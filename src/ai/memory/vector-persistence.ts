@@ -8,25 +8,25 @@
  * as individual compressed .md files.
  */
 export interface IndexEntry {
-	id: string;
+	readonly id: string;
 	/** Base64-encoded Float32Array bytes. */
-	embedding: string;
-	metadata: Record<string, string>;
-	timestamp: number;
+	readonly embedding: string;
+	readonly metadata: Readonly<Record<string, string>>;
+	readonly timestamp: number;
 	/** Number of times this entry has been accessed (recommendation engine). */
-	accessCount?: number;
+	readonly accessCount?: number;
 	/** Last access timestamp in epoch milliseconds. */
-	lastAccessed?: number;
+	readonly lastAccessed?: number;
 	/** Auto-extracted or user-assigned topic labels. */
-	topics?: string[];
+	readonly topics?: readonly string[];
 }
 
 /**
  * Root structure of the index.json file.
  */
 export interface IndexFile {
-	version: 2;
-	entries: IndexEntry[];
+	readonly version: 2;
+	readonly entries: readonly IndexEntry[];
 }
 
 /**

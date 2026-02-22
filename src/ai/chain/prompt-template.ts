@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import {
-	createChainError,
+	createTemplateError,
 	createTemplateMissingVariablesError,
 } from '../../errors/index.js';
 
@@ -17,7 +17,7 @@ export interface PromptTemplate {
 
 export function createPromptTemplate(template: string): PromptTemplate {
 	if (template.length === 0) {
-		throw createChainError('Template string cannot be empty', {
+		throw createTemplateError('Template string cannot be empty', {
 			code: 'TEMPLATE_EMPTY',
 		});
 	}
@@ -28,7 +28,7 @@ export function createPromptTemplate(template: string): PromptTemplate {
 			[...template.matchAll(/\{([\w-]+)\}/g)].map((m) => {
 				const varName = m[1];
 				if (!varName) {
-					throw createChainError(
+					throw createTemplateError(
 						'Unexpected empty match in template variable extraction',
 						{ code: 'TEMPLATE_PARSE_ERROR' },
 					);
@@ -51,7 +51,7 @@ export function createPromptTemplate(template: string): PromptTemplate {
 			for (const varName of variables) {
 				const value = values[varName];
 				if (typeof value !== 'string') {
-					throw createChainError(
+					throw createTemplateError(
 						`Template variable "${varName}" must be a string, got ${typeof value}`,
 						{ code: 'TEMPLATE_INVALID_VALUE' },
 					);

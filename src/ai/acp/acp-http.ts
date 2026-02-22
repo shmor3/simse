@@ -16,8 +16,8 @@ import type { ACPServerEntry } from './types.js';
 // ---------------------------------------------------------------------------
 
 export interface ResolvedServer {
-	entry: ACPServerEntry;
-	baseUrl: string;
+	readonly entry: ACPServerEntry;
+	readonly baseUrl: string;
 }
 
 // ---------------------------------------------------------------------------

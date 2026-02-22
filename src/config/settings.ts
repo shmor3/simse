@@ -304,6 +304,8 @@ export const defineConfig = (
 				if (invalidPaths.has('memory.similarityThreshold'))
 					mem.similarityThreshold = undefined;
 				if (invalidPaths.has('memory.maxResults')) mem.maxResults = undefined;
+				if (invalidPaths.has('memory.embeddingAgent'))
+					mem.embeddingAgent = undefined;
 				input = { ...input, memory: mem as typeof rawInput.memory };
 			}
 			if (rawInput.mcp?.server) {

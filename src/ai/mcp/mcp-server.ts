@@ -411,6 +411,7 @@ export function createMCPServer(
 	// -----------------------------------------------------------------------
 
 	let started = false;
+	let registered = false;
 	let startPromise: Promise<void> | null = null;
 
 	const start = async (): Promise<void> => {
@@ -418,9 +419,12 @@ export function createMCPServer(
 		if (startPromise) return startPromise;
 
 		startPromise = (async () => {
-			registerTools();
-			registerResources();
-			registerPrompts();
+			if (!registered) {
+				registerTools();
+				registerResources();
+				registerPrompts();
+				registered = true;
+			}
 
 			const transport = new StdioServerTransport();
 			await server.connect(transport);

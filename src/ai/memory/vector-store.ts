@@ -573,17 +573,18 @@ export function createVectorStore(
 		// Build compressed index (include access stats)
 		const indexEntries: IndexEntry[] = entries.map((e) => {
 			const stats = accessStats.get(e.id);
-			const entry: IndexEntry = {
+			return {
 				id: e.id,
 				embedding: encodeEmbedding(e.embedding),
 				metadata: { ...e.metadata },
 				timestamp: e.timestamp,
+				...(stats
+					? {
+							accessCount: stats.accessCount,
+							lastAccessed: stats.lastAccessed,
+						}
+					: {}),
 			};
-			if (stats) {
-				entry.accessCount = stats.accessCount;
-				entry.lastAccessed = stats.lastAccessed;
-			}
-			return entry;
 		});
 
 		const indexFile: IndexFile = { version: 2, entries: indexEntries };
@@ -634,7 +635,7 @@ export function createVectorStore(
 			}
 		}
 
-		// Clean up orphaned .md files
+		// Clean up orphaned .md and leftover .tmp files from crashed writes
 		try {
 			const files = await readdir(entriesDir);
 			for (const file of files) {
@@ -645,6 +646,10 @@ export function createVectorStore(
 						await rm(orphanPath, { force: true });
 						logger.debug(`Removed orphaned entry file: ${file}`);
 					}
+				} else if (file.endsWith('.tmp')) {
+					const tmpPath = join(entriesDir, file);
+					await rm(tmpPath, { force: true });
+					logger.debug(`Removed leftover tmp file: ${file}`);
 				}
 			}
 		} catch {
@@ -679,9 +684,9 @@ export function createVectorStore(
 
 		if (!initialized) return;
 
-		// Wait for any in-flight save to finish first, then save if still dirty.
-		// This avoids the race where saveChain is mutated between our save() call
-		// and the subsequent await.
+		// Drain the write lock so no in-flight mutations are missed, then
+		// wait for any in-flight save to finish, then final save if dirty.
+		await writeLock.catch(() => {});
 		await saveChain;
 		if (dirty) {
 			await save();
@@ -803,6 +808,36 @@ export function createVectorStore(
 			const now = Date.now();
 
 			for (const entry of batchEntries) {
+				// Duplicate detection (consistent with add())
+				if (duplicateThreshold > 0) {
+					const dupResult = checkDuplicateImpl(
+						entry.embedding,
+						entries,
+						duplicateThreshold,
+					);
+					if (dupResult.isDuplicate) {
+						if (duplicateBehavior === 'skip') {
+							logger.debug(
+								`Skipping duplicate entry in batch (similarity: ${dupResult.similarity?.toFixed(4)})`,
+								{ existingId: dupResult.existingEntry?.id },
+							);
+							ids.push(dupResult.existingEntry?.id ?? '');
+							continue;
+						}
+						if (duplicateBehavior === 'error') {
+							throw createMemoryError(
+								`Duplicate entry detected in batch (similarity: ${dupResult.similarity?.toFixed(4)}, existing: ${dupResult.existingEntry?.id})`,
+								{ code: 'VECTOR_STORE_DUPLICATE' },
+							);
+						}
+						// 'warn' — log and continue
+						logger.warn(
+							`Adding near-duplicate entry in batch (similarity: ${dupResult.similarity?.toFixed(4)})`,
+							{ existingId: dupResult.existingEntry?.id },
+						);
+					}
+				}
+
 				const id = randomUUID();
 				ids.push(id);
 				const newEntry: VectorEntry = {

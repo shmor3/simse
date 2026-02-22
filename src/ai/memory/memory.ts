@@ -161,16 +161,27 @@ export function createMemoryManager(
 	// Lifecycle
 	// -----------------------------------------------------------------------
 
-	const initialize = async (): Promise<void> => {
-		logger.debug('Initializing memory manager', {
-			storePath: config.storePath,
-			embeddingAgent: config.embeddingAgent,
+	let initPromise: Promise<void> | null = null;
+
+	const initialize = (): Promise<void> => {
+		if (initialized) return Promise.resolve();
+		if (initPromise) return initPromise;
+
+		initPromise = (async () => {
+			logger.debug('Initializing memory manager', {
+				storePath: config.storePath,
+				embeddingAgent: config.embeddingAgent,
+			});
+
+			await store.load();
+			initialized = true;
+
+			logger.info(`Memory manager initialized (${store.size} entries loaded)`);
+		})().finally(() => {
+			initPromise = null;
 		});
 
-		await store.load();
-		initialized = true;
-
-		logger.info(`Memory manager initialized (${store.size} entries loaded)`);
+		return initPromise;
 	};
 
 	const dispose = async (): Promise<void> => {

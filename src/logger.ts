@@ -93,7 +93,7 @@ export interface MemoryTransportHandle extends LogTransport {
 export const createMemoryTransport = (): MemoryTransportHandle => {
 	const entries: LogEntry[] = [];
 
-	return {
+	return Object.freeze({
 		entries,
 		write(entry: LogEntry): void {
 			entries.push(entry);
@@ -104,7 +104,7 @@ export const createMemoryTransport = (): MemoryTransportHandle => {
 		filter(level: LogLevel): readonly LogEntry[] {
 			return entries.filter((e) => e.level === level);
 		},
-	};
+	});
 };
 
 // ---------------------------------------------------------------------------

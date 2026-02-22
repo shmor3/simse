@@ -1,0 +1,42 @@
+{
+	"name": "simse",
+	"version": "1.0.0",
+	"description": "A modular pipeline framework for orchestrating multi-step AI workflows using ACP, MCP, and vector memory",
+	"type": "module",
+	"main": "dist/lib.js",
+	"types": "dist/lib.d.ts",
+	"exports": {
+		".": {
+			"import": "./dist/lib.js",
+			"types": "./dist/lib.d.ts"
+		}
+	},
+	"keywords": [
+		"langchain",
+		"acp",
+		"agent-communication-protocol",
+		"mcp",
+		"model-context-protocol",
+		"ai",
+		"typescript",
+		"bun"
+	],
+	"license": "MIT",
+	"scripts": {
+		"build": "bun build ./src/lib.ts --outdir ./dist --target bun",
+		"test": "bun test",
+		"test:watch": "bun test --watch",
+		"test:coverage": "bun test --coverage",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"typecheck": "bun x tsc --noEmit"
+	},
+	"dependencies": {
+		"@modelcontextprotocol/sdk": "^1.12.0",
+		"zod": "^3.24.0"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"typescript": "^5.7.0"
+	}
+}

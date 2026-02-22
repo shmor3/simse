@@ -1,0 +1,291 @@
+// ---------------------------------------------------------------------------
+// Memory / Vector Store Types
+// ---------------------------------------------------------------------------
+//
+// All types are strictly readonly to enforce immutability throughout
+// the codebase.  No classes — only plain data interfaces.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Embedding Provider
+// ---------------------------------------------------------------------------
+
+export interface EmbeddingProvider {
+	readonly embed: (
+		input: string | readonly string[],
+		model?: string,
+	) => Promise<{ readonly embeddings: ReadonlyArray<readonly number[]> }>;
+}
+
+// ---------------------------------------------------------------------------
+// Vector Store Types
+// ---------------------------------------------------------------------------
+
+export interface VectorEntry {
+	readonly id: string;
+	readonly text: string;
+	readonly embedding: readonly number[];
+	readonly metadata: Readonly<Record<string, string>>;
+	readonly timestamp: number;
+}
+
+export interface SearchResult {
+	readonly entry: VectorEntry;
+	readonly score: number;
+}
+
+// ---------------------------------------------------------------------------
+// Text Search
+// ---------------------------------------------------------------------------
+
+/**
+ * How the text query is matched against entry text.
+ *
+ * - `"fuzzy"` — Levenshtein / n-gram similarity (tolerates typos).
+ * - `"substring"` — Case-insensitive substring containment.
+ * - `"exact"` — Case-sensitive exact equality.
+ * - `"regex"` — Match against a regular expression pattern.
+ * - `"token"` — Tokenised word overlap (bag-of-words similarity).
+ */
+export type TextSearchMode =
+	| 'fuzzy'
+	| 'substring'
+	| 'exact'
+	| 'regex'
+	| 'token';
+
+export interface TextSearchOptions {
+	/** The query string (or regex pattern when mode is `"regex"`). */
+	readonly query: string;
+	/** Matching strategy. Defaults to `"fuzzy"`. */
+	readonly mode?: TextSearchMode;
+	/**
+	 * Minimum similarity score to include in results (0–1).
+	 * Only meaningful for `"fuzzy"` and `"token"` modes — the other modes
+	 * are binary (match / no-match) and always return a score of 1 for hits.
+	 * Defaults to `0.3`.
+	 */
+	readonly threshold?: number;
+}
+
+export interface TextSearchResult {
+	readonly entry: VectorEntry;
+	/** Relevance score between 0 and 1. */
+	readonly score: number;
+}
+
+// ---------------------------------------------------------------------------
+// Metadata Filtering
+// ---------------------------------------------------------------------------
+
+/**
+ * How a metadata value is compared.
+ *
+ * - `"eq"` — Exact equality (default).
+ * - `"neq"` — Not equal.
+ * - `"contains"` — Value contains the filter string (case-insensitive).
+ * - `"startsWith"` — Value starts with the filter string (case-insensitive).
+ * - `"endsWith"` — Value ends with the filter string (case-insensitive).
+ * - `"regex"` — Value matches a regular expression.
+ * - `"exists"` — Key is present (value is ignored).
+ * - `"notExists"` — Key is absent (value is ignored).
+ */
+export type MetadataMatchMode =
+	| 'eq'
+	| 'neq'
+	| 'contains'
+	| 'startsWith'
+	| 'endsWith'
+	| 'regex'
+	| 'exists'
+	| 'notExists';
+
+export interface MetadataFilter {
+	/** The metadata key to match on. */
+	readonly key: string;
+	/** The value to compare against (ignored for `"exists"` / `"notExists"`). */
+	readonly value?: string;
+	/** Comparison mode. Defaults to `"eq"`. */
+	readonly mode?: MetadataMatchMode;
+}
+
+// ---------------------------------------------------------------------------
+// Date Range Filtering
+// ---------------------------------------------------------------------------
+
+export interface DateRange {
+	/** Inclusive lower bound (epoch milliseconds). */
+	readonly after?: number;
+	/** Inclusive upper bound (epoch milliseconds). */
+	readonly before?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Advanced / Combined Search Options
+// ---------------------------------------------------------------------------
+
+export interface SearchOptions {
+	// -- Vector similarity ------------------------------------------------
+	/**
+	 * Query embedding for cosine-similarity ranking.
+	 * When omitted the search is purely text / metadata / date based.
+	 */
+	readonly queryEmbedding?: readonly number[];
+	/** Minimum cosine similarity (0–1). Defaults to `0`. */
+	readonly similarityThreshold?: number;
+
+	// -- Text search ------------------------------------------------------
+	/** Optional text-level search applied *in addition* to vector search. */
+	readonly text?: TextSearchOptions;
+
+	// -- Metadata filters -------------------------------------------------
+	/**
+	 * One or more metadata filters. All filters must match for an entry to
+	 * be included (logical AND).
+	 */
+	readonly metadata?: readonly MetadataFilter[];
+
+	// -- Date range -------------------------------------------------------
+	/** Restrict results to entries within a timestamp window. */
+	readonly dateRange?: DateRange;
+
+	// -- Pagination / limits ---------------------------------------------
+	/** Maximum number of results to return. Defaults to `10`. */
+	readonly maxResults?: number;
+
+	/**
+	 * How vector and text scores are combined when both are present.
+	 *
+	 * - `"vector"` — Rank by vector similarity only (text is a filter).
+	 * - `"text"` — Rank by text relevance only (vector is a filter).
+	 * - `"average"` — Arithmetic mean of both scores.
+	 * - `"multiply"` — Product of both scores (boosts entries that rank
+	 *   highly on *both* axes).
+	 *
+	 * Defaults to `"average"`.
+	 */
+	readonly rankBy?: 'vector' | 'text' | 'average' | 'multiply';
+}
+
+export interface AdvancedSearchResult {
+	readonly entry: VectorEntry;
+	/** Final combined score used for ranking (0–1). */
+	readonly score: number;
+	/** Individual score components, present when the corresponding search
+	 *  dimension was requested. */
+	readonly scores: {
+		readonly vector?: number;
+		readonly text?: number;
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Deduplication
+// ---------------------------------------------------------------------------
+
+export interface DuplicateCheckResult {
+	readonly isDuplicate: boolean;
+	readonly existingEntry?: VectorEntry;
+	readonly similarity?: number;
+}
+
+export interface DuplicateGroup {
+	readonly representative: VectorEntry;
+	readonly duplicates: readonly VectorEntry[];
+	readonly averageSimilarity: number;
+}
+
+// ---------------------------------------------------------------------------
+// Topic Info
+// ---------------------------------------------------------------------------
+
+export interface TopicInfo {
+	readonly topic: string;
+	readonly entryCount: number;
+	readonly entryIds: readonly string[];
+}
+
+// ---------------------------------------------------------------------------
+// Recommendation
+// ---------------------------------------------------------------------------
+
+export interface WeightProfile {
+	/** Weight for vector similarity score. Defaults to `0.6`. */
+	readonly vector?: number;
+	/** Weight for recency score. Defaults to `0.2`. */
+	readonly recency?: number;
+	/** Weight for frequency/access count score. Defaults to `0.2`. */
+	readonly frequency?: number;
+}
+
+export interface RecommendOptions {
+	/** Query embedding for vector similarity scoring. */
+	readonly queryEmbedding?: readonly number[];
+	/** Weight profile for combining scores. */
+	readonly weights?: WeightProfile;
+	/** Maximum number of results. Defaults to `10`. */
+	readonly maxResults?: number;
+	/** Minimum combined score to include in results (0–1). Defaults to `0`. */
+	readonly minScore?: number;
+	/** Metadata filters to pre-filter candidates. */
+	readonly metadata?: readonly MetadataFilter[];
+	/** Topic filter — only entries matching any of these topics. */
+	readonly topics?: readonly string[];
+	/** Date range filter. */
+	readonly dateRange?: DateRange;
+}
+
+export interface RecommendationResult {
+	readonly entry: VectorEntry;
+	readonly score: number;
+	readonly scores: {
+		readonly vector?: number;
+		readonly recency?: number;
+		readonly frequency?: number;
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Summarization
+// ---------------------------------------------------------------------------
+
+export interface TextGenerationProvider {
+	readonly generate: (prompt: string, systemPrompt?: string) => Promise<string>;
+}
+
+export interface SummarizeOptions {
+	/** IDs of entries to summarize (minimum 2). */
+	readonly ids: readonly string[];
+	/**
+	 * Custom instruction prompt for the summarization.
+	 * The combined entry texts are always appended after this prompt.
+	 * When omitted a sensible default instruction is used.
+	 */
+	readonly prompt?: string;
+	/** Optional system prompt passed to the text generation provider. */
+	readonly systemPrompt?: string;
+	/** If true, delete the original entries after summarization. Defaults to `false`. */
+	readonly deleteOriginals?: boolean;
+	/** Additional metadata to attach to the summary entry. */
+	readonly metadata?: Record<string, string>;
+}
+
+export interface SummarizeResult {
+	readonly summaryId: string;
+	readonly summaryText: string;
+	readonly sourceIds: readonly string[];
+	readonly deletedOriginals: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Memory Config
+// ---------------------------------------------------------------------------
+
+export interface MemoryConfig {
+	readonly enabled: boolean;
+	/** ACP agent ID used for generating embeddings. */
+	readonly embeddingAgent?: string;
+	readonly storePath: string;
+	readonly similarityThreshold: number;
+	readonly maxResults: number;
+}

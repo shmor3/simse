@@ -1,0 +1,655 @@
+import {
+	createEmbeddingError,
+	createMemoryError,
+	isEmbeddingError,
+	toError,
+} from '../../errors/index.js';
+import { getDefaultLogger, type Logger } from '../../logger.js';
+import type {
+	AdvancedSearchResult,
+	DateRange,
+	DuplicateCheckResult,
+	DuplicateGroup,
+	EmbeddingProvider,
+	MemoryConfig,
+	MetadataFilter,
+	RecommendationResult,
+	RecommendOptions,
+	SearchOptions,
+	SearchResult,
+	SummarizeOptions,
+	SummarizeResult,
+	TextGenerationProvider,
+	TextSearchOptions,
+	TextSearchResult,
+	TopicInfo,
+	VectorEntry,
+} from './types.js';
+import { createVectorStore, type VectorStoreOptions } from './vector-store.js';
+
+// ---------------------------------------------------------------------------
+// Options
+// ---------------------------------------------------------------------------
+
+export interface MemoryManagerOptions {
+	/** Inject a custom logger. */
+	logger?: Logger;
+	/** Override vector store options. */
+	vectorStoreOptions?: Omit<VectorStoreOptions, 'logger'>;
+	/**
+	 * Optional text generation provider used for summarization.
+	 * Can also be set later via `setTextGenerator()`.
+	 */
+	textGenerator?: TextGenerationProvider;
+}
+
+// ---------------------------------------------------------------------------
+// MemoryManager interface
+// ---------------------------------------------------------------------------
+
+export interface MemoryManager {
+	readonly initialize: () => Promise<void>;
+	readonly dispose: () => Promise<void>;
+	readonly add: (
+		text: string,
+		metadata?: Record<string, string>,
+	) => Promise<string>;
+	readonly addBatch: (
+		entries: Array<{ text: string; metadata?: Record<string, string> }>,
+	) => Promise<string[]>;
+	readonly search: (
+		query: string,
+		maxResults?: number,
+		threshold?: number,
+	) => Promise<SearchResult[]>;
+	readonly textSearch: (options: TextSearchOptions) => TextSearchResult[];
+	readonly filterByMetadata: (filters: MetadataFilter[]) => VectorEntry[];
+	readonly filterByDateRange: (range: DateRange) => VectorEntry[];
+	readonly advancedSearch: (
+		options: SearchOptions,
+	) => Promise<AdvancedSearchResult[]>;
+	readonly getById: (id: string) => VectorEntry | undefined;
+	readonly getAll: () => VectorEntry[];
+	readonly getTopics: () => TopicInfo[];
+	readonly filterByTopic: (topics: string[]) => VectorEntry[];
+	readonly recommend: (
+		query: string,
+		options?: Omit<RecommendOptions, 'queryEmbedding'>,
+	) => Promise<RecommendationResult[]>;
+	readonly findDuplicates: (threshold?: number) => DuplicateGroup[];
+	readonly checkDuplicate: (text: string) => Promise<DuplicateCheckResult>;
+	readonly summarize: (options: SummarizeOptions) => Promise<SummarizeResult>;
+	readonly setTextGenerator: (provider: TextGenerationProvider) => void;
+	readonly delete: (id: string) => Promise<boolean>;
+	readonly deleteBatch: (ids: string[]) => Promise<number>;
+	readonly clear: () => Promise<void>;
+	readonly size: number;
+	readonly isInitialized: boolean;
+	readonly isDirty: boolean;
+	readonly embeddingAgent: string | undefined;
+	readonly storePath: string;
+}
+
+// ---------------------------------------------------------------------------
+// Factory
+// ---------------------------------------------------------------------------
+
+export function createMemoryManager(
+	embedder: EmbeddingProvider,
+	config: MemoryConfig,
+	options?: MemoryManagerOptions,
+): MemoryManager {
+	const logger = (options?.logger ?? getDefaultLogger()).child('memory');
+	const store = createVectorStore(config.storePath, {
+		logger,
+		...(options?.vectorStoreOptions ?? {}),
+	});
+
+	let initialized = false;
+	let textGenerator: TextGenerationProvider | undefined =
+		options?.textGenerator;
+
+	// -----------------------------------------------------------------------
+	// Internal helpers
+	// -----------------------------------------------------------------------
+
+	const ensureInitialized = (): void => {
+		if (!initialized) {
+			throw createMemoryError(
+				'MemoryManager has not been initialized. Call initialize() first.',
+				{ code: 'MEMORY_NOT_INITIALIZED' },
+			);
+		}
+	};
+
+	const getEmbedding = async (text: string): Promise<number[]> => {
+		const result = await safeEmbed(text);
+		const embedding = result.embeddings[0];
+
+		if (!embedding || embedding.length === 0) {
+			throw createEmbeddingError(
+				'Embedding agent returned an empty embedding vector',
+				{ model: config.embeddingAgent },
+			);
+		}
+
+		return embedding;
+	};
+
+	const safeEmbed = async (
+		input: string | string[],
+	): Promise<{ embeddings: number[][] }> => {
+		try {
+			const result = await embedder.embed(input, config.embeddingAgent);
+			return {
+				embeddings: result.embeddings.map((e) => [...e]),
+			};
+		} catch (error) {
+			if (isEmbeddingError(error)) throw error;
+
+			throw createEmbeddingError(
+				`Embedding request failed: ${toError(error).message}`,
+				{
+					cause: error,
+					model: config.embeddingAgent,
+				},
+			);
+		}
+	};
+
+	// -----------------------------------------------------------------------
+	// Lifecycle
+	// -----------------------------------------------------------------------
+
+	const initialize = async (): Promise<void> => {
+		logger.debug('Initializing memory manager', {
+			storePath: config.storePath,
+			embeddingAgent: config.embeddingAgent,
+		});
+
+		await store.load();
+		initialized = true;
+
+		logger.info(`Memory manager initialized (${store.size} entries loaded)`);
+	};
+
+	const dispose = async (): Promise<void> => {
+		logger.debug('Disposing memory manager');
+		await store.dispose();
+		initialized = false;
+		logger.debug('Memory manager disposed');
+	};
+
+	// -----------------------------------------------------------------------
+	// Write operations
+	// -----------------------------------------------------------------------
+
+	const add = async (
+		text: string,
+		metadata: Record<string, string> = {},
+	): Promise<string> => {
+		ensureInitialized();
+
+		if (text.trim().length === 0) {
+			throw createMemoryError(
+				'Cannot add empty or whitespace-only text to memory',
+				{
+					code: 'MEMORY_EMPTY_TEXT',
+				},
+			);
+		}
+
+		logger.debug('Embedding and storing text', {
+			textLength: text.length,
+			embeddingAgent: config.embeddingAgent,
+		});
+
+		const embedding = await getEmbedding(text);
+		const id = await store.add(text, embedding, metadata);
+
+		logger.debug(`Stored memory entry "${id}"`, {
+			embeddingDim: embedding.length,
+			metadataKeys: Object.keys(metadata),
+		});
+
+		return id;
+	};
+
+	const addBatch = async (
+		batchEntries: Array<{
+			text: string;
+			metadata?: Record<string, string>;
+		}>,
+	): Promise<string[]> => {
+		ensureInitialized();
+
+		if (batchEntries.length === 0) return [];
+
+		for (let i = 0; i < batchEntries.length; i++) {
+			if (batchEntries[i].text.trim().length === 0) {
+				throw createMemoryError(
+					`Cannot add empty or whitespace-only text to memory (batch index ${i})`,
+					{ code: 'MEMORY_EMPTY_TEXT', metadata: { batchIndex: i } },
+				);
+			}
+		}
+
+		logger.debug(`Embedding batch of ${batchEntries.length} texts`, {
+			embeddingAgent: config.embeddingAgent,
+		});
+
+		const texts = batchEntries.map((e) => e.text);
+		const result = await safeEmbed(texts);
+
+		if (result.embeddings.length < batchEntries.length) {
+			throw createEmbeddingError(
+				`Embedding agent returned ${result.embeddings.length} embeddings ` +
+					`for ${batchEntries.length} inputs`,
+				{ model: config.embeddingAgent },
+			);
+		}
+
+		// Validate each individual embedding is non-empty
+		for (let i = 0; i < batchEntries.length; i++) {
+			if (!result.embeddings[i] || result.embeddings[i].length === 0) {
+				throw createEmbeddingError(
+					`Embedding agent returned an empty embedding vector at index ${i}`,
+					{ model: config.embeddingAgent },
+				);
+			}
+		}
+
+		const storeBatch = batchEntries.map((entry, i) => ({
+			text: entry.text,
+			embedding: result.embeddings[i],
+			metadata: entry.metadata ?? {},
+		}));
+
+		const ids = await store.addBatch(storeBatch);
+
+		logger.debug(`Stored batch of ${ids.length} memory entries`);
+		return ids;
+	};
+
+	// -----------------------------------------------------------------------
+	// Vector Search (embedding-based)
+	// -----------------------------------------------------------------------
+
+	const searchFn = async (
+		query: string,
+		maxResults?: number,
+		threshold?: number,
+	): Promise<SearchResult[]> => {
+		ensureInitialized();
+
+		if (query.trim().length === 0) {
+			logger.warn('Search called with empty query — returning no results');
+			return [];
+		}
+
+		logger.debug('Searching memory', {
+			queryLength: query.length,
+			maxResults: maxResults ?? config.maxResults,
+			threshold: threshold ?? config.similarityThreshold,
+		});
+
+		const queryEmbedding = await getEmbedding(query);
+
+		const results = store.search(
+			queryEmbedding,
+			maxResults ?? config.maxResults,
+			threshold ?? config.similarityThreshold,
+		);
+
+		logger.debug(`Found ${results.length} matching memories`);
+		return results;
+	};
+
+	// -----------------------------------------------------------------------
+	// Text Search (content-based, no embeddings)
+	// -----------------------------------------------------------------------
+
+	const textSearch = (searchOptions: TextSearchOptions): TextSearchResult[] => {
+		ensureInitialized();
+
+		if (searchOptions.query.trim().length === 0) {
+			logger.warn('textSearch called with empty query — returning no results');
+			return [];
+		}
+
+		logger.debug('Text searching memory', {
+			query: searchOptions.query,
+			mode: searchOptions.mode ?? 'fuzzy',
+			threshold: searchOptions.threshold ?? 0.3,
+		});
+
+		const results = store.textSearch(searchOptions);
+
+		logger.debug(`Text search found ${results.length} matching memories`);
+		return results;
+	};
+
+	// -----------------------------------------------------------------------
+	// Metadata Filtering
+	// -----------------------------------------------------------------------
+
+	const filterByMetadata = (filters: MetadataFilter[]): VectorEntry[] => {
+		ensureInitialized();
+
+		logger.debug('Filtering memory by metadata', {
+			filterCount: filters.length,
+		});
+
+		const results = store.filterByMetadata(filters);
+
+		logger.debug(
+			`Metadata filter returned ${results.length} matching memories`,
+		);
+		return results;
+	};
+
+	// -----------------------------------------------------------------------
+	// Date Range Filtering
+	// -----------------------------------------------------------------------
+
+	const filterByDateRange = (range: DateRange): VectorEntry[] => {
+		ensureInitialized();
+
+		logger.debug('Filtering memory by date range', {
+			after: range.after,
+			before: range.before,
+		});
+
+		const results = store.filterByDateRange(range);
+
+		logger.debug(
+			`Date range filter returned ${results.length} matching memories`,
+		);
+		return results;
+	};
+
+	// -----------------------------------------------------------------------
+	// Advanced / Combined Search
+	// -----------------------------------------------------------------------
+
+	const advancedSearch = async (
+		searchOptions: SearchOptions,
+	): Promise<AdvancedSearchResult[]> => {
+		ensureInitialized();
+
+		let resolvedOptions = searchOptions;
+		if (!searchOptions.queryEmbedding && searchOptions.text?.query) {
+			const trimmedQuery = searchOptions.text.query.trim();
+			if (trimmedQuery.length > 0) {
+				try {
+					const queryEmbedding = await getEmbedding(trimmedQuery);
+					resolvedOptions = { ...searchOptions, queryEmbedding };
+				} catch {
+					logger.debug(
+						'Embedding failed for advancedSearch query — falling back to text-only',
+					);
+				}
+			}
+		}
+
+		logger.debug('Advanced search on memory', {
+			hasEmbedding: resolvedOptions.queryEmbedding !== undefined,
+			hasText: resolvedOptions.text !== undefined,
+			metadataFilterCount: resolvedOptions.metadata?.length ?? 0,
+			hasDateRange: resolvedOptions.dateRange !== undefined,
+			maxResults: resolvedOptions.maxResults ?? 10,
+			rankBy: resolvedOptions.rankBy ?? 'average',
+		});
+
+		const results = store.advancedSearch(resolvedOptions);
+
+		logger.debug(`Advanced search found ${results.length} matching memories`);
+		return results;
+	};
+
+	// -----------------------------------------------------------------------
+	// Accessors
+	// -----------------------------------------------------------------------
+
+	const getById = (id: string): VectorEntry | undefined => {
+		ensureInitialized();
+		return store.getById(id);
+	};
+
+	const getAll = (): VectorEntry[] => {
+		ensureInitialized();
+		return store.getAll();
+	};
+
+	const getTopics = (): TopicInfo[] => {
+		ensureInitialized();
+		return store.getTopics();
+	};
+
+	const filterByTopic = (topics: string[]): VectorEntry[] => {
+		ensureInitialized();
+		return store.filterByTopic(topics);
+	};
+
+	// -----------------------------------------------------------------------
+	// Recommendation
+	// -----------------------------------------------------------------------
+
+	const recommend = async (
+		query: string,
+		recommendOptions?: Omit<RecommendOptions, 'queryEmbedding'>,
+	): Promise<RecommendationResult[]> => {
+		ensureInitialized();
+
+		if (query.trim().length === 0) {
+			logger.warn('recommend called with empty query — returning no results');
+			return [];
+		}
+
+		logger.debug('Generating recommendations', {
+			queryLength: query.length,
+			maxResults: recommendOptions?.maxResults ?? 10,
+		});
+
+		const queryEmbedding = await getEmbedding(query);
+		const results = store.recommend({
+			...recommendOptions,
+			queryEmbedding,
+		});
+
+		logger.debug(`Recommendations returned ${results.length} results`);
+		return results;
+	};
+
+	// -----------------------------------------------------------------------
+	// Deduplication
+	// -----------------------------------------------------------------------
+
+	const findDuplicates = (threshold?: number): DuplicateGroup[] => {
+		ensureInitialized();
+
+		logger.debug('Finding duplicate entries', { threshold });
+		const groups = store.findDuplicates(threshold);
+		logger.debug(`Found ${groups.length} duplicate groups`);
+		return groups;
+	};
+
+	const checkDuplicateFn = async (
+		text: string,
+	): Promise<DuplicateCheckResult> => {
+		ensureInitialized();
+
+		if (text.trim().length === 0) {
+			return { isDuplicate: false };
+		}
+
+		const embedding = await getEmbedding(text);
+		return store.checkDuplicate(embedding);
+	};
+
+	// -----------------------------------------------------------------------
+	// Summarization
+	// -----------------------------------------------------------------------
+
+	const summarize = async (
+		summarizeOptions: SummarizeOptions,
+	): Promise<SummarizeResult> => {
+		ensureInitialized();
+
+		if (!textGenerator) {
+			throw createMemoryError(
+				'Summarization requires a textGenerator. Pass it in MemoryManagerOptions or call setTextGenerator().',
+				{ code: 'MEMORY_NO_TEXT_GENERATOR' },
+			);
+		}
+
+		if (summarizeOptions.ids.length < 2) {
+			throw createMemoryError('Summarization requires at least 2 entry IDs', {
+				code: 'MEMORY_SUMMARIZE_TOO_FEW',
+			});
+		}
+
+		// Gather entry texts
+		const sourceEntries: VectorEntry[] = [];
+		for (const id of summarizeOptions.ids) {
+			const entry = store.getById(id);
+			if (!entry) {
+				throw createMemoryError(`Entry "${id}" not found for summarization`, {
+					code: 'MEMORY_ENTRY_NOT_FOUND',
+				});
+			}
+			sourceEntries.push(entry);
+		}
+
+		const combinedText = sourceEntries
+			.map((e, i) => `--- Entry ${i + 1} ---\n${e.text}`)
+			.join('\n\n');
+
+		const instruction =
+			summarizeOptions.prompt ??
+			'Summarize the following entries into a single concise summary that captures all key information:';
+
+		const prompt = `${instruction}\n\n${combinedText}`;
+
+		logger.debug('Generating summary', {
+			entryCount: sourceEntries.length,
+			promptLength: prompt.length,
+		});
+
+		const summaryText = await textGenerator.generate(
+			prompt,
+			summarizeOptions.systemPrompt,
+		);
+
+		// Embed and store the summary
+		const summaryEmbedding = await getEmbedding(summaryText);
+		const summaryMetadata: Record<string, string> = {
+			...summarizeOptions.metadata,
+			summarizedFrom: summarizeOptions.ids.join(','),
+		};
+		const summaryId = await store.add(
+			summaryText,
+			summaryEmbedding,
+			summaryMetadata,
+		);
+
+		// Optionally delete originals
+		const deleteOriginals = summarizeOptions.deleteOriginals ?? false;
+		if (deleteOriginals) {
+			await store.deleteBatch([...summarizeOptions.ids]);
+		}
+
+		logger.debug(`Created summary entry "${summaryId}"`, {
+			deletedOriginals: deleteOriginals,
+		});
+
+		return {
+			summaryId,
+			summaryText,
+			sourceIds: [...summarizeOptions.ids],
+			deletedOriginals: deleteOriginals,
+		};
+	};
+
+	// -----------------------------------------------------------------------
+	// Text Generator
+	// -----------------------------------------------------------------------
+
+	const setTextGenerator = (provider: TextGenerationProvider): void => {
+		textGenerator = provider;
+		logger.debug('Text generation provider updated');
+	};
+
+	// -----------------------------------------------------------------------
+	// Delete / clear
+	// -----------------------------------------------------------------------
+
+	const deleteEntry = async (id: string): Promise<boolean> => {
+		ensureInitialized();
+		const deleted = await store.delete(id);
+
+		if (deleted) {
+			logger.debug(`Deleted memory entry "${id}"`);
+		} else {
+			logger.debug(`Memory entry "${id}" not found for deletion`);
+		}
+
+		return deleted;
+	};
+
+	const deleteBatch = async (ids: string[]): Promise<number> => {
+		ensureInitialized();
+		const deleted = await store.deleteBatch(ids);
+		logger.debug(`Deleted ${deleted} of ${ids.length} requested entries`);
+		return deleted;
+	};
+
+	const clear = async (): Promise<void> => {
+		ensureInitialized();
+		await store.clear();
+		logger.info('Memory store cleared');
+	};
+
+	// -----------------------------------------------------------------------
+	// Return the record
+	// -----------------------------------------------------------------------
+
+	return Object.freeze({
+		initialize,
+		dispose,
+		add,
+		addBatch,
+		search: searchFn,
+		textSearch,
+		filterByMetadata,
+		filterByDateRange,
+		advancedSearch,
+		getById,
+		getAll,
+		getTopics,
+		filterByTopic,
+		recommend,
+		findDuplicates,
+		checkDuplicate: checkDuplicateFn,
+		summarize,
+		setTextGenerator,
+		delete: deleteEntry,
+		deleteBatch,
+		clear,
+		get size() {
+			return store.size;
+		},
+		get isInitialized() {
+			return initialized;
+		},
+		get isDirty() {
+			return store.isDirty;
+		},
+		get embeddingAgent() {
+			return config.embeddingAgent;
+		},
+		get storePath() {
+			return config.storePath;
+		},
+	});
+}

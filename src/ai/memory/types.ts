@@ -46,13 +46,15 @@ export interface SearchResult {
  * - `"exact"` — Case-sensitive exact equality.
  * - `"regex"` — Match against a regular expression pattern.
  * - `"token"` — Tokenised word overlap (bag-of-words similarity).
+ * - `"bm25"` — BM25 ranking via inverted term index.
  */
 export type TextSearchMode =
 	| 'fuzzy'
 	| 'substring'
 	| 'exact'
 	| 'regex'
-	| 'token';
+	| 'token'
+	| 'bm25';
 
 export interface TextSearchOptions {
 	/** The query string (or regex pattern when mode is `"regex"`). */

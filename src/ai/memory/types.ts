@@ -213,10 +213,17 @@ export interface DuplicateGroup {
 // Topic Info
 // ---------------------------------------------------------------------------
 
+export interface RelatedTopic {
+	readonly topic: string;
+	readonly coOccurrenceCount: number;
+}
+
 export interface TopicInfo {
 	readonly topic: string;
 	readonly entryCount: number;
 	readonly entryIds: readonly string[];
+	readonly parent?: string;
+	readonly children: readonly string[];
 }
 
 // ---------------------------------------------------------------------------

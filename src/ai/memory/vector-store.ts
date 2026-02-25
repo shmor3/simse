@@ -56,14 +56,14 @@ import { isValidLearningState } from './vector-persistence.js';
 
 export interface VectorStoreOptions {
 	/** Pluggable storage backend. Consumers must provide their own implementation. */
-	storage: StorageBackend;
+	readonly storage: StorageBackend;
 
 	/**
 	 * If `true`, every mutation (add / delete / clear) immediately persists.
 	 * If `false`, call `save()` manually or rely on `flushIntervalMs`.
 	 * Defaults to `false` for better performance.
 	 */
-	autoSave?: boolean;
+	readonly autoSave?: boolean;
 
 	/**
 	 * When > 0, the store will automatically flush dirty state every
@@ -71,25 +71,25 @@ export interface VectorStoreOptions {
 	 * Only used when `autoSave` is `false`.
 	 * Defaults to `5000` (5 seconds).
 	 */
-	flushIntervalMs?: number;
+	readonly flushIntervalMs?: number;
 
 	/**
 	 * Maximum allowed length for regex search patterns. Patterns exceeding this
 	 * limit are rejected to prevent ReDoS. Defaults to `256`.
 	 */
-	maxRegexPatternLength?: number;
+	readonly maxRegexPatternLength?: number;
 
 	/**
 	 * Options for the internal topic index used by `getTopics()` and
 	 * `filterByTopic()`.
 	 */
-	topicIndex?: TopicIndexOptions;
+	readonly topicIndex?: TopicIndexOptions;
 
 	/**
 	 * Cosine similarity threshold for automatic duplicate detection on `add()`.
 	 * Set to 0 to disable (default). Values like `0.95` catch near-duplicates.
 	 */
-	duplicateThreshold?: number;
+	readonly duplicateThreshold?: number;
 
 	/**
 	 * Behavior when a duplicate is detected during `add()`.
@@ -98,23 +98,23 @@ export interface VectorStoreOptions {
 	 * - `'error'` — throw a MemoryError.
 	 * Defaults to `'warn'`.
 	 */
-	duplicateBehavior?: 'skip' | 'warn' | 'error';
+	readonly duplicateBehavior?: 'skip' | 'warn' | 'error';
 
 	/**
 	 * Options for recency scoring in `recommend()`.
 	 * Controls the exponential decay half-life.
 	 */
-	recency?: RecencyOptions;
+	readonly recency?: RecencyOptions;
 
 	/**
 	 * Options for the adaptive learning engine.
 	 * When enabled, the store observes search patterns and adapts
 	 * recommendation weights and scoring in real time.
 	 */
-	learning?: LearningOptions;
+	readonly learning?: LearningOptions;
 
 	/** Inject a custom logger. */
-	logger?: Logger;
+	readonly logger?: Logger;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,34 +127,38 @@ export interface VectorStore {
 	readonly dispose: () => Promise<void>;
 	readonly add: (
 		text: string,
-		embedding: number[],
+		embedding: readonly number[],
 		metadata?: Record<string, string>,
 	) => Promise<string>;
 	readonly addBatch: (
-		entries: Array<{
+		entries: ReadonlyArray<{
 			text: string;
-			embedding: number[];
+			embedding: readonly number[];
 			metadata?: Record<string, string>;
 		}>,
 	) => Promise<string[]>;
 	readonly delete: (id: string) => Promise<boolean>;
-	readonly deleteBatch: (ids: string[]) => Promise<number>;
+	readonly deleteBatch: (ids: readonly string[]) => Promise<number>;
 	readonly clear: () => Promise<void>;
 	readonly search: (
-		queryEmbedding: number[],
+		queryEmbedding: readonly number[],
 		maxResults: number,
 		threshold: number,
 	) => SearchResult[];
 	readonly textSearch: (options: TextSearchOptions) => TextSearchResult[];
-	readonly filterByMetadata: (filters: MetadataFilter[]) => VectorEntry[];
+	readonly filterByMetadata: (
+		filters: readonly MetadataFilter[],
+	) => VectorEntry[];
 	readonly filterByDateRange: (range: DateRange) => VectorEntry[];
 	readonly advancedSearch: (options: SearchOptions) => AdvancedSearchResult[];
 	readonly getAll: () => VectorEntry[];
 	readonly getById: (id: string) => VectorEntry | undefined;
 	readonly getTopics: () => TopicInfo[];
-	readonly filterByTopic: (topics: string[]) => VectorEntry[];
+	readonly filterByTopic: (topics: readonly string[]) => VectorEntry[];
 	readonly findDuplicates: (threshold?: number) => DuplicateGroup[];
-	readonly checkDuplicate: (embedding: number[]) => DuplicateCheckResult;
+	readonly checkDuplicate: (
+		embedding: readonly number[],
+	) => DuplicateCheckResult;
 	readonly recommend: (options?: RecommendOptions) => RecommendationResult[];
 	/** The adaptive learning engine instance (if learning is enabled). */
 	readonly learningEngine: LearningEngine | undefined;
@@ -168,6 +172,18 @@ export interface VectorStore {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Create a vector store backed by a pluggable {@link StorageBackend}.
+ *
+ * Supports cosine-similarity search, text search, metadata filtering,
+ * date-range filtering, duplicate detection, topic indexing, and
+ * weighted recommendation scoring with adaptive learning.
+ *
+ * @param options - Storage backend (required), auto-save, flush interval,
+ *   duplicate threshold, recency options, learning config, logger.
+ * @returns A frozen {@link VectorStore}. Call `load()` before use, `dispose()` when done.
+ * @throws {MemoryError} When accessed before `load()` or with empty text/embedding.
+ */
 export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	let entries: VectorEntry[] = [];
 	const logger = (options.logger ?? getDefaultLogger()).child('vector-store');
@@ -333,11 +349,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	// -----------------------------------------------------------------------
 
 	const indexEntry = (entry: VectorEntry): void => {
-		topicIdx.addEntry(
-			entry.id,
-			entry.text,
-			entry.metadata as Record<string, string>,
-		);
+		topicIdx.addEntry(entry);
 		metadataIdx.addEntry(entry.id, entry.metadata as Record<string, string>);
 		magnitudeCache.set(entry.id, entry.embedding);
 	};
@@ -634,7 +646,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 
 	const add = (
 		text: string,
-		embedding: number[],
+		embedding: readonly number[],
 		metadata: Record<string, string> = {},
 	): Promise<string> => {
 		ensureLoaded();
@@ -712,9 +724,9 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	};
 
 	const addBatch = (
-		batchEntries: Array<{
+		batchEntries: ReadonlyArray<{
 			text: string;
-			embedding: number[];
+			embedding: readonly number[];
 			metadata?: Record<string, string>;
 		}>,
 	): Promise<string[]> => {
@@ -831,7 +843,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		return result;
 	};
 
-	const deleteBatch = (ids: string[]): Promise<number> => {
+	const deleteBatch = (ids: readonly string[]): Promise<number> => {
 		ensureLoaded();
 		if (ids.length === 0) return Promise.resolve(0);
 
@@ -892,7 +904,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	// -----------------------------------------------------------------------
 
 	const search = (
-		queryEmbedding: number[],
+		queryEmbedding: readonly number[],
 		maxResults: number,
 		threshold: number,
 	): SearchResult[] => {
@@ -981,7 +993,9 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	// Metadata Filtering
 	// -----------------------------------------------------------------------
 
-	const filterByMetadata = (filters: MetadataFilter[]): VectorEntry[] => {
+	const filterByMetadata = (
+		filters: readonly MetadataFilter[],
+	): VectorEntry[] => {
 		ensureLoaded();
 		if (filters.length === 0) return [...entries];
 
@@ -1160,13 +1174,10 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 
 	const getTopics = (): TopicInfo[] => {
 		ensureLoaded();
-		return topicIdx.getAllTopics().map((topic) => {
-			const entryIds = [...topicIdx.getEntries(topic)];
-			return { topic, entryCount: entryIds.length, entryIds };
-		});
+		return [...topicIdx.getAllTopics()];
 	};
 
-	const filterByTopic = (topics: string[]): VectorEntry[] => {
+	const filterByTopic = (topics: readonly string[]): VectorEntry[] => {
 		ensureLoaded();
 		if (topics.length === 0) return [...entries];
 
@@ -1193,7 +1204,9 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		return findDuplicateGroups(entries, t);
 	};
 
-	const checkDuplicate = (embedding: number[]): DuplicateCheckResult => {
+	const checkDuplicate = (
+		embedding: readonly number[],
+	): DuplicateCheckResult => {
 		ensureLoaded();
 		return checkDuplicateImpl(embedding, entries, duplicateThreshold);
 	};

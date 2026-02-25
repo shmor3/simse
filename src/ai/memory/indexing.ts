@@ -7,6 +7,8 @@
 // No external dependencies.
 // ---------------------------------------------------------------------------
 
+import type { RelatedTopic, TopicInfo, VectorEntry } from './types.js';
+
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
@@ -23,24 +25,26 @@ export interface TopicIndexOptions {
 // ---------------------------------------------------------------------------
 
 export interface TopicIndex {
-	/** Get all entry IDs associated with a given topic. */
-	readonly getEntries: (topic: string) => ReadonlySet<string>;
-	/** List all known topics. */
-	readonly getAllTopics: () => readonly string[];
+	/** Get all entry IDs associated with a topic and its descendants. */
+	readonly getEntries: (topic: string) => readonly string[];
+	/** List all known topics with hierarchy info. */
+	readonly getAllTopics: () => readonly TopicInfo[];
 	/** Get topics for a specific entry. */
 	readonly getTopics: (id: string) => readonly string[];
 	/** Add an entry to the index, extracting topics from text and metadata. */
-	readonly addEntry: (
-		id: string,
-		text: string,
-		metadata: Record<string, string>,
-	) => void;
+	readonly addEntry: (entry: VectorEntry) => void;
 	/** Remove an entry from the index. */
 	readonly removeEntry: (id: string) => void;
 	/** Remove all entries from the index. */
 	readonly clear: () => void;
 	/** Number of distinct topics tracked. */
 	readonly topicCount: number;
+	/** Get topics that co-occur with the given topic, sorted by count desc. */
+	readonly getRelatedTopics: (topic: string) => readonly RelatedTopic[];
+	/** Move all entries from one topic to another. */
+	readonly mergeTopic: (from: string, to: string) => void;
+	/** Get direct child topic paths (not grandchildren). */
+	readonly getChildren: (topic: string) => readonly string[];
 }
 
 // Default stop words for topic extraction
@@ -105,21 +109,11 @@ const DEFAULT_STOP_WORDS = new Set([
 
 const NON_ALPHANUMERIC_RE = /[^\p{L}\p{N}\s]/gu;
 
-function extractTopics(
+function extractTopicsFromText(
 	text: string,
-	metadata: Record<string, string>,
 	stopWords: ReadonlySet<string>,
 	maxTopics: number,
 ): string[] {
-	// If metadata.topic is explicitly set, use it
-	if (metadata.topic) {
-		return metadata.topic
-			.split(',')
-			.map((t) => t.trim().toLowerCase())
-			.filter((t) => t.length > 0);
-	}
-
-	// Otherwise auto-extract from text
 	const words = text
 		.toLowerCase()
 		.replace(NON_ALPHANUMERIC_RE, '')
@@ -139,6 +133,62 @@ function extractTopics(
 		.map(([word]) => word);
 }
 
+/**
+ * Resolve topics from entry metadata + text fallback.
+ *
+ * Priority:
+ * 1. `metadata.topics` — JSON-stringified string array (multi-topic)
+ * 2. `metadata.topic` — single string (comma-separated supported)
+ * 3. Auto-extract from text via word frequency
+ */
+function resolveTopics(
+	text: string,
+	metadata: Record<string, string>,
+	stopWords: ReadonlySet<string>,
+	maxTopics: number,
+): string[] {
+	// 1. metadata.topics (JSON array)
+	if (metadata.topics) {
+		try {
+			const parsed: unknown = JSON.parse(metadata.topics);
+			if (Array.isArray(parsed)) {
+				return parsed
+					.filter((t): t is string => typeof t === 'string')
+					.map((t) => t.trim().toLowerCase())
+					.filter((t) => t.length > 0);
+			}
+		} catch {
+			// Fall through to next strategy
+		}
+	}
+
+	// 2. metadata.topic (single string, comma-separated)
+	if (metadata.topic) {
+		return metadata.topic
+			.split(',')
+			.map((t) => t.trim().toLowerCase())
+			.filter((t) => t.length > 0);
+	}
+
+	// 3. Auto-extract from text
+	return extractTopicsFromText(text, stopWords, maxTopics);
+}
+
+/**
+ * Get the direct parent of a topic path, or undefined for root topics.
+ */
+function getParentPath(topic: string): string | undefined {
+	const idx = topic.lastIndexOf('/');
+	return idx === -1 ? undefined : topic.slice(0, idx);
+}
+
+/**
+ * Create a composite key for a pair of topics (order-independent).
+ */
+function coOccurrenceKey(a: string, b: string): string {
+	return a < b ? `${a}\0${b}` : `${b}\0${a}`;
+}
+
 export function createTopicIndex(options?: TopicIndexOptions): TopicIndex {
 	const maxTopics = options?.maxTopicsPerEntry ?? 5;
 	const stopWords = new Set(DEFAULT_STOP_WORDS);
@@ -148,29 +198,126 @@ export function createTopicIndex(options?: TopicIndexOptions): TopicIndex {
 		}
 	}
 
-	// topic → Set<entryId>
+	// topic → Set<entryId> (direct entries only, not descendants)
 	const topicToEntries = new Map<string, Set<string>>();
-	// entryId → topics[]
+	// entryId → topic paths (leaf topics the entry was directly added to)
 	const entryToTopics = new Map<string, string[]>();
+	// topic → Set<child topic> (direct children only)
+	const topicToChildren = new Map<string, Set<string>>();
+	// co-occurrence pair key → count
+	const coOccurrence = new Map<string, number>();
 
-	const addEntry = (
-		id: string,
-		text: string,
-		metadata: Record<string, string>,
-	): void => {
+	/**
+	 * Ensure a topic and all its ancestors exist in the index structures.
+	 */
+	const ensureTopicExists = (topic: string): void => {
+		if (!topicToEntries.has(topic)) {
+			topicToEntries.set(topic, new Set());
+		}
+		const parent = getParentPath(topic);
+		if (parent !== undefined) {
+			ensureTopicExists(parent);
+			let children = topicToChildren.get(parent);
+			if (!children) {
+				children = new Set();
+				topicToChildren.set(parent, children);
+			}
+			children.add(topic);
+		}
+	};
+
+	/**
+	 * Clean up a topic node if it has no direct entries and no children.
+	 */
+	const cleanupTopic = (topic: string): void => {
+		const entries = topicToEntries.get(topic);
+		const children = topicToChildren.get(topic);
+		if (entries && entries.size === 0 && (!children || children.size === 0)) {
+			topicToEntries.delete(topic);
+			topicToChildren.delete(topic);
+			const parent = getParentPath(topic);
+			if (parent !== undefined) {
+				const parentChildren = topicToChildren.get(parent);
+				if (parentChildren) {
+					parentChildren.delete(topic);
+				}
+				cleanupTopic(parent);
+			}
+		}
+	};
+
+	/**
+	 * Increment pairwise co-occurrence counters for a set of topics.
+	 */
+	const incrementCoOccurrence = (topics: readonly string[]): void => {
+		for (let i = 0; i < topics.length; i++) {
+			for (let j = i + 1; j < topics.length; j++) {
+				const key = coOccurrenceKey(topics[i], topics[j]);
+				coOccurrence.set(key, (coOccurrence.get(key) ?? 0) + 1);
+			}
+		}
+	};
+
+	/**
+	 * Decrement pairwise co-occurrence counters for a set of topics.
+	 */
+	const decrementCoOccurrence = (topics: readonly string[]): void => {
+		for (let i = 0; i < topics.length; i++) {
+			for (let j = i + 1; j < topics.length; j++) {
+				const key = coOccurrenceKey(topics[i], topics[j]);
+				const current = coOccurrence.get(key) ?? 0;
+				if (current <= 1) {
+					coOccurrence.delete(key);
+				} else {
+					coOccurrence.set(key, current - 1);
+				}
+			}
+		}
+	};
+
+	/**
+	 * Collect all entry IDs for a topic and all its descendants.
+	 */
+	const collectDescendantEntries = (topic: string): string[] => {
+		const result = new Set<string>();
+		const directEntries = topicToEntries.get(topic);
+		if (directEntries) {
+			for (const id of directEntries) {
+				result.add(id);
+			}
+		}
+		const children = topicToChildren.get(topic);
+		if (children) {
+			for (const child of children) {
+				for (const id of collectDescendantEntries(child)) {
+					result.add(id);
+				}
+			}
+		}
+		return [...result];
+	};
+
+	const addEntry = (entry: VectorEntry): void => {
+		const { id, text, metadata } = entry;
 		// Remove existing mapping if re-indexing
 		removeEntry(id);
 
-		const topics = extractTopics(text, metadata, stopWords, maxTopics);
+		const topics = resolveTopics(
+			text,
+			metadata as Record<string, string>,
+			stopWords,
+			maxTopics,
+		);
 		entryToTopics.set(id, topics);
 
 		for (const topic of topics) {
-			let set = topicToEntries.get(topic);
-			if (!set) {
-				set = new Set();
-				topicToEntries.set(topic, set);
-			}
-			set.add(id);
+			ensureTopicExists(topic);
+			topicToEntries.get(topic)?.add(id);
+		}
+
+		// Track co-occurrence between all topics on this entry
+		if (topics.length > 1) {
+			incrementCoOccurrence(topics);
 		}
 	};
 
@@ -178,13 +325,16 @@ export function createTopicIndex(options?: TopicIndexOptions): TopicIndex {
 		const topics = entryToTopics.get(id);
 		if (!topics) return;
 
+		// Decrement co-occurrence before removing
+		if (topics.length > 1) {
+			decrementCoOccurrence(topics);
+		}
+
 		for (const topic of topics) {
 			const set = topicToEntries.get(topic);
 			if (set) {
 				set.delete(id);
-				if (set.size === 0) {
-					topicToEntries.delete(topic);
-				}
+				cleanupTopic(topic);
 			}
 		}
 		entryToTopics.delete(id);
@@ -193,21 +343,141 @@ export function createTopicIndex(options?: TopicIndexOptions): TopicIndex {
 	const clear = (): void => {
 		topicToEntries.clear();
 		entryToTopics.clear();
+		topicToChildren.clear();
+		coOccurrence.clear();
 	};
 
-	const emptySet: ReadonlySet<string> = new Set();
+	const getEntries = (topic: string): readonly string[] => {
+		const normalized = topic.toLowerCase();
+		return collectDescendantEntries(normalized);
+	};
+
+	const getAllTopics = (): readonly TopicInfo[] => {
+		const result: TopicInfo[] = [];
+		for (const [topic, entries] of topicToEntries) {
+			const children = topicToChildren.get(topic);
+			result.push({
+				topic,
+				entryCount: entries.size,
+				entryIds: [...entries],
+				parent: getParentPath(topic),
+				children: children ? [...children] : [],
+			});
+		}
+		return result;
+	};
+
+	const getTopics = (id: string): readonly string[] =>
+		entryToTopics.get(id) ?? [];
+
+	const getRelatedTopics = (topic: string): readonly RelatedTopic[] => {
+		const normalized = topic.toLowerCase();
+		const related = new Map<string, number>();
+		for (const [key, count] of coOccurrence) {
+			const [a, b] = key.split('\0');
+			if (a === normalized) {
+				related.set(b, (related.get(b) ?? 0) + count);
+			} else if (b === normalized) {
+				related.set(a, (related.get(a) ?? 0) + count);
+			}
+		}
+		return [...related.entries()]
+			.map(([t, c]) => ({ topic: t, coOccurrenceCount: c }))
+			.sort((a, b) => b.coOccurrenceCount - a.coOccurrenceCount);
+	};
+
+	const mergeTopic = (from: string, to: string): void => {
+		const fromNorm = from.toLowerCase();
+		const toNorm = to.toLowerCase();
+
+		const fromEntries = topicToEntries.get(fromNorm);
+		if (!fromEntries || fromEntries.size === 0) return;
+
+		// Ensure the target topic exists
+		ensureTopicExists(toNorm);
+
+		const toEntries = topicToEntries.get(toNorm);
+		if (!toEntries) return;
+
+		// Move each entry from `from` to `to`
+		for (const id of fromEntries) {
+			toEntries.add(id);
+
+			// Update the entry-to-topics mapping
+			const topics = entryToTopics.get(id);
+			if (topics) {
+				// Decrement old co-occurrence for this entry's topic set
+				if (topics.length > 1) {
+					decrementCoOccurrence(topics);
+				}
+
+				// Replace `from` with `to` in the topic list
+				const idx = topics.indexOf(fromNorm);
+				if (idx !== -1) {
+					// Avoid duplicates if entry already has `to`
+					if (topics.includes(toNorm)) {
+						topics.splice(idx, 1);
+					} else {
+						topics[idx] = toNorm;
+					}
+				}
+
+				// Increment new co-occurrence for updated topic set
+				if (topics.length > 1) {
+					incrementCoOccurrence(topics);
+				}
+			}
+		}
+
+		// Clear the `from` topic entries and clean up
+		fromEntries.clear();
+		cleanupTopic(fromNorm);
+
+		// Also move co-occurrence counters that reference `from` to `to`
+		// (this handles co-occurrences with third-party topics)
+		const keysToRemove: string[] = [];
+		const updates = new Map<string, number>();
+		for (const [key, count] of coOccurrence) {
+			const [a, b] = key.split('\0');
+			if (a === fromNorm || b === fromNorm) {
+				keysToRemove.push(key);
+				const other = a === fromNorm ? b : a;
+				if (other !== toNorm) {
+					const newKey = coOccurrenceKey(toNorm, other);
+					updates.set(
+						newKey,
+						(updates.get(newKey) ?? coOccurrence.get(newKey) ?? 0) + count,
+					);
+				}
+			}
+		}
+		for (const key of keysToRemove) {
+			coOccurrence.delete(key);
+		}
+		for (const [key, count] of updates) {
+			coOccurrence.set(key, count);
+		}
+	};
+
+	const getChildren = (topic: string): readonly string[] => {
+		const normalized = topic.toLowerCase();
+		const children = topicToChildren.get(normalized);
+		return children ? [...children] : [];
+	};
 
 	return Object.freeze({
-		getEntries: (topic: string) =>
-			topicToEntries.get(topic.toLowerCase()) ?? emptySet,
-		getAllTopics: () => [...topicToEntries.keys()],
-		getTopics: (id: string) => entryToTopics.get(id) ?? [],
+		getEntries,
+		getAllTopics,
+		getTopics,
 		addEntry,
 		removeEntry,
 		clear,
 		get topicCount() {
 			return topicToEntries.size;
 		},
+		getRelatedTopics,
+		mergeTopic,
+		getChildren,
 	});
 }
 

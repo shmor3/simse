@@ -480,11 +480,22 @@ export function createACPClient(
 		const unsubscribe = connection.onNotification(
 			'session/update',
 			(params: unknown) => {
-				const update = params as ACPSessionUpdateParams;
-				if (update.sessionId !== sessionId) return;
+				const p = params as ACPSessionUpdateParams;
+				if (p.sessionId !== sessionId) return;
 
-				if (update.kind === 'agent_message_chunk' && update.content) {
-					const text = extractContentText(update.content);
+				const update = p.update;
+				if (!update) return;
+
+				if (
+					update.sessionUpdate === 'agent_message_chunk' &&
+					update.content
+				) {
+					const content = update.content;
+					// Content may be a single block or an array
+					const blocks = Array.isArray(content) ? content : [content];
+					const text = extractContentText(
+						blocks as readonly ACPContentBlock[],
+					);
 					if (text) {
 						chunks.push({ text });
 						chunkResolve?.();
@@ -492,7 +503,9 @@ export function createACPClient(
 				}
 
 				if (update.metadata) {
-					const usage = extractTokenUsage(update.metadata);
+					const usage = extractTokenUsage(
+						update.metadata as Readonly<Record<string, unknown>>,
+					);
 					if (usage) streamUsage = usage;
 				}
 			},

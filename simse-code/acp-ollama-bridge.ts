@@ -426,8 +426,10 @@ function createAcpServer(
 				fullText += text;
 				const updateParams: ACPSessionUpdateParams = {
 					sessionId,
-					kind: 'agent_message_chunk',
-					content: [{ type: 'text', text }],
+					update: {
+						sessionUpdate: 'agent_message_chunk',
+						content: [{ type: 'text', text }],
+					},
 				};
 				transport.writeNotification('session/update', updateParams);
 			},

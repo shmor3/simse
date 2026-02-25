@@ -132,11 +132,16 @@ export interface ACPSessionPromptResult {
 // ACP protocol — session update notifications (streaming)
 // ---------------------------------------------------------------------------
 
+export interface ACPSessionUpdate {
+	readonly sessionUpdate: string;
+	readonly content?: unknown;
+	readonly metadata?: unknown;
+	readonly [key: string]: unknown;
+}
+
 export interface ACPSessionUpdateParams {
 	readonly sessionId: string;
-	readonly kind: string;
-	readonly content?: readonly ACPContentBlock[];
-	readonly metadata?: Readonly<Record<string, unknown>>;
+	readonly update?: ACPSessionUpdate;
 }
 
 // ---------------------------------------------------------------------------

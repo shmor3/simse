@@ -10,6 +10,7 @@
 import type { MagnitudeCache, MetadataIndex } from './indexing.js';
 import { computeMagnitude } from './indexing.js';
 import type { InvertedIndex } from './inverted-index.js';
+import { recencyScore } from './recommendation.js';
 import {
 	fuzzyScore,
 	matchesAllMetadataFilters,
@@ -327,6 +328,9 @@ export function advancedVectorSearch(
 		dateRange,
 		maxResults = 10,
 		rankBy = 'average',
+		fieldBoosts,
+		rankWeights,
+		topicFilter,
 	} = options;
 
 	// ---- BM25 fast-path for text component ----
@@ -344,6 +348,12 @@ export function advancedVectorSearch(
 			}
 		}
 	}
+
+	// ---- Pre-compute topic filter set for O(1) lookup ----
+	const topicSet =
+		topicFilter && topicFilter.length > 0
+			? new Set<string>(topicFilter)
+			: undefined;
 
 	const results: AdvancedSearchResult[] = [];
 
@@ -377,12 +387,12 @@ export function advancedVectorSearch(
 				continue;
 		}
 
-		if (metadata && metadata.length > 0) {
-			if (
-				!matchesAllMetadataFilters(entry.metadata, metadata as MetadataFilter[])
-			)
-				continue;
-		}
+		// Metadata filtering — entries that don't match are excluded
+		const passedMetadata =
+			!metadata ||
+			metadata.length === 0 ||
+			matchesAllMetadataFilters(entry.metadata, metadata as MetadataFilter[]);
+		if (!passedMetadata) continue;
 
 		let vectorScore: number | undefined;
 		if (queryEmbedding && queryEmbedding.length > 0 && queryMag > 0) {
@@ -416,7 +426,54 @@ export function advancedVectorSearch(
 			}
 		}
 
-		const finalScore = combineScores(vectorScore, textScoreVal, rankBy);
+		// ---- Field boosting ----
+		// Apply text boost multiplier
+		let boostedTextScore = textScoreVal;
+		if (boostedTextScore !== undefined && fieldBoosts?.text !== undefined) {
+			boostedTextScore *= fieldBoosts.text;
+		}
+
+		// Metadata boost: bonus for entries that passed metadata filters
+		let metadataBoost = 0;
+		if (
+			fieldBoosts?.metadata !== undefined &&
+			metadata &&
+			metadata.length > 0
+		) {
+			// Entry passed metadata filters — apply the metadata boost
+			metadataBoost = fieldBoosts.metadata;
+		}
+
+		// Topic boost: bonus for entries whose topic matches the topic filter
+		let topicBoost = 0;
+		if (fieldBoosts?.topic !== undefined && topicSet) {
+			const entryTopic = entry.metadata.topic;
+			if (entryTopic && topicSet.has(entryTopic)) {
+				topicBoost = fieldBoosts.topic;
+			}
+		}
+
+		// ---- Score combination ----
+		let finalScore: number;
+		if (rankBy === 'weighted') {
+			// Weighted ranking mode — combine all components with user-specified weights
+			const wVector = rankWeights?.vector ?? 0.5;
+			const wText = rankWeights?.text ?? 0.3;
+			const wMetadata = rankWeights?.metadata ?? 0.1;
+			const wRecency = rankWeights?.recency ?? 0.1;
+
+			const recencyVal = recencyScore(entry.timestamp);
+
+			finalScore =
+				(vectorScore ?? 0) * wVector +
+				(boostedTextScore ?? 0) * wText +
+				metadataBoost * wMetadata +
+				recencyVal * wRecency;
+		} else {
+			// Standard ranking modes — apply boosts as additive bonuses
+			const baseScore = combineScores(vectorScore, boostedTextScore, rankBy);
+			finalScore = baseScore + metadataBoost + topicBoost;
+		}
 
 		results.push({
 			entry,

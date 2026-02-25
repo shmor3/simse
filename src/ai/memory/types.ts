@@ -177,10 +177,46 @@ export interface SearchOptions {
 	 * - `"average"` — Arithmetic mean of both scores.
 	 * - `"multiply"` — Product of both scores (boosts entries that rank
 	 *   highly on *both* axes).
+	 * - `"weighted"` — Combine using explicit `rankWeights` for each component.
 	 *
 	 * Defaults to `"average"`.
 	 */
-	readonly rankBy?: 'vector' | 'text' | 'average' | 'multiply';
+	readonly rankBy?: 'vector' | 'text' | 'average' | 'multiply' | 'weighted';
+
+	// -- Field boosting ---------------------------------------------------
+	/**
+	 * Multipliers applied to individual score components before combining.
+	 *
+	 * - `text` — Scales the text relevance score (default 1.0).
+	 * - `metadata` — Bonus added when an entry passes metadata filters (default 1.0).
+	 * - `topic` — Bonus added when an entry matches a topic filter (default 1.0).
+	 */
+	readonly fieldBoosts?: {
+		readonly text?: number;
+		readonly metadata?: number;
+		readonly topic?: number;
+	};
+
+	/**
+	 * Weights for the `"weighted"` ranking mode. Each weight controls
+	 * the contribution of its corresponding score component.
+	 *
+	 * Defaults: `{ vector: 0.5, text: 0.3, metadata: 0.1, recency: 0.1 }`.
+	 */
+	readonly rankWeights?: {
+		readonly vector?: number;
+		readonly text?: number;
+		readonly metadata?: number;
+		readonly recency?: number;
+	};
+
+	// -- Topic filter (for boosting) --------------------------------------
+	/**
+	 * Topics to match for topic-based field boosting.
+	 * Entries whose `metadata.topic` matches any of these topics receive the
+	 * topic boost defined in `fieldBoosts.topic`.
+	 */
+	readonly topicFilter?: readonly string[];
 }
 
 export interface AdvancedSearchResult {

@@ -113,6 +113,8 @@ export type {
 	AgenticLoopResult,
 	LoopCallbacks,
 	LoopTurn,
+	SubagentInfo,
+	SubagentResult,
 } from './ai/loop/index.js';
 export { createAgenticLoop } from './ai/loop/index.js';
 export type { MCPClient } from './ai/mcp/mcp-client.js';
@@ -197,6 +199,8 @@ export { createTaskList } from './ai/tasks/index.js';
 // ---- Tool Registry --------------------------------------------------------
 export type {
 	RegisteredTool,
+	SubagentCallbacks,
+	SubagentToolsOptions,
 	ToolAnnotations,
 	ToolCallRequest,
 	ToolCallResult,
@@ -210,6 +214,7 @@ export type {
 export {
 	createToolRegistry,
 	registerMemoryTools,
+	registerSubagentTools,
 	registerTaskTools,
 	registerVFSTools,
 } from './ai/tools/index.js';

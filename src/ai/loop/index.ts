@@ -5,4 +5,6 @@ export type {
 	AgenticLoopResult,
 	LoopCallbacks,
 	LoopTurn,
+	SubagentInfo,
+	SubagentResult,
 } from './types.js';

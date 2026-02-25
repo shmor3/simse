@@ -153,8 +153,9 @@ export function createACPClient(
 				const result = await connection.initialize();
 				connections.set(entry.name, connection);
 
+				const info = result.agentInfo;
 				logger.info(
-					`ACP server "${entry.name}" initialized: ${result.agentInfo.name} v${result.agentInfo.version}`,
+					`ACP server "${entry.name}" initialized${info ? `: ${info.name} v${info.version}` : ''}`,
 				);
 			}),
 		);

@@ -1,36 +1,31 @@
 // ---------------------------------------------------------------------------
-// Agent Communication Protocol (ACP) Client
+// Agent Client Protocol (ACP) Client — JSON-RPC 2.0 over stdio
 // ---------------------------------------------------------------------------
 
 import {
 	createEmbeddingError,
 	createProviderGenerationError,
-	createProviderTimeoutError,
 	createProviderUnavailableError,
-	isEmbeddingError,
 	isSimseError,
 	toError,
 } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
 import { isTransientError, retry } from '../../utils/retry.js';
-import {
-	buildHeaders,
-	fetchWithTimeout,
-	httpGet,
-	httpPost,
-	type ResolvedServer,
-	wrapFetchError,
-} from './acp-http.js';
-import { extractEmbeddings, extractGenerateResult } from './acp-results.js';
-import { extractStreamDelta } from './acp-stream.js';
+import { type ACPConnection, createACPConnection } from './acp-connection.js';
+import { extractContentText, extractTokenUsage } from './acp-results.js';
 import type {
 	ACPAgentInfo,
 	ACPConfig,
-	ACPCreateRunRequest,
+	ACPContentBlock,
 	ACPEmbedResult,
 	ACPGenerateResult,
-	ACPMessage,
-	ACPRun,
+	ACPPermissionPolicy,
+	ACPServerEntry,
+	ACPSessionNewResult,
+	ACPSessionPromptResult,
+	ACPSessionUpdateParams,
+	ACPStreamChunk,
+	ACPTokenUsage,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -44,21 +39,14 @@ export interface ACPClientOptions {
 		baseDelayMs?: number;
 		maxDelayMs?: number;
 	};
-	/** Override the polling configuration for run-based requests. */
-	pollingOptions?: {
-		/** Initial polling interval in milliseconds. Defaults to `500`. */
-		initialIntervalMs?: number;
-		/** Maximum polling interval in milliseconds. Defaults to `5000`. */
-		maxIntervalMs?: number;
-		/** Polling backoff multiplier. Defaults to `2`. */
-		backoffMultiplier?: number;
-	};
 	/** Timeout for streaming requests in milliseconds. Defaults to `120000`. */
 	streamTimeoutMs?: number;
-	/** Timeout for health check (isAvailable) in milliseconds. Defaults to `5000`. */
-	healthCheckTimeoutMs?: number;
 	/** Inject a custom logger (defaults to the global logger). */
 	logger?: Logger;
+	/** Client name advertised during ACP initialize. Defaults to 'simse'. */
+	clientName?: string;
+	/** Client version advertised during ACP initialize. Defaults to '1.0.0'. */
+	clientVersion?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +54,10 @@ export interface ACPClientOptions {
 // ---------------------------------------------------------------------------
 
 export interface ACPClient {
+	/** Spawn all servers and initialize ACP connections. */
+	readonly initialize: () => Promise<void>;
+	/** Close all ACP connections and kill spawned processes. */
+	readonly dispose: () => Promise<void>;
 	readonly listAgents: (serverName?: string) => Promise<ACPAgentInfo[]>;
 	readonly getAgent: (
 		agentId: string,
@@ -99,12 +91,15 @@ export interface ACPClient {
 			systemPrompt?: string;
 			config?: Record<string, unknown>;
 		},
-	) => AsyncGenerator<string>;
+	) => AsyncGenerator<ACPStreamChunk>;
 	readonly embed: (
 		input: string | string[],
 		model?: string,
+		serverName?: string,
 	) => Promise<ACPEmbedResult>;
 	readonly isAvailable: (serverName?: string) => Promise<boolean>;
+	/** Set the permission policy on all active connections. */
+	readonly setPermissionPolicy: (policy: ACPPermissionPolicy) => void;
 	readonly serverNames: string[];
 	readonly serverCount: number;
 	readonly defaultServerName: string | undefined;
@@ -122,44 +117,71 @@ export function createACPClient(
 	const logger = (options?.logger ?? getDefaultLogger()).child('acp');
 
 	const maxRetryAttempts = options?.retryOptions?.maxAttempts ?? 3;
-	const pollInitialIntervalMs =
-		options?.pollingOptions?.initialIntervalMs ?? 500;
-	const pollMaxIntervalMs = options?.pollingOptions?.maxIntervalMs ?? 5_000;
-	const pollBackoffMultiplier = options?.pollingOptions?.backoffMultiplier ?? 2;
-	const streamTimeoutMs = options?.streamTimeoutMs ?? 120_000;
-	const healthCheckTimeoutMs = options?.healthCheckTimeoutMs ?? 5_000;
 	const retryBaseDelayMs = options?.retryOptions?.baseDelayMs ?? 500;
 	const retryMaxDelayMs = options?.retryOptions?.maxDelayMs ?? 15_000;
+	const streamTimeoutMs = options?.streamTimeoutMs ?? 120_000;
+	const clientName = options?.clientName ?? 'simse';
+	const clientVersion = options?.clientVersion ?? '1.0.0';
 
-	// Index servers by name — validate URL schemes to prevent SSRF
-	const servers = new Map<string, ResolvedServer>();
-	for (const entry of config.servers) {
-		let parsed: URL;
-		try {
-			parsed = new URL(entry.url);
-		} catch {
-			throw createProviderUnavailableError('acp', {
-				metadata: {
-					reason: `Invalid URL for ACP server "${entry.name}": ${entry.url}`,
-				},
-			});
-		}
-		if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-			throw createProviderUnavailableError('acp', {
-				metadata: {
-					reason: `ACP server "${entry.name}" URL must use http or https, got "${parsed.protocol}"`,
-				},
-			});
-		}
-		const baseUrl = entry.url.replace(/\/+$/, '');
-		servers.set(entry.name, { entry, baseUrl });
-	}
+	// Connection pool — one connection per configured server
+	const connections = new Map<string, ACPConnection>();
 
 	// -----------------------------------------------------------------------
-	// Internal helpers — resolution
+	// Initialize / dispose
 	// -----------------------------------------------------------------------
 
-	const resolveServer = (serverName?: string): ResolvedServer => {
+	const initialize = async (): Promise<void> => {
+		const initPromises = config.servers.map(async (entry) => {
+			if (connections.has(entry.name)) return;
+
+			logger.info(
+				`Connecting to ACP server "${entry.name}": ${entry.command} ${(entry.args ?? []).join(' ')}`,
+			);
+
+			const connection = createACPConnection({
+				command: entry.command,
+				args: entry.args,
+				cwd: entry.cwd,
+				env: entry.env,
+				timeoutMs: entry.timeoutMs,
+				permissionPolicy: entry.permissionPolicy,
+				clientName,
+				clientVersion,
+			});
+
+			const result = await connection.initialize();
+			connections.set(entry.name, connection);
+
+			logger.info(
+				`ACP server "${entry.name}" initialized: ${result.server_info.name} v${result.server_info.version}`,
+			);
+		});
+
+		await Promise.all(initPromises);
+	};
+
+	const dispose = async (): Promise<void> => {
+		const closePromises = [...connections.entries()].map(
+			async ([name, conn]) => {
+				logger.debug(`Closing ACP connection "${name}"`);
+				await conn.close();
+			},
+		);
+		await Promise.all(closePromises);
+		connections.clear();
+	};
+
+	// -----------------------------------------------------------------------
+	// Internal helpers
+	// -----------------------------------------------------------------------
+
+	const resolveConnection = (
+		serverName?: string,
+	): {
+		connection: ACPConnection;
+		entry: ACPServerEntry;
+		name: string;
+	} => {
 		const name = serverName ?? config.defaultServer ?? config.servers[0]?.name;
 
 		if (!name) {
@@ -168,56 +190,31 @@ export function createACPClient(
 			});
 		}
 
-		const server = servers.get(name);
-		if (!server) {
+		const connection = connections.get(name);
+		if (!connection) {
 			throw createProviderUnavailableError('acp', {
 				metadata: {
-					reason: `ACP server "${name}" is not configured`,
-					configuredServers: [...servers.keys()],
+					reason: `ACP server "${name}" is not connected. Call initialize() first.`,
+					configuredServers: config.servers.map((s) => s.name),
 				},
 			});
 		}
 
-		return server;
+		const entry = config.servers.find((s) => s.name === name)!;
+		return { connection, entry, name };
 	};
 
 	const resolveAgentId = (
-		server: ResolvedServer,
+		entry: ACPServerEntry,
 		stepAgentId?: string,
 	): string => {
-		const agentId =
-			stepAgentId ?? server.entry.defaultAgent ?? config.defaultAgent;
-
-		if (!agentId) {
-			throw createProviderGenerationError(
-				'acp',
-				'No agent ID specified. Set a default agent in config or provide one per step.',
-			);
-		}
-
-		return agentId;
+		// Resolution order: step → server default → global default → server name
+		// The server name is the ultimate fallback so a single-server config
+		// "just works" without requiring an explicit agent ID anywhere.
+		return (
+			stepAgentId ?? entry.defaultAgent ?? config.defaultAgent ?? entry.name
+		);
 	};
-
-	// -----------------------------------------------------------------------
-	// Internal helpers — message building
-	// -----------------------------------------------------------------------
-
-	const buildInputMessages = (
-		prompt: string,
-		systemPrompt?: string,
-	): ACPMessage[] => {
-		const text = systemPrompt ? `${systemPrompt}\n\n${prompt}` : prompt;
-		return [
-			{
-				role: 'user',
-				parts: [{ type: 'text' as const, text }],
-			},
-		];
-	};
-
-	// -----------------------------------------------------------------------
-	// Internal helpers — retry
-	// -----------------------------------------------------------------------
 
 	const withRetry = async <T>(
 		operation: string,
@@ -248,69 +245,42 @@ export function createACPClient(
 	};
 
 	// -----------------------------------------------------------------------
-	// Run management
+	// ACP session helpers
 	// -----------------------------------------------------------------------
 
-	const isEndpointNotFound = (error: unknown): boolean =>
-		isSimseError(error) &&
-		(error.statusCode === 404 || error.statusCode === 405);
+	const createSession = async (connection: ACPConnection): Promise<string> => {
+		const result = await connection.request<ACPSessionNewResult>(
+			'session/new',
+			{ supported_content_types: ['text'] },
+		);
+		return result.session_id;
+	};
 
-	const createAndPollRun = async (
-		server: ResolvedServer,
-		body: ACPCreateRunRequest,
-	): Promise<ACPRun> => {
-		const run = await httpPost<ACPRun>(server, '/runs', body);
-
-		if (run.status === 'completed' || run.status === 'failed') {
-			return run;
-		}
-
-		const maxPollMs = server.entry.timeoutMs ?? 30_000;
-		let pollIntervalMs = pollInitialIntervalMs;
-		const deadline = Date.now() + maxPollMs;
-
-		while (Date.now() < deadline) {
-			const remaining = deadline - Date.now();
-			if (remaining <= 0) break;
-			await new Promise((resolve) =>
-				setTimeout(resolve, Math.min(pollIntervalMs, remaining)),
-			);
-			pollIntervalMs = Math.min(
-				pollIntervalMs * pollBackoffMultiplier,
-				pollMaxIntervalMs,
-			);
-
-			const updated = await httpGet<ACPRun>(
-				server,
-				`/runs/${encodeURIComponent(run.run_id)}`,
-			);
-
-			if (updated.status === 'completed' || updated.status === 'failed') {
-				return updated;
-			}
-
-			if (updated.status === 'cancelled') {
-				throw createProviderGenerationError(
-					'acp',
-					`Run ${run.run_id} was cancelled`,
-					{ model: body.agent_id },
-				);
-			}
-
-			if (updated.status === 'awaiting_input') {
-				throw createProviderGenerationError(
-					'acp',
-					`Run ${run.run_id} is awaiting input, which is not supported by this client`,
-					{ model: body.agent_id },
-				);
-			}
-		}
-
-		throw createProviderTimeoutError('acp', maxPollMs, {
-			cause: new Error(
-				`Run ${run.run_id} did not complete within ${maxPollMs}ms`,
-			),
+	const sendPrompt = async (
+		connection: ACPConnection,
+		sessionId: string,
+		content: readonly ACPContentBlock[],
+	): Promise<ACPSessionPromptResult> => {
+		return connection.request<ACPSessionPromptResult>('session/prompt', {
+			session_id: sessionId,
+			content,
 		});
+	};
+
+	// -----------------------------------------------------------------------
+	// Build content blocks
+	// -----------------------------------------------------------------------
+
+	const buildTextContent = (
+		prompt: string,
+		systemPrompt?: string,
+	): ACPContentBlock[] => {
+		const blocks: ACPContentBlock[] = [];
+		if (systemPrompt) {
+			blocks.push({ type: 'text', text: systemPrompt });
+		}
+		blocks.push({ type: 'text', text: prompt });
+		return blocks;
 	};
 
 	// -----------------------------------------------------------------------
@@ -318,40 +288,45 @@ export function createACPClient(
 	// -----------------------------------------------------------------------
 
 	const listAgents = async (serverName?: string): Promise<ACPAgentInfo[]> => {
-		const server = resolveServer(serverName);
-
-		logger.debug(`Listing agents on "${server.entry.name}"`, {
-			url: server.baseUrl,
-		});
-
-		const response = await httpGet<ACPAgentInfo[] | { agents: ACPAgentInfo[] }>(
-			server,
-			'/agents',
-		);
-
-		const agents = Array.isArray(response) ? response : response.agents;
-		if (!Array.isArray(agents)) {
-			throw createProviderGenerationError(
-				'acp',
-				`Unexpected response format from /agents on "${server.entry.name}"`,
-			);
+		// Native ACP has no agent listing — return synthetic info from config
+		if (serverName) {
+			const entry = config.servers.find((s) => s.name === serverName);
+			if (!entry) {
+				throw createProviderUnavailableError('acp', {
+					metadata: {
+						reason: `ACP server "${serverName}" is not configured`,
+					},
+				});
+			}
+			return [
+				{
+					id: entry.defaultAgent ?? entry.name,
+					name: entry.name,
+					description: `ACP agent on server "${entry.name}"`,
+				},
+			];
 		}
-		logger.debug(`Found ${agents.length} agent(s) on "${server.entry.name}"`);
-		return agents;
+
+		return config.servers.map((entry) => ({
+			id: entry.defaultAgent ?? entry.name,
+			name: entry.name,
+			description: `ACP agent on server "${entry.name}"`,
+		}));
 	};
 
 	const getAgent = async (
 		agentId: string,
 		serverName?: string,
 	): Promise<ACPAgentInfo> => {
-		const server = resolveServer(serverName);
-
-		logger.debug(`Getting agent "${agentId}" on "${server.entry.name}"`);
-
-		return httpGet<ACPAgentInfo>(
-			server,
-			`/agents/${encodeURIComponent(agentId)}`,
-		);
+		const agents = await listAgents(serverName);
+		const agent = agents.find((a) => a.id === agentId);
+		if (!agent) {
+			throw createProviderGenerationError(
+				'acp',
+				`Agent "${agentId}" not found`,
+			);
+		}
+		return agent;
 	};
 
 	const generate = async (
@@ -363,40 +338,31 @@ export function createACPClient(
 			config?: Record<string, unknown>;
 		},
 	): Promise<ACPGenerateResult> => {
-		const server = resolveServer(generateOptions?.serverName);
-		const agentId = resolveAgentId(server, generateOptions?.agentId);
+		const { connection, entry, name } = resolveConnection(
+			generateOptions?.serverName,
+		);
+		const agentId = resolveAgentId(entry, generateOptions?.agentId);
 
 		logger.debug('Starting generate request', {
-			server: server.entry.name,
+			server: name,
 			agent: agentId,
 			promptLength: prompt.length,
 			hasSystemPrompt: !!generateOptions?.systemPrompt,
 		});
 
 		return withRetry('generate', async () => {
-			const input = buildInputMessages(prompt, generateOptions?.systemPrompt);
+			const sessionId = await createSession(connection);
+			const content = buildTextContent(prompt, generateOptions?.systemPrompt);
+			const result = await sendPrompt(connection, sessionId, content);
 
-			const body: ACPCreateRunRequest = {
-				agent_id: agentId,
-				input,
-				...(generateOptions?.config ? { config: generateOptions.config } : {}),
+			return {
+				content: extractContentText(result.content),
+				agentId,
+				serverName: name,
+				sessionId,
+				usage: extractTokenUsage(result.metadata),
+				stopReason: result.stop_reason,
 			};
-
-			let run: ACPRun;
-			try {
-				run = await httpPost<ACPRun>(server, '/runs/wait', body);
-			} catch (error) {
-				if (isEndpointNotFound(error)) {
-					logger.debug(
-						'/runs/wait not available, falling back to async run + polling',
-					);
-					run = await createAndPollRun(server, body);
-				} else {
-					throw error;
-				}
-			}
-
-			return extractGenerateResult(run, server.entry.name);
 		});
 	};
 
@@ -418,63 +384,44 @@ export function createACPClient(
 			);
 		}
 
-		const server = resolveServer(chatOptions?.serverName);
-		const agentId = resolveAgentId(server, chatOptions?.agentId);
+		const { connection, entry, name } = resolveConnection(
+			chatOptions?.serverName,
+		);
+		const agentId = resolveAgentId(entry, chatOptions?.agentId);
 
 		logger.debug('Starting chat request', {
-			server: server.entry.name,
+			server: name,
 			agent: agentId,
 			messageCount: messages.length,
 		});
 
 		return withRetry('chat', async () => {
-			const systemMessages = messages.filter((m) => m.role === 'system');
-			const systemText = systemMessages.map((m) => m.content).join('\n\n');
-			const conversationMessages = messages.filter((m) => m.role !== 'system');
+			const sessionId = await createSession(connection);
 
-			// If only system messages were provided, convert to a user message
-			let systemInjected = false;
-			if (conversationMessages.length === 0 && systemText.length > 0) {
-				conversationMessages.push({
-					role: 'user',
-					content: systemText,
-				});
-				systemInjected = true;
+			// Combine all messages into content blocks for a single prompt.
+			// System messages become prefixed text blocks, assistant messages
+			// are included as context.
+			const content: ACPContentBlock[] = [];
+			for (const msg of messages) {
+				const prefix =
+					msg.role === 'system'
+						? '[System] '
+						: msg.role === 'assistant'
+							? '[Assistant] '
+							: '';
+				content.push({ type: 'text', text: `${prefix}${msg.content}` });
 			}
-			const input: ACPMessage[] = conversationMessages.map((msg) => {
-				const role: 'user' | 'agent' =
-					msg.role === 'assistant' ? 'agent' : 'user';
-				let text = msg.content;
 
-				if (!systemInjected && role === 'user' && systemText.length > 0) {
-					text = `${systemText}\n\n${text}`;
-					systemInjected = true;
-				}
+			const result = await sendPrompt(connection, sessionId, content);
 
-				return {
-					role,
-					parts: [{ type: 'text' as const, text }],
-				};
-			});
-
-			const body: ACPCreateRunRequest = {
-				agent_id: agentId,
-				input,
-				...(chatOptions?.config ? { config: chatOptions.config } : {}),
+			return {
+				content: extractContentText(result.content),
+				agentId,
+				serverName: name,
+				sessionId,
+				usage: extractTokenUsage(result.metadata),
+				stopReason: result.stop_reason,
 			};
-
-			let run: ACPRun;
-			try {
-				run = await httpPost<ACPRun>(server, '/runs/wait', body);
-			} catch (error) {
-				if (isEndpointNotFound(error)) {
-					run = await createAndPollRun(server, body);
-				} else {
-					throw error;
-				}
-			}
-
-			return extractGenerateResult(run, server.entry.name);
 		});
 	};
 
@@ -486,132 +433,92 @@ export function createACPClient(
 			systemPrompt?: string;
 			config?: Record<string, unknown>;
 		},
-	): AsyncGenerator<string> {
-		const server = resolveServer(streamOptions?.serverName);
-		const agentId = resolveAgentId(server, streamOptions?.agentId);
+	): AsyncGenerator<ACPStreamChunk> {
+		const { connection, entry, name } = resolveConnection(
+			streamOptions?.serverName,
+		);
+		const agentId = resolveAgentId(entry, streamOptions?.agentId);
 
 		logger.debug('Starting generate stream', {
-			server: server.entry.name,
+			server: name,
 			agent: agentId,
 			promptLength: prompt.length,
 		});
 
-		const input = buildInputMessages(prompt, streamOptions?.systemPrompt);
+		const sessionId = await createSession(connection);
+		const content = buildTextContent(prompt, streamOptions?.systemPrompt);
 
-		const body: ACPCreateRunRequest = {
-			agent_id: agentId,
-			input,
-			...(streamOptions?.config ? { config: streamOptions.config } : {}),
-		};
+		// Collect streaming chunks via notification handler
+		type ChunkItem = { text: string } | { done: true };
+		const chunks: ChunkItem[] = [];
+		let chunkResolve: (() => void) | undefined;
+		let streamUsage: ACPTokenUsage | undefined;
 
-		const timeoutMs = server.entry.timeoutMs ?? streamTimeoutMs;
+		const unsubscribe = connection.onNotification(
+			'session/update',
+			(params: unknown) => {
+				const update = params as ACPSessionUpdateParams;
+				if (update.session_id !== sessionId) return;
 
-		let response: Response;
-		try {
-			response = await fetchWithTimeout(
-				`${server.baseUrl}/runs/stream`,
-				{
-					method: 'POST',
-					headers: {
-						...buildHeaders(server),
-						Accept: 'text/event-stream',
-					},
-					body: JSON.stringify(body),
-				},
-				timeoutMs,
-			);
-		} catch (error) {
-			throw wrapFetchError(
-				'generateStream',
-				error,
-				server.entry.name,
-				timeoutMs,
-			);
-		}
+				if (update.kind === 'agent_message_chunk' && update.content) {
+					const text = extractContentText(update.content);
+					if (text) {
+						chunks.push({ text });
+						chunkResolve?.();
+					}
+				}
 
-		if (!response.ok) {
-			const text = await response.text().catch(() => '');
-			throw createProviderGenerationError(
-				'acp',
-				`Streaming request failed (${response.status}): ${text}`,
-				{ model: agentId },
-			);
-		}
+				if (update.metadata) {
+					const usage = extractTokenUsage(update.metadata);
+					if (usage) streamUsage = usage;
+				}
+			},
+		);
 
-		if (!response.body) {
-			throw createProviderGenerationError(
-				'acp',
-				'Server returned no response body for streaming request',
-				{ model: agentId },
-			);
-		}
-
-		const reader = response.body.getReader();
-		const decoder = new TextDecoder();
-		let buffer = '';
-		// Track whether any incremental deltas were yielded, so we only
-		// use the completed-event full-text fallback when no deltas arrived.
-		let anyDeltaYielded = false;
+		// Send the prompt — don't await yet, chunks arrive as notifications
+		const promptPromise = sendPrompt(connection, sessionId, content).then(
+			(result) => {
+				// Final result arrived — mark stream as done
+				if (result.metadata) {
+					const usage = extractTokenUsage(result.metadata);
+					if (usage) streamUsage = usage;
+				}
+				chunks.push({ done: true });
+				chunkResolve?.();
+				return result;
+			},
+		);
 
 		try {
+			// Set a stream-level timeout
+			const timeoutMs = entry.timeoutMs ?? streamTimeoutMs;
+			const deadline = Date.now() + timeoutMs;
+
+			let idx = 0;
 			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-
-				// SSE spec allows \r\n, \r, and \n as line terminators
-				const lines = buffer.split(/\r\n|\r|\n/);
-				buffer = lines.pop() ?? '';
-
-				for (const line of lines) {
-					const trimmed = line.trim();
-					if (trimmed.startsWith('data:')) {
-						const jsonStr = trimmed.slice(5).trim();
-						if (jsonStr === '[DONE]') return;
-						if (jsonStr.length === 0) continue;
-
-						try {
-							const event = JSON.parse(jsonStr) as Record<string, unknown>;
-							const delta = extractStreamDelta(event);
-							if (delta) {
-								// Skip completed-event full-text if deltas were already yielded
-								const isCompletedFallback =
-									event.status === 'completed' && anyDeltaYielded;
-								if (!isCompletedFallback) {
-									anyDeltaYielded = true;
-									yield delta;
-								}
-							}
-						} catch {
-							logger.debug('Skipping malformed SSE data', {
-								data: jsonStr,
-							});
-						}
+				if (idx < chunks.length) {
+					const chunk = chunks[idx++];
+					if ('done' in chunk) break;
+					yield { type: 'delta', text: chunk.text };
+				} else {
+					const remaining = deadline - Date.now();
+					if (remaining <= 0) {
+						throw createProviderGenerationError(
+							'acp',
+							`Stream timed out after ${timeoutMs}ms`,
+							{ model: agentId },
+						);
 					}
+
+					await new Promise<void>((resolve) => {
+						chunkResolve = resolve;
+						setTimeout(resolve, Math.min(remaining, 100));
+					});
 				}
 			}
 
-			if (buffer.trim().startsWith('data:')) {
-				const jsonStr = buffer.trim().slice(5).trim();
-				if (jsonStr.length > 0 && jsonStr !== '[DONE]') {
-					try {
-						const event = JSON.parse(jsonStr) as Record<string, unknown>;
-						const delta = extractStreamDelta(event);
-						if (delta) {
-							const isCompletedFallback =
-								event.status === 'completed' && anyDeltaYielded;
-							if (!isCompletedFallback) {
-								yield delta;
-							}
-						}
-					} catch {
-						// Ignore
-					}
-				}
-			}
+			yield { type: 'complete', usage: streamUsage };
 		} catch (error) {
-			// Don't double-wrap errors that are already structured SimseErrors
 			if (isSimseError(error)) throw error;
 			throw createProviderGenerationError(
 				'acp',
@@ -619,107 +526,108 @@ export function createACPClient(
 				{ cause: error, model: agentId },
 			);
 		} finally {
-			reader.releaseLock();
-			try {
-				await response.body?.cancel();
-			} catch {
-				// Ignore cancel errors
-			}
+			unsubscribe();
+			// Ensure the prompt promise settles
+			promptPromise.catch(() => {});
 		}
 	}
 
 	const embed = async (
 		input: string | string[],
 		model?: string,
+		serverName?: string,
 	): Promise<ACPEmbedResult> => {
+		// ACP does not support embeddings natively.
+		// Send embedding data as a data content block and hope the server handles it.
 		const texts = Array.isArray(input) ? input : [input];
-		const server = resolveServer();
-		const agentId = model ?? resolveAgentId(server);
+		const { connection, entry, name } = resolveConnection(serverName);
+		const agentId = model ?? resolveAgentId(entry);
 
-		logger.debug('Generating embeddings', {
-			server: server.entry.name,
+		logger.debug('Generating embeddings via ACP', {
+			server: name,
 			agent: agentId,
 			inputCount: texts.length,
 		});
 
 		return withRetry('embed', async () => {
-			const inputMessages: ACPMessage[] = [
+			const sessionId = await createSession(connection);
+
+			const content: ACPContentBlock[] = [
 				{
-					role: 'user',
-					parts: [
-						{
-							type: 'data' as const,
-							data: { texts, action: 'embed' },
-							mimeType: 'application/json',
-						},
-					],
+					type: 'data',
+					data: { texts, action: 'embed' },
+					mimeType: 'application/json',
 				},
 			];
 
-			const body: ACPCreateRunRequest = {
-				agent_id: agentId,
-				input: inputMessages,
-				config: { mode: 'embedding' },
-			};
+			const result = await sendPrompt(connection, sessionId, content);
 
-			let run: ACPRun;
-			try {
-				run = await httpPost<ACPRun>(server, '/runs/wait', body);
-			} catch (error) {
-				if (isEndpointNotFound(error)) {
-					run = await createAndPollRun(server, body);
-				} else {
-					if (isEmbeddingError(error)) throw error;
-					// Re-throw transient errors unwrapped so withRetry can match them
-					if (isTransientError(error)) throw error;
-					throw createEmbeddingError(
-						`Embedding request failed: ${toError(error).message}`,
-						{ cause: error, model: agentId },
-					);
+			// Try to extract embeddings from the response
+			for (const block of result.content) {
+				if (block.type === 'data') {
+					const data = block.data;
+					if (Array.isArray(data)) {
+						return {
+							embeddings: data as number[][],
+							agentId,
+							serverName: name,
+							usage: extractTokenUsage(result.metadata),
+						};
+					}
+					if (
+						typeof data === 'object' &&
+						data !== null &&
+						'embeddings' in data
+					) {
+						return {
+							embeddings: (data as { embeddings: number[][] }).embeddings,
+							agentId,
+							serverName: name,
+							usage: extractTokenUsage(result.metadata),
+						};
+					}
+				}
+
+				if (block.type === 'text') {
+					try {
+						const parsed = JSON.parse(block.text);
+						if (Array.isArray(parsed)) {
+							return {
+								embeddings: parsed as number[][],
+								agentId,
+								serverName: name,
+								usage: extractTokenUsage(result.metadata),
+							};
+						}
+						if (parsed && 'embeddings' in parsed) {
+							return {
+								embeddings: (parsed as { embeddings: number[][] }).embeddings,
+								agentId,
+								serverName: name,
+								usage: extractTokenUsage(result.metadata),
+							};
+						}
+					} catch {
+						// Not JSON
+					}
 				}
 			}
 
-			if (run.status === 'failed') {
-				throw createEmbeddingError(
-					`Embedding agent failed: ${run.error?.message ?? 'unknown error'}`,
-					{ model: agentId },
-				);
-			}
-
-			const embeddings = extractEmbeddings(run);
-
-			if (!embeddings || embeddings.length === 0) {
-				throw createEmbeddingError('Embedding agent returned no embeddings', {
-					model: agentId,
-				});
-			}
-
-			return {
-				embeddings,
-				agentId,
-				serverName: server.entry.name,
-			};
+			throw createEmbeddingError(
+				'ACP server returned no embeddings in response',
+				{ model: agentId },
+			);
 		});
 	};
 
 	const isAvailable = async (serverName?: string): Promise<boolean> => {
 		try {
-			const server = resolveServer(serverName);
-			const response = await fetchWithTimeout(
-				`${server.baseUrl}/agents`,
-				{
-					method: 'GET',
-					headers: buildHeaders(server),
-				},
-				healthCheckTimeoutMs,
-			);
-			// Drain body to release the underlying connection
-			await response.body?.cancel();
-			return response.ok;
+			const name =
+				serverName ?? config.defaultServer ?? config.servers[0]?.name;
+			if (!name) return false;
+			const connection = connections.get(name);
+			return connection?.isConnected ?? false;
 		} catch {
-			logger.debug('ACP server is not available', {
-				server: serverName ?? config.defaultServer ?? '(default)',
-			});
 			return false;
 		}
 	};
@@ -728,7 +636,15 @@ export function createACPClient(
 	// Return the frozen record
 	// -----------------------------------------------------------------------
 
+	const setPermissionPolicy = (policy: ACPPermissionPolicy): void => {
+		for (const conn of connections.values()) {
+			conn.setPermissionPolicy(policy);
+		}
+	};
+
 	return Object.freeze({
+		initialize,
+		dispose,
 		listAgents,
 		getAgent,
 		generate,
@@ -736,11 +652,12 @@ export function createACPClient(
 		generateStream,
 		embed,
 		isAvailable,
+		setPermissionPolicy,
 		get serverNames() {
-			return [...servers.keys()];
+			return config.servers.map((s) => s.name);
 		},
 		get serverCount() {
-			return servers.size;
+			return config.servers.length;
 		},
 		get defaultServerName() {
 			return config.defaultServer ?? config.servers[0]?.name;

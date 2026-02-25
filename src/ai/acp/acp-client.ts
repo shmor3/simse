@@ -784,11 +784,12 @@ export function createACPClient(
 		return withResilience(name, 'embed', async () => {
 			const sessionId = await createSession(connection);
 
+			// ACP does not define an embedding-specific content block.
+			// Send as a text prompt asking the agent to return embeddings.
 			const content: ACPContentBlock[] = [
 				{
-					type: 'data',
-					data: { texts, action: 'embed' },
-					mimeType: 'application/json',
+					type: 'text',
+					text: JSON.stringify({ texts, action: 'embed' }),
 				},
 			];
 

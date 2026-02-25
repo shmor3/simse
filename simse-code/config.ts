@@ -63,12 +63,14 @@ export interface MCPFileConfig {
 }
 
 export interface EmbedFileConfig {
-	/** ACP agent ID used for generating embeddings. */
-	readonly embeddingAgent?: string;
-	/** ACP server name used for embeddings (must stay consistent for memory). */
-	readonly embeddingServer?: string;
-	/** Embedding model override (passed to the embedder). */
+	/** Hugging Face model ID for in-process embeddings. */
 	readonly embeddingModel?: string;
+	/** ONNX quantization dtype (fp32, fp16, q8, q4). */
+	readonly dtype?: 'fp32' | 'fp16' | 'q8' | 'q4';
+	/** @deprecated ACP agent ID — use embeddingModel instead. */
+	readonly embeddingAgent?: string;
+	/** @deprecated ACP server name — use embeddingModel instead. */
+	readonly embeddingServer?: string;
 }
 
 export interface MemoryFileConfig {
@@ -481,7 +483,8 @@ export function createCLIConfig(options?: CLIConfigOptions): CLIConfigResult {
 		},
 		memory: {
 			enabled: memoryConfig.enabled ?? true,
-			embeddingAgent: embedConfig.embeddingAgent ?? defaultAgent ?? 'default',
+			embeddingAgent:
+				embedConfig.embeddingModel ?? 'nomic-ai/nomic-embed-text-v1.5',
 			similarityThreshold: memoryConfig.similarityThreshold ?? 0.7,
 			maxResults: memoryConfig.maxResults ?? 10,
 		},

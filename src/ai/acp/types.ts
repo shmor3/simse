@@ -94,13 +94,37 @@ export interface ACPTextContent {
 	readonly text: string;
 }
 
+export interface ACPResourceLinkContent {
+	readonly type: 'resource_link';
+	readonly uri: string;
+	readonly name: string;
+	readonly mimeType?: string;
+	readonly title?: string;
+	readonly description?: string;
+}
+
+export interface ACPResourceContent {
+	readonly type: 'resource';
+	readonly resource: {
+		readonly uri: string;
+		readonly mimeType?: string;
+		readonly text?: string;
+		readonly blob?: string;
+	};
+}
+
+/** @deprecated Non-standard content block. Use ACPTextContent or ACPResourceContent instead. */
 export interface ACPDataContent {
 	readonly type: 'data';
 	readonly data: unknown;
 	readonly mimeType?: string;
 }
 
-export type ACPContentBlock = ACPTextContent | ACPDataContent;
+export type ACPContentBlock =
+	| ACPTextContent
+	| ACPResourceLinkContent
+	| ACPResourceContent
+	| ACPDataContent;
 
 // ---------------------------------------------------------------------------
 // ACP protocol — prompt (generation)

@@ -30,6 +30,10 @@ export {
 	extractToolCall,
 	extractToolCallUpdate,
 } from './ai/acp/acp-results.js';
+export type { LocalEmbedderOptions } from './ai/acp/local-embedder.js';
+export { createLocalEmbedder } from './ai/acp/local-embedder.js';
+export type { TEIEmbedderOptions } from './ai/acp/tei-bridge.js';
+export { createTEIEmbedder } from './ai/acp/tei-bridge.js';
 export type {
 	ACPAgentCapabilities,
 	ACPAgentInfo,
@@ -48,6 +52,8 @@ export type {
 	ACPModelsInfo,
 	ACPModesInfo,
 	ACPPermissionPolicy,
+	ACPResourceContent,
+	ACPResourceLinkContent,
 	ACPSamplingParams,
 	ACPServerEntry,
 	ACPServerInfo,

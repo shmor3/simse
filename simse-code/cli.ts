@@ -13,6 +13,7 @@ import {
 	type ACPClient,
 	createACPClient,
 	createDefaultValidators,
+	createLocalEmbedder,
 	createVFSDisk,
 	createVirtualFS,
 	type VFSDisk,
@@ -26,7 +27,7 @@ import type { CLIConfigResult, EmbedFileConfig } from './config.js';
 import { createCLIConfig } from './config.js';
 import { type Conversation, createConversation } from './conversation.js';
 import { createAgenticLoop } from './loop.js';
-import { createACPEmbedder, createACPGenerator } from './providers.js';
+import { createACPGenerator } from './providers.js';
 import { runSetup } from './setup.js';
 import { createSkillRegistry, type SkillRegistry } from './skills.js';
 import { createFileStorageBackend } from './storage.js';
@@ -77,9 +78,8 @@ function embedConfigChanged(
 ): boolean {
 	if (!saved) return false; // no saved state = first run, nothing to compare
 	return (
-		(current.embeddingAgent ?? '') !== (saved.embeddingAgent ?? '') ||
-		(current.embeddingServer ?? '') !== (saved.embeddingServer ?? '') ||
-		(current.embeddingModel ?? '') !== (saved.embeddingModel ?? '')
+		(current.embeddingModel ?? '') !== (saved.embeddingModel ?? '') ||
+		(current.dtype ?? '') !== (saved.dtype ?? '')
 	);
 }
 
@@ -1227,65 +1227,45 @@ interface EmbedPreset {
 
 const embedPresets: readonly EmbedPreset[] = [
 	{
-		label: 'Ollama (nomic-embed-text)',
-		description: 'Local embeddings via Ollama',
-		build: async (rl) => {
-			const model =
-				(
-					await settingsAsk(rl, '  Embedding model [nomic-embed-text]: ')
-				).trim() || 'nomic-embed-text';
-			const server =
-				(await settingsAsk(rl, '  ACP server name [ollama]: ')).trim() ||
-				'ollama';
-			return { embeddingModel: model, embeddingServer: server };
-		},
+		label: 'nomic-embed-text-v1.5 (default)',
+		description: 'High-quality 768-dim embeddings, q8 quantized (~33MB)',
+		build: async () => ({
+			embeddingModel: 'nomic-ai/nomic-embed-text-v1.5',
+			dtype: 'q8',
+		}),
 	},
 	{
-		label: 'Ollama (mxbai-embed-large)',
-		description: 'High-quality local embeddings (larger model)',
-		build: async (rl) => {
-			const model =
-				(
-					await settingsAsk(rl, '  Embedding model [mxbai-embed-large]: ')
-				).trim() || 'mxbai-embed-large';
-			const server =
-				(await settingsAsk(rl, '  ACP server name [ollama]: ')).trim() ||
-				'ollama';
-			return { embeddingModel: model, embeddingServer: server };
-		},
+		label: 'all-MiniLM-L6-v2',
+		description: 'Fast 384-dim embeddings, smallest model (~23MB)',
+		build: async () => ({
+			embeddingModel: 'Xenova/all-MiniLM-L6-v2',
+			dtype: 'q8',
+		}),
 	},
 	{
-		label: 'Ollama (all-minilm)',
-		description: 'Fast lightweight local embeddings',
-		build: async (rl) => {
-			const model =
-				(await settingsAsk(rl, '  Embedding model [all-minilm]: ')).trim() ||
-				'all-minilm';
-			const server =
-				(await settingsAsk(rl, '  ACP server name [ollama]: ')).trim() ||
-				'ollama';
-			return { embeddingModel: model, embeddingServer: server };
-		},
+		label: 'bge-small-en-v1.5',
+		description: 'Compact 384-dim embeddings, strong benchmarks (~33MB)',
+		build: async () => ({
+			embeddingModel: 'Xenova/bge-small-en-v1.5',
+			dtype: 'q8',
+		}),
 	},
 	{
 		label: 'Custom',
-		description: 'Any ACP-compatible embedding provider',
+		description: 'Any Hugging Face ONNX embedding model',
 		build: async (rl) => {
 			const model =
-				(await settingsAsk(rl, '  Embedding model: ')).trim() || undefined;
-			const server =
 				(
-					await settingsAsk(rl, '  ACP server name (enter for default): ')
-				).trim() || undefined;
-			const agent =
+					await settingsAsk(
+						rl,
+						'  HF model ID [nomic-ai/nomic-embed-text-v1.5]: ',
+					)
+				).trim() || 'nomic-ai/nomic-embed-text-v1.5';
+			const dtype =
 				(
-					await settingsAsk(rl, '  ACP agent ID (enter for default): ')
-				).trim() || undefined;
-			const result: Record<string, unknown> = {};
-			if (model) result.embeddingModel = model;
-			if (server) result.embeddingServer = server;
-			if (agent) result.embeddingAgent = agent;
-			return result;
+					await settingsAsk(rl, '  Quantization (fp32/fp16/q8/q4) [q8]: ')
+				).trim() || 'q8';
+			return { embeddingModel: model, dtype };
 		},
 	},
 ];
@@ -1301,24 +1281,16 @@ async function embedMenu(ctx: AppContext): Promise<string | undefined> {
 
 	// Show current config
 	const model = config.embeddingModel;
-	const server = config.embeddingServer;
-	const agent = config.embeddingAgent;
-	if (model || server || agent) {
+	const dtype = config.dtype;
+	if (model) {
 		console.log(`  ${colors.bold('Current:')}`);
-		if (model)
-			console.log(
-				`    ${colors.bold('Model:')}  ${colors.cyan(String(model))}`,
-			);
-		if (server)
-			console.log(
-				`    ${colors.bold('Server:')} ${colors.cyan(String(server))}`,
-			);
-		if (agent)
-			console.log(
-				`    ${colors.bold('Agent:')}  ${colors.cyan(String(agent))}`,
-			);
+		console.log(`    ${colors.bold('Model:')} ${colors.cyan(String(model))}`);
+		if (dtype)
+			console.log(`    ${colors.bold('Dtype:')} ${colors.cyan(String(dtype))}`);
 	} else {
-		console.log(colors.dim('  No embedding provider configured.'));
+		console.log(
+			colors.dim('  Using default: nomic-ai/nomic-embed-text-v1.5 (q8)'),
+		);
 	}
 
 	console.log(`\n  ${colors.bold('Select a provider:')}\n`);
@@ -1526,13 +1498,10 @@ const configCommand: Command = {
 		lines.push('');
 		lines.push(colors.bold(colors.cyan('Embedding:')));
 		lines.push(
-			`  ${colors.bold('Agent:')}  ${embedConfig.embeddingAgent ?? colors.dim('default')}`,
+			`  ${colors.bold('Model:')} ${embedConfig.embeddingModel ?? colors.dim('nomic-ai/nomic-embed-text-v1.5')}`,
 		);
 		lines.push(
-			`  ${colors.bold('Server:')} ${embedConfig.embeddingServer ?? colors.dim('default')}`,
-		);
-		lines.push(
-			`  ${colors.bold('Model:')}  ${embedConfig.embeddingModel ?? colors.dim('default')}`,
+			`  ${colors.bold('Dtype:')} ${embedConfig.dtype ?? colors.dim('q8')}`,
 		);
 
 		lines.push('');
@@ -1651,18 +1620,13 @@ async function editEmbedSettings(ctx: AppContext): Promise<string> {
 
 	const fields = [
 		{
-			key: 'embeddingAgent',
-			label: 'Embedding agent',
-			type: 'str' as const,
-		},
-		{
-			key: 'embeddingServer',
-			label: 'Embedding server',
-			type: 'str' as const,
-		},
-		{
 			key: 'embeddingModel',
-			label: 'Embedding model',
+			label: 'HF model ID',
+			type: 'str' as const,
+		},
+		{
+			key: 'dtype',
+			label: 'Quantization (fp32/fp16/q8/q4)',
 			type: 'str' as const,
 		},
 	];
@@ -2937,10 +2901,9 @@ async function main(): Promise<void> {
 
 	const acpClient = createACPClient(config.acp, { logger });
 	const { embedConfig } = configResult;
-	const embedder = createACPEmbedder({
-		client: acpClient,
+	const embedder = createLocalEmbedder({
 		model: embedConfig.embeddingModel,
-		serverName: embedConfig.embeddingServer,
+		dtype: embedConfig.dtype,
 	});
 	const textGenerator = createACPGenerator({ client: acpClient });
 

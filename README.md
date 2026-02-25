@@ -1,20 +1,20 @@
 # simse
 
-A modular pipeline framework for orchestrating multi-step AI workflows. Connects to AI backends via **ACP** (Agent Communication Protocol), exposes tools via **MCP** (Model Context Protocol), and provides a file-backed **vector memory** store with compression, indexing, deduplication, recommendation, and summarization.
+A modular pipeline framework for orchestrating multi-step AI workflows using ACP, MCP, and vector memory.
 
 ## Features
 
-- **ACP Client** — generate, stream, chat, and embed via any ACP-compatible server
-- **Chain Pipelines** — multi-step prompt chains with templates, input mapping, and callbacks
-- **MCP Server/Client** — expose simse tools or connect to external MCP servers
-- **Vector Memory** — file-backed vector store with cosine similarity search
-- **Text Search** — exact, substring, fuzzy, regex, and token matching
-- **Deduplication** — cosine-based duplicate detection and grouping
-- **Recommendations** — weighted scoring combining vector similarity, recency decay, and access frequency
-- **Summarization** — condense multiple memory entries into one via a text generation provider
-- **Retry** — exponential backoff with jitter and AbortSignal support
-- **Structured Logging** — leveled logger with transports and child loggers
-- **Typed Error Hierarchy** — domain-specific error factories with duck-typed guards
+- **ACP Client** — Connect to AI backends via the [Agent Client Protocol](https://agentclientprotocol.com) over JSON-RPC 2.0 / NDJSON stdio. Streaming, sessions, permissions, mode/model switching, embeddings.
+- **MCP Client & Server** — Expose and consume tools, resources, and prompts via the [Model Context Protocol](https://modelcontextprotocol.io). Retry, logging, completions, roots, resource templates.
+- **Agentic Loop** — Multi-turn tool-use loop that streams from ACP, parses tool calls, executes them, and repeats until completion. Auto-compaction, stream retry, tool retry.
+- **Subagents** — Spawn nested agent loops or delegate single-shot tasks, with depth-limited recursion and lifecycle callbacks.
+- **Chains** — Composable multi-step prompt pipelines with templates, input mapping, and callbacks.
+- **Vector Memory** — File-backed vector store with cosine similarity search, topic/metadata indexing, deduplication, recommendation scoring, compression, and summarization.
+- **Virtual Filesystem** — In-memory filesystem with history, diffing, snapshots, validation, and optional disk persistence.
+- **Task List** — Dependency-aware task tracking for agentic workflows.
+- **Resilience** — Circuit breaker, health monitor, timeout utility, and retry with exponential backoff and jitter.
+- **Structured Logging** — Leveled logger with transports and child loggers.
+- **Typed Error Hierarchy** — Domain-specific error factories with duck-typed guards.
 
 ## Requirements
 
@@ -23,77 +23,37 @@ A modular pipeline framework for orchestrating multi-step AI workflows. Connects
 ## Install
 
 ```bash
-bun install
+bun add simse
 ```
 
-## Usage
+## Quick Start
 
-Configuration is fully typed via TypeScript interfaces — `defineConfig()` accepts a `SimseConfig` object and validates semantic constraints (URL format, numeric ranges, cross-references) at runtime. Structural validation is handled at compile time by TypeScript.
-
-```typescript
+```ts
 import {
-  defineConfig,
   createACPClient,
-  createChain,
-  createPromptTemplate,
-  createMemoryManager,
-  createVectorStore,
+  createAgenticLoop,
+  createConversation,
+  createToolRegistry,
+  registerSubagentTools,
 } from 'simse';
 
-// Configure — fully typed, no JSON parsing
-const config = defineConfig({
-  acp: {
-    servers: [{ name: 'local', url: 'http://localhost:8000', defaultAgent: 'default' }],
-  },
-  memory: {
-    embeddingAgent: 'default',
-    storePath: './memory-data',
-  },
-  chains: {
-    summarize: {
-      steps: [{ name: 'summarize', template: 'Summarize:\n\n{text}' }],
-    },
-  },
+const acpClient = createACPClient({
+  servers: [{ name: 'my-agent', command: 'my-agent-binary' }],
 });
+await acpClient.initialize();
 
-// Generate text
-const client = createACPClient(config.acp);
-const result = await client.generate('Hello, world!');
+const registry = createToolRegistry({});
+const conversation = createConversation();
 
-// Build a chain programmatically
-const chain = createChain({ acpClient: client });
-chain.addStep({
-  name: 'brainstorm',
-  template: createPromptTemplate('List 3 facts about {topic}.'),
-});
-chain.addStep({
-  name: 'article',
-  template: createPromptTemplate('Write a paragraph from these facts:\n\n{brainstorm}'),
-  inputMapping: { brainstorm: 'brainstorm' },
-});
-const results = await chain.run({ topic: 'Bun runtime' });
+// Optionally enable subagent spawning
+registerSubagentTools(registry, { acpClient, toolRegistry: registry });
 
-// Vector memory (bring your own StorageBackend)
-const store = createVectorStore({ storage: myStorageBackend, autoSave: true });
-await store.load();
-await store.add('TypeScript is a typed superset of JavaScript', [0.9, 0.1, 0.0]);
-const matches = store.search([0.85, 0.15, 0.0], 5, 0.5);
-
-// Memory manager (auto-embeds text)
-const memory = createMemoryManager(embeddingProvider, {
-  enabled: true,
-  embeddingAgent: 'default',
-  similarityThreshold: 0.7,
-  maxResults: 10,
-}, { storage: myStorageBackend });
-await memory.initialize();
-await memory.add('Some important information', { category: 'notes' });
-const searchResults = await memory.search('important');
+const loop = createAgenticLoop({ acpClient, toolRegistry: registry, conversation });
+const result = await loop.run('Hello, what can you do?');
+console.log(result.finalText);
 ```
 
-See the [`example/`](example/) directory for complete walkthroughs: [`app.ts`](example/app.ts) (full knowledge base app), [`config.ts`](example/config.ts), [`agents.ts`](example/agents.ts), [`tools.ts`](example/tools.ts).
-
-## Scripts
+## Development
 
 ```bash
 bun test               # Run tests
@@ -114,13 +74,22 @@ src/
   errors/                # Error hierarchy by domain
   config/                # Typed config validation + defineConfig()
   ai/
-    acp/                 # ACP client, HTTP helpers, streaming
+    acp/                 # ACP client, connection, streaming
     mcp/                 # MCP server + client
     chain/               # Chain pipelines + prompt templates
+    loop/                # Agentic loop + types
+    agent/               # Agent executor
+    conversation/        # Conversation buffer
     memory/              # Vector store, text search, compression,
                          # indexing, deduplication, recommendation
+    tasks/               # Task list
+    tools/               # Tool registry, builtins, subagent tools
+    vfs/                 # Virtual filesystem
   utils/
     retry.ts             # Retry with exponential backoff
+    circuit-breaker.ts   # Circuit breaker state machine
+    health-monitor.ts    # Health tracking with windowed failure rates
+    timeout.ts           # Timeout utility with AbortSignal support
 ```
 
 ### Key Patterns
@@ -128,12 +97,11 @@ src/
 - **Factory functions** — no classes; every module exports `createXxx()` returning a frozen readonly interface
 - **Immutable returns** — all factories use `Object.freeze()`
 - **ESM-only** — all imports use `.js` extensions
-- **Typed config validation** — validators accept typed interfaces, not `unknown`; TypeScript handles structural checks, runtime validates only semantics (URL format, ranges, cross-references)
-- **Zero external runtime deps** for core logic (only `@modelcontextprotocol/sdk` for MCP)
+- **Typed config** — TypeScript handles structural checks; runtime validates semantics
 - **Write-lock serialization** — vector store serializes concurrent mutations via a promise chain
-- **Crash-safe persistence** — content files written before index; atomic writes via tmp+rename
+- **Crash-safe persistence** — content files written before index
 - **Compressed v2 format** — Float32 base64 embeddings, gzipped index
 
 ## License
 
-MIT
+[MIT](LICENSE)

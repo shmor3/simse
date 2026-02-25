@@ -1,98 +1,68 @@
 // ---------------------------------------------------------------------------
-// ACP result extraction — parse generate results and embeddings from ACPRun
+// ACP result extraction — parse token usage and content from ACP responses
 // ---------------------------------------------------------------------------
 
-import { createProviderGenerationError } from '../../errors/index.js';
-import type { ACPGenerateResult, ACPRun } from './types.js';
+import type { ACPContentBlock, ACPTokenUsage } from './types.js';
 
 /**
- * Extract text content from a completed ACP run.
- * Throws if the run failed.
+ * Extract token usage from metadata.
+ * Supports both snake_case (OpenAI-style) and camelCase field names.
+ * Returns undefined if usage data is not present or malformed.
  */
-export function extractGenerateResult(
-	run: ACPRun,
-	serverName: string,
-): ACPGenerateResult {
-	if (run.status === 'failed') {
-		throw createProviderGenerationError(
-			'acp',
-			`Agent run failed: ${run.error?.message ?? 'unknown error'}`,
-			{ model: run.agent_id },
-		);
-	}
+export function extractTokenUsage(
+	metadata: Readonly<Record<string, unknown>> | undefined,
+): ACPTokenUsage | undefined {
+	if (!metadata) return undefined;
 
-	if (run.status === 'cancelled') {
-		throw createProviderGenerationError(
-			'acp',
-			`Agent run ${run.run_id} was cancelled`,
-			{ model: run.agent_id },
-		);
-	}
+	const usage = metadata.usage;
+	if (typeof usage !== 'object' || usage === null) return undefined;
 
-	if (run.status === 'awaiting_input') {
-		throw createProviderGenerationError(
-			'acp',
-			`Agent run ${run.run_id} is awaiting input, which is not supported by this client`,
-			{ model: run.agent_id },
-		);
-	}
+	const u = usage as Record<string, unknown>;
 
-	let content = '';
-	if (run.output && Array.isArray(run.output)) {
-		for (const msg of run.output) {
-			if (msg.role === 'agent' && Array.isArray(msg.parts)) {
-				for (const part of msg.parts) {
-					if (part.type === 'text') {
-						content += (part as { type: 'text'; text: string }).text;
-					}
-				}
-			}
-		}
-	}
+	// Try snake_case first (OpenAI-compatible), then camelCase
+	const prompt =
+		typeof u.prompt_tokens === 'number'
+			? u.prompt_tokens
+			: typeof u.promptTokens === 'number'
+				? u.promptTokens
+				: undefined;
+
+	const completion =
+		typeof u.completion_tokens === 'number'
+			? u.completion_tokens
+			: typeof u.completionTokens === 'number'
+				? u.completionTokens
+				: undefined;
+
+	if (prompt === undefined || completion === undefined) return undefined;
+
+	const total =
+		typeof u.total_tokens === 'number'
+			? u.total_tokens
+			: typeof u.totalTokens === 'number'
+				? u.totalTokens
+				: prompt + completion;
 
 	return {
-		content,
-		agentId: run.agent_id,
-		serverName,
-		runId: run.run_id,
+		promptTokens: prompt,
+		completionTokens: completion,
+		totalTokens: total,
 	};
 }
 
 /**
- * Extract embedding vectors from a completed ACP run.
- * Returns undefined if no embeddings are found.
+ * Extract concatenated text from ACP content blocks.
+ * Returns empty string if no text blocks are present.
  */
-export function extractEmbeddings(run: ACPRun): number[][] | undefined {
-	if (!run.output) return undefined;
-
-	for (const msg of run.output) {
-		if (msg.role !== 'agent') continue;
-		for (const part of msg.parts) {
-			if (part.type === 'data') {
-				const data = (part as { type: 'data'; data: unknown }).data;
-				if (Array.isArray(data)) {
-					return data as number[][];
-				}
-				if (typeof data === 'object' && data !== null && 'embeddings' in data) {
-					return (data as { embeddings: number[][] }).embeddings;
-				}
-			}
-
-			if (part.type === 'text') {
-				try {
-					const parsed = JSON.parse(
-						(part as { type: 'text'; text: string }).text,
-					);
-					if (Array.isArray(parsed)) return parsed as number[][];
-					if (parsed && 'embeddings' in parsed) {
-						return (parsed as { embeddings: number[][] }).embeddings;
-					}
-				} catch {
-					// Not JSON, skip
-				}
-			}
+export function extractContentText(
+	content: readonly ACPContentBlock[] | undefined,
+): string {
+	if (!content) return '';
+	let text = '';
+	for (const block of content) {
+		if (block.type === 'text') {
+			text += block.text;
 		}
 	}
-
-	return undefined;
+	return text;
 }

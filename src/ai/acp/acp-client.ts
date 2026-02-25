@@ -272,12 +272,11 @@ export function createACPClient(
 		const result = await connection.request<ACPSessionNewResult>(
 			'session/new',
 			{
-				supported_content_types: ['text'],
 				cwd: process.cwd(),
 				mcpServers: [],
 			},
 		);
-		return result.session_id;
+		return result.sessionId;
 	};
 
 	const sendPrompt = async (
@@ -286,8 +285,8 @@ export function createACPClient(
 		content: readonly ACPContentBlock[],
 	): Promise<ACPSessionPromptResult> => {
 		return connection.request<ACPSessionPromptResult>('session/prompt', {
-			session_id: sessionId,
-			content,
+			sessionId,
+			prompt: content,
 		});
 	};
 
@@ -385,7 +384,7 @@ export function createACPClient(
 				serverName: name,
 				sessionId,
 				usage: extractTokenUsage(result.metadata),
-				stopReason: result.stop_reason,
+				stopReason: result.stopReason,
 			};
 		});
 	};
@@ -444,7 +443,7 @@ export function createACPClient(
 				serverName: name,
 				sessionId,
 				usage: extractTokenUsage(result.metadata),
-				stopReason: result.stop_reason,
+				stopReason: result.stopReason,
 			};
 		});
 	};
@@ -482,7 +481,7 @@ export function createACPClient(
 			'session/update',
 			(params: unknown) => {
 				const update = params as ACPSessionUpdateParams;
-				if (update.session_id !== sessionId) return;
+				if (update.sessionId !== sessionId) return;
 
 				if (update.kind === 'agent_message_chunk' && update.content) {
 					const text = extractContentText(update.content);
@@ -587,7 +586,7 @@ export function createACPClient(
 			const result = await sendPrompt(connection, sessionId, content);
 
 			// Try to extract embeddings from the response
-			for (const block of result.content) {
+			for (const block of result.content ?? []) {
 				if (block.type === 'data') {
 					const data = block.data;
 					if (Array.isArray(data)) {

@@ -348,7 +348,7 @@ function createAcpServer(
 	const handleSessionNew = (id: number): void => {
 		const sessionId = randomUUID();
 		sessions.add(sessionId);
-		const result: ACPSessionNewResult = { session_id: sessionId };
+		const result: ACPSessionNewResult = { sessionId };
 		transport.writeResponse(id, result);
 	};
 
@@ -358,15 +358,15 @@ function createAcpServer(
 	): Promise<void> => {
 		const p = params as ACPSessionPromptParams;
 
-		if (!p?.session_id || !sessions.has(p.session_id)) {
+		if (!p?.sessionId || !sessions.has(p.sessionId)) {
 			transport.writeError(id, {
 				code: JSON_RPC_ERRORS.INVALID_PARAMS,
-				message: `Session '${p?.session_id ?? ''}' not found`,
+				message: `Session '${p?.sessionId ?? ''}' not found`,
 			});
 			return;
 		}
 
-		const { content, session_id: sessionId } = p;
+		const { prompt: content, sessionId } = p;
 
 		try {
 			if (isEmbedRequest(content)) {
@@ -398,7 +398,7 @@ function createAcpServer(
 
 		const result: ACPSessionPromptResult = {
 			content: [{ type: 'text', text }],
-			stop_reason: 'end_turn',
+			stopReason: 'end_turn',
 			metadata: {
 				usage: {
 					prompt_tokens: promptTokens,
@@ -425,7 +425,7 @@ function createAcpServer(
 			(text) => {
 				fullText += text;
 				const updateParams: ACPSessionUpdateParams = {
-					session_id: sessionId,
+					sessionId,
 					kind: 'agent_message_chunk',
 					content: [{ type: 'text', text }],
 				};
@@ -435,7 +435,7 @@ function createAcpServer(
 
 		const result: ACPSessionPromptResult = {
 			content: [{ type: 'text', text: fullText }],
-			stop_reason: 'end_turn',
+			stopReason: 'end_turn',
 			metadata: {
 				usage: {
 					prompt_tokens: promptTokens,
@@ -472,7 +472,7 @@ function createAcpServer(
 					mimeType: 'application/json',
 				},
 			],
-			stop_reason: 'end_turn',
+			stopReason: 'end_turn',
 			metadata: {
 				usage: {
 					prompt_tokens: response.promptTokens,

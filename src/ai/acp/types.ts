@@ -79,11 +79,12 @@ export interface ACPInitializeResult {
 // ---------------------------------------------------------------------------
 
 export interface ACPSessionNewParams {
-	readonly supported_content_types?: readonly string[];
+	readonly cwd: string;
+	readonly mcpServers: readonly unknown[];
 }
 
 export interface ACPSessionNewResult {
-	readonly session_id: string;
+	readonly sessionId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -110,17 +111,20 @@ export type ACPContentBlock = ACPTextContent | ACPDataContent;
 export type ACPStopReason =
 	| 'end_turn'
 	| 'max_tokens'
+	| 'max_turn_requests'
+	| 'refusal'
+	| 'cancelled'
 	| 'stop_sequence'
 	| 'tool_use';
 
 export interface ACPSessionPromptParams {
-	readonly session_id: string;
-	readonly content: readonly ACPContentBlock[];
+	readonly sessionId: string;
+	readonly prompt: readonly ACPContentBlock[];
 }
 
 export interface ACPSessionPromptResult {
-	readonly content: readonly ACPContentBlock[];
-	readonly stop_reason: ACPStopReason;
+	readonly content?: readonly ACPContentBlock[];
+	readonly stopReason?: ACPStopReason;
 	readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
@@ -129,7 +133,7 @@ export interface ACPSessionPromptResult {
 // ---------------------------------------------------------------------------
 
 export interface ACPSessionUpdateParams {
-	readonly session_id: string;
+	readonly sessionId: string;
 	readonly kind: string;
 	readonly content?: readonly ACPContentBlock[];
 	readonly metadata?: Readonly<Record<string, unknown>>;
@@ -140,7 +144,7 @@ export interface ACPSessionUpdateParams {
 // ---------------------------------------------------------------------------
 
 export interface ACPPermissionRequestParams {
-	readonly session_id: string;
+	readonly sessionId: string;
 	readonly description: string;
 	readonly metadata?: Readonly<Record<string, unknown>>;
 }

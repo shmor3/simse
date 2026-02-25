@@ -7,24 +7,53 @@
 // ---------------------------------------------------------------------------
 
 export type { ACPClient, ACPClientOptions } from './ai/acp/acp-client.js';
-// ---- ACP (Agent Communication Protocol) -----------------------------------
+// ---- ACP (Agent Client Protocol) ------------------------------------------
 export { createACPClient } from './ai/acp/acp-client.js';
+export type {
+	ACPConnection,
+	ACPConnectionOptions,
+} from './ai/acp/acp-connection.js';
+export { createACPConnection } from './ai/acp/acp-connection.js';
 export type {
 	ACPAgentInfo,
 	ACPChatMessage,
 	ACPChatOptions,
 	ACPConfig,
-	ACPDataPart,
+	ACPContentBlock,
+	ACPDataContent,
+	ACPAgentCapabilities,
 	ACPEmbedResult,
 	ACPGenerateOptions,
 	ACPGenerateResult,
-	ACPMessage,
-	ACPMessagePart,
-	ACPRunError,
+	ACPInitializeResult,
+	ACPPermissionPolicy,
 	ACPServerEntry,
-	ACPStreamEvent,
-	ACPTextPart,
+	ACPServerInfo,
+	ACPSessionPromptResult,
+	ACPStopReason,
+	ACPStreamChunk,
+	ACPStreamComplete,
+	ACPStreamDelta,
+	ACPTextContent,
+	ACPTokenUsage,
+	JsonRpcError,
+	JsonRpcMessage,
+	JsonRpcNotification,
+	JsonRpcRequest,
+	JsonRpcResponse,
 } from './ai/acp/types.js';
+// ---- Agent ----------------------------------------------------------------
+export type {
+	AgentExecutor,
+	AgentExecutorOptions,
+	AgentResult,
+	AgentStepConfig,
+	ParallelConfig,
+	ParallelSubResult,
+	ParallelSubStepConfig,
+	SwarmMergeStrategy,
+} from './ai/agent/index.js';
+export { createAgentExecutor } from './ai/agent/index.js';
 // ---- Chains ---------------------------------------------------------------
 export type {
 	Chain,
@@ -54,12 +83,15 @@ export type {
 	MCPResourceInfo,
 	MCPServerConfig,
 	MCPServerConnection,
+	MCPToolCallMetrics,
 	MCPToolInfo,
 	MCPToolResult,
 } from './ai/mcp/types.js';
 export type { CompressionOptions } from './ai/memory/compression.js';
 export { cosineSimilarity } from './ai/memory/cosine.js';
 export type { TopicIndexOptions } from './ai/memory/indexing.js';
+export type { LearningEngine } from './ai/memory/learning.js';
+export { createLearningEngine } from './ai/memory/learning.js';
 export type {
 	MemoryManager,
 	MemoryManagerOptions,
@@ -67,17 +99,22 @@ export type {
 // ---- Memory / Vector Store ------------------------------------------------
 export { createMemoryManager } from './ai/memory/memory.js';
 export type { RecencyOptions } from './ai/memory/recommendation.js';
+export type { StorageBackend } from './ai/memory/storage.js';
 export type {
 	AdvancedSearchResult,
 	DateRange,
 	DuplicateCheckResult,
 	DuplicateGroup,
 	EmbeddingProvider,
+	LearningOptions,
+	LearningProfile,
 	MemoryConfig,
 	MetadataFilter,
 	MetadataMatchMode,
+	QueryRecord,
 	RecommendationResult,
 	RecommendOptions,
+	RelevanceFeedback,
 	SearchOptions,
 	SearchResult,
 	SummarizeOptions,
@@ -95,6 +132,55 @@ export type {
 	VectorStoreOptions,
 } from './ai/memory/vector-store.js';
 export { createVectorStore } from './ai/memory/vector-store.js';
+// ---- Virtual Filesystem ---------------------------------------------------
+export type {
+	VFSCommitOperation,
+	VFSCommitOptions,
+	VFSCommitResult,
+	VFSContentType,
+	VFSCopyOptions,
+	VFSDeleteOptions,
+	VFSDiffHunk,
+	VFSDiffLine,
+	VFSDiffOptions,
+	VFSDiffResult,
+	VFSDirEntry,
+	VFSDisk,
+	VFSDiskOptions,
+	VFSHistoryEntry,
+	VFSHistoryOptions,
+	VFSLimits,
+	VFSLoadOptions,
+	VFSMkdirOptions,
+	VFSNodeType,
+	VFSReaddirOptions,
+	VFSReadResult,
+	VFSSearchOptions,
+	VFSSearchResult,
+	VFSSnapshot,
+	VFSSnapshotDirectory,
+	VFSSnapshotFile,
+	VFSStat,
+	VFSValidationIssue,
+	VFSValidationResult,
+	VFSValidator,
+	VFSWriteEvent,
+	VFSWriteOptions,
+	VirtualFS,
+	VirtualFSOptions,
+} from './ai/vfs/index.js';
+export {
+	createDefaultValidators,
+	createEmptyFileValidator,
+	createJSONSyntaxValidator,
+	createMissingTrailingNewlineValidator,
+	createMixedIndentationValidator,
+	createMixedLineEndingsValidator,
+	createTrailingWhitespaceValidator,
+	createVFSDisk,
+	createVirtualFS,
+	validateSnapshot,
+} from './ai/vfs/index.js';
 // ---- Configuration --------------------------------------------------------
 export type {
 	ACPServerInput,
@@ -102,6 +188,8 @@ export type {
 	ChainDefinition,
 	ChainStepDefinition,
 	DefineConfigOptions,
+	ParallelConfigDefinition,
+	ParallelSubStepDefinition,
 	SimseConfig,
 } from './config/settings.js';
 export { defineConfig } from './config/settings.js';
@@ -139,6 +227,8 @@ export {
 	createTemplateMissingVariablesError,
 	createVectorStoreCorruptionError,
 	createVectorStoreIOError,
+	// VFS
+	createVFSError,
 	isChainError,
 	isChainNotFoundError,
 	isChainStepError,
@@ -162,6 +252,7 @@ export {
 	isTemplateMissingVariablesError,
 	isVectorStoreCorruptionError,
 	isVectorStoreIOError,
+	isVFSError,
 	toError,
 	wrapError,
 } from './errors/index.js';

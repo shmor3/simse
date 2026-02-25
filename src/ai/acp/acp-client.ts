@@ -154,7 +154,7 @@ export function createACPClient(
 				connections.set(entry.name, connection);
 
 				logger.info(
-					`ACP server "${entry.name}" initialized: ${result.server_info.name} v${result.server_info.version}`,
+					`ACP server "${entry.name}" initialized: ${result.agentInfo.name} v${result.agentInfo.version}`,
 				);
 			}),
 		);

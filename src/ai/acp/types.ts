@@ -1,10 +1,155 @@
 // ---------------------------------------------------------------------------
-// Agent Communication Protocol (ACP) Types
+// Agent Client Protocol (ACP) Types — JSON-RPC 2.0 over stdio
 // ---------------------------------------------------------------------------
 //
-// All types are strictly readonly to enforce immutability throughout
-// the codebase.  No classes — only plain data interfaces.
+// Native ACP types following the Agent Client Protocol specification
+// (agentclientprotocol.com). All types are strictly readonly.
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// JSON-RPC 2.0 framing
+// ---------------------------------------------------------------------------
+
+export interface JsonRpcRequest {
+	readonly jsonrpc: '2.0';
+	readonly id: number;
+	readonly method: string;
+	readonly params?: unknown;
+}
+
+export interface JsonRpcResponse {
+	readonly jsonrpc: '2.0';
+	readonly id: number;
+	readonly result?: unknown;
+	readonly error?: JsonRpcError;
+}
+
+export interface JsonRpcNotification {
+	readonly jsonrpc: '2.0';
+	readonly method: string;
+	readonly params?: unknown;
+}
+
+export interface JsonRpcError {
+	readonly code: number;
+	readonly message: string;
+	readonly data?: unknown;
+}
+
+export type JsonRpcMessage =
+	| JsonRpcRequest
+	| JsonRpcResponse
+	| JsonRpcNotification;
+
+// ---------------------------------------------------------------------------
+// ACP protocol — initialize
+// ---------------------------------------------------------------------------
+
+export interface ACPClientInfo {
+	readonly name: string;
+	readonly version: string;
+}
+
+export interface ACPInitializeParams {
+	readonly client_info: ACPClientInfo;
+	readonly capabilities?: Readonly<Record<string, unknown>>;
+}
+
+export interface ACPServerInfo {
+	readonly name: string;
+	readonly version: string;
+}
+
+export interface ACPAgentCapabilities {
+	readonly loadSession?: boolean;
+	readonly promptCapabilities?: Readonly<Record<string, unknown>>;
+	readonly sessionCapabilities?: Readonly<Record<string, unknown>>;
+	readonly mcpCapabilities?: Readonly<Record<string, unknown>>;
+}
+
+export interface ACPInitializeResult {
+	readonly protocolVersion: number;
+	readonly agentInfo: ACPServerInfo;
+	readonly agentCapabilities?: ACPAgentCapabilities;
+	readonly authMethods?: readonly Readonly<Record<string, unknown>>[];
+}
+
+// ---------------------------------------------------------------------------
+// ACP protocol — sessions
+// ---------------------------------------------------------------------------
+
+export interface ACPSessionNewParams {
+	readonly supported_content_types?: readonly string[];
+}
+
+export interface ACPSessionNewResult {
+	readonly session_id: string;
+}
+
+// ---------------------------------------------------------------------------
+// ACP protocol — content blocks
+// ---------------------------------------------------------------------------
+
+export interface ACPTextContent {
+	readonly type: 'text';
+	readonly text: string;
+}
+
+export interface ACPDataContent {
+	readonly type: 'data';
+	readonly data: unknown;
+	readonly mimeType?: string;
+}
+
+export type ACPContentBlock = ACPTextContent | ACPDataContent;
+
+// ---------------------------------------------------------------------------
+// ACP protocol — prompt (generation)
+// ---------------------------------------------------------------------------
+
+export type ACPStopReason =
+	| 'end_turn'
+	| 'max_tokens'
+	| 'stop_sequence'
+	| 'tool_use';
+
+export interface ACPSessionPromptParams {
+	readonly session_id: string;
+	readonly content: readonly ACPContentBlock[];
+}
+
+export interface ACPSessionPromptResult {
+	readonly content: readonly ACPContentBlock[];
+	readonly stop_reason: ACPStopReason;
+	readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+// ---------------------------------------------------------------------------
+// ACP protocol — session update notifications (streaming)
+// ---------------------------------------------------------------------------
+
+export interface ACPSessionUpdateParams {
+	readonly session_id: string;
+	readonly kind: string;
+	readonly content?: readonly ACPContentBlock[];
+	readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+// ---------------------------------------------------------------------------
+// ACP protocol — permission requests
+// ---------------------------------------------------------------------------
+
+export interface ACPPermissionRequestParams {
+	readonly session_id: string;
+	readonly description: string;
+	readonly metadata?: Readonly<Record<string, unknown>>;
+}
+
+export interface ACPPermissionRequestResult {
+	readonly allowed: boolean;
+}
+
+export type ACPPermissionPolicy = 'auto-approve' | 'prompt' | 'deny';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -13,17 +158,20 @@
 export interface ACPServerEntry {
 	/** Friendly name for this ACP server connection. */
 	readonly name: string;
-	/** Base URL of the ACP-compatible server (e.g. "http://localhost:8000"). */
-	readonly url: string;
+	/** Command to spawn this server (required — ACP uses stdio). */
+	readonly command: string;
+	/** Arguments for the command. */
+	readonly args?: readonly string[];
+	/** Working directory for the spawned command. */
+	readonly cwd?: string;
+	/** Environment variables to pass to the spawned process. */
+	readonly env?: Readonly<Record<string, string>>;
 	/** Default agent ID to use when none is specified per-step. */
 	readonly defaultAgent?: string;
-	/**
-	 * Optional API key for authenticated servers.
-	 * Prefer setting via environment variables (ACP_API_KEY_<NAME>).
-	 */
-	readonly apiKey?: string;
 	/** Request timeout in milliseconds. Defaults to 30 000. */
 	readonly timeoutMs?: number;
+	/** Permission policy for tool use requests from the agent. Defaults to 'deny'. */
+	readonly permissionPolicy?: ACPPermissionPolicy;
 }
 
 export interface ACPConfig {
@@ -36,32 +184,20 @@ export interface ACPConfig {
 }
 
 // ---------------------------------------------------------------------------
-// ACP Protocol — Messages
+// Token usage tracking
 // ---------------------------------------------------------------------------
 
-/** A single text content part within a message. */
-export interface ACPTextPart {
-	readonly type: 'text';
-	readonly text: string;
-}
-
-/** A single data content part within a message. */
-export interface ACPDataPart {
-	readonly type: 'data';
-	readonly data: unknown;
-	readonly mimeType?: string;
-}
-
-export type ACPMessagePart = ACPTextPart | ACPDataPart;
-
-/** A message exchanged between user and agent. */
-export interface ACPMessage {
-	readonly role: 'user' | 'agent';
-	readonly parts: readonly ACPMessagePart[];
+export interface ACPTokenUsage {
+	/** Number of tokens in the prompt / input. */
+	readonly promptTokens: number;
+	/** Number of tokens in the completion / output. */
+	readonly completionTokens: number;
+	/** Total tokens consumed (prompt + completion). */
+	readonly totalTokens: number;
 }
 
 // ---------------------------------------------------------------------------
-// ACP Protocol — Agents
+// Agent info (synthetic — derived from config, not from protocol)
 // ---------------------------------------------------------------------------
 
 export interface ACPAgentInfo {
@@ -71,83 +207,28 @@ export interface ACPAgentInfo {
 	readonly name?: string;
 	/** Description of what this agent does. */
 	readonly description?: string;
-	/** Additional metadata the server may expose. */
-	readonly metadata?: Readonly<Record<string, unknown>>;
-}
-
-// ---------------------------------------------------------------------------
-// ACP Protocol — Runs
-// ---------------------------------------------------------------------------
-
-export type ACPRunStatus =
-	| 'created'
-	| 'in_progress'
-	| 'awaiting_input'
-	| 'completed'
-	| 'failed'
-	| 'cancelled';
-
-export interface ACPRunError {
-	readonly message: string;
-	readonly code?: string;
-}
-
-export interface ACPRun {
-	/** Unique run identifier. */
-	readonly run_id: string;
-	/** The agent that handled this run. */
-	readonly agent_id: string;
-	/** Current status. */
-	readonly status: ACPRunStatus;
-	/** Output messages from the agent (populated when completed). */
-	readonly output?: readonly ACPMessage[];
-	/** Error details when status is "failed". */
-	readonly error?: ACPRunError;
 	/** Additional metadata. */
 	readonly metadata?: Readonly<Record<string, unknown>>;
-	/** ISO-8601 timestamp of creation. */
-	readonly created_at?: string;
-	/** ISO-8601 timestamp of last update. */
-	readonly updated_at?: string;
 }
 
 // ---------------------------------------------------------------------------
-// ACP Protocol — Requests
+// Streaming chunk types
 // ---------------------------------------------------------------------------
 
-export interface ACPCreateRunRequest {
-	/** Agent to run. */
-	readonly agent_id: string;
-	/** Input messages. */
-	readonly input: readonly ACPMessage[];
-	/** Optional run-level configuration forwarded to the agent. */
-	readonly config?: Readonly<Record<string, unknown>>;
+/** An incremental text delta from a streaming response. */
+export interface ACPStreamDelta {
+	readonly type: 'delta';
+	readonly text: string;
 }
 
-// ---------------------------------------------------------------------------
-// ACP Protocol — Streaming Events (SSE)
-// ---------------------------------------------------------------------------
-
-export type ACPStreamEventType =
-	| 'run.created'
-	| 'run.in_progress'
-	| 'run.completed'
-	| 'run.failed'
-	| 'message.delta'
-	| 'message.completed'
-	| 'generic';
-
-export interface ACPStreamEvent {
-	/** Event type. */
-	readonly event: ACPStreamEventType;
-	/** Event payload. */
-	readonly data: ACPRun | ACPMessageDelta | Readonly<Record<string, unknown>>;
+/** Final event emitted when a stream completes, carrying optional usage. */
+export interface ACPStreamComplete {
+	readonly type: 'complete';
+	readonly usage?: ACPTokenUsage;
 }
 
-export interface ACPMessageDelta {
-	/** Incremental text content. */
-	readonly delta: string;
-}
+/** Discriminated union yielded by `generateStream()`. */
+export type ACPStreamChunk = ACPStreamDelta | ACPStreamComplete;
 
 // ---------------------------------------------------------------------------
 // Client result types
@@ -160,8 +241,12 @@ export interface ACPGenerateResult {
 	readonly agentId: string;
 	/** The server that handled the request. */
 	readonly serverName: string;
-	/** The run ID for traceability. */
-	readonly runId: string;
+	/** The session ID for traceability. */
+	readonly sessionId: string;
+	/** Token usage reported by the server, if available. */
+	readonly usage?: ACPTokenUsage;
+	/** Stop reason from the agent. */
+	readonly stopReason?: ACPStopReason;
 }
 
 export interface ACPEmbedResult {
@@ -171,6 +256,8 @@ export interface ACPEmbedResult {
 	readonly agentId: string;
 	/** The server that handled the request. */
 	readonly serverName: string;
+	/** Token usage reported by the server, if available. */
+	readonly usage?: ACPTokenUsage;
 }
 
 // ---------------------------------------------------------------------------

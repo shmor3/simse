@@ -123,8 +123,8 @@ export type {
 	SubagentResult,
 } from './ai/loop/index.js';
 export { createAgenticLoop } from './ai/loop/index.js';
-export type { MCPClient } from './ai/mcp/mcp-client.js';
 // ---- MCP (Model Context Protocol) ----------------------------------------
+export type { MCPClient } from './ai/mcp/mcp-client.js';
 export { createMCPClient } from './ai/mcp/mcp-client.js';
 export type { MCPServerOptions, SimseMCPServer } from './ai/mcp/mcp-server.js';
 export { createMCPServer } from './ai/mcp/mcp-server.js';
@@ -158,6 +158,8 @@ export type {
 } from './ai/memory/memory.js';
 // ---- Memory / Vector Store ------------------------------------------------
 export { createMemoryManager } from './ai/memory/memory.js';
+export type { ParsedQuery } from './ai/memory/query-dsl.js';
+export { parseQuery } from './ai/memory/query-dsl.js';
 export type { RecencyOptions } from './ai/memory/recommendation.js';
 export type { StorageBackend } from './ai/memory/storage.js';
 export type {
@@ -316,6 +318,7 @@ export {
 	// Provider
 	createProviderError,
 	createProviderGenerationError,
+	createProviderHTTPError,
 	createProviderTimeoutError,
 	createProviderUnavailableError,
 	// Base
@@ -356,6 +359,7 @@ export {
 	isMemoryError,
 	isProviderError,
 	isProviderGenerationError,
+	isProviderHTTPError,
 	isProviderTimeoutError,
 	isProviderUnavailableError,
 	isSimseError,
@@ -408,6 +412,7 @@ export type {
 export { createHealthMonitor } from './utils/health-monitor.js';
 export type { RetryOptions } from './utils/retry.js';
 export {
+	createRetryAbortedError,
 	createRetryExhaustedError,
 	isRetryAbortedError,
 	isRetryExhaustedError,

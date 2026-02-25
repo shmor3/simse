@@ -5,6 +5,7 @@ import {
 	toError,
 } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
+import { parseQuery } from './query-dsl.js';
 import type { StorageBackend } from './storage.js';
 import type {
 	AdvancedSearchResult,
@@ -72,6 +73,7 @@ export interface MemoryManager {
 	readonly advancedSearch: (
 		options: SearchOptions,
 	) => Promise<AdvancedSearchResult[]>;
+	readonly query: (dsl: string) => Promise<AdvancedSearchResult[]>;
 	readonly getById: (id: string) => VectorEntry | undefined;
 	readonly getAll: () => VectorEntry[];
 	readonly getTopics: () => TopicInfo[];
@@ -437,6 +439,60 @@ export function createMemoryManager(
 	};
 
 	// -----------------------------------------------------------------------
+	// Query DSL
+	// -----------------------------------------------------------------------
+
+	const queryDsl = async (dsl: string): Promise<AdvancedSearchResult[]> => {
+		ensureInitialized();
+
+		const parsed = parseQuery(dsl);
+
+		logger.debug('Running DSL query', { dsl });
+
+		const searchOptions: SearchOptions = {
+			...(parsed.textSearch && parsed.textSearch.query.length > 0
+				? {
+						text: {
+							query: parsed.textSearch.query,
+							mode: parsed.textSearch.mode,
+						},
+					}
+				: {}),
+			...(parsed.metadataFilters && parsed.metadataFilters.length > 0
+				? { metadata: parsed.metadataFilters }
+				: {}),
+			...(parsed.minScore !== undefined
+				? { similarityThreshold: parsed.minScore }
+				: {}),
+		};
+
+		// If the DSL has a text query, auto-embed it for vector search
+		if (parsed.textSearch && parsed.textSearch.query.trim().length > 0) {
+			try {
+				const queryEmbedding = await getEmbedding(parsed.textSearch.query);
+				(searchOptions as Record<string, unknown>).queryEmbedding =
+					queryEmbedding;
+			} catch {
+				logger.debug(
+					'Embedding failed for DSL query — falling back to text-only',
+				);
+			}
+		}
+
+		let results = store.advancedSearch(searchOptions);
+
+		// Apply topic filter manually if present
+		if (parsed.topicFilter && parsed.topicFilter.length > 0) {
+			const topicEntries = store.filterByTopic([...parsed.topicFilter]);
+			const topicIds = new Set(topicEntries.map((e) => e.id));
+			results = results.filter((r) => topicIds.has(r.entry.id));
+		}
+
+		logger.debug(`DSL query returned ${results.length} results`);
+		return results;
+	};
+
+	// -----------------------------------------------------------------------
 	// Accessors
 	// -----------------------------------------------------------------------
 
@@ -674,6 +730,7 @@ export function createMemoryManager(
 		filterByMetadata,
 		filterByDateRange,
 		advancedSearch,
+		query: queryDsl,
 		getById,
 		getAll,
 		getTopics,

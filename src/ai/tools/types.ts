@@ -19,6 +19,7 @@ export type ToolCategory =
 	| 'memory'
 	| 'vfs'
 	| 'task'
+	| 'subagent'
 	| 'other';
 
 export interface ToolParameter {

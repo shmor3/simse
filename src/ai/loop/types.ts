@@ -56,6 +56,22 @@ export interface LoopTurn {
 }
 
 // ---------------------------------------------------------------------------
+// Subagent types
+// ---------------------------------------------------------------------------
+
+export interface SubagentInfo {
+	readonly id: string;
+	readonly description: string;
+	readonly mode: 'spawn' | 'delegate';
+}
+
+export interface SubagentResult {
+	readonly text: string;
+	readonly turns: number;
+	readonly durationMs: number;
+}
+
+// ---------------------------------------------------------------------------
 // Callbacks
 // ---------------------------------------------------------------------------
 
@@ -67,6 +83,21 @@ export interface LoopCallbacks {
 	readonly onTurnComplete?: (turn: LoopTurn) => void;
 	readonly onCompaction?: (summary: string) => void;
 	readonly onError?: (error: Error) => void;
+	readonly onSubagentStart?: (info: SubagentInfo) => void;
+	readonly onSubagentStreamDelta?: (id: string, text: string) => void;
+	readonly onSubagentToolCallStart?: (
+		id: string,
+		call: ToolCallRequest,
+	) => void;
+	readonly onSubagentToolCallEnd?: (
+		id: string,
+		result: ToolCallResult,
+	) => void;
+	readonly onSubagentComplete?: (
+		id: string,
+		result: SubagentResult,
+	) => void;
+	readonly onSubagentError?: (id: string, error: Error) => void;
 }
 
 // ---------------------------------------------------------------------------

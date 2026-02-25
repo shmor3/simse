@@ -9,7 +9,6 @@ import {
 	findDuplicateGroups,
 } from './deduplication.js';
 import {
-	computeMagnitude,
 	createMagnitudeCache,
 	createMetadataIndex,
 	createTopicIndex,
@@ -17,15 +16,8 @@ import {
 } from './indexing.js';
 import { createInvertedIndex } from './inverted-index.js';
 import { createLearningEngine, type LearningEngine } from './learning.js';
-import {
-	computeRecommendationScore,
-	frequencyScore,
-	normalizeWeights,
-	type RecencyOptions,
-	recencyScore,
-} from './recommendation.js';
+import type { RecencyOptions } from './recommendation.js';
 import type { StorageBackend } from './storage.js';
-import { matchesAllMetadataFilters } from './text-search.js';
 import type {
 	AdvancedSearchResult,
 	DateRange,
@@ -43,6 +35,7 @@ import type {
 	TopicInfo,
 	VectorEntry,
 } from './types.js';
+import { computeRecommendations } from './vector-recommend.js';
 import {
 	advancedVectorSearch,
 	filterEntriesByDateRange,
@@ -846,138 +839,24 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	// Recommendation
 	// -----------------------------------------------------------------------
 
-	/**
-	 * Fast cosine similarity using pre-computed magnitudes (for recommend()).
-	 * Returns undefined if vectors are incompatible or zero-magnitude.
-	 */
-	const fastCosine = (
-		queryEmbedding: readonly number[],
-		queryMag: number,
-		entry: VectorEntry,
-	): number | undefined => {
-		if (entry.embedding.length !== queryEmbedding.length) return undefined;
-		const entryMag =
-			magnitudeCache.get(entry.id) ?? computeMagnitude(entry.embedding);
-		if (entryMag === 0) return undefined;
-		let dot = 0;
-		for (let i = 0; i < queryEmbedding.length; i++) {
-			dot += queryEmbedding[i] * entry.embedding[i];
-		}
-		const raw = dot / (queryMag * entryMag);
-		return Number.isFinite(raw) ? Math.min(1, Math.max(-1, raw)) : undefined;
-	};
-
 	const recommend = (
 		recommendOptions?: RecommendOptions,
 	): RecommendationResult[] => {
 		ensureLoaded();
-		const opts = recommendOptions ?? {};
-		// Use adapted weights from learning engine if available, falling back to user-provided or defaults
-		const baseWeights =
-			learningEngine && !opts.weights
-				? learningEngine.getAdaptedWeights()
-				: normalizeWeights(opts.weights);
-		const weights = baseWeights;
-		const maxResults = opts.maxResults ?? 10;
-		const minScore = opts.minScore ?? 0;
 
-		// Pre-filter candidates
-		let candidates = entries;
-
-		// Topic filter
-		if (opts.topics && opts.topics.length > 0) {
-			const matchingIds = new Set<string>();
-			for (const topic of opts.topics) {
-				for (const id of topicIdx.getEntries(topic)) {
-					matchingIds.add(id);
-				}
-			}
-			candidates = candidates.filter((e) => matchingIds.has(e.id));
-		}
-
-		// Metadata filter
-		if (opts.metadata && opts.metadata.length > 0) {
-			candidates = candidates.filter((e) =>
-				matchesAllMetadataFilters(
-					e.metadata,
-					opts.metadata as MetadataFilter[],
-				),
-			);
-		}
-
-		// Date range filter
-		if (opts.dateRange) {
-			const { after, before } = opts.dateRange;
-			candidates = candidates.filter((e) => {
-				if (after !== undefined && e.timestamp < after) return false;
-				if (before !== undefined && e.timestamp > before) return false;
-				return true;
-			});
-		}
-
-		if (candidates.length === 0) return [];
-
-		// Find max access count for frequency normalization
-		let maxAccessCount = 0;
-		for (const entry of candidates) {
-			const stats = accessStats.get(entry.id);
-			if (stats && stats.accessCount > maxAccessCount) {
-				maxAccessCount = stats.accessCount;
-			}
-		}
-
-		// Pre-compute query magnitude for vector scoring
-		const queryEmbedding = opts.queryEmbedding;
-		const queryMag =
-			queryEmbedding && queryEmbedding.length > 0
-				? computeMagnitude(queryEmbedding)
-				: 0;
-
-		const results: RecommendationResult[] = [];
-
-		for (const entry of candidates) {
-			// Vector similarity score
-			let vectorScoreVal: number | undefined;
-			if (queryEmbedding && queryEmbedding.length > 0 && queryMag > 0) {
-				vectorScoreVal = fastCosine(queryEmbedding, queryMag, entry);
-			}
-
-			// Recency score
-			const recencyVal = recencyScore(entry.timestamp, recencyOpts);
-
-			// Frequency score
-			const stats = accessStats.get(entry.id);
-			const freqVal = frequencyScore(stats?.accessCount ?? 0, maxAccessCount);
-
-			const recommendation = computeRecommendationScore(
-				{
-					vectorScore: vectorScoreVal,
-					recencyScore: recencyVal,
-					frequencyScore: freqVal,
-				},
-				weights,
-			);
-
-			// Apply learning boost if available
-			const boost = learningEngine
-				? learningEngine.computeBoost(entry.id, entry.embedding)
-				: 1.0;
-			const boostedScore = recommendation.score * boost;
-
-			if (boostedScore >= minScore) {
-				results.push({
-					entry,
-					score: boostedScore,
-					scores: recommendation.scores,
-				});
-			}
-		}
-
-		results.sort((a, b) => b.score - a.score);
-
+		// Delegate to the pure recommendation function.
 		// Do not call trackAccess here to avoid a positive feedback loop
 		// where frequently recommended entries inflate their own frequency scores.
-		return results.slice(0, maxResults);
+		return computeRecommendations(
+			entries,
+			accessStats,
+			recommendOptions ?? {},
+			magnitudeCache,
+			topicIdx,
+			metadataIdx,
+			learningEngine,
+			recencyOpts,
+		);
 	};
 
 	// -----------------------------------------------------------------------

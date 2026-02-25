@@ -92,6 +92,8 @@ export function createToolService(options: ToolServiceOptions): ToolService {
 			args: Record<string, string>,
 		) => mcpClient.getPrompt(serverName, promptName, args),
 		createServer: () =>
-			createMCPServer(options.mcpServerConfig, options.acpClient),
+			createMCPServer(options.mcpServerConfig, {
+				acpClient: options.acpClient,
+			}),
 	});
 }

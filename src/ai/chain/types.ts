@@ -5,6 +5,7 @@
 import type { ACPTokenUsage } from '../acp/types.js';
 import type { ParallelConfig, ParallelSubResult } from '../agent/types.js';
 import type { MCPToolCallMetrics } from '../mcp/types.js';
+import type { PromptTemplate } from './prompt-template.js';
 
 /**
  * Which AI backend a chain step executes against.
@@ -16,39 +17,39 @@ export type Provider = 'acp' | 'mcp' | 'memory';
  */
 export interface ChainStepConfig {
 	/** Unique name for this step. */
-	name: string;
+	readonly name: string;
 	/** The prompt template to fill and send. */
-	template: import('./prompt-template.js').PromptTemplate;
+	readonly template: PromptTemplate;
 	/** Which AI provider to use for this step. */
-	provider?: Provider;
+	readonly provider?: Provider;
 	/** ACP agent ID override for this step. */
-	agentId?: string;
+	readonly agentId?: string;
 	/** ACP server name override for this step. */
-	serverName?: string;
+	readonly serverName?: string;
 	/** Additional ACP run config passed to the agent. */
-	agentConfig?: Record<string, unknown>;
+	readonly agentConfig?: Readonly<Record<string, unknown>>;
 	/** System prompt prepended to the request (where supported). */
-	systemPrompt?: string;
+	readonly systemPrompt?: string;
 	/** Transform the raw LLM output before passing to the next step. */
-	outputTransform?: (output: string) => string;
+	readonly outputTransform?: (output: string) => string;
 	/** Map previous step outputs to this step's template variables. */
-	inputMapping?: Record<string, string>;
+	readonly inputMapping?: Readonly<Record<string, string>>;
 	/** MCP: name of the connected MCP server to call. */
-	mcpServerName?: string;
+	readonly mcpServerName?: string;
 	/** MCP: name of the tool to invoke on the MCP server. */
-	mcpToolName?: string;
+	readonly mcpToolName?: string;
 	/** MCP: mapping from tool argument names to chain value keys. */
-	mcpArguments?: Record<string, string>;
+	readonly mcpArguments?: Readonly<Record<string, string>>;
 	/** Store this step's output to the memory vector store. */
-	storeToMemory?: boolean;
+	readonly storeToMemory?: boolean;
 	/** Metadata to attach when storing to memory. */
-	memoryMetadata?: Record<string, string>;
+	readonly memoryMetadata?: Readonly<Record<string, string>>;
 	/**
 	 * When set, this step runs sub-steps concurrently instead of calling
 	 * a single provider. The step's own template/provider are ignored
 	 * when parallel is present.
 	 */
-	parallel?: ParallelConfig;
+	readonly parallel?: ParallelConfig;
 }
 
 /**
@@ -56,25 +57,25 @@ export interface ChainStepConfig {
  */
 export interface StepResult {
 	/** Name of the step. */
-	stepName: string;
+	readonly stepName: string;
 	/** Provider that was used. */
-	provider: Provider;
+	readonly provider: Provider;
 	/** Model / agent that was used. */
-	model: string;
+	readonly model: string;
 	/** The fully-resolved prompt that was sent. */
-	input: string;
+	readonly input: string;
 	/** The raw or transformed output from the provider. */
-	output: string;
+	readonly output: string;
 	/** Wall-clock time for this step in milliseconds. */
-	durationMs: number;
+	readonly durationMs: number;
 	/** Zero-based index of this step in the chain. */
-	stepIndex: number;
+	readonly stepIndex: number;
 	/** Token usage from ACP provider, if available. */
-	usage?: ACPTokenUsage;
+	readonly usage?: ACPTokenUsage;
 	/** Tool call metrics from MCP provider. */
-	toolMetrics?: MCPToolCallMetrics;
+	readonly toolMetrics?: MCPToolCallMetrics;
 	/** Sub-step results when this step ran in parallel mode. */
-	subResults?: readonly ParallelSubResult[];
+	readonly subResults?: readonly ParallelSubResult[];
 }
 
 /**

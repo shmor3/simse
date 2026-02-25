@@ -27,11 +27,16 @@ src/
   errors/                   # Error hierarchy split by domain
     base.ts                 # SimseError interface, createSimseError, toError, wrapError
     config.ts               # Config error factories + guards
-    provider.ts             # Provider error factories + guards
+    provider.ts             # Provider error factories + guards (incl. HTTP errors)
     chain.ts                # Chain error factories + guards
     template.ts             # Template error factories + guards
     mcp.ts                  # MCP error factories + guards
     memory.ts               # Memory/Embedding/VectorStore error factories + guards
+    loop.ts                 # Agentic loop error factories + guards
+    resilience.ts           # CircuitBreaker/Timeout error factories + guards
+    tasks.ts                # Task list error factories + guards
+    tools.ts                # Tool registry error factories + guards
+    vfs.ts                  # Virtual filesystem error factories + guards
     index.ts                # Barrel re-export
   config/
     schema.ts               # Typed config validation (semantic-only, no runtime type guards)
@@ -47,6 +52,9 @@ src/
                              # Stderr routing to logger
       acp-results.ts        # Response parsing: extractContentText, extractTokenUsage
                              # Tool call extraction: extractToolCall, extractToolCallUpdate
+      acp-adapters.ts       # EmbeddingProvider + TextGenerationProvider adapters for ACP
+      local-embedder.ts     # In-process embedding via @huggingface/transformers
+      tei-bridge.ts         # Text Embeddings Inference (TEI) HTTP bridge
       types.ts              # ACP types: sessions, content blocks, streaming, permissions,
                              # tool calls, sampling params, model/mode info
     mcp/
@@ -57,7 +65,7 @@ src/
                              # Resource templates: listResourceTemplates()
                              # Retry logic on tool calls and resource reads
       mcp-server.ts         # MCP server: generate, run-chain, list-agents,
-                             # memory-search, memory-add tools
+                             # memory-search, memory-add, vfs-*, task-* tools
                              # List-changed notifications
                              # Logging support
       types.ts              # MCP types: tools, resources, prompts, logging,
@@ -72,6 +80,16 @@ src/
       format.ts             # formatSearchResults helper
       types.ts              # Provider, ChainStepConfig, StepResult, ChainCallbacks
       index.ts              # Barrel re-export
+    conversation/
+      conversation.ts       # createConversation factory: message management,
+                             # serialization, auto-compaction
+      types.ts              # ConversationRole, ConversationMessage, ConversationOptions
+      index.ts              # Barrel re-export
+    loop/
+      agentic-loop.ts       # createAgenticLoop: conversation → ACP stream → tool exec → repeat
+                             # maxTurns, AbortSignal, auto-compaction, streaming retry
+      types.ts              # AgenticLoopOptions, LoopTurn, AgenticLoopResult, LoopCallbacks
+      index.ts              # Barrel re-export
     memory/
       memory.ts             # MemoryManager: add/search/recommend/summarize/findDuplicates
       vector-store.ts       # VectorStore: file-backed storage with indexes + compression
@@ -79,12 +97,33 @@ src/
       vector-persistence.ts # IndexEntry / IndexFile types + validation guards
       text-search.ts        # Text search: exact, substring, fuzzy, regex, token modes
       compression.ts        # Float32 base64 embedding encode/decode, gzip wrappers
-      indexing.ts            # TopicIndex, MetadataIndex, MagnitudeCache factories
-      deduplication.ts       # checkDuplicate, findDuplicateGroups (cosine-based)
-      recommendation.ts      # WeightProfile, recency/frequency scoring, computeRecommendationScore
+      indexing.ts           # TopicIndex, MetadataIndex, MagnitudeCache factories
+      deduplication.ts      # checkDuplicate, findDuplicateGroups (cosine-based)
+      recommendation.ts     # WeightProfile, recency/frequency scoring, computeRecommendationScore
+      storage.ts            # StorageBackend interface (pluggable persistence)
+      learning.ts           # Adaptive learning engine: query tracking, weight adaptation
       types.ts              # All memory/search/deduplication/recommendation/summarization types
+    tasks/
+      task-list.ts          # createTaskList factory: CRUD, dependencies, blocking
+      types.ts              # TaskItem, TaskStatus, TaskList, TaskCreateInput, TaskUpdateInput
+      index.ts              # Barrel re-export
+    tools/
+      tool-registry.ts      # createToolRegistry: register, discover, execute, parse
+      builtin-tools.ts      # registerMemoryTools, registerVFSTools, registerTaskTools
+      subagent-tools.ts     # registerSubagentTools: spawn sub-loops as tool calls
+      types.ts              # ToolDefinition, ToolHandler, ToolRegistry, ToolCallRequest
+      index.ts              # Barrel re-export
+    vfs/
+      vfs.ts                # createVirtualFS: in-memory filesystem sandbox
+      vfs-disk.ts           # createVFSDisk: disk-backed VFS with snapshots
+      validators.ts         # File content validators (JSON syntax, trailing whitespace, etc.)
+      types.ts              # VirtualFS, VFSDirEntry, VFSReadResult, VFSWriteOptions
+      index.ts              # Barrel re-export
   utils/
     retry.ts                # Retry with exponential backoff + jitter, AbortSignal support
+    circuit-breaker.ts      # Circuit breaker pattern for fault tolerance
+    health-monitor.ts       # Health monitoring with sliding window stats
+    timeout.ts              # withTimeout utility for Promise-based timeouts
 ```
 
 ### Key Patterns

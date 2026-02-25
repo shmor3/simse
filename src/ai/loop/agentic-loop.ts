@@ -33,6 +33,16 @@ function isTransientLikeToolError(output: string): boolean {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Create an agentic loop that repeatedly streams from ACP, parses tool calls,
+ * executes them via the tool registry, and feeds results back until the agent
+ * produces a final text response or hits the turn limit.
+ *
+ * @param options - ACP client, tool registry, conversation, max turns, signal.
+ * @returns A frozen {@link AgenticLoop} with a `run(prompt)` method.
+ * @throws {LoopTurnLimitError} When `maxTurns` is exceeded.
+ * @throws {LoopAbortedError} When the AbortSignal fires mid-loop.
+ */
 export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 	const {
 		acpClient,

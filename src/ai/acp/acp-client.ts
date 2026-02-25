@@ -158,6 +158,15 @@ export interface ACPClient {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Create an ACP client that communicates with one or more ACP-compatible
+ * agent servers over JSON-RPC 2.0 / NDJSON stdio.
+ *
+ * @param config - ACP server definitions (command, args, env per server).
+ * @param options - Retry policy, stream timeout, circuit breaker thresholds.
+ * @returns A frozen {@link ACPClient} with generate, chat, embed, and session management.
+ * @throws {ProviderUnavailableError} When the target server process cannot be spawned.
+ */
 export function createACPClient(
 	config: ACPConfig,
 	options?: ACPClientOptions,

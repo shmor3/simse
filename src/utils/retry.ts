@@ -74,6 +74,19 @@ export const isRetryExhaustedError = (
 	isSimseError(value) && value.code === 'RETRY_EXHAUSTED';
 
 /**
+ * Create a `RetryAbortedError` — thrown when the retry is cancelled via AbortSignal.
+ */
+export const createRetryAbortedError = (
+	message: string,
+	options: { cause?: unknown } = {},
+): SimseError =>
+	createSimseError(message, {
+		name: 'RetryAbortedError',
+		code: 'RETRY_ABORTED',
+		cause: options.cause,
+	});
+
+/**
  * Type-guard for abort errors thrown when the retry signal fires.
  */
 export const isRetryAbortedError = (value: unknown): value is SimseError =>
@@ -116,8 +129,7 @@ export async function retry<T>(
 	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 		// Check if externally aborted before each attempt
 		if (signal?.aborted) {
-			throw createSimseError('Retry aborted by signal', {
-				code: 'RETRY_ABORTED',
+			throw createRetryAbortedError('Retry aborted by signal', {
 				cause: lastError,
 			});
 		}
@@ -168,13 +180,13 @@ export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 	return new Promise<void>((resolve, reject) => {
 		if (signal?.aborted) {
-			reject(createSimseError('Sleep aborted', { code: 'RETRY_ABORTED' }));
+			reject(createRetryAbortedError('Sleep aborted'));
 			return;
 		}
 
 		const onAbort = () => {
 			clearTimeout(timer);
-			reject(createSimseError('Sleep aborted', { code: 'RETRY_ABORTED' }));
+			reject(createRetryAbortedError('Sleep aborted'));
 		};
 
 		const timer = setTimeout(() => {

@@ -9,6 +9,10 @@ import {
 	createConfigParseError,
 	createConfigValidationError,
 	createEmbeddingError,
+	// Loop
+	createLoopAbortedError,
+	createLoopError,
+	createLoopTurnLimitError,
 	createMCPConnectionError,
 	createMCPError,
 	createMCPServerNotConnectedError,
@@ -17,12 +21,21 @@ import {
 	createMemoryError,
 	createProviderError,
 	createProviderGenerationError,
+	createProviderHTTPError,
 	createProviderTimeoutError,
 	createProviderUnavailableError,
 	// Factory functions
 	createSimseError,
+	// Tasks
+	createTaskCircularDependencyError,
+	createTaskError,
+	createTaskNotFoundError,
 	createTemplateError,
 	createTemplateMissingVariablesError,
+	// Tools
+	createToolError,
+	createToolExecutionError,
+	createToolNotFoundError,
 	createVectorStoreCorruptionError,
 	createVectorStoreIOError,
 	isChainError,
@@ -32,6 +45,9 @@ import {
 	isConfigNotFoundError,
 	isConfigValidationError,
 	isEmbeddingError,
+	isLoopAbortedError,
+	isLoopError,
+	isLoopTurnLimitError,
 	isMCPConnectionError,
 	isMCPError,
 	isMCPServerNotConnectedError,
@@ -40,12 +56,19 @@ import {
 	isMemoryError,
 	isProviderError,
 	isProviderGenerationError,
+	isProviderHTTPError,
 	isProviderTimeoutError,
 	isProviderUnavailableError,
 	// Type guards
 	isSimseError,
+	isTaskCircularDependencyError,
+	isTaskError,
+	isTaskNotFoundError,
 	isTemplateError,
 	isTemplateMissingVariablesError,
+	isToolError,
+	isToolExecutionError,
+	isToolNotFoundError,
 	isVectorStoreCorruptionError,
 	isVectorStoreIOError,
 	// Utility
@@ -544,6 +567,170 @@ describe('VectorStoreIOError', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Provider HTTP Error
+// ---------------------------------------------------------------------------
+
+describe('ProviderHTTPError', () => {
+	it('should include status code and provider', () => {
+		const err = createProviderHTTPError('openai', 429, 'Rate limited');
+
+		expect(isProviderHTTPError(err)).toBe(true);
+		expect(isProviderError(err)).toBe(true);
+		expect(isSimseError(err)).toBe(true);
+		expect(err.name).toBe('ProviderHTTPError');
+		expect(err.code).toBe('PROVIDER_HTTP_ERROR');
+		expect(err.statusCode).toBe(429);
+		expect(err.provider).toBe('openai');
+		expect(err.message).toBe('Rate limited');
+	});
+
+	it('should work with 5xx status codes', () => {
+		const err = createProviderHTTPError('claude', 502, 'Bad gateway');
+		expect(err.statusCode).toBe(502);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Loop Errors
+// ---------------------------------------------------------------------------
+
+describe('LoopError', () => {
+	it('should default code to LOOP_ERROR', () => {
+		const err = createLoopError('loop broke');
+
+		expect(isLoopError(err)).toBe(true);
+		expect(isSimseError(err)).toBe(true);
+		expect(err.name).toBe('LoopError');
+		expect(err.code).toBe('LOOP_ERROR');
+	});
+});
+
+describe('LoopTurnLimitError', () => {
+	it('should include maxTurns in metadata', () => {
+		const err = createLoopTurnLimitError(10);
+
+		expect(isLoopTurnLimitError(err)).toBe(true);
+		expect(isLoopError(err)).toBe(true);
+		expect(isSimseError(err)).toBe(true);
+		expect(err.name).toBe('LoopTurnLimitError');
+		expect(err.code).toBe('LOOP_TURN_LIMIT');
+		expect(err.metadata).toEqual(expect.objectContaining({ maxTurns: 10 }));
+		expect(err.message).toContain('10');
+	});
+});
+
+describe('LoopAbortedError', () => {
+	it('should include turn number in metadata', () => {
+		const err = createLoopAbortedError(5);
+
+		expect(isLoopAbortedError(err)).toBe(true);
+		expect(isLoopError(err)).toBe(true);
+		expect(isSimseError(err)).toBe(true);
+		expect(err.name).toBe('LoopAbortedError');
+		expect(err.code).toBe('LOOP_ABORTED');
+		expect(err.metadata).toEqual(expect.objectContaining({ turn: 5 }));
+		expect(err.message).toContain('5');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Task Errors
+// ---------------------------------------------------------------------------
+
+describe('TaskError', () => {
+	it('should default code to TASK_ERROR', () => {
+		const err = createTaskError('task broke');
+
+		expect(isTaskError(err)).toBe(true);
+		expect(isSimseError(err)).toBe(true);
+		expect(err.name).toBe('TaskError');
+		expect(err.code).toBe('TASK_ERROR');
+		expect(err.statusCode).toBe(400);
+	});
+});
+
+describe('TaskNotFoundError', () => {
+	it('should include taskId in metadata', () => {
+		const err = createTaskNotFoundError('task-42');
+
+		expect(isTaskNotFoundError(err)).toBe(true);
+		expect(isTaskError(err)).toBe(true);
+		expect(isSimseError(err)).toBe(true);
+		expect(err.name).toBe('TaskNotFoundError');
+		expect(err.code).toBe('TASK_NOT_FOUND');
+		expect(err.metadata).toEqual(
+			expect.objectContaining({ taskId: 'task-42' }),
+		);
+		expect(err.message).toContain('task-42');
+	});
+});
+
+describe('TaskCircularDependencyError', () => {
+	it('should include both task IDs in metadata', () => {
+		const err = createTaskCircularDependencyError('a', 'b');
+
+		expect(isTaskCircularDependencyError(err)).toBe(true);
+		expect(isTaskError(err)).toBe(true);
+		expect(isSimseError(err)).toBe(true);
+		expect(err.name).toBe('TaskCircularDependencyError');
+		expect(err.code).toBe('TASK_CIRCULAR_DEPENDENCY');
+		expect(err.metadata).toEqual(
+			expect.objectContaining({ taskId: 'a', dependencyId: 'b' }),
+		);
+		expect(err.message).toContain('a');
+		expect(err.message).toContain('b');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Tool Errors
+// ---------------------------------------------------------------------------
+
+describe('ToolError', () => {
+	it('should default code to TOOL_ERROR', () => {
+		const err = createToolError('tool broke');
+
+		expect(isToolError(err)).toBe(true);
+		expect(isSimseError(err)).toBe(true);
+		expect(err.name).toBe('ToolError');
+		expect(err.code).toBe('TOOL_ERROR');
+	});
+});
+
+describe('ToolNotFoundError', () => {
+	it('should include toolName in metadata', () => {
+		const err = createToolNotFoundError('memory_search');
+
+		expect(isToolNotFoundError(err)).toBe(true);
+		expect(isToolError(err)).toBe(true);
+		expect(isSimseError(err)).toBe(true);
+		expect(err.name).toBe('ToolNotFoundError');
+		expect(err.code).toBe('TOOL_NOT_FOUND');
+		expect(err.metadata).toEqual(
+			expect.objectContaining({ toolName: 'memory_search' }),
+		);
+		expect(err.message).toContain('memory_search');
+	});
+});
+
+describe('ToolExecutionError', () => {
+	it('should include toolName and failure message', () => {
+		const err = createToolExecutionError('vfs_write', 'permission denied');
+
+		expect(isToolExecutionError(err)).toBe(true);
+		expect(isToolError(err)).toBe(true);
+		expect(isSimseError(err)).toBe(true);
+		expect(err.name).toBe('ToolExecutionError');
+		expect(err.code).toBe('TOOL_EXECUTION_ERROR');
+		expect(err.metadata).toEqual(
+			expect.objectContaining({ toolName: 'vfs_write' }),
+		);
+		expect(err.message).toContain('vfs_write');
+		expect(err.message).toContain('permission denied');
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Utility functions
 // ---------------------------------------------------------------------------
 
@@ -681,6 +868,30 @@ describe('Error hierarchy', () => {
 		expect(isVectorStoreCorruptionError(memErr)).toBe(true);
 		expect(isMemoryError(memErr)).toBe(true);
 		expect(isSimseError(memErr)).toBe(true);
+
+		// Loop hierarchy
+		const loopErr = createLoopTurnLimitError(10);
+		expect(isLoopTurnLimitError(loopErr)).toBe(true);
+		expect(isLoopError(loopErr)).toBe(true);
+		expect(isSimseError(loopErr)).toBe(true);
+
+		// Task hierarchy
+		const taskErr = createTaskNotFoundError('1');
+		expect(isTaskNotFoundError(taskErr)).toBe(true);
+		expect(isTaskError(taskErr)).toBe(true);
+		expect(isSimseError(taskErr)).toBe(true);
+
+		// Tool hierarchy
+		const toolErr = createToolExecutionError('t', 'm');
+		expect(isToolExecutionError(toolErr)).toBe(true);
+		expect(isToolError(toolErr)).toBe(true);
+		expect(isSimseError(toolErr)).toBe(true);
+
+		// Provider HTTP hierarchy
+		const httpErr = createProviderHTTPError('p', 500, 'm');
+		expect(isProviderHTTPError(httpErr)).toBe(true);
+		expect(isProviderError(httpErr)).toBe(true);
+		expect(isSimseError(httpErr)).toBe(true);
 	});
 
 	it('should have correct .name properties throughout the hierarchy', () => {
@@ -723,6 +934,20 @@ describe('Error hierarchy', () => {
 		expect(createVectorStoreIOError('', 'read').name).toBe(
 			'VectorStoreIOError',
 		);
+
+		// New error types
+		expect(createProviderHTTPError('', 500, '').name).toBe('ProviderHTTPError');
+		expect(createLoopError('').name).toBe('LoopError');
+		expect(createLoopTurnLimitError(0).name).toBe('LoopTurnLimitError');
+		expect(createLoopAbortedError(0).name).toBe('LoopAbortedError');
+		expect(createTaskError('').name).toBe('TaskError');
+		expect(createTaskNotFoundError('').name).toBe('TaskNotFoundError');
+		expect(createTaskCircularDependencyError('', '').name).toBe(
+			'TaskCircularDependencyError',
+		);
+		expect(createToolError('').name).toBe('ToolError');
+		expect(createToolNotFoundError('').name).toBe('ToolNotFoundError');
+		expect(createToolExecutionError('', '').name).toBe('ToolExecutionError');
 	});
 });
 

@@ -17,6 +17,8 @@ import type { MCPServerConfig } from './types.js';
 // ---------------------------------------------------------------------------
 
 export interface MCPServerOptions {
+	/** ACP client used for generate, run-chain, and list-agents tools. */
+	readonly acpClient: ACPClient;
 	/** Optional memory manager for memory-search and memory-add tools. */
 	readonly memoryManager?: MemoryManager;
 	/** Optional VFS for vfs-read, vfs-write, vfs-list, vfs-tree tools. */
@@ -45,14 +47,22 @@ export interface SimseMCPServer {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Create an MCP server that exposes simse capabilities (generate, run-chain,
+ * list-agents, memory, VFS, and task tools) over the Model Context Protocol.
+ *
+ * @param config - Server name and version.
+ * @param options - ACP client (required), plus optional memory manager, VFS, task list.
+ * @returns A frozen {@link SimseMCPServer}. Call `start()` to begin serving over stdio.
+ */
 export function createMCPServer(
 	config: MCPServerConfig,
-	acpClient: ACPClient,
-	options?: MCPServerOptions,
+	options: MCPServerOptions,
 ): SimseMCPServer {
-	const memoryManager = options?.memoryManager;
-	const vfs = options?.vfs;
-	const taskList = options?.taskList;
+	const acpClient = options.acpClient;
+	const memoryManager = options.memoryManager;
+	const vfs = options.vfs;
+	const taskList = options.taskList;
 	// options.toolRegistry and options.conversation are reserved for future use
 
 	const server = new McpServer({

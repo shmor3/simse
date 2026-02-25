@@ -33,12 +33,12 @@ import type {
 // ---------------------------------------------------------------------------
 
 export interface ChainOptions {
-	acpClient: ACPClient;
-	mcpClient?: MCPClient;
-	memoryManager?: MemoryManager;
-	logger?: Logger;
-	callbacks?: ChainCallbacks;
-	chainName?: string;
+	readonly acpClient: ACPClient;
+	readonly mcpClient?: MCPClient;
+	readonly memoryManager?: MemoryManager;
+	readonly logger?: Logger;
+	readonly callbacks?: ChainCallbacks;
+	readonly chainName?: string;
 }
 
 export interface Chain {

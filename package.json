@@ -12,8 +12,16 @@
 			"types": "./dist/lib.d.ts"
 		}
 	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"sideEffects": false,
+	"engines": {
+		"bun": ">=1.0.0"
+	},
 	"keywords": [
-		"langchain",
 		"acp",
 		"agent-communication-protocol",
 		"mcp",
@@ -24,7 +32,7 @@
 	],
 	"license": "MIT",
 	"scripts": {
-		"build": "bun build ./src/lib.ts --outdir ./dist --target bun",
+		"build": "bun build ./src/lib.ts --outdir ./dist --target bun && tsc --project tsconfig.build.json",
 		"test": "bun test",
 		"test:watch": "bun test --watch",
 		"test:coverage": "bun test --coverage",
@@ -33,9 +41,11 @@
 		"typecheck": "bun x tsc --noEmit"
 	},
 	"dependencies": {
-		"@huggingface/transformers": "^3.8.1",
 		"@modelcontextprotocol/sdk": "^1.12.0",
 		"zod": "^3.24.0"
+	},
+	"optionalDependencies": {
+		"@huggingface/transformers": "^3.8.1"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",

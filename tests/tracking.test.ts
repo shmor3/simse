@@ -3,7 +3,7 @@ import {
 	extractContentText,
 	extractTokenUsage,
 } from '../src/ai/acp/acp-results.js';
-import type { ACPContentBlock, ACPTokenUsage } from '../src/ai/acp/types.js';
+import type { ACPContentBlock } from '../src/ai/acp/types.js';
 
 // ---------------------------------------------------------------------------
 // extractTokenUsage
@@ -160,54 +160,5 @@ describe('extractContentText', () => {
 			{ type: 'data', data: { key: 'value' } },
 		];
 		expect(extractContentText(blocks)).toBe('');
-	});
-});
-
-// ---------------------------------------------------------------------------
-// MCPToolCallMetrics (structural tests)
-// ---------------------------------------------------------------------------
-
-describe('MCPToolCallMetrics', () => {
-	it('satisfies the type contract', () => {
-		const metrics = {
-			durationMs: 42.5,
-			serverName: 'test-server',
-			toolName: 'test-tool',
-			startedAt: '2026-01-01T00:00:00.000Z',
-		};
-
-		expect(metrics.durationMs).toBeGreaterThan(0);
-		expect(metrics.serverName).toBe('test-server');
-		expect(metrics.toolName).toBe('test-tool');
-		expect(metrics.startedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-	});
-});
-
-// ---------------------------------------------------------------------------
-// ACPStreamChunk discriminated union
-// ---------------------------------------------------------------------------
-
-describe('ACPStreamChunk', () => {
-	it('discriminates delta chunks', () => {
-		const chunk = { type: 'delta' as const, text: 'hello' };
-		expect(chunk.type).toBe('delta');
-		expect(chunk.text).toBe('hello');
-	});
-
-	it('discriminates complete chunks without usage', () => {
-		const chunk = { type: 'complete' as const };
-		expect(chunk.type).toBe('complete');
-		expect((chunk as { usage?: ACPTokenUsage }).usage).toBeUndefined();
-	});
-
-	it('discriminates complete chunks with usage', () => {
-		const usage: ACPTokenUsage = {
-			promptTokens: 10,
-			completionTokens: 20,
-			totalTokens: 30,
-		};
-		const chunk = { type: 'complete' as const, usage };
-		expect(chunk.type).toBe('complete');
-		expect(chunk.usage).toEqual(usage);
 	});
 });

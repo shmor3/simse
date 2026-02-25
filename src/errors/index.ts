@@ -61,10 +61,12 @@ export {
 export {
 	createProviderError,
 	createProviderGenerationError,
+	createProviderHTTPError,
 	createProviderTimeoutError,
 	createProviderUnavailableError,
 	isProviderError,
 	isProviderGenerationError,
+	isProviderHTTPError,
 	isProviderTimeoutError,
 	isProviderUnavailableError,
 } from './provider.js';

@@ -116,6 +116,15 @@ export interface MCPClient {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Create an MCP client that connects to one or more MCP servers
+ * via stdio or HTTP transport.
+ *
+ * @param config - Server definitions with connection details.
+ * @param loggerOpt - Optional logger (defaults to the global logger).
+ * @returns A frozen {@link MCPClient} with tool/resource/prompt discovery and invocation.
+ * @throws {MCPConnectionError} When a server connection fails.
+ */
 export function createMCPClient(
 	config: MCPClientConfig,
 	loggerOpt?: Logger,

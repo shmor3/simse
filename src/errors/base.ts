@@ -23,11 +23,11 @@ export interface SimseError extends Error {
 // ---------------------------------------------------------------------------
 
 export interface SimseErrorOptions {
-	name?: string;
-	code?: string;
-	statusCode?: number;
-	cause?: unknown;
-	metadata?: Record<string, unknown>;
+	readonly name?: string;
+	readonly code?: string;
+	readonly statusCode?: number;
+	readonly cause?: unknown;
+	readonly metadata?: Readonly<Record<string, unknown>>;
 }
 
 // ---------------------------------------------------------------------------

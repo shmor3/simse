@@ -84,6 +84,20 @@ export const createProviderGenerationError = (
 		metadata: options.model ? { model: options.model } : {},
 	});
 
+export const createProviderHTTPError = (
+	provider: string,
+	statusCode: number,
+	message: string,
+	options: { cause?: unknown; metadata?: Record<string, unknown> } = {},
+): SimseError & { readonly provider: string } =>
+	createProviderError(provider, message, {
+		name: 'ProviderHTTPError',
+		code: 'PROVIDER_HTTP_ERROR',
+		statusCode,
+		cause: options.cause,
+		metadata: options.metadata,
+	});
+
 // ---------------------------------------------------------------------------
 // Type Guards
 // ---------------------------------------------------------------------------
@@ -109,3 +123,8 @@ export const isProviderGenerationError = (
 	value: unknown,
 ): value is SimseError & { readonly provider: string } =>
 	isSimseError(value) && value.code === 'PROVIDER_GENERATION_FAILED';
+
+export const isProviderHTTPError = (
+	value: unknown,
+): value is SimseError & { readonly provider: string } =>
+	isSimseError(value) && value.code === 'PROVIDER_HTTP_ERROR';

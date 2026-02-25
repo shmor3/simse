@@ -10,6 +10,9 @@
 //    based on which signals best predict useful results.
 // 3. Interest embedding — maintains a decayed average of recent query
 //    embeddings representing the user's evolving interests.
+// 4. Per-topic profiles — tracks weights, interest embeddings, and query
+//    counts independently per topic, falling back to global state when
+//    a topic has insufficient data (< 10 queries).
 //
 // All state is serializable for persistence via the vector store's
 // compressed JSON format.
@@ -29,6 +32,7 @@ import type {
 	FeedbackEntry,
 	LearningState,
 	SerializedQueryRecord,
+	TopicProfileEntry,
 } from './vector-persistence.js';
 
 // ---------------------------------------------------------------------------
@@ -40,19 +44,25 @@ export interface LearningEngine {
 	readonly recordQuery: (
 		queryEmbedding: readonly number[],
 		resultIds: readonly string[],
+		options?: { readonly topic?: string },
 	) => void;
 	/** Record explicit user feedback on whether an entry was relevant. */
 	readonly recordFeedback: (entryId: string, relevant: boolean) => void;
 	/** Get accumulated relevance feedback for an entry. */
 	readonly getRelevanceFeedback: (id: string) => RelevanceFeedback | undefined;
-	/** Get the current adapted weight profile. */
-	readonly getAdaptedWeights: () => Readonly<Required<WeightProfile>>;
-	/** Get the current interest embedding (decayed average of queries). */
-	readonly getInterestEmbedding: () => readonly number[] | undefined;
+	/** Get the current adapted weight profile, optionally per-topic. */
+	readonly getAdaptedWeights: (
+		topic?: string,
+	) => Readonly<Required<WeightProfile>>;
+	/** Get the current interest embedding, optionally per-topic. */
+	readonly getInterestEmbedding: (
+		topic?: string,
+	) => readonly number[] | undefined;
 	/** Compute a boost multiplier for an entry based on learning state. */
 	readonly computeBoost: (
 		entryId: string,
 		entryEmbedding: readonly number[],
+		topic?: string,
 	) => number;
 	/** Serialize all learning state for persistence. */
 	readonly serialize: () => LearningState;
@@ -79,6 +89,18 @@ const MIN_WEIGHT = 0.05;
 const MAX_WEIGHT = 0.9;
 const BOOST_MIN = 0.8;
 const BOOST_MAX = 1.2;
+const TOPIC_QUERY_THRESHOLD = 10;
+
+// ---------------------------------------------------------------------------
+// Per-topic mutable state
+// ---------------------------------------------------------------------------
+
+interface TopicState {
+	weights: Required<WeightProfile>;
+	interestEmbedding: number[] | undefined;
+	queryCount: number;
+	queryHistory: QueryRecord[];
+}
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -131,21 +153,30 @@ export function createLearningEngine(
 	/** Last time learning state changed. */
 	let lastUpdated = 0;
 
+	/** Per-topic learning state. */
+	const topicStates = new Map<string, TopicState>();
+
 	// -- Helpers --------------------------------------------------------------
 
 	const clampWeight = (w: number): number =>
 		Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, w));
 
-	const normalizeWeightsInPlace = (): void => {
-		const v = clampWeight(adaptedWeights.vector);
-		const r = clampWeight(adaptedWeights.recency);
-		const f = clampWeight(adaptedWeights.frequency);
+	const normalizeWeights = (
+		weights: Required<WeightProfile>,
+	): Required<WeightProfile> => {
+		const v = clampWeight(weights.vector);
+		const r = clampWeight(weights.recency);
+		const f = clampWeight(weights.frequency);
 		const total = v + r + f;
-		adaptedWeights = {
+		return {
 			vector: v / total,
 			recency: r / total,
 			frequency: f / total,
 		};
+	};
+
+	const normalizeWeightsInPlace = (): void => {
+		adaptedWeights = normalizeWeights(adaptedWeights);
 	};
 
 	/**
@@ -171,27 +202,23 @@ export function createLearningEngine(
 	};
 
 	/**
-	 * Recompute the interest embedding from query history using
+	 * Recompute an interest embedding from a set of query records using
 	 * exponential decay weighting.
 	 */
-	const recomputeInterestEmbedding = (): void => {
-		if (queryHistory.length === 0) {
-			interestEmbedding = undefined;
-			return;
-		}
+	const computeInterestEmbeddingFromHistory = (
+		history: readonly QueryRecord[],
+	): number[] | undefined => {
+		if (history.length === 0) return undefined;
 
 		const now = Date.now();
 		const lambda = Math.LN2 / queryDecayMs;
-		const dim = queryHistory[0].embedding.length;
-		if (dim === 0) {
-			interestEmbedding = undefined;
-			return;
-		}
+		const dim = history[0].embedding.length;
+		if (dim === 0) return undefined;
 
 		const weighted = new Float64Array(dim);
 		let totalWeight = 0;
 
-		for (const record of queryHistory) {
+		for (const record of history) {
 			if (record.embedding.length !== dim) continue;
 			const age = Math.max(0, now - record.timestamp);
 			const w = Math.exp(-lambda * age);
@@ -201,10 +228,7 @@ export function createLearningEngine(
 			}
 		}
 
-		if (totalWeight === 0) {
-			interestEmbedding = undefined;
-			return;
-		}
+		if (totalWeight === 0) return undefined;
 
 		// Normalize to unit vector
 		let mag = 0;
@@ -214,16 +238,73 @@ export function createLearningEngine(
 		}
 		mag = Math.sqrt(mag);
 
-		if (mag === 0) {
-			interestEmbedding = undefined;
-			return;
-		}
+		if (mag === 0) return undefined;
 
 		const result = new Array<number>(dim);
 		for (let i = 0; i < dim; i++) {
 			result[i] = weighted[i] / mag;
 		}
-		interestEmbedding = result;
+		return result;
+	};
+
+	/**
+	 * Recompute the global interest embedding from query history.
+	 */
+	const recomputeInterestEmbedding = (): void => {
+		interestEmbedding = computeInterestEmbeddingFromHistory(queryHistory);
+	};
+
+	/**
+	 * Get or create the mutable topic state for a given topic.
+	 */
+	const getOrCreateTopicState = (topic: string): TopicState => {
+		let state = topicStates.get(topic);
+		if (!state) {
+			state = {
+				weights: { vector: 0.6, recency: 0.2, frequency: 0.2 },
+				interestEmbedding: undefined,
+				queryCount: 0,
+				queryHistory: [],
+			};
+			topicStates.set(topic, state);
+		}
+		return state;
+	};
+
+	/**
+	 * Adapt weights based on whether recent results tended to be
+	 * frequently-accessed entries. Returns the new weights.
+	 */
+	const adaptWeightsForResults = (
+		currentWeights: Required<WeightProfile>,
+		resultIds: readonly string[],
+	): Required<WeightProfile> => {
+		if (resultIds.length === 0) return currentWeights;
+
+		let highFeedbackCount = 0;
+		for (const id of resultIds) {
+			const fb = feedback.get(id);
+			if (fb && fb.totalRetrievals > 3) {
+				highFeedbackCount++;
+			}
+		}
+
+		const ratio = highFeedbackCount / resultIds.length;
+		let newWeights: Required<WeightProfile>;
+		if (ratio > 0.5) {
+			newWeights = {
+				vector: currentWeights.vector,
+				recency: currentWeights.recency,
+				frequency: currentWeights.frequency + weightAdaptationRate * 0.5,
+			};
+		} else {
+			newWeights = {
+				vector: currentWeights.vector + weightAdaptationRate * 0.5,
+				recency: currentWeights.recency,
+				frequency: currentWeights.frequency,
+			};
+		}
+		return normalizeWeights(newWeights);
 	};
 
 	// -- Public API -----------------------------------------------------------
@@ -231,6 +312,7 @@ export function createLearningEngine(
 	const recordQuery = (
 		queryEmbedding: readonly number[],
 		resultIds: readonly string[],
+		options?: { readonly topic?: string },
 	): void => {
 		if (!enabled) return;
 		if (queryEmbedding.length === 0 || resultIds.length === 0) return;
@@ -239,7 +321,7 @@ export function createLearningEngine(
 		totalQueriesCount++;
 		lastUpdated = now;
 
-		// Add to query history (FIFO capped)
+		// Add to global query history (FIFO capped)
 		const record: QueryRecord = {
 			embedding: [...queryEmbedding],
 			timestamp: now,
@@ -281,42 +363,37 @@ export function createLearningEngine(
 			}
 		}
 
-		// Adapt weights based on whether recent results tended to be
-		// recently-created or frequently-accessed entries.
-		// We use a simple heuristic: if results were found, slightly
-		// shift toward the weights that the system is using.
-		// This creates a gentle positive feedback loop that stabilizes.
-		if (resultIds.length > 0) {
-			// Count how many results have high access (feedback) counts
-			let highFeedbackCount = 0;
-			for (const id of resultIds) {
-				const fb = feedback.get(id);
-				if (fb && fb.totalRetrievals > 3) {
-					highFeedbackCount++;
-				}
-			}
+		// Adapt global weights
+		adaptedWeights = adaptWeightsForResults(adaptedWeights, resultIds);
 
-			const ratio = highFeedbackCount / resultIds.length;
-			if (ratio > 0.5) {
-				// Results skew toward frequently-accessed entries → boost frequency weight
-				adaptedWeights = {
-					vector: adaptedWeights.vector,
-					recency: adaptedWeights.recency,
-					frequency: adaptedWeights.frequency + weightAdaptationRate * 0.5,
-				};
-			} else {
-				// Results are fresh/diverse → boost vector weight (semantic relevance)
-				adaptedWeights = {
-					vector: adaptedWeights.vector + weightAdaptationRate * 0.5,
-					recency: adaptedWeights.recency,
-					frequency: adaptedWeights.frequency,
-				};
-			}
-			normalizeWeightsInPlace();
-		}
-
-		// Recompute interest embedding
+		// Recompute global interest embedding
 		recomputeInterestEmbedding();
+
+		// Update per-topic state if topic provided
+		const topic = options?.topic;
+		if (topic) {
+			const topicState = getOrCreateTopicState(topic);
+			topicState.queryCount++;
+
+			// Add to topic query history (FIFO capped)
+			topicState.queryHistory.push(record);
+			if (topicState.queryHistory.length > maxQueryHistory) {
+				topicState.queryHistory = topicState.queryHistory.slice(
+					-maxQueryHistory,
+				);
+			}
+
+			// Adapt topic weights
+			topicState.weights = adaptWeightsForResults(
+				topicState.weights,
+				resultIds,
+			);
+
+			// Recompute topic interest embedding
+			topicState.interestEmbedding = computeInterestEmbeddingFromHistory(
+				topicState.queryHistory,
+			);
+		}
 	};
 
 	const recordFeedback = (entryId: string, relevant: boolean): void => {
@@ -365,16 +442,35 @@ export function createLearningEngine(
 		};
 	};
 
-	const getAdaptedWeights = (): Readonly<Required<WeightProfile>> => ({
-		...adaptedWeights,
-	});
+	const getAdaptedWeights = (
+		topic?: string,
+	): Readonly<Required<WeightProfile>> => {
+		if (topic) {
+			const topicState = topicStates.get(topic);
+			if (topicState && topicState.queryCount >= TOPIC_QUERY_THRESHOLD) {
+				return { ...topicState.weights };
+			}
+		}
+		return { ...adaptedWeights };
+	};
 
-	const getInterestEmbedding = (): readonly number[] | undefined =>
-		interestEmbedding ? [...interestEmbedding] : undefined;
+	const getInterestEmbedding = (
+		topic?: string,
+	): readonly number[] | undefined => {
+		if (topic) {
+			const topicState = topicStates.get(topic);
+			if (topicState?.interestEmbedding) {
+				return [...topicState.interestEmbedding];
+			}
+			return undefined;
+		}
+		return interestEmbedding ? [...interestEmbedding] : undefined;
+	};
 
 	const computeBoost = (
 		entryId: string,
 		entryEmbedding: readonly number[],
+		topic?: string,
 	): number => {
 		if (!enabled) return 1.0;
 
@@ -388,14 +484,24 @@ export function createLearningEngine(
 			boost += relevance * 0.1;
 		}
 
-		// Interest alignment component: entries closer to interest profile get a small boost
+		// Interest alignment component: use topic-specific interest if available,
+		// otherwise fall back to global interest embedding
+		let effectiveInterest: number[] | undefined;
+		if (topic) {
+			const topicState = topicStates.get(topic);
+			effectiveInterest = topicState?.interestEmbedding;
+		}
+		if (!effectiveInterest) {
+			effectiveInterest = interestEmbedding;
+		}
+
 		if (
-			interestEmbedding &&
-			entryEmbedding.length === interestEmbedding.length
+			effectiveInterest &&
+			entryEmbedding.length === effectiveInterest.length
 		) {
 			const similarity = cosineSimilarity(
 				[...entryEmbedding],
-				interestEmbedding,
+				effectiveInterest,
 			);
 			// Scale: similarity of 1.0 → +interestBoostWeight, 0.0 → +0
 			boost += Math.max(0, similarity) * interestBoostWeight;
@@ -432,6 +538,19 @@ export function createLearningEngine(
 			});
 		}
 
+		// Serialize per-topic state
+		const serializedTopicProfiles: TopicProfileEntry[] = [];
+		for (const [topic, state] of topicStates) {
+			serializedTopicProfiles.push({
+				topic,
+				weights: { ...state.weights },
+				interestEmbedding: state.interestEmbedding
+					? encodeEmbedding(state.interestEmbedding)
+					: undefined,
+				queryCount: state.queryCount,
+			});
+		}
+
 		return {
 			version: 1,
 			feedback: serializedFeedback,
@@ -445,6 +564,10 @@ export function createLearningEngine(
 			explicitFeedback:
 				serializedExplicitFeedback.length > 0
 					? serializedExplicitFeedback
+					: undefined,
+			topicProfiles:
+				serializedTopicProfiles.length > 0
+					? serializedTopicProfiles
 					: undefined,
 		};
 	};
@@ -506,6 +629,35 @@ export function createLearningEngine(
 			}
 		}
 
+		// Restore per-topic state
+		topicStates.clear();
+		if (state.topicProfiles) {
+			for (const profile of state.topicProfiles) {
+				const topicState: TopicState = {
+					weights: normalizeWeights({
+						vector: profile.weights.vector,
+						recency: profile.weights.recency,
+						frequency: profile.weights.frequency,
+					}),
+					interestEmbedding: undefined,
+					queryCount: profile.queryCount,
+					queryHistory: [], // not persisted — rebuilt from future queries
+				};
+
+				if (profile.interestEmbedding) {
+					try {
+						topicState.interestEmbedding = decodeEmbedding(
+							profile.interestEmbedding,
+						);
+					} catch {
+						// Skip corrupt embeddings
+					}
+				}
+
+				topicStates.set(profile.topic, topicState);
+			}
+		}
+
 		totalQueriesCount = state.totalQueries;
 		lastUpdated = state.lastUpdated;
 	};
@@ -518,6 +670,7 @@ export function createLearningEngine(
 		interestEmbedding = undefined;
 		totalQueriesCount = 0;
 		lastUpdated = 0;
+		topicStates.clear();
 	};
 
 	const pruneEntries = (validIds: ReadonlySet<string>): void => {

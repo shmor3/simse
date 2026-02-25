@@ -56,6 +56,19 @@ export interface ExplicitFeedbackEntry {
 	readonly negativeCount: number;
 }
 
+/** Per-topic learning profile stored on disk. */
+export interface TopicProfileEntry {
+	readonly topic: string;
+	readonly weights: {
+		readonly vector: number;
+		readonly recency: number;
+		readonly frequency: number;
+	};
+	/** Base64-encoded Float32Array interest embedding for this topic. */
+	readonly interestEmbedding?: string;
+	readonly queryCount: number;
+}
+
 /** Root structure of the learning.json file. */
 export interface LearningState {
 	readonly version: 1;
@@ -70,6 +83,7 @@ export interface LearningState {
 	readonly totalQueries: number;
 	readonly lastUpdated: number;
 	readonly explicitFeedback?: ReadonlyArray<ExplicitFeedbackEntry>;
+	readonly topicProfiles?: ReadonlyArray<TopicProfileEntry>;
 }
 
 /**
@@ -93,6 +107,10 @@ export function isValidLearningState(value: unknown): value is LearningState {
 		obj.explicitFeedback !== undefined &&
 		!Array.isArray(obj.explicitFeedback)
 	)
+		return false;
+
+	// Optional topicProfiles array
+	if (obj.topicProfiles !== undefined && !Array.isArray(obj.topicProfiles))
 		return false;
 
 	return true;

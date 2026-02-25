@@ -15,6 +15,7 @@ import {
 	createTopicIndex,
 	type TopicIndexOptions,
 } from './indexing.js';
+import { createInvertedIndex } from './inverted-index.js';
 import { createLearningEngine, type LearningEngine } from './learning.js';
 import {
 	computeRecommendationScore,
@@ -24,11 +25,7 @@ import {
 	recencyScore,
 } from './recommendation.js';
 import type { StorageBackend } from './storage.js';
-import {
-	fuzzyScore,
-	matchesAllMetadataFilters,
-	tokenOverlapScore,
-} from './text-search.js';
+import { matchesAllMetadataFilters } from './text-search.js';
 import type {
 	AdvancedSearchResult,
 	DateRange,
@@ -46,6 +43,14 @@ import type {
 	TopicInfo,
 	VectorEntry,
 } from './types.js';
+import {
+	advancedVectorSearch,
+	filterEntriesByDateRange,
+	filterEntriesByMetadata,
+	textSearchEntries,
+	type VectorSearchConfig,
+	vectorSearch,
+} from './vector-search.js';
 import {
 	deserializeFromStorage,
 	serializeToStorage,
@@ -204,6 +209,13 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	const topicIdx = createTopicIndex(options.topicIndex);
 	const metadataIdx = createMetadataIndex();
 	const magnitudeCache = createMagnitudeCache();
+	const invertedIdx = createInvertedIndex();
+
+	// Search config passed to pure search functions
+	const searchConfig: VectorSearchConfig = {
+		maxRegexPatternLength,
+		warn: (msg: string) => logger.warn(msg),
+	};
 
 	// Access stats for recommendation engine
 	const accessStats = new Map<
@@ -247,105 +259,6 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	};
 
 	// -----------------------------------------------------------------------
-	// Internal search helpers
-	// -----------------------------------------------------------------------
-
-	/**
-	 * Fast cosine similarity using pre-computed magnitudes.
-	 * Returns undefined if vectors are incompatible or zero-magnitude.
-	 */
-	const fastCosine = (
-		queryEmbedding: readonly number[],
-		queryMag: number,
-		entry: VectorEntry,
-	): number | undefined => {
-		if (entry.embedding.length !== queryEmbedding.length) return undefined;
-		const entryMag =
-			magnitudeCache.get(entry.id) ?? computeMagnitude(entry.embedding);
-		if (entryMag === 0) return undefined;
-		let dot = 0;
-		for (let i = 0; i < queryEmbedding.length; i++) {
-			dot += queryEmbedding[i] * entry.embedding[i];
-		}
-		const raw = dot / (queryMag * entryMag);
-		// Clamp to [-1, 1] to guard against floating-point rounding
-		return Number.isFinite(raw) ? Math.min(1, Math.max(-1, raw)) : undefined;
-	};
-
-	const scoreText = (
-		candidate: string,
-		query: string,
-		mode: string,
-		compiledRegex?: RegExp,
-	): number => {
-		switch (mode) {
-			case 'fuzzy':
-				return fuzzyScore(query, candidate);
-
-			case 'substring':
-				return candidate.toLowerCase().includes(query.toLowerCase()) ? 1 : 0;
-
-			case 'exact':
-				return candidate === query ? 1 : 0;
-
-			case 'regex': {
-				if (compiledRegex) {
-					return compiledRegex.test(candidate) ? 1 : 0;
-				}
-				// Fallback: compile once (should not normally reach here)
-				if (query.length > maxRegexPatternLength) {
-					logger.warn(
-						`Regex pattern exceeds ${maxRegexPatternLength} chars, skipping`,
-					);
-					return 0;
-				}
-				try {
-					return new RegExp(query).test(candidate) ? 1 : 0;
-				} catch {
-					logger.warn(`Invalid regex pattern: ${query}`);
-					return 0;
-				}
-			}
-
-			case 'token':
-				return tokenOverlapScore(query, candidate);
-
-			default:
-				return 0;
-		}
-	};
-
-	const combineScores = (
-		vectorScore: number | undefined,
-		textScore: number | undefined,
-		rankBy: string,
-	): number => {
-		const v = vectorScore ?? 0;
-		const t = textScore ?? 0;
-		const hasVector = vectorScore !== undefined;
-		const hasText = textScore !== undefined;
-
-		if (!hasVector && !hasText) return 0;
-		if (!hasVector) return t;
-		if (!hasText) return v;
-
-		switch (rankBy) {
-			case 'vector':
-				return v;
-			case 'text':
-				return t;
-			case 'multiply':
-				return v * t;
-			default:
-				return (v + t) / 2;
-		}
-	};
-
-	// -----------------------------------------------------------------------
-	// Lifecycle
-	// -----------------------------------------------------------------------
-
-	// -----------------------------------------------------------------------
 	// Index management
 	// -----------------------------------------------------------------------
 
@@ -353,12 +266,14 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		topicIdx.addEntry(entry);
 		metadataIdx.addEntry(entry.id, entry.metadata as Record<string, string>);
 		magnitudeCache.set(entry.id, entry.embedding);
+		invertedIdx.addEntry(entry);
 	};
 
 	const deindexEntry = (entry: VectorEntry): void => {
 		topicIdx.removeEntry(entry.id);
 		metadataIdx.removeEntry(entry.id, entry.metadata as Record<string, string>);
 		magnitudeCache.remove(entry.id);
+		invertedIdx.removeEntry(entry.id, entry.text);
 	};
 
 	const trackAccess = (id: string): void => {
@@ -376,6 +291,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		topicIdx.clear();
 		metadataIdx.clear();
 		magnitudeCache.clear();
+		invertedIdx.clear();
 		for (const entry of entries) {
 			indexEntry(entry);
 		}
@@ -738,6 +654,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 			topicIdx.clear();
 			metadataIdx.clear();
 			magnitudeCache.clear();
+			invertedIdx.clear();
 			accessStats.clear();
 			dirtyIds.clear();
 			if (learningEngine) learningEngine.clear();
@@ -770,22 +687,14 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 			return [];
 		}
 
-		// Pre-compute query magnitude once
-		const queryMag = computeMagnitude(queryEmbedding);
-		if (queryMag === 0) return [];
+		const results = vectorSearch(
+			entries,
+			queryEmbedding,
+			maxResults,
+			threshold,
+			magnitudeCache,
+		);
 
-		const scored: SearchResult[] = [];
-
-		for (const entry of entries) {
-			const score = fastCosine(queryEmbedding, queryMag, entry);
-			if (score === undefined) continue;
-			if (score >= threshold) {
-				scored.push({ entry, score });
-			}
-		}
-
-		scored.sort((a, b) => b.score - a.score);
-		const results = scored.slice(0, maxResults);
 		for (const r of results) {
 			trackAccess(r.entry.id);
 		}
@@ -808,41 +717,12 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 
 	const textSearch = (searchOptions: TextSearchOptions): TextSearchResult[] => {
 		ensureLoaded();
-		const { query, mode = 'fuzzy', threshold = 0.3 } = searchOptions;
-
-		if (query.length === 0) {
+		if (searchOptions.query.length === 0) {
 			logger.warn('textSearch called with empty query');
 			return [];
 		}
 
-		// Compile regex once before the loop
-		let compiledRegex: RegExp | undefined;
-		if (mode === 'regex') {
-			if (query.length > maxRegexPatternLength) {
-				logger.warn(
-					`Regex pattern exceeds ${maxRegexPatternLength} chars, skipping`,
-				);
-				return [];
-			}
-			try {
-				compiledRegex = new RegExp(query);
-			} catch {
-				logger.warn(`Invalid regex pattern: ${query}`);
-				return [];
-			}
-		}
-
-		const results: TextSearchResult[] = [];
-
-		for (const entry of entries) {
-			const score = scoreText(entry.text, query, mode, compiledRegex);
-			if (score >= threshold) {
-				results.push({ entry, score });
-			}
-		}
-
-		results.sort((a, b) => b.score - a.score);
-		return results;
+		return textSearchEntries(entries, searchOptions, searchConfig, invertedIdx);
 	};
 
 	// -----------------------------------------------------------------------
@@ -853,34 +733,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		filters: readonly MetadataFilter[],
 	): VectorEntry[] => {
 		ensureLoaded();
-		if (filters.length === 0) return [...entries];
-
-		// Optimization: if all filters are simple "eq" mode, use the metadata index
-		const allEq = filters.every(
-			(f) => (f.mode ?? 'eq') === 'eq' && f.value !== undefined,
-		);
-		if (allEq) {
-			// Intersect sets from the metadata index
-			let candidateIds: Set<string> | undefined;
-			for (const f of filters) {
-				const ids = metadataIdx.getEntries(f.key, f.value as string);
-				if (candidateIds === undefined) {
-					candidateIds = new Set(ids);
-				} else {
-					for (const id of candidateIds) {
-						if (!ids.has(id)) candidateIds.delete(id);
-					}
-				}
-				if (candidateIds.size === 0) return [];
-			}
-			if (!candidateIds) return [];
-			return entries.filter((e) => candidateIds.has(e.id));
-		}
-
-		// Fallback: linear scan for complex filter modes
-		return entries.filter((e) =>
-			matchesAllMetadataFilters(e.metadata, filters),
-		);
+		return filterEntriesByMetadata(entries, filters, metadataIdx);
 	};
 
 	// -----------------------------------------------------------------------
@@ -889,12 +742,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 
 	const filterByDateRange = (range: DateRange): VectorEntry[] => {
 		ensureLoaded();
-		return entries.filter((e) => {
-			if (range.after !== undefined && e.timestamp < range.after) return false;
-			if (range.before !== undefined && e.timestamp > range.before)
-				return false;
-			return true;
-		});
+		return filterEntriesByDateRange(entries, range);
 	};
 
 	// -----------------------------------------------------------------------
@@ -905,95 +753,22 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		searchOptions: SearchOptions,
 	): AdvancedSearchResult[] => {
 		ensureLoaded();
-		const {
-			queryEmbedding,
-			similarityThreshold = 0,
-			text,
-			metadata,
-			dateRange,
-			maxResults = 10,
-			rankBy = 'average',
-		} = searchOptions;
 
-		const results: AdvancedSearchResult[] = [];
+		const topResults = advancedVectorSearch(
+			entries,
+			searchOptions,
+			searchConfig,
+			magnitudeCache,
+			metadataIdx,
+			invertedIdx,
+		);
 
-		// Pre-compute query magnitude for fast cosine
-		const queryMag =
-			queryEmbedding && queryEmbedding.length > 0
-				? computeMagnitude(queryEmbedding)
-				: 0;
-
-		// Pre-compile regex for text search if needed
-		let compiledRegex: RegExp | undefined;
-		if (text && (text.mode ?? 'fuzzy') === 'regex') {
-			if (text.query.length > maxRegexPatternLength) {
-				logger.warn(
-					`Regex pattern exceeds ${maxRegexPatternLength} chars, skipping text filter`,
-				);
-			} else {
-				try {
-					compiledRegex = new RegExp(text.query);
-				} catch {
-					logger.warn(`Invalid regex pattern: ${text.query}`);
-				}
-			}
-		}
-
-		for (const entry of entries) {
-			if (dateRange) {
-				if (dateRange.after !== undefined && entry.timestamp < dateRange.after)
-					continue;
-				if (
-					dateRange.before !== undefined &&
-					entry.timestamp > dateRange.before
-				)
-					continue;
-			}
-
-			if (metadata && metadata.length > 0) {
-				if (
-					!matchesAllMetadataFilters(
-						entry.metadata,
-						metadata as MetadataFilter[],
-					)
-				)
-					continue;
-			}
-
-			let vectorScore: number | undefined;
-			if (queryEmbedding && queryEmbedding.length > 0 && queryMag > 0) {
-				vectorScore = fastCosine(queryEmbedding, queryMag, entry);
-				if (vectorScore === undefined) continue;
-				if (vectorScore < similarityThreshold) continue;
-			}
-
-			let textScoreVal: number | undefined;
-			if (text) {
-				const mode = text.mode ?? 'fuzzy';
-				const textThreshold = text.threshold ?? 0.3;
-				textScoreVal = scoreText(entry.text, text.query, mode, compiledRegex);
-				if (textScoreVal < textThreshold) continue;
-			}
-
-			const finalScore = combineScores(vectorScore, textScoreVal, rankBy);
-
-			results.push({
-				entry,
-				score: finalScore,
-				scores: {
-					vector: vectorScore,
-					text: textScoreVal,
-				},
-			});
-		}
-
-		results.sort((a, b) => b.score - a.score);
-		const topResults = results.slice(0, maxResults);
 		for (const r of topResults) {
 			trackAccess(r.entry.id);
 		}
 
 		// Record query for adaptive learning (only if we have a query embedding)
+		const queryEmbedding = searchOptions.queryEmbedding;
 		if (
 			learningEngine &&
 			topResults.length > 0 &&
@@ -1070,6 +845,27 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	// -----------------------------------------------------------------------
 	// Recommendation
 	// -----------------------------------------------------------------------
+
+	/**
+	 * Fast cosine similarity using pre-computed magnitudes (for recommend()).
+	 * Returns undefined if vectors are incompatible or zero-magnitude.
+	 */
+	const fastCosine = (
+		queryEmbedding: readonly number[],
+		queryMag: number,
+		entry: VectorEntry,
+	): number | undefined => {
+		if (entry.embedding.length !== queryEmbedding.length) return undefined;
+		const entryMag =
+			magnitudeCache.get(entry.id) ?? computeMagnitude(entry.embedding);
+		if (entryMag === 0) return undefined;
+		let dot = 0;
+		for (let i = 0; i < queryEmbedding.length; i++) {
+			dot += queryEmbedding[i] * entry.embedding[i];
+		}
+		const raw = dot / (queryMag * entryMag);
+		return Number.isFinite(raw) ? Math.min(1, Math.max(-1, raw)) : undefined;
+	};
 
 	const recommend = (
 		recommendOptions?: RecommendOptions,

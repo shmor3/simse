@@ -89,14 +89,8 @@ export interface LoopCallbacks {
 		id: string,
 		call: ToolCallRequest,
 	) => void;
-	readonly onSubagentToolCallEnd?: (
-		id: string,
-		result: ToolCallResult,
-	) => void;
-	readonly onSubagentComplete?: (
-		id: string,
-		result: SubagentResult,
-	) => void;
+	readonly onSubagentToolCallEnd?: (id: string, result: ToolCallResult) => void;
+	readonly onSubagentComplete?: (id: string, result: SubagentResult) => void;
 	readonly onSubagentError?: (id: string, error: Error) => void;
 }
 

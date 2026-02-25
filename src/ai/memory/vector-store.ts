@@ -1,11 +1,9 @@
-import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
 import {
 	createMemoryError,
 	createVectorStoreCorruptionError,
 } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
-import { decodeEmbedding, encodeEmbedding } from './compression.js';
 import {
 	checkDuplicate as checkDuplicateImpl,
 	findDuplicateGroups,
@@ -48,7 +46,10 @@ import type {
 	TopicInfo,
 	VectorEntry,
 } from './types.js';
-import { isValidLearningState } from './vector-persistence.js';
+import {
+	deserializeFromStorage,
+	serializeToStorage,
+} from './vector-serialize.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -380,113 +381,6 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		}
 	};
 
-	// -----------------------------------------------------------------------
-	// Entry serialization — binary format per entry value in the KV store
-	// [4b text-len][text][4b emb-b64-len][emb-b64][4b meta-json-len][meta-json]
-	// [8b timestamp][4b accessCount][8b lastAccessed]
-	// -----------------------------------------------------------------------
-
-	const LEARNING_KEY = '__learning';
-
-	const serializeEntry = (
-		entry: VectorEntry,
-		stats?: { accessCount: number; lastAccessed: number },
-	): Buffer => {
-		const textBuf = Buffer.from(entry.text, 'utf-8');
-		const embBuf = Buffer.from(encodeEmbedding(entry.embedding), 'utf-8');
-		const metaBuf = Buffer.from(JSON.stringify(entry.metadata), 'utf-8');
-
-		const totalSize =
-			4 + textBuf.length + 4 + embBuf.length + 4 + metaBuf.length + 8 + 4 + 8;
-
-		const buf = Buffer.alloc(totalSize);
-		let offset = 0;
-
-		buf.writeUInt32BE(textBuf.length, offset);
-		offset += 4;
-		textBuf.copy(buf, offset);
-		offset += textBuf.length;
-
-		buf.writeUInt32BE(embBuf.length, offset);
-		offset += 4;
-		embBuf.copy(buf, offset);
-		offset += embBuf.length;
-
-		buf.writeUInt32BE(metaBuf.length, offset);
-		offset += 4;
-		metaBuf.copy(buf, offset);
-		offset += metaBuf.length;
-
-		// Timestamp as two 32-bit halves (JS numbers are 64-bit floats)
-		const ts = entry.timestamp;
-		buf.writeUInt32BE(Math.floor(ts / 0x100000000), offset);
-		offset += 4;
-		buf.writeUInt32BE(ts >>> 0, offset);
-		offset += 4;
-
-		buf.writeUInt32BE(stats?.accessCount ?? 0, offset);
-		offset += 4;
-
-		const la = stats?.lastAccessed ?? 0;
-		buf.writeUInt32BE(Math.floor(la / 0x100000000), offset);
-		offset += 4;
-		buf.writeUInt32BE(la >>> 0, offset);
-
-		return buf;
-	};
-
-	const deserializeEntry = (
-		id: string,
-		buf: Buffer,
-	): {
-		entry: VectorEntry;
-		accessCount: number;
-		lastAccessed: number;
-	} | null => {
-		try {
-			let offset = 0;
-
-			const textLen = buf.readUInt32BE(offset);
-			offset += 4;
-			const text = buf.toString('utf-8', offset, offset + textLen);
-			offset += textLen;
-
-			const embLen = buf.readUInt32BE(offset);
-			offset += 4;
-			const embB64 = buf.toString('utf-8', offset, offset + embLen);
-			offset += embLen;
-			const embedding = decodeEmbedding(embB64);
-
-			const metaLen = buf.readUInt32BE(offset);
-			offset += 4;
-			const metaJson = buf.toString('utf-8', offset, offset + metaLen);
-			offset += metaLen;
-			const metadata: Record<string, string> = JSON.parse(metaJson);
-
-			const tsHigh = buf.readUInt32BE(offset);
-			offset += 4;
-			const tsLow = buf.readUInt32BE(offset);
-			offset += 4;
-			const timestamp = tsHigh * 0x100000000 + tsLow;
-
-			const accessCount = buf.readUInt32BE(offset);
-			offset += 4;
-
-			const laHigh = buf.readUInt32BE(offset);
-			offset += 4;
-			const laLow = buf.readUInt32BE(offset);
-			const lastAccessed = laHigh * 0x100000000 + laLow;
-
-			return {
-				entry: { id, text, embedding, metadata, timestamp },
-				accessCount,
-				lastAccessed,
-			};
-		} catch {
-			return null;
-		}
-	};
-
 	const initEmpty = (reason: string): void => {
 		entries = [];
 		dirty = false;
@@ -511,71 +405,45 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	const doLoad = async (): Promise<void> => {
 		if (initialized) return;
 
-		let data: Map<string, Buffer>;
+		let rawData: Map<string, Buffer>;
 		try {
-			data = await storage.load();
+			rawData = await storage.load();
 		} catch (error) {
 			throw createVectorStoreCorruptionError('storage', {
 				cause: error,
 			});
 		}
 
-		if (data.size === 0) {
+		if (rawData.size === 0) {
 			initEmpty('No data found — starting with empty store');
 			return;
 		}
 
-		const valid: VectorEntry[] = [];
-		let skipped = 0;
-		accessStats.clear();
+		const deserialized = deserializeFromStorage(rawData, logger);
 
-		for (const [key, value] of data) {
-			if (key === LEARNING_KEY) continue; // handled below
-
-			const result = deserializeEntry(key, value);
-			if (result === null) {
-				skipped++;
-				logger.warn(`Skipping corrupt entry: ${key}`);
-				continue;
-			}
-
-			valid.push(result.entry);
-
-			if (result.accessCount > 0 || result.lastAccessed > 0) {
-				accessStats.set(result.entry.id, {
-					accessCount: result.accessCount,
-					lastAccessed: result.lastAccessed,
-				});
-			}
-		}
-
-		if (skipped > 0) {
+		if (deserialized.skipped > 0) {
 			logger.warn(
-				`Loaded ${valid.length} entries, skipped ${skipped} corrupt entries`,
+				`Loaded ${deserialized.entries.length} entries, skipped ${deserialized.skipped} corrupt entries`,
 			);
 			dirty = true;
 		}
 
-		entries = valid;
+		entries = deserialized.entries;
+		accessStats.clear();
+		for (const [id, stats] of deserialized.accessStats) {
+			accessStats.set(id, stats);
+		}
 		rebuildIndexes();
 
 		// Restore learning state
-		if (learningEngine && data.has(LEARNING_KEY)) {
+		if (learningEngine && deserialized.learningState) {
 			try {
-				const learningBuf = data.get(LEARNING_KEY);
-				if (!learningBuf) throw new Error('Missing learning key');
-				const learningJson = learningBuf.toString('utf-8');
-				const learningParsed: unknown = JSON.parse(learningJson);
-				if (isValidLearningState(learningParsed)) {
-					learningEngine.restore(learningParsed);
-					const validIds = new Set(valid.map((e) => e.id));
-					learningEngine.pruneEntries(validIds);
-					logger.debug(
-						`Restored learning state (${learningEngine.totalQueries} queries recorded)`,
-					);
-				} else {
-					logger.warn('Invalid learning state — starting fresh');
-				}
+				learningEngine.restore(deserialized.learningState);
+				const validIds = new Set(deserialized.entries.map((e) => e.id));
+				learningEngine.pruneEntries(validIds);
+				logger.debug(
+					`Restored learning state (${learningEngine.totalQueries} queries recorded)`,
+				);
 			} catch {
 				logger.warn('Failed to restore learning state — starting fresh');
 			}
@@ -588,19 +456,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	};
 
 	const doSave = async (): Promise<void> => {
-		const data = new Map<string, Buffer>();
-
-		for (const entry of entries) {
-			const stats = accessStats.get(entry.id);
-			data.set(entry.id, serializeEntry(entry, stats));
-		}
-
-		// Persist learning state alongside entries
-		if (learningEngine?.hasData) {
-			const learningState = learningEngine.serialize();
-			const learningJson = JSON.stringify(learningState);
-			data.set(LEARNING_KEY, Buffer.from(learningJson, 'utf-8'));
-		}
+		const { data } = serializeToStorage(entries, accessStats, learningEngine);
 
 		await storage.save(data);
 

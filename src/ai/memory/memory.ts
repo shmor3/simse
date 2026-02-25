@@ -84,6 +84,8 @@ export interface MemoryManager {
 	readonly checkDuplicate: (text: string) => Promise<DuplicateCheckResult>;
 	readonly summarize: (options: SummarizeOptions) => Promise<SummarizeResult>;
 	readonly setTextGenerator: (provider: TextGenerationProvider) => void;
+	/** Record explicit user feedback on whether an entry was relevant. */
+	readonly recordFeedback: (entryId: string, relevant: boolean) => void;
 	readonly delete: (id: string) => Promise<boolean>;
 	readonly deleteBatch: (ids: string[]) => Promise<number>;
 	readonly clear: () => Promise<void>;
@@ -99,6 +101,17 @@ export interface MemoryManager {
 // Factory
 // ---------------------------------------------------------------------------
 
+/**
+ * Create a memory manager that wraps a vector store with automatic
+ * embedding, search, deduplication, recommendation, and summarization.
+ *
+ * @param embedder - Provider that converts text into embedding vectors.
+ * @param config - Memory settings (similarity threshold, max results, embedding agent).
+ * @param options - Storage backend, logger, vector store options, optional text generator.
+ * @returns A frozen {@link MemoryManager}. Call `initialize()` before use.
+ * @throws {EmbeddingError} When the embedding provider fails during add/search.
+ * @throws {MemoryError} When the store is not initialized or text is empty.
+ */
 export function createMemoryManager(
 	embedder: EmbeddingProvider,
 	config: MemoryConfig,
@@ -597,6 +610,27 @@ export function createMemoryManager(
 	};
 
 	// -----------------------------------------------------------------------
+	// Explicit Feedback
+	// -----------------------------------------------------------------------
+
+	const recordFeedback = (entryId: string, relevant: boolean): void => {
+		ensureInitialized();
+
+		const engine = store.learningEngine;
+		if (!engine) {
+			throw createMemoryError(
+				'Cannot record feedback: adaptive learning is not enabled.',
+				{ code: 'MEMORY_LEARNING_DISABLED' },
+			);
+		}
+
+		engine.recordFeedback(entryId, relevant);
+		logger.debug(
+			`Recorded ${relevant ? 'positive' : 'negative'} feedback for "${entryId}"`,
+		);
+	};
+
+	// -----------------------------------------------------------------------
 	// Delete / clear
 	// -----------------------------------------------------------------------
 
@@ -649,6 +683,7 @@ export function createMemoryManager(
 		checkDuplicate: checkDuplicateFn,
 		summarize,
 		setTextGenerator,
+		recordFeedback,
 		delete: deleteEntry,
 		deleteBatch,
 		clear,

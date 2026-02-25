@@ -25,6 +25,7 @@ import type {
 	WeightProfile,
 } from './types.js';
 import type {
+	ExplicitFeedbackEntry,
 	FeedbackEntry,
 	LearningState,
 	SerializedQueryRecord,
@@ -40,6 +41,8 @@ export interface LearningEngine {
 		queryEmbedding: readonly number[],
 		resultIds: readonly string[],
 	) => void;
+	/** Record explicit user feedback on whether an entry was relevant. */
+	readonly recordFeedback: (entryId: string, relevant: boolean) => void;
 	/** Get accumulated relevance feedback for an entry. */
 	readonly getRelevanceFeedback: (id: string) => RelevanceFeedback | undefined;
 	/** Get the current adapted weight profile. */
@@ -103,6 +106,12 @@ export function createLearningEngine(
 		}
 	>();
 
+	/** Per-entry explicit relevance feedback: id -> positive/negative counts. */
+	const explicitFeedback = new Map<
+		string,
+		{ positive: number; negative: number }
+	>();
+
 	/** Recent query history (capped at maxQueryHistory). */
 	let queryHistory: QueryRecord[] = [];
 
@@ -140,19 +149,25 @@ export function createLearningEngine(
 	};
 
 	/**
-	 * Compute the diversity score for an entry based on how many unique
-	 * query embeddings (with low mutual similarity) have retrieved it.
-	 * Returns 0–1.
+	 * Compute the relevance score for an entry based on implicit retrieval
+	 * counts and explicit user feedback.
+	 *
+	 * Formula: clamp((queryCount + positive * 5 - negative * 3) / maxScale, 0, 1)
+	 * Explicit feedback is weighted much stronger than implicit retrievals.
 	 */
 	const computeRelevanceScore = (
+		entryId: string,
 		entry: typeof feedback extends Map<string, infer V> ? V : never,
 	): number => {
-		if (entry.queryCount <= 1) return 0;
+		const explicit = explicitFeedback.get(entryId);
+		const positiveFeedback = explicit?.positive ?? 0;
+		const negativeFeedback = explicit?.negative ?? 0;
 
-		// Use the count of distinct queries as a proxy for diversity.
-		// Cap at a reasonable maximum so the score stays in [0, 1].
-		const maxDiversityQueries = maxQueryHistory;
-		return Math.min(1, entry.queryCount / maxDiversityQueries);
+		const rawScore =
+			entry.queryCount + positiveFeedback * 5 - negativeFeedback * 3;
+
+		const maxScale = maxQueryHistory;
+		return Math.min(1, Math.max(0, rawScore / maxScale));
 	};
 
 	/**
@@ -304,15 +319,49 @@ export function createLearningEngine(
 		recomputeInterestEmbedding();
 	};
 
+	const recordFeedback = (entryId: string, relevant: boolean): void => {
+		if (!enabled) return;
+
+		const existing = explicitFeedback.get(entryId);
+		if (existing) {
+			if (relevant) {
+				existing.positive++;
+			} else {
+				existing.negative++;
+			}
+		} else {
+			explicitFeedback.set(entryId, {
+				positive: relevant ? 1 : 0,
+				negative: relevant ? 0 : 1,
+			});
+		}
+
+		lastUpdated = Date.now();
+	};
+
 	const getRelevanceFeedback = (id: string): RelevanceFeedback | undefined => {
 		const entry = feedback.get(id);
-		if (!entry) return undefined;
+		if (!entry) {
+			// Check if there's explicit feedback without implicit tracking
+			const explicit = explicitFeedback.get(id);
+			if (!explicit) return undefined;
+
+			// Return feedback based solely on explicit signals
+			const rawScore = explicit.positive * 5 - explicit.negative * 3;
+			const maxScale = maxQueryHistory;
+			return {
+				queryCount: 0,
+				totalRetrievals: 0,
+				lastQueryTimestamp: 0,
+				relevanceScore: Math.min(1, Math.max(0, rawScore / maxScale)),
+			};
+		}
 
 		return {
 			queryCount: entry.queryCount,
 			totalRetrievals: entry.totalRetrievals,
 			lastQueryTimestamp: entry.lastQueryTimestamp,
-			relevanceScore: computeRelevanceScore(entry),
+			relevanceScore: computeRelevanceScore(id, entry),
 		};
 	};
 
@@ -334,7 +383,7 @@ export function createLearningEngine(
 		// Relevance feedback component: entries retrieved by diverse queries get a boost
 		const fb = feedback.get(entryId);
 		if (fb) {
-			const relevance = computeRelevanceScore(fb);
+			const relevance = computeRelevanceScore(entryId, fb);
 			// Scale from 0→0 boost to 1→+0.1 boost
 			boost += relevance * 0.1;
 		}
@@ -374,6 +423,15 @@ export function createLearningEngine(
 			}),
 		);
 
+		const serializedExplicitFeedback: ExplicitFeedbackEntry[] = [];
+		for (const [entryId, counts] of explicitFeedback) {
+			serializedExplicitFeedback.push({
+				entryId,
+				positiveCount: counts.positive,
+				negativeCount: counts.negative,
+			});
+		}
+
 		return {
 			version: 1,
 			feedback: serializedFeedback,
@@ -384,6 +442,10 @@ export function createLearningEngine(
 				: undefined,
 			totalQueries: totalQueriesCount,
 			lastUpdated,
+			explicitFeedback:
+				serializedExplicitFeedback.length > 0
+					? serializedExplicitFeedback
+					: undefined,
 		};
 	};
 
@@ -433,12 +495,24 @@ export function createLearningEngine(
 			interestEmbedding = undefined;
 		}
 
+		// Restore explicit feedback
+		explicitFeedback.clear();
+		if (state.explicitFeedback) {
+			for (const entry of state.explicitFeedback) {
+				explicitFeedback.set(entry.entryId, {
+					positive: entry.positiveCount,
+					negative: entry.negativeCount,
+				});
+			}
+		}
+
 		totalQueriesCount = state.totalQueries;
 		lastUpdated = state.lastUpdated;
 	};
 
 	const clear = (): void => {
 		feedback.clear();
+		explicitFeedback.clear();
 		queryHistory = [];
 		adaptedWeights = { vector: 0.6, recency: 0.2, frequency: 0.2 };
 		interestEmbedding = undefined;
@@ -450,6 +524,11 @@ export function createLearningEngine(
 		for (const id of feedback.keys()) {
 			if (!validIds.has(id)) {
 				feedback.delete(id);
+			}
+		}
+		for (const id of explicitFeedback.keys()) {
+			if (!validIds.has(id)) {
+				explicitFeedback.delete(id);
 			}
 		}
 	};
@@ -468,6 +547,7 @@ export function createLearningEngine(
 
 	return Object.freeze({
 		recordQuery,
+		recordFeedback,
 		getRelevanceFeedback,
 		getAdaptedWeights,
 		getInterestEmbedding,

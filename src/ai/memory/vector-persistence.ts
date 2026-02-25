@@ -49,6 +49,13 @@ export interface SerializedQueryRecord {
 	readonly resultCount: number;
 }
 
+/** Per-entry explicit feedback record stored on disk. */
+export interface ExplicitFeedbackEntry {
+	readonly entryId: string;
+	readonly positiveCount: number;
+	readonly negativeCount: number;
+}
+
 /** Root structure of the learning.json file. */
 export interface LearningState {
 	readonly version: 1;
@@ -62,6 +69,7 @@ export interface LearningState {
 	readonly interestEmbedding: string | undefined;
 	readonly totalQueries: number;
 	readonly lastUpdated: number;
+	readonly explicitFeedback?: ReadonlyArray<ExplicitFeedbackEntry>;
 }
 
 /**
@@ -79,6 +87,13 @@ export function isValidLearningState(value: unknown): value is LearningState {
 		return false;
 	if (typeof obj.totalQueries !== 'number') return false;
 	if (typeof obj.lastUpdated !== 'number') return false;
+
+	// Optional explicitFeedback array
+	if (
+		obj.explicitFeedback !== undefined &&
+		!Array.isArray(obj.explicitFeedback)
+	)
+		return false;
 
 	return true;
 }

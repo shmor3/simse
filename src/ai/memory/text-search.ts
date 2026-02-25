@@ -302,25 +302,76 @@ export function matchesMetadataFilter(
 		case 'contains':
 			return (
 				actual !== undefined &&
-				filter.value !== undefined &&
+				typeof filter.value === 'string' &&
 				actual.toLowerCase().includes(filter.value.toLowerCase())
 			);
 		case 'startsWith':
 			return (
 				actual !== undefined &&
-				filter.value !== undefined &&
+				typeof filter.value === 'string' &&
 				actual.toLowerCase().startsWith(filter.value.toLowerCase())
 			);
 		case 'endsWith':
 			return (
 				actual !== undefined &&
-				filter.value !== undefined &&
+				typeof filter.value === 'string' &&
 				actual.toLowerCase().endsWith(filter.value.toLowerCase())
 			);
 		case 'regex': {
-			if (actual === undefined || filter.value === undefined) return false;
+			if (actual === undefined || typeof filter.value !== 'string')
+				return false;
 			const re = getCachedRegex(filter.value);
 			return re?.test(actual) ?? false;
+		}
+		case 'gt': {
+			if (actual === undefined || typeof filter.value !== 'string')
+				return false;
+			const a = Number(actual);
+			const b = Number(filter.value);
+			if (Number.isNaN(a) || Number.isNaN(b)) return false;
+			return a > b;
+		}
+		case 'gte': {
+			if (actual === undefined || typeof filter.value !== 'string')
+				return false;
+			const a = Number(actual);
+			const b = Number(filter.value);
+			if (Number.isNaN(a) || Number.isNaN(b)) return false;
+			return a >= b;
+		}
+		case 'lt': {
+			if (actual === undefined || typeof filter.value !== 'string')
+				return false;
+			const a = Number(actual);
+			const b = Number(filter.value);
+			if (Number.isNaN(a) || Number.isNaN(b)) return false;
+			return a < b;
+		}
+		case 'lte': {
+			if (actual === undefined || typeof filter.value !== 'string')
+				return false;
+			const a = Number(actual);
+			const b = Number(filter.value);
+			if (Number.isNaN(a) || Number.isNaN(b)) return false;
+			return a <= b;
+		}
+		case 'in': {
+			if (actual === undefined || !Array.isArray(filter.value)) return false;
+			return filter.value.includes(actual);
+		}
+		case 'notIn': {
+			if (actual === undefined || !Array.isArray(filter.value)) return false;
+			return !filter.value.includes(actual);
+		}
+		case 'between': {
+			if (actual === undefined || !Array.isArray(filter.value)) return false;
+			if (filter.value.length !== 2) return false;
+			const val = Number(actual);
+			const min = Number(filter.value[0]);
+			const max = Number(filter.value[1]);
+			if (Number.isNaN(val) || Number.isNaN(min) || Number.isNaN(max))
+				return false;
+			return val >= min && val <= max;
 		}
 		default:
 			return false;

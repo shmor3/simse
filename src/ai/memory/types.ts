@@ -89,6 +89,13 @@ export interface TextSearchResult {
  * - `"regex"` — Value matches a regular expression.
  * - `"exists"` — Key is present (value is ignored).
  * - `"notExists"` — Key is absent (value is ignored).
+ * - `"gt"` — Numeric greater-than comparison.
+ * - `"gte"` — Numeric greater-than-or-equal comparison.
+ * - `"lt"` — Numeric less-than comparison.
+ * - `"lte"` — Numeric less-than-or-equal comparison.
+ * - `"in"` — Value is one of the strings in the array.
+ * - `"notIn"` — Value is not one of the strings in the array.
+ * - `"between"` — Numeric value is within a [min, max] range (inclusive).
  */
 export type MetadataMatchMode =
 	| 'eq'
@@ -98,13 +105,20 @@ export type MetadataMatchMode =
 	| 'endsWith'
 	| 'regex'
 	| 'exists'
-	| 'notExists';
+	| 'notExists'
+	| 'gt'
+	| 'gte'
+	| 'lt'
+	| 'lte'
+	| 'in'
+	| 'notIn'
+	| 'between';
 
 export interface MetadataFilter {
 	/** The metadata key to match on. */
 	readonly key: string;
-	/** The value to compare against (ignored for `"exists"` / `"notExists"`). */
-	readonly value?: string;
+	/** The value to compare against (ignored for `"exists"` / `"notExists"`). Array form used by `"in"`, `"notIn"`, and `"between"`. */
+	readonly value?: string | readonly string[];
 	/** Comparison mode. Defaults to `"eq"`. */
 	readonly mode?: MetadataMatchMode;
 }
@@ -267,7 +281,7 @@ export interface SummarizeOptions {
 	/** If true, delete the original entries after summarization. Defaults to `false`. */
 	readonly deleteOriginals?: boolean;
 	/** Additional metadata to attach to the summary entry. */
-	readonly metadata?: Record<string, string>;
+	readonly metadata?: Readonly<Record<string, string>>;
 }
 
 export interface SummarizeResult {

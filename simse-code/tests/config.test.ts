@@ -336,7 +336,7 @@ describe('createCLIConfig', () => {
 	it('should read memory options from memory.json', () => {
 		writeJson(testDir, 'acp.json', makeACPConfig());
 		writeJson(testDir, 'embed.json', {
-			embeddingAgent: 'embed-agent',
+			embeddingModel: 'nomic-ai/nomic-embed-text-v1.5',
 		} satisfies EmbedFileConfig);
 		writeJson(testDir, 'memory.json', {
 			enabled: true,
@@ -348,8 +348,8 @@ describe('createCLIConfig', () => {
 			dataDir: testDir,
 		});
 		expect(config.memory.enabled).toBe(true);
-		expect(config.memory.embeddingAgent).toBe('embed-agent');
-		expect(embedConfig.embeddingAgent).toBe('embed-agent');
+		expect(config.memory.embeddingAgent).toBe('nomic-ai/nomic-embed-text-v1.5');
+		expect(embedConfig.embeddingModel).toBe('nomic-ai/nomic-embed-text-v1.5');
 		expect(config.memory.similarityThreshold).toBe(0.5);
 		expect(config.memory.maxResults).toBe(20);
 		expect(memoryConfig.enabled).toBe(true);
@@ -405,13 +405,10 @@ describe('createCLIConfig', () => {
 		expect(memoryConfig.atomicWrite).toBe(false);
 	});
 
-	it('should fall back to defaultAgent for embeddingAgent when not in memory.json', () => {
+	it('should fall back to default model when embeddingModel not in embed.json', () => {
 		writeJson(testDir, 'acp.json', makeACPConfig());
-		writeJson(testDir, 'config.json', {
-			defaultAgent: 'fallback-agent',
-		} satisfies UserConfig);
 
 		const { config } = createCLIConfig({ dataDir: testDir });
-		expect(config.memory.embeddingAgent).toBe('fallback-agent');
+		expect(config.memory.embeddingAgent).toBe('nomic-ai/nomic-embed-text-v1.5');
 	});
 });

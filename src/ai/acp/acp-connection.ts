@@ -107,16 +107,45 @@ export function createACPConnection(
 	// Permission handling
 	// -----------------------------------------------------------------------
 
-	const handlePermissionRequest = (id: number, _params: unknown): void => {
-		let allowed = false;
-		if (permissionPolicy === 'auto-approve') {
-			allowed = true;
-		} else if (permissionPolicy === 'deny') {
-			allowed = false;
-		}
-		// 'prompt' falls through to deny — no interactive prompting in a library
+	const handlePermissionRequest = (id: number, params: unknown): void => {
+		const p = params as {
+			options?: readonly { optionId: string; kind: string }[];
+		};
+		const options = p?.options ?? [];
 
-		sendResponse(id, { allowed });
+		if (permissionPolicy === 'auto-approve') {
+			// Pick the first "allow" option, preferring allow_always > allow_once
+			const allowAlways = options.find(
+				(o) => o.kind === 'allow_always',
+			);
+			const allowOnce = options.find((o) => o.kind === 'allow_once');
+			const pick = allowAlways ?? allowOnce;
+
+			if (pick) {
+				sendResponse(id, {
+					outcome: { outcome: 'selected', optionId: pick.optionId },
+				});
+				return;
+			}
+
+			// Fallback if options don't contain allow kinds
+			sendResponse(id, {
+				outcome: { outcome: 'selected', optionId: options[0]?.optionId },
+			});
+			return;
+		}
+
+		// 'deny' or 'prompt' — reject
+		const reject = options.find(
+			(o) => o.kind === 'reject_once' || o.kind === 'reject_always',
+		);
+		if (reject) {
+			sendResponse(id, {
+				outcome: { outcome: 'selected', optionId: reject.optionId },
+			});
+		} else {
+			sendResponse(id, { outcome: { outcome: 'cancelled' } });
+		}
 	};
 
 	const sendResponse = (id: number, result: unknown): void => {

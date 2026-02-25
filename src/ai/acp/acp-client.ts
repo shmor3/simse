@@ -276,6 +276,29 @@ export function createACPClient(
 				mcpServers: [],
 			},
 		);
+
+		// Set the permission mode based on the connection's policy.
+		// This tells the agent how to handle tool permissions for this session.
+		const modeId =
+			connection.permissionPolicy === 'auto-approve'
+				? 'bypassPermissions'
+				: connection.permissionPolicy === 'deny'
+					? 'plan'
+					: 'default';
+
+		// Fire-and-forget — don't block session creation if the agent
+		// doesn't support mode switching (it's best-effort).
+		connection
+			.request('session/set_config_option', {
+				sessionId: result.sessionId,
+				configOptionId: 'mode',
+				groupId: modeId,
+			})
+			.catch(() => {
+				// Agent may not support config options — that's fine,
+				// permissions still fall back to session/request_permission.
+			});
+
 		return result.sessionId;
 	};
 

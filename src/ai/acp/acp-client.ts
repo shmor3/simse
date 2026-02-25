@@ -131,33 +131,52 @@ export function createACPClient(
 	// -----------------------------------------------------------------------
 
 	const initialize = async (): Promise<void> => {
-		const initPromises = config.servers.map(async (entry) => {
-			if (connections.has(entry.name)) return;
+		const results = await Promise.allSettled(
+			config.servers.map(async (entry) => {
+				if (connections.has(entry.name)) return;
 
-			logger.info(
-				`Connecting to ACP server "${entry.name}": ${entry.command} ${(entry.args ?? []).join(' ')}`,
-			);
+				logger.info(
+					`Connecting to ACP server "${entry.name}": ${entry.command} ${(entry.args ?? []).join(' ')}`,
+				);
 
-			const connection = createACPConnection({
-				command: entry.command,
-				args: entry.args,
-				cwd: entry.cwd,
-				env: entry.env,
-				timeoutMs: entry.timeoutMs,
-				permissionPolicy: entry.permissionPolicy,
-				clientName,
-				clientVersion,
+				const connection = createACPConnection({
+					command: entry.command,
+					args: entry.args,
+					cwd: entry.cwd,
+					env: entry.env,
+					timeoutMs: entry.timeoutMs,
+					permissionPolicy: entry.permissionPolicy,
+					clientName,
+					clientVersion,
+				});
+
+				const result = await connection.initialize();
+				connections.set(entry.name, connection);
+
+				logger.info(
+					`ACP server "${entry.name}" initialized: ${result.server_info.name} v${result.server_info.version}`,
+				);
+			}),
+		);
+
+		for (let i = 0; i < results.length; i++) {
+			const result = results[i];
+			if (result.status === 'rejected') {
+				const name = config.servers[i].name;
+				logger.warn(
+					`ACP server "${name}" failed to initialize: ${toError(result.reason).message}`,
+				);
+			}
+		}
+
+		if (connections.size === 0) {
+			throw createProviderUnavailableError('acp', {
+				metadata: {
+					reason: 'All ACP servers failed to initialize',
+					servers: config.servers.map((s) => s.name),
+				},
 			});
-
-			const result = await connection.initialize();
-			connections.set(entry.name, connection);
-
-			logger.info(
-				`ACP server "${entry.name}" initialized: ${result.server_info.name} v${result.server_info.version}`,
-			);
-		});
-
-		await Promise.all(initPromises);
+		}
 	};
 
 	const dispose = async (): Promise<void> => {

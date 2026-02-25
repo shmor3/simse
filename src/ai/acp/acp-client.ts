@@ -271,7 +271,11 @@ export function createACPClient(
 	const createSession = async (connection: ACPConnection): Promise<string> => {
 		const result = await connection.request<ACPSessionNewResult>(
 			'session/new',
-			{ supported_content_types: ['text'] },
+			{
+				supported_content_types: ['text'],
+				cwd: process.cwd(),
+				mcpServers: [],
+			},
 		);
 		return result.session_id;
 	};

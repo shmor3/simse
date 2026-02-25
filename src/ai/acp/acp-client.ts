@@ -10,6 +10,15 @@ import {
 	toError,
 } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
+import {
+	type CircuitBreaker,
+	createCircuitBreaker,
+} from '../../utils/circuit-breaker.js';
+import {
+	createHealthMonitor,
+	type HealthMonitor,
+	type HealthSnapshot,
+} from '../../utils/health-monitor.js';
 import { isTransientError, retry } from '../../utils/retry.js';
 import { type ACPConnection, createACPConnection } from './acp-connection.js';
 import { extractContentText, extractTokenUsage } from './acp-results.js';
@@ -52,6 +61,11 @@ export interface ACPClientOptions {
 	clientName?: string;
 	/** Client version advertised during ACP initialize. Defaults to '1.0.0'. */
 	clientVersion?: string;
+	/** Circuit breaker configuration for per-server failure handling. */
+	circuitBreaker?: {
+		failureThreshold?: number;
+		resetTimeoutMs?: number;
+	};
 }
 
 export interface ACPStreamOptions {
@@ -133,6 +147,7 @@ export interface ACPClient {
 		modelId: string,
 		serverName?: string,
 	) => Promise<void>;
+	readonly getServerHealth: (serverName?: string) => HealthSnapshot | undefined;
 	readonly serverNames: string[];
 	readonly serverCount: number;
 	readonly defaultServerName: string | undefined;
@@ -158,6 +173,10 @@ export function createACPClient(
 
 	// Connection pool — one connection per configured server
 	const connections = new Map<string, ACPConnection>();
+
+	// Per-server circuit breakers and health monitors
+	const breakers = new Map<string, CircuitBreaker>();
+	const monitors = new Map<string, HealthMonitor>();
 
 	// -----------------------------------------------------------------------
 	// Initialize / dispose
@@ -188,6 +207,25 @@ export function createACPClient(
 
 				const result = await connection.initialize();
 				connections.set(entry.name, connection);
+
+				// Create circuit breaker and health monitor for this server
+				if (options?.circuitBreaker) {
+					breakers.set(
+						entry.name,
+						createCircuitBreaker({
+							name: `acp:${entry.name}`,
+							failureThreshold: options.circuitBreaker.failureThreshold,
+							resetTimeoutMs: options.circuitBreaker.resetTimeoutMs,
+							shouldCount: isTransientError,
+							onStateChange: (from, to) => {
+								logger.warn(
+									`Circuit breaker for ACP server "${entry.name}": ${from} → ${to}`,
+								);
+							},
+						}),
+					);
+				}
+				monitors.set(entry.name, createHealthMonitor());
 
 				const info = result.agentInfo;
 				logger.info(
@@ -272,32 +310,46 @@ export function createACPClient(
 		);
 	};
 
-	const withRetry = async <T>(
+	const withResilience = async <T>(
+		sName: string,
 		operation: string,
 		fn: () => Promise<T>,
 	): Promise<T> => {
-		return retry(
-			async (attempt) => {
-				if (attempt > 1) {
-					logger.debug(
-						`Retrying "${operation}" (attempt ${attempt}/${maxRetryAttempts})`,
-					);
-				}
-				return fn();
-			},
-			{
-				maxAttempts: maxRetryAttempts,
-				baseDelayMs: retryBaseDelayMs,
-				maxDelayMs: retryMaxDelayMs,
-				shouldRetry: (error) => isTransientError(error),
-				onRetry: (error, nextAttempt, delayMs) => {
-					logger.warn(
-						`Operation "${operation}" failed, retrying in ${delayMs}ms (attempt ${nextAttempt})`,
-						{ error: toError(error).message },
-					);
+		const breaker = breakers.get(sName);
+		const monitor = monitors.get(sName);
+
+		const retryFn = () =>
+			retry(
+				async (attempt) => {
+					if (attempt > 1) {
+						logger.debug(
+							`Retrying "${operation}" (attempt ${attempt}/${maxRetryAttempts})`,
+						);
+					}
+					return fn();
 				},
-			},
-		);
+				{
+					maxAttempts: maxRetryAttempts,
+					baseDelayMs: retryBaseDelayMs,
+					maxDelayMs: retryMaxDelayMs,
+					shouldRetry: (error) => isTransientError(error),
+					onRetry: (error, nextAttempt, delayMs) => {
+						logger.warn(
+							`Operation "${operation}" failed, retrying in ${delayMs}ms (attempt ${nextAttempt})`,
+							{ error: toError(error).message },
+						);
+					},
+				},
+			);
+
+		try {
+			const result = breaker ? await breaker.execute(retryFn) : await retryFn();
+			monitor?.recordSuccess();
+			return result;
+		} catch (error) {
+			monitor?.recordFailure(error instanceof Error ? error : undefined);
+			throw error;
+		}
 	};
 
 	// -----------------------------------------------------------------------
@@ -450,7 +502,7 @@ export function createACPClient(
 			hasSystemPrompt: !!generateOptions?.systemPrompt,
 		});
 
-		return withRetry('generate', async () => {
+		return withResilience(name, 'generate', async () => {
 			const sessionId = await createSession(connection);
 			const content = buildTextContent(prompt, generateOptions?.systemPrompt);
 			const result = await sendPrompt(
@@ -501,7 +553,7 @@ export function createACPClient(
 			messageCount: messages.length,
 		});
 
-		return withRetry('chat', async () => {
+		return withResilience(name, 'chat', async () => {
 			const sessionId = await createSession(connection);
 
 			// Combine all messages into content blocks for a single prompt.
@@ -544,6 +596,7 @@ export function createACPClient(
 			streamOptions?.serverName,
 		);
 		const agentId = resolveAgentId(entry, streamOptions?.agentId);
+		const monitor = monitors.get(name);
 
 		logger.debug('Starting generate stream', {
 			server: name,
@@ -551,120 +604,164 @@ export function createACPClient(
 			promptLength: prompt.length,
 		});
 
-		const sessionId = await createSession(connection);
-		const content = buildTextContent(prompt, streamOptions?.systemPrompt);
+		// Retry wrapper: on transient failure, reset and retry from scratch
+		let lastStreamError: unknown;
+		for (let attempt = 1; attempt <= maxRetryAttempts; attempt++) {
+			if (attempt > 1) {
+				logger.debug(
+					`Retrying generateStream (attempt ${attempt}/${maxRetryAttempts})`,
+				);
+				// Backoff before retry
+				const delay = retryBaseDelayMs * 2 ** (attempt - 2);
+				await new Promise<void>((r) =>
+					setTimeout(r, Math.min(delay, retryMaxDelayMs)),
+				);
+			}
 
-		// Collect streaming chunks via notification handler
-		type ChunkItem = { text: string } | { done: true };
-		const chunks: ChunkItem[] = [];
-		let chunkResolve: (() => void) | undefined;
-		let streamUsage: ACPTokenUsage | undefined;
+			const sessionId = await createSession(connection);
+			const content = buildTextContent(prompt, streamOptions?.systemPrompt);
 
-		const unsubscribe = connection.onNotification(
-			'session/update',
-			(params: unknown) => {
-				const p = params as ACPSessionUpdateParams;
-				if (p.sessionId !== sessionId) return;
+			// Collect streaming chunks via notification handler
+			type ChunkItem = { text: string } | { done: true };
+			const chunks: ChunkItem[] = [];
+			let chunkResolve: (() => void) | undefined;
+			let streamUsage: ACPTokenUsage | undefined;
 
-				const update = p.update;
-				if (!update) return;
+			const unsubscribe = connection.onNotification(
+				'session/update',
+				(params: unknown) => {
+					const p = params as ACPSessionUpdateParams;
+					if (p.sessionId !== sessionId) return;
 
-				if (update.sessionUpdate === 'agent_message_chunk' && update.content) {
-					const content = update.content;
-					// Content may be a single block or an array
-					const blocks = Array.isArray(content) ? content : [content];
-					const text = extractContentText(blocks as readonly ACPContentBlock[]);
-					if (text) {
-						chunks.push({ text });
-						chunkResolve?.();
+					const update = p.update;
+					if (!update) return;
+
+					if (
+						update.sessionUpdate === 'agent_message_chunk' &&
+						update.content
+					) {
+						const content = update.content;
+						// Content may be a single block or an array
+						const blocks = Array.isArray(content) ? content : [content];
+						const text = extractContentText(
+							blocks as readonly ACPContentBlock[],
+						);
+						if (text) {
+							chunks.push({ text });
+							chunkResolve?.();
+						}
 					}
-				}
 
-				if (update.sessionUpdate === 'tool_call') {
-					streamOptions?.onToolCall?.({
-						toolCallId: update.toolCallId as string,
-						title: update.title as string,
-						kind: (update.kind as ACPToolCall['kind']) ?? 'other',
-						status: (update.status as ACPToolCall['status']) ?? 'pending',
-					});
-				}
+					if (update.sessionUpdate === 'tool_call') {
+						streamOptions?.onToolCall?.({
+							toolCallId: update.toolCallId as string,
+							title: update.title as string,
+							kind: (update.kind as ACPToolCall['kind']) ?? 'other',
+							status: (update.status as ACPToolCall['status']) ?? 'pending',
+						});
+					}
 
-				if (update.sessionUpdate === 'tool_call_update') {
-					streamOptions?.onToolCallUpdate?.({
-						toolCallId: update.toolCallId as string,
-						status:
-							(update.status as ACPToolCallUpdate['status']) ?? 'in_progress',
-						content: update.content,
-					});
-				}
+					if (update.sessionUpdate === 'tool_call_update') {
+						streamOptions?.onToolCallUpdate?.({
+							toolCallId: update.toolCallId as string,
+							status:
+								(update.status as ACPToolCallUpdate['status']) ?? 'in_progress',
+							content: update.content,
+						});
+					}
 
-				if (update.metadata) {
-					const usage = extractTokenUsage(
-						update.metadata as Readonly<Record<string, unknown>>,
-					);
+					if (update.metadata) {
+						const usage = extractTokenUsage(
+							update.metadata as Readonly<Record<string, unknown>>,
+						);
+						if (usage) streamUsage = usage;
+					}
+				},
+			);
+
+			// Send the prompt — don't await yet, chunks arrive as notifications
+			const promptPromise = sendPrompt(
+				connection,
+				sessionId,
+				content,
+				buildSamplingMetadata(streamOptions?.sampling),
+			).then((result) => {
+				// Final result arrived — mark stream as done
+				if (result.metadata) {
+					const usage = extractTokenUsage(result.metadata);
 					if (usage) streamUsage = usage;
 				}
-			},
-		);
+				chunks.push({ done: true });
+				chunkResolve?.();
+				return result;
+			});
 
-		// Send the prompt — don't await yet, chunks arrive as notifications
-		const promptPromise = sendPrompt(
-			connection,
-			sessionId,
-			content,
-			buildSamplingMetadata(streamOptions?.sampling),
-		).then((result) => {
-			// Final result arrived — mark stream as done
-			if (result.metadata) {
-				const usage = extractTokenUsage(result.metadata);
-				if (usage) streamUsage = usage;
-			}
-			chunks.push({ done: true });
-			chunkResolve?.();
-			return result;
-		});
+			try {
+				// Set a stream-level timeout
+				const timeoutMs = entry.timeoutMs ?? streamTimeoutMs;
+				const deadline = Date.now() + timeoutMs;
 
-		try {
-			// Set a stream-level timeout
-			const timeoutMs = entry.timeoutMs ?? streamTimeoutMs;
-			const deadline = Date.now() + timeoutMs;
+				let idx = 0;
+				while (true) {
+					if (idx < chunks.length) {
+						const chunk = chunks[idx++];
+						if ('done' in chunk) break;
+						yield { type: 'delta', text: chunk.text };
+					} else {
+						const remaining = deadline - Date.now();
+						if (remaining <= 0) {
+							throw createProviderGenerationError(
+								'acp',
+								`Stream timed out after ${timeoutMs}ms`,
+								{ model: agentId },
+							);
+						}
 
-			let idx = 0;
-			while (true) {
-				if (idx < chunks.length) {
-					const chunk = chunks[idx++];
-					if ('done' in chunk) break;
-					yield { type: 'delta', text: chunk.text };
-				} else {
-					const remaining = deadline - Date.now();
-					if (remaining <= 0) {
-						throw createProviderGenerationError(
-							'acp',
-							`Stream timed out after ${timeoutMs}ms`,
-							{ model: agentId },
-						);
+						await new Promise<void>((resolve) => {
+							chunkResolve = resolve;
+							setTimeout(resolve, Math.min(remaining, 100));
+						});
 					}
-
-					await new Promise<void>((resolve) => {
-						chunkResolve = resolve;
-						setTimeout(resolve, Math.min(remaining, 100));
-					});
 				}
-			}
 
-			yield { type: 'complete', usage: streamUsage };
-		} catch (error) {
-			if (isSimseError(error)) throw error;
-			throw createProviderGenerationError(
-				'acp',
-				`Stream interrupted: ${toError(error).message}`,
-				{ cause: error, model: agentId },
-			);
-		} finally {
-			unsubscribe();
-			// Ensure the prompt promise settles
-			promptPromise.catch(() => {});
+				yield { type: 'complete', usage: streamUsage };
+				monitor?.recordSuccess();
+				return; // success — exit retry loop
+			} catch (error) {
+				lastStreamError = error;
+				// Only retry on transient errors and not on last attempt
+				if (attempt < maxRetryAttempts && isTransientError(error)) {
+					logger.warn(
+						`Stream attempt ${attempt} failed with transient error, will retry`,
+						{ error: toError(error).message },
+					);
+					continue;
+				}
+
+				monitor?.recordFailure(error instanceof Error ? error : undefined);
+				if (isSimseError(error)) throw error;
+				throw createProviderGenerationError(
+					'acp',
+					`Stream interrupted: ${toError(error).message}`,
+					{ cause: error, model: agentId },
+				);
+			} finally {
+				unsubscribe();
+				// Ensure the prompt promise settles
+				promptPromise.catch(() => {});
+			}
 		}
+
+		// All retry attempts exhausted
+		monitor?.recordFailure(
+			lastStreamError instanceof Error ? lastStreamError : undefined,
+		);
+		if (isSimseError(lastStreamError)) throw lastStreamError;
+		throw createProviderGenerationError(
+			'acp',
+			`Stream failed after ${maxRetryAttempts} attempts: ${toError(lastStreamError).message}`,
+			{ cause: lastStreamError, model: agentId },
+		);
 	}
 
 	const embed = async (
@@ -684,7 +781,7 @@ export function createACPClient(
 			inputCount: texts.length,
 		});
 
-		return withRetry('embed', async () => {
+		return withResilience(name, 'embed', async () => {
 			const sessionId = await createSession(connection);
 
 			const content: ACPContentBlock[] = [
@@ -827,6 +924,12 @@ export function createACPClient(
 	// Return the frozen record
 	// -----------------------------------------------------------------------
 
+	const getServerHealth = (serverName?: string): HealthSnapshot | undefined => {
+		const name = serverName ?? config.defaultServer ?? config.servers[0]?.name;
+		if (!name) return undefined;
+		return monitors.get(name)?.getHealth();
+	};
+
 	const setPermissionPolicy = (policy: ACPPermissionPolicy): void => {
 		for (const conn of connections.values()) {
 			conn.setPermissionPolicy(policy);
@@ -844,6 +947,7 @@ export function createACPClient(
 		embed,
 		isAvailable,
 		setPermissionPolicy,
+		getServerHealth,
 		listSessions,
 		loadSession,
 		deleteSession,

@@ -8,6 +8,7 @@
 
 import { toError } from '../../errors/base.js';
 import { createLoopError } from '../../errors/loop.js';
+import { isTransientError } from '../../utils/retry.js';
 import type { ToolCallResult } from '../tools/types.js';
 import type {
 	AgenticLoop,
@@ -16,6 +17,17 @@ import type {
 	LoopCallbacks,
 	LoopTurn,
 } from './types.js';
+
+// ---------------------------------------------------------------------------
+// Transient tool error heuristic
+// ---------------------------------------------------------------------------
+
+const TRANSIENT_PATTERNS =
+	/timeout|unavailable|econnrefused|econnreset|etimedout|socket hang up|network|503|429/i;
+
+function isTransientLikeToolError(output: string): boolean {
+	return TRANSIENT_PATTERNS.test(output);
+}
 
 // ---------------------------------------------------------------------------
 // Factory
@@ -33,7 +45,14 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		signal,
 		autoCompact = false,
 		compactionProvider,
+		streamRetry,
+		toolRetry,
 	} = options;
+
+	const streamMaxAttempts = streamRetry?.maxAttempts ?? 2;
+	const streamBaseDelayMs = streamRetry?.baseDelayMs ?? 1000;
+	const toolMaxAttempts = toolRetry?.maxAttempts ?? 2;
+	const toolBaseDelayMs = toolRetry?.baseDelayMs ?? 500;
 
 	const run = async (
 		userInput: string,
@@ -86,40 +105,58 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 			// Serialize conversation to a single prompt string
 			const prompt = conversation.serialize();
 
-			// Stream from ACP
+			// Stream from ACP with retry on transient errors
 			let fullResponse = '';
 			callbacks?.onStreamStart?.();
 
-			try {
-				const stream = acpClient.generateStream(prompt, {
-					serverName,
-					agentId,
-				});
-
-				for await (const chunk of stream) {
-					// Check abort during streaming
-					if (signal?.aborted) {
-						return Object.freeze({
-							finalText: fullResponse || lastText,
-							turns: Object.freeze(turns),
-							totalTurns: turn,
-							hitTurnLimit: false,
-							aborted: true,
-							totalDurationMs: Date.now() - loopStart,
-						});
-					}
-
-					if (chunk.type === 'delta') {
-						fullResponse += chunk.text;
-						callbacks?.onStreamDelta?.(chunk.text);
-					}
+			for (
+				let streamAttempt = 1;
+				streamAttempt <= streamMaxAttempts;
+				streamAttempt++
+			) {
+				if (streamAttempt > 1) {
+					// Reset accumulated response before retry
+					fullResponse = '';
+					const delay = streamBaseDelayMs * 2 ** (streamAttempt - 2);
+					await new Promise<void>((r) => setTimeout(r, delay));
 				}
-			} catch (err) {
-				const error = toError(err);
-				callbacks?.onError?.(error);
-				fullResponse =
-					fullResponse ||
-					`Error communicating with ACP server: ${error.message}`;
+
+				try {
+					const stream = acpClient.generateStream(prompt, {
+						serverName,
+						agentId,
+					});
+
+					for await (const chunk of stream) {
+						// Check abort during streaming
+						if (signal?.aborted) {
+							return Object.freeze({
+								finalText: fullResponse || lastText,
+								turns: Object.freeze(turns),
+								totalTurns: turn,
+								hitTurnLimit: false,
+								aborted: true,
+								totalDurationMs: Date.now() - loopStart,
+							});
+						}
+
+						if (chunk.type === 'delta') {
+							fullResponse += chunk.text;
+							callbacks?.onStreamDelta?.(chunk.text);
+						}
+					}
+					break; // success — exit retry loop
+				} catch (err) {
+					if (streamAttempt < streamMaxAttempts && isTransientError(err)) {
+						continue; // retry
+					}
+					const error = toError(err);
+					callbacks?.onError?.(error);
+					fullResponse =
+						fullResponse ||
+						`Error communicating with ACP server: ${error.message}`;
+					break;
+				}
 			}
 
 			// If response is completely empty, report it
@@ -155,7 +192,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 				});
 			}
 
-			// Execute tool calls
+			// Execute tool calls with retry on transient-looking errors
 			const toolResults: ToolCallResult[] = [];
 			for (const call of parsed.toolCalls) {
 				if (signal?.aborted) {
@@ -170,7 +207,24 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 				}
 
 				callbacks?.onToolCallStart?.(call);
-				const result = await toolRegistry.execute(call);
+
+				let result = await toolRegistry.execute(call);
+
+				// Retry tool if it returned a transient-looking error
+				if (result.isError && toolMaxAttempts > 1) {
+					for (
+						let toolAttempt = 2;
+						toolAttempt <= toolMaxAttempts;
+						toolAttempt++
+					) {
+						if (!isTransientLikeToolError(result.output)) break;
+						const delay = toolBaseDelayMs * 2 ** (toolAttempt - 2);
+						await new Promise<void>((r) => setTimeout(r, delay));
+						result = await toolRegistry.execute(call);
+						if (!result.isError) break;
+					}
+				}
+
 				toolResults.push(result);
 				callbacks?.onToolCallEnd?.(result);
 

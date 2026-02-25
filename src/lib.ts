@@ -282,6 +282,8 @@ export {
 	createChainError,
 	createChainNotFoundError,
 	createChainStepError,
+	// Resilience
+	createCircuitBreakerOpenError,
 	// Config
 	createConfigError,
 	createConfigNotFoundError,
@@ -314,6 +316,7 @@ export {
 	// Template
 	createTemplateError,
 	createTemplateMissingVariablesError,
+	createTimeoutError,
 	// Tools
 	createToolError,
 	createToolExecutionError,
@@ -325,6 +328,7 @@ export {
 	isChainError,
 	isChainNotFoundError,
 	isChainStepError,
+	isCircuitBreakerOpenError,
 	isConfigError,
 	isConfigNotFoundError,
 	isConfigParseError,
@@ -349,6 +353,7 @@ export {
 	isTaskNotFoundError,
 	isTemplateError,
 	isTemplateMissingVariablesError,
+	isTimeoutError,
 	isToolError,
 	isToolExecutionError,
 	isToolNotFoundError,
@@ -377,6 +382,19 @@ export {
 } from './logger.js';
 
 // ---- Utilities ------------------------------------------------------------
+export type {
+	CircuitBreaker,
+	CircuitBreakerOptions,
+	CircuitBreakerState,
+} from './utils/circuit-breaker.js';
+export { createCircuitBreaker } from './utils/circuit-breaker.js';
+export type {
+	HealthMonitor,
+	HealthMonitorOptions,
+	HealthSnapshot,
+	HealthStatus,
+} from './utils/health-monitor.js';
+export { createHealthMonitor } from './utils/health-monitor.js';
 export type { RetryOptions } from './utils/retry.js';
 export {
 	createRetryExhaustedError,
@@ -386,3 +404,5 @@ export {
 	retry,
 	sleep,
 } from './utils/retry.js';
+export type { TimeoutOptions } from './utils/timeout.js';
+export { withTimeout } from './utils/timeout.js';

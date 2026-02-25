@@ -69,6 +69,12 @@ export {
 	isProviderUnavailableError,
 } from './provider.js';
 export {
+	createCircuitBreakerOpenError,
+	createTimeoutError,
+	isCircuitBreakerOpenError,
+	isTimeoutError,
+} from './resilience.js';
+export {
 	createTaskCircularDependencyError,
 	createTaskError,
 	createTaskNotFoundError,

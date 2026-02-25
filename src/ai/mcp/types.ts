@@ -28,6 +28,11 @@ export interface MCPClientConfig {
 	readonly clientName?: string;
 	/** Client version advertised during MCP handshake. Required when connecting to servers. */
 	readonly clientVersion?: string;
+	/** Circuit breaker configuration applied per-server. */
+	readonly circuitBreaker?: {
+		readonly failureThreshold?: number;
+		readonly resetTimeoutMs?: number;
+	};
 }
 
 export interface MCPServerConfig {

@@ -199,6 +199,7 @@ const TRANSIENT_CODES = new Set([
 	'PROVIDER_TIMEOUT',
 	'PROVIDER_UNAVAILABLE',
 	'MCP_CONNECTION_ERROR',
+	'OPERATION_TIMEOUT',
 ]);
 
 export function isTransientError(error: unknown): boolean {

@@ -30,6 +30,16 @@ export interface AgenticLoopOptions {
 	readonly autoCompact?: boolean;
 	/** Provider for summarizing conversation during auto-compaction. */
 	readonly compactionProvider?: TextGenerationProvider;
+	/** Retry config for the generateStream call within each turn. */
+	readonly streamRetry?: {
+		readonly maxAttempts?: number;
+		readonly baseDelayMs?: number;
+	};
+	/** Retry config for tool execution when results look transient. */
+	readonly toolRetry?: {
+		readonly maxAttempts?: number;
+		readonly baseDelayMs?: number;
+	};
 }
 
 // ---------------------------------------------------------------------------

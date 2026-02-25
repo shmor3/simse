@@ -21,6 +21,15 @@ import {
 	toError,
 } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
+import {
+	type CircuitBreaker,
+	createCircuitBreaker,
+} from '../../utils/circuit-breaker.js';
+import {
+	createHealthMonitor,
+	type HealthMonitor,
+	type HealthSnapshot,
+} from '../../utils/health-monitor.js';
 import { isTransientError, retry } from '../../utils/retry.js';
 import type {
 	MCPClientConfig,
@@ -100,6 +109,7 @@ export interface MCPClient {
 	readonly sendRootsListChanged: () => Promise<void>;
 	readonly setRoots: (roots: MCPRoot[]) => void;
 	readonly roots: readonly MCPRoot[];
+	readonly getServerHealth: (serverName: string) => HealthSnapshot | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +122,10 @@ export function createMCPClient(
 ): MCPClient {
 	const logger = (loggerOpt ?? getDefaultLogger()).child('mcp-client');
 	const connections = new Map<string, ConnectedServer>();
+
+	// Per-server circuit breakers and health monitors
+	const breakers = new Map<string, CircuitBreaker>();
+	const monitors = new Map<string, HealthMonitor>();
 
 	// -----------------------------------------------------------------------
 	// Notification handler registries
@@ -267,7 +281,21 @@ export function createMCPClient(
 		});
 
 		try {
-			await client.connect(transport);
+			await retry(
+				async () => {
+					await client.connect(transport);
+				},
+				{
+					maxAttempts: 3,
+					baseDelayMs: 1000,
+					shouldRetry: (error) => isTransientError(error),
+					onRetry: (_error, nextAttempt, delayMs) => {
+						logger.warn(
+							`MCP connect to "${serverName}" failed, retrying in ${delayMs}ms (attempt ${nextAttempt})`,
+						);
+					},
+				},
+			);
 		} catch (error) {
 			// Close the transport to prevent resource leak (orphaned child process, etc.)
 			try {
@@ -283,6 +311,25 @@ export function createMCPClient(
 				{ cause: error },
 			);
 		}
+
+		// Create circuit breaker and health monitor for this server
+		if (config.circuitBreaker) {
+			breakers.set(
+				serverName,
+				createCircuitBreaker({
+					name: `mcp:${serverName}`,
+					failureThreshold: config.circuitBreaker.failureThreshold,
+					resetTimeoutMs: config.circuitBreaker.resetTimeoutMs,
+					shouldCount: isTransientError,
+					onStateChange: (from, to) => {
+						logger.warn(
+							`Circuit breaker for MCP server "${serverName}": ${from} → ${to}`,
+						);
+					},
+				}),
+			);
+		}
+		monitors.set(serverName, createHealthMonitor());
 
 		// Register notification handlers
 		client.setNotificationHandler(
@@ -363,6 +410,8 @@ export function createMCPClient(
 		}
 
 		connections.delete(serverName);
+		breakers.delete(serverName);
+		monitors.delete(serverName);
 		logger.info(`Disconnected from MCP server "${serverName}"`);
 	};
 
@@ -388,7 +437,11 @@ export function createMCPClient(
 
 		for (const [name, conn] of servers) {
 			try {
-				const response = await conn.client.listTools();
+				const response = await retry(async () => conn.client.listTools(), {
+					maxAttempts: 2,
+					baseDelayMs: 500,
+					shouldRetry: (error) => isTransientError(error),
+				});
 				for (const tool of response.tools) {
 					const annotations = (tool as Record<string, unknown>).annotations as
 						| Record<string, unknown>
@@ -436,83 +489,96 @@ export function createMCPClient(
 		toolName: string,
 		args: Record<string, unknown>,
 	): Promise<MCPToolResult> => {
-		return retry(
-			async () => {
-				const conn = getConnection(serverName);
+		const breaker = breakers.get(serverName);
+		const monitor = monitors.get(serverName);
 
-				logger.debug(`Calling tool "${toolName}" on server "${serverName}"`, {
-					argKeys: Object.keys(args),
-				});
+		const retryFn = () =>
+			retry(
+				async () => {
+					const conn = getConnection(serverName);
 
-				const startedAt = new Date().toISOString();
-				const startMs = performance.now();
-
-				let response: Awaited<ReturnType<Client['callTool']>>;
-				try {
-					response = await conn.client.callTool({
-						name: toolName,
-						arguments: args,
+					logger.debug(`Calling tool "${toolName}" on server "${serverName}"`, {
+						argKeys: Object.keys(args),
 					});
-				} catch (error) {
-					throw createMCPToolError(
-						serverName,
-						toolName,
-						`Tool call failed: ${toError(error).message}`,
-						{ cause: error },
-					);
-				}
 
-				const durationMs = performance.now() - startMs;
+					const startedAt = new Date().toISOString();
+					const startMs = performance.now();
 
-				const rawContent = (response.content ?? []) as Array<{
-					type: string;
-					text?: string;
-					[key: string]: unknown;
-				}>;
+					let response: Awaited<ReturnType<Client['callTool']>>;
+					try {
+						response = await conn.client.callTool({
+							name: toolName,
+							arguments: args,
+						});
+					} catch (error) {
+						throw createMCPToolError(
+							serverName,
+							toolName,
+							`Tool call failed: ${toError(error).message}`,
+							{ cause: error },
+						);
+					}
 
-				const textParts = rawContent
-					.filter(
-						(item): item is typeof item & { text: string } =>
-							item.type === 'text' &&
-							typeof item.text === 'string' &&
-							item.text.length > 0,
-					)
-					.map((item) => item.text);
+					const durationMs = performance.now() - startMs;
 
-				const result: MCPToolResult = {
-					content: textParts.join('\n'),
-					isError: response.isError === true,
-					rawContent,
-					metrics: {
-						durationMs,
-						serverName,
-						toolName,
-						startedAt,
-					},
-				};
+					const rawContent = (response.content ?? []) as Array<{
+						type: string;
+						text?: string;
+						[key: string]: unknown;
+					}>;
 
-				if (result.isError) {
-					logger.warn(
-						`Tool "${toolName}" on "${serverName}" returned an error`,
-						{
-							content: result.content.slice(0, 200),
+					const textParts = rawContent
+						.filter(
+							(item): item is typeof item & { text: string } =>
+								item.type === 'text' &&
+								typeof item.text === 'string' &&
+								item.text.length > 0,
+						)
+						.map((item) => item.text);
+
+					const result: MCPToolResult = {
+						content: textParts.join('\n'),
+						isError: response.isError === true,
+						rawContent,
+						metrics: {
+							durationMs,
+							serverName,
+							toolName,
+							startedAt,
 						},
-					);
-				} else {
-					logger.debug(`Tool "${toolName}" completed successfully`, {
-						contentLength: result.content.length,
-						durationMs,
-					});
-				}
+					};
 
-				return result;
-			},
-			{
-				maxAttempts: 2,
-				baseDelayMs: 500,
-				shouldRetry: (error) => isTransientError(error),
-			},
-		);
+					if (result.isError) {
+						logger.warn(
+							`Tool "${toolName}" on "${serverName}" returned an error`,
+							{
+								content: result.content.slice(0, 200),
+							},
+						);
+					} else {
+						logger.debug(`Tool "${toolName}" completed successfully`, {
+							contentLength: result.content.length,
+							durationMs,
+						});
+					}
+
+					return result;
+				},
+				{
+					maxAttempts: 2,
+					baseDelayMs: 500,
+					shouldRetry: (error) => isTransientError(error),
+				},
+			);
+
+		try {
+			const result = breaker ? await breaker.execute(retryFn) : await retryFn();
+			monitor?.recordSuccess();
+			return result;
+		} catch (error) {
+			monitor?.recordFailure(error instanceof Error ? error : undefined);
+			throw error;
+		}
 	};
 
 	// -----------------------------------------------------------------------
@@ -527,7 +593,11 @@ export function createMCPClient(
 
 		for (const [name, conn] of servers) {
 			try {
-				const response = await conn.client.listResources();
+				const response = await retry(async () => conn.client.listResources(), {
+					maxAttempts: 2,
+					baseDelayMs: 500,
+					shouldRetry: (error) => isTransientError(error),
+				});
 				for (const res of response.resources) {
 					results.push({
 						serverName: name,
@@ -557,37 +627,50 @@ export function createMCPClient(
 		serverName: string,
 		uri: string,
 	): Promise<string> => {
-		return retry(
-			async () => {
-				const conn = getConnection(serverName);
+		const breaker = breakers.get(serverName);
+		const monitor = monitors.get(serverName);
 
-				logger.debug(`Reading resource "${uri}" from server "${serverName}"`);
+		const retryFn = () =>
+			retry(
+				async () => {
+					const conn = getConnection(serverName);
 
-				let response: Awaited<ReturnType<Client['readResource']>>;
-				try {
-					response = await conn.client.readResource({ uri });
-				} catch (error) {
-					throw createMCPError(
-						`Failed to read resource "${uri}" from server "${serverName}": ${toError(error).message}`,
-						{
-							code: 'MCP_READ_RESOURCE_FAILED',
-							cause: error,
-							metadata: { serverName, uri },
-						},
-					);
-				}
+					logger.debug(`Reading resource "${uri}" from server "${serverName}"`);
 
-				const first = response.contents[0];
-				if (!first) return '';
-				if ('text' in first) return first.text as string;
-				return JSON.stringify(first);
-			},
-			{
-				maxAttempts: 2,
-				baseDelayMs: 500,
-				shouldRetry: (error) => isTransientError(error),
-			},
-		);
+					let response: Awaited<ReturnType<Client['readResource']>>;
+					try {
+						response = await conn.client.readResource({ uri });
+					} catch (error) {
+						throw createMCPError(
+							`Failed to read resource "${uri}" from server "${serverName}": ${toError(error).message}`,
+							{
+								code: 'MCP_READ_RESOURCE_FAILED',
+								cause: error,
+								metadata: { serverName, uri },
+							},
+						);
+					}
+
+					const first = response.contents[0];
+					if (!first) return '';
+					if ('text' in first) return first.text as string;
+					return JSON.stringify(first);
+				},
+				{
+					maxAttempts: 2,
+					baseDelayMs: 500,
+					shouldRetry: (error) => isTransientError(error),
+				},
+			);
+
+		try {
+			const result = breaker ? await breaker.execute(retryFn) : await retryFn();
+			monitor?.recordSuccess();
+			return result;
+		} catch (error) {
+			monitor?.recordFailure(error instanceof Error ? error : undefined);
+			throw error;
+		}
 	};
 
 	// -----------------------------------------------------------------------
@@ -600,7 +683,11 @@ export function createMCPClient(
 
 		for (const [name, conn] of servers) {
 			try {
-				const response = await conn.client.listPrompts();
+				const response = await retry(async () => conn.client.listPrompts(), {
+					maxAttempts: 2,
+					baseDelayMs: 500,
+					shouldRetry: (error) => isTransientError(error),
+				});
 				for (const prompt of response.prompts) {
 					results.push({
 						serverName: name,
@@ -739,6 +826,10 @@ export function createMCPClient(
 	// Roots
 	// -----------------------------------------------------------------------
 
+	const getServerHealth = (serverName: string): HealthSnapshot | undefined => {
+		return monitors.get(serverName)?.getHealth();
+	};
+
 	const setRoots = (roots: MCPRoot[]): void => {
 		currentRoots = [...roots];
 	};
@@ -821,6 +912,7 @@ export function createMCPClient(
 		onResourcesChanged,
 		onPromptsChanged,
 		complete,
+		getServerHealth,
 		sendRootsListChanged,
 		setRoots,
 		get roots() {

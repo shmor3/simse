@@ -53,6 +53,7 @@ function createMockACPClient(
 		deleteSession: mock(() => Promise.resolve()),
 		setSessionMode: mock(() => Promise.resolve()),
 		setSessionModel: mock(() => Promise.resolve()),
+		getServerHealth: mock(() => undefined),
 		serverNames: ['test'],
 		serverCount: 1,
 		defaultServerName: 'test',
@@ -324,5 +325,118 @@ describe('createAgenticLoop', () => {
 
 		expect(compactionProvider.generate).toHaveBeenCalled();
 		expect(compactions).toEqual(['summary of conversation']);
+	});
+
+	it('retries stream on transient error', async () => {
+		let streamCalls = 0;
+		const acpClient = createMockACPClient();
+		(acpClient as any).generateStream = async function* () {
+			streamCalls++;
+			if (streamCalls === 1) {
+				// First attempt: throw transient error (must match isTransientError patterns)
+				const err = new Error('ECONNRESET');
+				throw err;
+			}
+			// Second attempt: succeed
+			yield { type: 'delta' as const, text: 'recovered' };
+			yield { type: 'complete' as const, usage: undefined };
+		};
+
+		const loop = createAgenticLoop({
+			acpClient,
+			toolRegistry: createToolRegistry({}),
+			conversation: createConversation(),
+			streamRetry: { maxAttempts: 3, baseDelayMs: 10 },
+		});
+
+		const result = await loop.run('test');
+		expect(result.finalText).toBe('recovered');
+		expect(streamCalls).toBe(2);
+	});
+
+	it('retries tool execution on transient-looking error', async () => {
+		let toolCalls = 0;
+		const acpClient = createMockACPClient([
+			'<tool_use>\n{"name": "flaky", "arguments": {}}\n</tool_use>',
+			'done',
+		]);
+
+		const toolRegistry = createToolRegistry({});
+		toolRegistry.register(
+			{ name: 'flaky', description: 'flaky tool', parameters: {} },
+			async () => {
+				toolCalls++;
+				if (toolCalls === 1) {
+					// Return transient-looking error on first call
+					throw new Error('timeout waiting for response');
+				}
+				return 'success';
+			},
+		);
+
+		const loop = createAgenticLoop({
+			acpClient,
+			toolRegistry,
+			conversation: createConversation(),
+			toolRetry: { maxAttempts: 3, baseDelayMs: 10 },
+		});
+
+		const result = await loop.run('test');
+		expect(result.turns[0].toolResults?.[0].output).toBe('success');
+		expect(toolCalls).toBe(2);
+	});
+
+	it('does not retry tool on non-transient error', async () => {
+		let toolCalls = 0;
+		const acpClient = createMockACPClient([
+			'<tool_use>\n{"name": "bad", "arguments": {}}\n</tool_use>',
+			'done',
+		]);
+
+		const toolRegistry = createToolRegistry({});
+		toolRegistry.register(
+			{ name: 'bad', description: 'bad tool', parameters: {} },
+			async () => {
+				toolCalls++;
+				throw new Error('invalid argument provided');
+			},
+		);
+
+		const loop = createAgenticLoop({
+			acpClient,
+			toolRegistry,
+			conversation: createConversation(),
+			toolRetry: { maxAttempts: 3, baseDelayMs: 10 },
+		});
+
+		await loop.run('test');
+		// Tool registry catches the throw and returns isError: true with the message,
+		// but the message does not match transient patterns so no retry
+		expect(toolCalls).toBe(1);
+	});
+
+	it('stream retry exhausts and reports error', async () => {
+		const acpClient = createMockACPClient();
+		// biome-ignore lint/correctness/useYield: test needs a throwing generator
+		(acpClient as any).generateStream = async function* () {
+			const err = new Error('ETIMEDOUT');
+			throw err;
+		};
+
+		const errors: string[] = [];
+
+		const loop = createAgenticLoop({
+			acpClient,
+			toolRegistry: createToolRegistry({}),
+			conversation: createConversation(),
+			streamRetry: { maxAttempts: 2, baseDelayMs: 10 },
+		});
+
+		const result = await loop.run('test', {
+			onError: (err) => errors.push(err.message),
+		});
+
+		expect(errors.length).toBeGreaterThan(0);
+		expect(result.finalText).toContain('Error');
 	});
 });

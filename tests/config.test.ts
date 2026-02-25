@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import {
 	formatValidationIssues,
 	type ValidationIssue,
@@ -35,7 +35,7 @@ describe('ACPServerEntrySchema', () => {
 		const result = validateACPServerEntry(
 			{
 				name: 'local',
-				url: 'http://localhost:8000',
+				command: 'echo',
 				defaultAgent: 'my-agent',
 				timeoutMs: 30000,
 			},
@@ -48,64 +48,40 @@ describe('ACPServerEntrySchema', () => {
 		const result = validateACPServerEntry(
 			{
 				name: '',
-				url: 'http://localhost:8000',
+				command: 'echo',
 			},
 			'server',
 		);
 		expect(hasIssues(result)).toBe(true);
 	});
 
-	it('should reject invalid URL', () => {
+	it('should reject empty command', () => {
 		const result = validateACPServerEntry(
 			{
 				name: 'bad',
-				url: 'not-a-url',
+				command: '',
 			},
 			'server',
 		);
 		expect(hasIssues(result)).toBe(true);
 	});
 
-	it('should accept URL without defaultAgent', () => {
+	it('should accept command without defaultAgent', () => {
 		const result = validateACPServerEntry(
 			{
 				name: 'local',
-				url: 'http://localhost:8000',
+				command: 'echo',
 			},
 			'server',
 		);
 		expect(isValid(result)).toBe(true);
-	});
-
-	it('should accept optional apiKey', () => {
-		const result = validateACPServerEntry(
-			{
-				name: 'local',
-				url: 'http://localhost:8000',
-				apiKey: 'my-key',
-			},
-			'server',
-		);
-		expect(isValid(result)).toBe(true);
-	});
-
-	it('should reject empty apiKey', () => {
-		const result = validateACPServerEntry(
-			{
-				name: 'local',
-				url: 'http://localhost:8000',
-				apiKey: '',
-			},
-			'server',
-		);
-		expect(hasIssues(result)).toBe(true);
 	});
 
 	it('should reject empty defaultAgent', () => {
 		const result = validateACPServerEntry(
 			{
 				name: 'local',
-				url: 'http://localhost:8000',
+				command: 'echo',
 				defaultAgent: '',
 			},
 			'server',
@@ -117,7 +93,7 @@ describe('ACPServerEntrySchema', () => {
 		const result = validateACPServerEntry(
 			{
 				name: 'local',
-				url: 'http://localhost:8000',
+				command: 'echo',
 			},
 			'server',
 		);
@@ -128,7 +104,7 @@ describe('ACPServerEntrySchema', () => {
 		const result = validateACPServerEntry(
 			{
 				name: 'local',
-				url: 'http://localhost:8000',
+				command: 'echo',
 				timeoutMs: 500,
 			},
 			'server',
@@ -140,7 +116,7 @@ describe('ACPServerEntrySchema', () => {
 		const result = validateACPServerEntry(
 			{
 				name: 'local',
-				url: 'http://localhost:8000',
+				command: 'echo',
 				timeoutMs: 700_000,
 			},
 			'server',
@@ -152,7 +128,7 @@ describe('ACPServerEntrySchema', () => {
 		const result = validateACPServerEntry(
 			{
 				name: 'local',
-				url: 'http://localhost:8000',
+				command: 'echo',
 				timeoutMs: 1500.5,
 			},
 			'server',
@@ -169,7 +145,7 @@ describe('ACPConfigSchema', () => {
 	it('should accept valid config with one server', () => {
 		const result = validateACPConfig(
 			{
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 			'acp',
 		);
@@ -179,7 +155,7 @@ describe('ACPConfigSchema', () => {
 	it('should accept config with defaultServer and defaultAgent', () => {
 		const result = validateACPConfig(
 			{
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 				defaultServer: 'local',
 				defaultAgent: 'agent-1',
 			},
@@ -192,8 +168,8 @@ describe('ACPConfigSchema', () => {
 		const result = validateACPConfig(
 			{
 				servers: [
-					{ name: 'local', url: 'http://localhost:8000' },
-					{ name: 'remote', url: 'https://api.example.com' },
+					{ name: 'local', command: 'echo' },
+					{ name: 'remote', command: 'remote-agent' },
 				],
 			},
 			'acp',
@@ -214,7 +190,7 @@ describe('ACPConfigSchema', () => {
 	it('should reject empty defaultServer', () => {
 		const result = validateACPConfig(
 			{
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 				defaultServer: '',
 			},
 			'acp',
@@ -225,7 +201,7 @@ describe('ACPConfigSchema', () => {
 	it('should reject empty defaultAgent', () => {
 		const result = validateACPConfig(
 			{
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 				defaultAgent: '',
 			},
 			'acp',
@@ -263,17 +239,6 @@ describe('MCPServerConnectionSchema', () => {
 				'mcp',
 			);
 			expect(isValid(result)).toBe(true);
-		});
-
-		it('should reject stdio without command', () => {
-			const result = validateMCPServerConnection(
-				{
-					name: 'local',
-					transport: 'stdio',
-				},
-				'mcp',
-			);
-			expect(hasIssues(result)).toBe(true);
 		});
 
 		it('should reject empty command', () => {
@@ -314,17 +279,6 @@ describe('MCPServerConnectionSchema', () => {
 			expect(isValid(result)).toBe(true);
 		});
 
-		it('should reject http without url', () => {
-			const result = validateMCPServerConnection(
-				{
-					name: 'remote',
-					transport: 'http',
-				},
-				'mcp',
-			);
-			expect(hasIssues(result)).toBe(true);
-		});
-
 		it('should reject invalid url', () => {
 			const result = validateMCPServerConnection(
 				{
@@ -348,17 +302,6 @@ describe('MCPServerConnectionSchema', () => {
 			);
 			expect(hasIssues(result)).toBe(true);
 		});
-	});
-
-	it('should reject unknown transport type', () => {
-		const result = validateMCPServerConnection(
-			{
-				name: 'x',
-				transport: 'grpc',
-			},
-			'mcp',
-		);
-		expect(hasIssues(result)).toBe(true);
 	});
 });
 
@@ -388,7 +331,7 @@ describe('MCPClientConfigSchema', () => {
 	it('should reject invalid server configs in the array', () => {
 		const result = validateMCPClientConfig(
 			{
-				servers: [{ name: '', transport: 'stdio' }],
+				servers: [{ name: '', transport: 'stdio', command: 'node' }],
 			},
 			'mcp.client',
 		);
@@ -472,17 +415,47 @@ describe('MemoryConfigSchema', () => {
 		expect(hasIssues(result)).toBe(true);
 	});
 
-	it('should accept enabled memory with embeddingAgent', () => {
+	it('should accept enabled memory with all required fields', () => {
 		const result = validateMemoryConfig(
-			{ enabled: true, embeddingAgent: 'embed-model' },
+			{
+				enabled: true,
+				embeddingAgent: 'embed-model',
+				similarityThreshold: 0.7,
+				maxResults: 5,
+			},
 			'memory',
 		);
 		expect(isValid(result)).toBe(true);
 	});
 
-	it('should accept optional embeddingAgent', () => {
+	it('should reject enabled memory without similarityThreshold', () => {
 		const result = validateMemoryConfig(
 			{
+				enabled: true,
+				embeddingAgent: 'embed-model',
+				maxResults: 5,
+			},
+			'memory',
+		);
+		expect(hasIssues(result)).toBe(true);
+	});
+
+	it('should reject enabled memory without maxResults', () => {
+		const result = validateMemoryConfig(
+			{
+				enabled: true,
+				embeddingAgent: 'embed-model',
+				similarityThreshold: 0.7,
+			},
+			'memory',
+		);
+		expect(hasIssues(result)).toBe(true);
+	});
+
+	it('should accept disabled memory with only embeddingAgent', () => {
+		const result = validateMemoryConfig(
+			{
+				enabled: false,
 				embeddingAgent: 'embed-model',
 			},
 			'memory',
@@ -494,16 +467,6 @@ describe('MemoryConfigSchema', () => {
 		const result = validateMemoryConfig(
 			{
 				embeddingAgent: '',
-			},
-			'memory',
-		);
-		expect(hasIssues(result)).toBe(true);
-	});
-
-	it('should reject empty storePath', () => {
-		const result = validateMemoryConfig(
-			{
-				storePath: '',
 			},
 			'memory',
 		);
@@ -684,33 +647,19 @@ describe('ChainStepDefinitionSchema', () => {
 
 	it('should accept all valid providers', () => {
 		for (const provider of ['acp', 'mcp', 'memory'] as const) {
-			const input: Record<string, unknown> = {
-				name: 'step1',
-				template: 'Do something',
-				provider,
-			};
-
-			// MCP requires extra fields
-			if (provider === 'mcp') {
-				input.mcpServerName = 'server';
-				input.mcpToolName = 'tool';
-			}
-
-			const result = validateChainStepDefinition(input, 'step');
+			const result = validateChainStepDefinition(
+				{
+					name: 'step1',
+					template: 'Do something',
+					provider,
+					...(provider === 'mcp'
+						? { mcpServerName: 'server', mcpToolName: 'tool' }
+						: {}),
+				},
+				'step',
+			);
 			expect(isValid(result)).toBe(true);
 		}
-	});
-
-	it('should reject invalid provider', () => {
-		const result = validateChainStepDefinition(
-			{
-				name: 'step1',
-				template: 'Do something',
-				provider: 'openai',
-			},
-			'step',
-		);
-		expect(hasIssues(result)).toBe(true);
 	});
 
 	it('should require mcpServerName when provider is mcp', () => {
@@ -861,32 +810,19 @@ describe('ChainDefinitionSchema', () => {
 
 describe('ProviderSchema', () => {
 	it('should accept all valid providers', () => {
-		for (const provider of ['acp', 'mcp', 'memory']) {
-			const input: Record<string, unknown> = {
-				name: 'step1',
-				template: 'Do something',
-				provider,
-			};
-			if (provider === 'mcp') {
-				input.mcpServerName = 'srv';
-				input.mcpToolName = 'tl';
-			}
-			const result = validateChainStepDefinition(input, 'step');
-			expect(isValid(result)).toBe(true);
-		}
-	});
-
-	it('should reject invalid providers', () => {
-		for (const provider of ['openai', 'anthropic', '']) {
+		for (const provider of ['acp', 'mcp', 'memory'] as const) {
 			const result = validateChainStepDefinition(
 				{
 					name: 'step1',
 					template: 'Do something',
 					provider,
+					...(provider === 'mcp'
+						? { mcpServerName: 'srv', mcpToolName: 'tl' }
+						: {}),
 				},
 				'step',
 			);
-			expect(hasIssues(result)).toBe(true);
+			expect(isValid(result)).toBe(true);
 		}
 	});
 });
@@ -899,7 +835,7 @@ describe('AppConfigSchema', () => {
 	it('should accept a valid config', () => {
 		const result = validateAppConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 				defaultServer: 'local',
 				defaultAgent: 'agent-1',
 			},
@@ -910,7 +846,7 @@ describe('AppConfigSchema', () => {
 	it('should accept config with only acp', () => {
 		const result = validateAppConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 		});
 		expect(isValid(result)).toBe(true);
@@ -922,7 +858,7 @@ describe('AppConfigSchema', () => {
 				servers: [
 					{
 						name: 'local',
-						url: 'http://localhost:8000',
+						command: 'echo',
 						defaultAgent: 'agent-1',
 					},
 				],
@@ -932,7 +868,6 @@ describe('AppConfigSchema', () => {
 			memory: {
 				enabled: true,
 				embeddingAgent: 'embed-model',
-				storePath: './data',
 				similarityThreshold: 0.8,
 				maxResults: 10,
 			},
@@ -954,11 +889,6 @@ describe('AppConfigSchema', () => {
 		expect(isValid(result)).toBe(true);
 	});
 
-	it('should reject config without acp', () => {
-		const result = validateAppConfig({});
-		expect(hasIssues(result)).toBe(true);
-	});
-
 	it('should reject config with empty acp servers', () => {
 		const result = validateAppConfig({
 			acp: {
@@ -978,7 +908,7 @@ describe('formatValidationIssues', () => {
 		const issues = validateACPServerEntry(
 			{
 				name: '',
-				url: 'not-a-url',
+				command: '',
 			},
 			'server',
 		);
@@ -1013,7 +943,7 @@ describe('defineConfig — basic validation', () => {
 	it('should accept a valid minimal config', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 				defaultServer: 'local',
 				defaultAgent: 'agent-1',
 			},
@@ -1052,19 +982,19 @@ describe('defineConfig — basic validation', () => {
 	it('should merge partial config with defaults', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 			memory: {
 				enabled: true,
 				embeddingAgent: 'embed-model',
+				similarityThreshold: 0.7,
 				maxResults: 20,
 			},
 		});
 
-		// Memory defaults
+		// Memory
 		expect(config.memory.enabled).toBe(true);
 		expect(config.memory.embeddingAgent).toBe('embed-model');
-		expect(config.memory.storePath).toBe('.simse/memory');
 		expect(config.memory.similarityThreshold).toBe(0.7);
 		expect(config.memory.maxResults).toBe(20);
 	});
@@ -1072,7 +1002,7 @@ describe('defineConfig — basic validation', () => {
 	it('should produce a complete AppConfig with all required fields', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 		});
 
@@ -1086,8 +1016,6 @@ describe('defineConfig — basic validation', () => {
 
 		// MCP defaults
 		expect(config.mcp.server.enabled).toBe(false);
-		expect(config.mcp.server.name).toBe('simse');
-		expect(config.mcp.server.version).toBe('1.0.0');
 		expect(config.mcp.client.servers).toHaveLength(0);
 	});
 });
@@ -1100,7 +1028,7 @@ describe('defineConfig — chains', () => {
 	it('should validate valid chain definitions', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 			chains: {
 				'blog-writer': {
@@ -1128,7 +1056,7 @@ describe('defineConfig — chains', () => {
 	it('should accept multiple chains', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 			chains: {
 				chain1: {
@@ -1150,7 +1078,7 @@ describe('defineConfig — chains', () => {
 		expect(() =>
 			defineConfig({
 				acp: {
-					servers: [{ name: 'local', url: 'http://localhost:8000' }],
+					servers: [{ name: 'local', command: 'echo' }],
 				},
 				chains: {
 					bad: {
@@ -1165,7 +1093,7 @@ describe('defineConfig — chains', () => {
 					servers: [
 						{
 							name: 'valid',
-							url: 'http://localhost:8000',
+							command: 'echo',
 						},
 					],
 				},
@@ -1188,7 +1116,7 @@ describe('defineConfig — chains', () => {
 		expect(() =>
 			defineConfig({
 				acp: {
-					servers: [{ name: 'local', url: 'http://localhost:8000' }],
+					servers: [{ name: 'local', command: 'echo' }],
 				},
 				chains: {
 					empty: {
@@ -1200,7 +1128,7 @@ describe('defineConfig — chains', () => {
 		try {
 			defineConfig({
 				acp: {
-					servers: [{ name: 'valid', url: 'http://localhost:8000' }],
+					servers: [{ name: 'valid', command: 'echo' }],
 				},
 				chains: {
 					test: {
@@ -1221,7 +1149,7 @@ describe('defineConfig — chains', () => {
 	it('should handle chains with all optional fields', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 			chains: {
 				minimal: {
@@ -1238,7 +1166,7 @@ describe('defineConfig — chains', () => {
 	it('should accept chain with provider-specific steps', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 			chains: {
 				mixed: {
@@ -1276,90 +1204,11 @@ describe('defineConfig — chains', () => {
 	it('should default chains to empty when omitted', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 		});
 
 		expect(config.chains).toEqual({});
-	});
-});
-
-// ===========================================================================
-// defineConfig — environment variables
-// ===========================================================================
-
-describe('defineConfig — environment variables', () => {
-	const originalEnv = { ...process.env };
-
-	beforeEach(() => {
-		// Clean up any ACP_API_KEY_ env vars
-		for (const key of Object.keys(process.env)) {
-			if (key.startsWith('ACP_API_KEY_')) {
-				delete process.env[key];
-			}
-		}
-	});
-
-	afterEach(() => {
-		// Restore environment
-		for (const key of Object.keys(process.env)) {
-			if (key.startsWith('ACP_API_KEY_')) {
-				delete process.env[key];
-			}
-		}
-		Object.assign(process.env, originalEnv);
-	});
-
-	it('should use ACP_API_KEY_<NAME> env var when set', () => {
-		process.env.ACP_API_KEY_LOCAL = 'env-key-123';
-
-		const config = defineConfig({
-			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
-			},
-		});
-
-		expect(config.acp.servers[0].apiKey).toBe('env-key-123');
-	});
-
-	it('should not override explicit apiKey with env var', () => {
-		process.env.ACP_API_KEY_LOCAL = 'env-key';
-
-		const config = defineConfig({
-			acp: {
-				servers: [
-					{
-						name: 'local',
-						url: 'http://localhost:8000',
-						apiKey: 'explicit-key',
-					},
-				],
-			},
-		});
-
-		expect(config.acp.servers[0].apiKey).toBe('explicit-key');
-	});
-
-	it('should handle hyphenated server names in env var lookup', () => {
-		process.env.ACP_API_KEY_MY_SERVER = 'hyphen-key';
-
-		const config = defineConfig({
-			acp: {
-				servers: [{ name: 'my-server', url: 'http://localhost:8000' }],
-			},
-		});
-
-		expect(config.acp.servers[0].apiKey).toBe('hyphen-key');
-	});
-
-	it('should not set apiKey when env var is not present', () => {
-		const config = defineConfig({
-			acp: {
-				servers: [{ name: 'no-env-var', url: 'http://localhost:8000' }],
-			},
-		});
-
-		expect(config.acp.servers[0].apiKey).toBeUndefined();
 	});
 });
 
@@ -1371,7 +1220,7 @@ describe('defineConfig — MCP', () => {
 	it('should accept MCP client server connections', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 			mcp: {
 				client: {
@@ -1400,7 +1249,7 @@ describe('defineConfig — MCP', () => {
 	it('should accept MCP server mode config', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 			mcp: {
 				server: {
@@ -1419,7 +1268,7 @@ describe('defineConfig — MCP', () => {
 	it('should default MCP server to disabled', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 		});
 
@@ -1429,7 +1278,7 @@ describe('defineConfig — MCP', () => {
 	it('should default MCP clients to empty', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 		});
 
@@ -1448,7 +1297,7 @@ describe('defineConfig — lenient mode', () => {
 		const config = defineConfig(
 			{
 				acp: {
-					servers: [{ name: 'local', url: 'http://localhost:8000' }],
+					servers: [{ name: 'local', command: 'echo' }],
 				},
 				chains: {
 					bad: {
@@ -1476,7 +1325,7 @@ describe('defineConfig — lenient mode', () => {
 		defineConfig(
 			{
 				acp: {
-					servers: [{ name: 'local', url: 'http://localhost:8000' }],
+					servers: [{ name: 'local', command: 'echo' }],
 				},
 				chains: {
 					bad: {
@@ -1505,12 +1354,12 @@ describe('defineConfig — full integration', () => {
 				servers: [
 					{
 						name: 'local',
-						url: 'http://localhost:8000',
+						command: 'echo',
 						defaultAgent: 'default-agent',
 					},
 					{
 						name: 'remote',
-						url: 'https://api.example.com',
+						command: 'remote-agent',
 						defaultAgent: 'remote-agent',
 					},
 				],
@@ -1520,7 +1369,8 @@ describe('defineConfig — full integration', () => {
 			memory: {
 				enabled: true,
 				embeddingAgent: 'embed-model',
-				storePath: '.my-app/memory',
+				similarityThreshold: 0.7,
+				maxResults: 5,
 			},
 			mcp: {
 				client: {
@@ -1590,7 +1440,6 @@ describe('defineConfig — full integration', () => {
 		// Memory
 		expect(config.memory.enabled).toBe(true);
 		expect(config.memory.embeddingAgent).toBe('embed-model');
-		expect(config.memory.storePath).toBe('.my-app/memory');
 		expect(config.memory.similarityThreshold).toBe(0.7);
 		expect(config.memory.maxResults).toBe(5);
 
@@ -1612,7 +1461,7 @@ describe('defineConfig — full integration', () => {
 	it('should apply timeoutMs default to servers', () => {
 		const config = defineConfig({
 			acp: {
-				servers: [{ name: 'local', url: 'http://localhost:8000' }],
+				servers: [{ name: 'local', command: 'echo' }],
 			},
 		});
 
@@ -1625,7 +1474,7 @@ describe('defineConfig — full integration', () => {
 				servers: [
 					{
 						name: 'local',
-						url: 'http://localhost:8000',
+						command: 'echo',
 						timeoutMs: 60_000,
 					},
 				],

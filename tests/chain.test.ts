@@ -41,13 +41,13 @@ function createMockACPClient(overrides: Partial<ACPClient> = {}): ACPClient {
 			content: 'acp response',
 			agentId: 'default',
 			serverName: 'local',
-			runId: 'run-1',
+			sessionId: 'session-1',
 		} satisfies ACPGenerateResult),
 		chat: mock((..._: any[]): any => {}).mockResolvedValue({
 			content: 'acp chat response',
 			agentId: 'default',
 			serverName: 'local',
-			runId: 'run-2',
+			sessionId: 'session-2',
 		}),
 		generateStream: mock((..._: any[]): any => {}),
 		listAgents: mock((..._: any[]): any => {}).mockResolvedValue([]),
@@ -80,6 +80,12 @@ function createMockMCPClient(overrides: Partial<MCPClient> = {}): MCPClient {
 			content: 'tool result',
 			isError: false,
 			rawContent: [{ type: 'text', text: 'tool result' }],
+			metrics: {
+				durationMs: 50,
+				serverName: 'test-server',
+				toolName: 'test-tool',
+				startedAt: new Date().toISOString(),
+			},
 		} satisfies MCPToolResult),
 		listResources: mock((..._: any[]): any => {}).mockResolvedValue([]),
 		readResource: mock((..._: any[]): any => {}).mockResolvedValue(''),
@@ -119,7 +125,6 @@ function createMockMemoryManager(
 		isInitialized: true,
 		isDirty: false,
 		embeddingAgent: 'embedding',
-		storePath: '.simse/memory',
 		...overrides,
 	} as unknown as MemoryManager;
 }
@@ -130,7 +135,7 @@ function createMinimalAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 			servers: [
 				{
 					name: 'local',
-					url: 'http://localhost:8000',
+					command: 'echo',
 					defaultAgent: 'default',
 					timeoutMs: 30000,
 				},
@@ -150,7 +155,6 @@ function createMinimalAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
 		memory: {
 			enabled: false,
 			embeddingAgent: 'embedding',
-			storePath: '.simse/memory',
 			similarityThreshold: 0.7,
 			maxResults: 5,
 		},
@@ -496,6 +500,7 @@ describe('Chain', () => {
 		it('should build a chain from a definition object', () => {
 			const definition: ChainDefinition = {
 				description: 'Test chain',
+				initialValues: {},
 				steps: [
 					{
 						name: 'step1',
@@ -525,6 +530,7 @@ describe('Chain', () => {
 		it('should throw ChainError for definition with no steps', () => {
 			const definition: ChainDefinition = {
 				description: 'Empty',
+				initialValues: {},
 				steps: [],
 			};
 
@@ -547,6 +553,7 @@ describe('Chain', () => {
 		it('should apply chain-level agentId to steps without explicit agentId', () => {
 			const definition: ChainDefinition = {
 				agentId: 'custom-agent',
+				initialValues: {},
 				steps: [
 					{ name: 's1', template: 'Hello {x}' },
 					{
@@ -731,13 +738,13 @@ describe('Chain', () => {
 					content: 'outline result',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r1',
+					sessionId: 's1',
 				})
 				.mockResolvedValueOnce({
 					content: 'draft result',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r2',
+					sessionId: 's2',
 				});
 
 			const acp = createMockACPClient({
@@ -776,19 +783,19 @@ describe('Chain', () => {
 					content: 'first output',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r1',
+					sessionId: 's1',
 				})
 				.mockResolvedValueOnce({
 					content: 'second output',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r2',
+					sessionId: 's2',
 				})
 				.mockResolvedValueOnce({
 					content: 'third output',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r3',
+					sessionId: 's3',
 				});
 
 			const acp = createMockACPClient({
@@ -833,13 +840,13 @@ describe('Chain', () => {
 					content: 'agent1 output',
 					agentId: 'agent-a',
 					serverName: 'local',
-					runId: 'r1',
+					sessionId: 's1',
 				})
 				.mockResolvedValueOnce({
 					content: 'agent2 output',
 					agentId: 'agent-b',
 					serverName: 'local',
-					runId: 'r2',
+					sessionId: 's2',
 				});
 
 			const acp = createMockACPClient({
@@ -890,13 +897,13 @@ describe('Chain', () => {
 					content: 'outline text',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r1',
+					sessionId: 's1',
 				})
 				.mockResolvedValueOnce({
 					content: 'draft text',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r2',
+					sessionId: 's2',
 				});
 
 			const acp = createMockACPClient({
@@ -938,13 +945,13 @@ describe('Chain', () => {
 					content: '  padded output  ',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r1',
+					sessionId: 's1',
 				})
 				.mockResolvedValueOnce({
 					content: 'final',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r2',
+					sessionId: 's2',
 				});
 
 			const acp = createMockACPClient({
@@ -1258,7 +1265,7 @@ describe('Chain', () => {
 					content: 'ok',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r1',
+					sessionId: 's1',
 				})
 				.mockRejectedValueOnce(new Error('Step 2 failed'));
 
@@ -1422,7 +1429,7 @@ describe('Chain', () => {
 					content: 'ok',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r1',
+					sessionId: 's1',
 				})
 				.mockRejectedValueOnce(new Error('step 2 fail'));
 
@@ -1697,19 +1704,19 @@ describe('Chain', () => {
 					content: 'a',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r1',
+					sessionId: 's1',
 				})
 				.mockResolvedValueOnce({
 					content: 'b',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r2',
+					sessionId: 's2',
 				})
 				.mockResolvedValueOnce({
 					content: 'c',
 					agentId: 'default',
 					serverName: 'local',
-					runId: 'r3',
+					sessionId: 's3',
 				});
 
 			const acp = createMockACPClient({
@@ -1753,7 +1760,7 @@ describe('Chain', () => {
 						content: 'response',
 						agentId: 'default',
 						serverName: 'local',
-						runId: 'r1',
+						sessionId: 's1',
 					};
 				},
 			);
@@ -1822,7 +1829,7 @@ describe('Chain', () => {
 						content: `output-${callCount.n}`,
 						agentId: 'default',
 						serverName: 'local',
-						runId: `r${callCount.n}`,
+						sessionId: `s${callCount.n}`,
 					};
 				},
 			);
@@ -1873,6 +1880,739 @@ describe('Chain', () => {
 
 			expect(results).toHaveLength(1);
 			expect(results[0].input).toBe('Line1: multi\nline\nvalue\nLine2: done');
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// Parallel execution
+	// -----------------------------------------------------------------------
+
+	describe('run (parallel)', () => {
+		it('should execute sub-steps concurrently and concat results', async () => {
+			const callCount = { n: 0 };
+			const generateMock = mock((..._: any[]): any => {}).mockImplementation(
+				async () => {
+					callCount.n++;
+					return {
+						content: `result-${callCount.n}`,
+						agentId: 'default',
+						serverName: 'local',
+						sessionId: `s${callCount.n}`,
+					};
+				},
+			);
+			const acp = createMockACPClient({
+				generate: generateMock as unknown as ACPClient['generate'],
+			});
+
+			const chain = createChain({
+				acpClient: acp,
+				logger: silentLogger,
+			});
+
+			chain.addStep({
+				name: 'parallel-step',
+				template: createPromptTemplate('{input}'),
+				parallel: {
+					subSteps: [
+						{
+							name: 'sub-a',
+							template: createPromptTemplate('A: {input}'),
+						},
+						{
+							name: 'sub-b',
+							template: createPromptTemplate('B: {input}'),
+						},
+					],
+				},
+			});
+
+			const results = await chain.run({ input: 'hello' });
+
+			expect(results).toHaveLength(1);
+			expect(results[0].stepName).toBe('parallel-step');
+			expect(results[0].model).toBe('parallel:2');
+			expect(results[0].subResults).toHaveLength(2);
+			expect(generateMock).toHaveBeenCalledTimes(2);
+			// Default concat merge joins with \n\n
+			expect(results[0].output).toBe('result-1\n\nresult-2');
+		});
+
+		it('should use custom concatSeparator', async () => {
+			const acp = createMockACPClient();
+
+			const chain = createChain({
+				acpClient: acp,
+				logger: silentLogger,
+			});
+
+			chain.addStep({
+				name: 'sep',
+				template: createPromptTemplate('{x}'),
+				parallel: {
+					concatSeparator: ' | ',
+					subSteps: [
+						{
+							name: 's1',
+							template: createPromptTemplate('A: {x}'),
+						},
+						{
+							name: 's2',
+							template: createPromptTemplate('B: {x}'),
+						},
+					],
+				},
+			});
+
+			const results = await chain.run({ x: 'test' });
+
+			expect(results[0].output).toBe('acp response | acp response');
+		});
+
+		it('should support keyed merge strategy', async () => {
+			const callCount = { n: 0 };
+			const generateMock = mock((..._: any[]): any => {}).mockImplementation(
+				async () => {
+					callCount.n++;
+					return {
+						content: `out-${callCount.n}`,
+						agentId: 'default',
+						serverName: 'local',
+						sessionId: `s${callCount.n}`,
+					};
+				},
+			);
+			const acp = createMockACPClient({
+				generate: generateMock as unknown as ACPClient['generate'],
+			});
+
+			const chain = createChain({
+				acpClient: acp,
+				logger: silentLogger,
+			});
+
+			chain
+				.addStep({
+					name: 'keyed',
+					template: createPromptTemplate('{x}'),
+					parallel: {
+						mergeStrategy: 'keyed',
+						subSteps: [
+							{
+								name: 'alpha',
+								template: createPromptTemplate('A: {x}'),
+							},
+							{
+								name: 'beta',
+								template: createPromptTemplate('B: {x}'),
+							},
+						],
+					},
+				})
+				.addStep({
+					name: 'after',
+					template: createPromptTemplate('Alpha: {alpha} Beta: {beta}'),
+					inputMapping: {
+						alpha: 'keyed.alpha',
+						beta: 'keyed.beta',
+					},
+				});
+
+			const results = await chain.run({ x: 'input' });
+
+			expect(results).toHaveLength(2);
+			// The second step should have resolved the keyed sub-step values via inputMapping
+			expect(results[1].input).toBe('Alpha: out-1 Beta: out-2');
+		});
+
+		it('should support custom merge function', async () => {
+			const callCount = { n: 0 };
+			const generateMock = mock((..._: any[]): any => {}).mockImplementation(
+				async () => {
+					callCount.n++;
+					return {
+						content: `item-${callCount.n}`,
+						agentId: 'default',
+						serverName: 'local',
+						sessionId: `s${callCount.n}`,
+					};
+				},
+			);
+			const acp = createMockACPClient({
+				generate: generateMock as unknown as ACPClient['generate'],
+			});
+
+			const chain = createChain({
+				acpClient: acp,
+				logger: silentLogger,
+			});
+
+			chain.addStep({
+				name: 'custom',
+				template: createPromptTemplate('{x}'),
+				parallel: {
+					mergeStrategy: (results) =>
+						JSON.stringify(
+							results.map((r) => ({ name: r.subStepName, out: r.output })),
+						),
+					subSteps: [
+						{
+							name: 'x',
+							template: createPromptTemplate('X: {x}'),
+						},
+						{
+							name: 'y',
+							template: createPromptTemplate('Y: {x}'),
+						},
+					],
+				},
+			});
+
+			const results = await chain.run({ x: 'v' });
+			const parsed = JSON.parse(results[0].output);
+
+			expect(parsed).toEqual([
+				{ name: 'x', out: 'item-1' },
+				{ name: 'y', out: 'item-2' },
+			]);
+		});
+
+		it('should apply outputTransform on sub-step outputs', async () => {
+			const acp = createMockACPClient();
+
+			const chain = createChain({
+				acpClient: acp,
+				logger: silentLogger,
+			});
+
+			chain.addStep({
+				name: 'transform',
+				template: createPromptTemplate('{x}'),
+				parallel: {
+					subSteps: [
+						{
+							name: 'upper',
+							template: createPromptTemplate('{x}'),
+							outputTransform: (s) => s.toUpperCase(),
+						},
+						{
+							name: 'prefix',
+							template: createPromptTemplate('{x}'),
+							outputTransform: (s) => `>> ${s}`,
+						},
+					],
+				},
+			});
+
+			const results = await chain.run({ x: 'test' });
+
+			expect(results[0].subResults![0].output).toBe('ACP RESPONSE');
+			expect(results[0].subResults![1].output).toBe('>> acp response');
+			expect(results[0].output).toBe('ACP RESPONSE\n\n>> acp response');
+		});
+
+		it('should populate previous_output and step name after parallel step', async () => {
+			const callCount = { n: 0 };
+			const generateMock = mock((..._: any[]): any => {}).mockImplementation(
+				async () => {
+					callCount.n++;
+					return {
+						content: `p-${callCount.n}`,
+						agentId: 'default',
+						serverName: 'local',
+						sessionId: `s${callCount.n}`,
+					};
+				},
+			);
+			const acp = createMockACPClient({
+				generate: generateMock as unknown as ACPClient['generate'],
+			});
+
+			const chain = createChain({
+				acpClient: acp,
+				logger: silentLogger,
+			});
+
+			chain
+				.addStep({
+					name: 'par',
+					template: createPromptTemplate('{x}'),
+					parallel: {
+						subSteps: [
+							{
+								name: 'a',
+								template: createPromptTemplate('A: {x}'),
+							},
+							{
+								name: 'b',
+								template: createPromptTemplate('B: {x}'),
+							},
+						],
+					},
+				})
+				.addStep({
+					name: 'next',
+					template: createPromptTemplate('Got: {previous_output}'),
+				});
+
+			const results = await chain.run({ x: 'go' });
+
+			expect(results).toHaveLength(2);
+			// The second step should have received the merged parallel output
+			expect(results[1].input).toBe('Got: p-1\n\np-2');
+		});
+
+		it('should include subResults with correct metadata', async () => {
+			const acp = createMockACPClient();
+
+			const chain = createChain({
+				acpClient: acp,
+				logger: silentLogger,
+			});
+
+			chain.addStep({
+				name: 'meta',
+				template: createPromptTemplate('{x}'),
+				parallel: {
+					subSteps: [
+						{
+							name: 'first',
+							template: createPromptTemplate('{x}'),
+						},
+						{
+							name: 'second',
+							template: createPromptTemplate('{x}'),
+						},
+					],
+				},
+			});
+
+			const results = await chain.run({ x: 'v' });
+			const subs = results[0].subResults!;
+
+			expect(subs).toHaveLength(2);
+			expect(subs[0].subStepName).toBe('first');
+			expect(subs[0].provider).toBe('acp');
+			expect(subs[0].model).toBe('acp:default');
+			expect(subs[0].input).toBe('v');
+			expect(subs[0].output).toBe('acp response');
+			expect(subs[0].durationMs).toBeGreaterThanOrEqual(0);
+			expect(subs[1].subStepName).toBe('second');
+		});
+	});
+
+	describe('run (parallel — fail tolerance)', () => {
+		it('should throw when a sub-step fails in strict mode', async () => {
+			const callCount = { n: 0 };
+			const generateMock = mock((..._: any[]): any => {}).mockImplementation(
+				async () => {
+					callCount.n++;
+					if (callCount.n === 2) throw new Error('sub-fail');
+					return {
+						content: `ok-${callCount.n}`,
+						agentId: 'default',
+						serverName: 'local',
+						sessionId: `s${callCount.n}`,
+					};
+				},
+			);
+			const acp = createMockACPClient({
+				generate: generateMock as unknown as ACPClient['generate'],
+			});
+
+			const chain = createChain({
+				acpClient: acp,
+				logger: silentLogger,
+			});
+
+			chain.addStep({
+				name: 'strict',
+				template: createPromptTemplate('{x}'),
+				parallel: {
+					subSteps: [
+						{
+							name: 'ok',
+							template: createPromptTemplate('{x}'),
+						},
+						{
+							name: 'fail',
+							template: createPromptTemplate('{x}'),
+						},
+					],
+				},
+			});
+
+			try {
+				await chain.run({ x: 'test' });
+				expect.unreachable('should have thrown');
+			} catch (e) {
+				expect(isChainStepError(e)).toBe(true);
+			}
+		});
+
+		it('should continue when sub-step fails in failTolerant mode', async () => {
+			const callCount = { n: 0 };
+			const generateMock = mock((..._: any[]): any => {}).mockImplementation(
+				async () => {
+					callCount.n++;
+					if (callCount.n === 2) throw new Error('sub-fail');
+					return {
+						content: `ok-${callCount.n}`,
+						agentId: 'default',
+						serverName: 'local',
+						sessionId: `s${callCount.n}`,
+					};
+				},
+			);
+			const acp = createMockACPClient({
+				generate: generateMock as unknown as ACPClient['generate'],
+			});
+
+			const chain = createChain({
+				acpClient: acp,
+				logger: silentLogger,
+			});
+
+			chain.addStep({
+				name: 'tolerant',
+				template: createPromptTemplate('{x}'),
+				parallel: {
+					failTolerant: true,
+					subSteps: [
+						{
+							name: 'ok',
+							template: createPromptTemplate('{x}'),
+						},
+						{
+							name: 'fail',
+							template: createPromptTemplate('{x}'),
+						},
+						{
+							name: 'ok2',
+							template: createPromptTemplate('{x}'),
+						},
+					],
+				},
+			});
+
+			const results = await chain.run({ x: 'test' });
+
+			expect(results).toHaveLength(1);
+			// Only 2 sub-steps succeeded
+			expect(results[0].subResults).toHaveLength(2);
+			expect(results[0].model).toBe('parallel:2');
+		});
+
+		it('should throw when all sub-steps fail in failTolerant mode', async () => {
+			const generateMock = mock((..._: any[]): any => {}).mockRejectedValue(
+				new Error('all-fail'),
+			);
+			const acp = createMockACPClient({
+				generate: generateMock as unknown as ACPClient['generate'],
+			});
+
+			const chain = createChain({
+				acpClient: acp,
+				logger: silentLogger,
+			});
+
+			chain.addStep({
+				name: 'all-fail',
+				template: createPromptTemplate('{x}'),
+				parallel: {
+					failTolerant: true,
+					subSteps: [
+						{
+							name: 'a',
+							template: createPromptTemplate('{x}'),
+						},
+						{
+							name: 'b',
+							template: createPromptTemplate('{x}'),
+						},
+					],
+				},
+			});
+
+			try {
+				await chain.run({ x: 'test' });
+				expect.unreachable('should have thrown');
+			} catch (e) {
+				expect(isChainStepError(e)).toBe(true);
+				expect((e as SimseError).message).toContain(
+					'All parallel sub-steps failed',
+				);
+			}
+		});
+	});
+
+	describe('run (parallel — callbacks)', () => {
+		it('should fire onStepStart for parent and each sub-step', async () => {
+			const onStepStart = mock((..._: any[]): any => {});
+
+			const chain = createChain({
+				acpClient: mockACP,
+				logger: silentLogger,
+				callbacks: { onStepStart },
+			});
+
+			chain.addStep({
+				name: 'cb-par',
+				template: createPromptTemplate('{x}'),
+				parallel: {
+					subSteps: [
+						{
+							name: 'sa',
+							template: createPromptTemplate('{x}'),
+						},
+						{
+							name: 'sb',
+							template: createPromptTemplate('{x}'),
+						},
+					],
+				},
+			});
+
+			await chain.run({ x: 'go' });
+
+			// 1 parent + 2 sub-steps = 3 onStepStart calls
+			expect(onStepStart).toHaveBeenCalledTimes(3);
+
+			// First call is the parent
+			expect(onStepStart.mock.calls[0][0]).toMatchObject({
+				stepName: 'cb-par',
+				provider: 'acp',
+				prompt: '[parallel: 2 sub-steps]',
+			});
+
+			// Sub-step calls (order may vary due to concurrency)
+			const subCalls = onStepStart.mock.calls.slice(1).map((c: any) => c[0]);
+			const subNames = subCalls.map((c: { stepName: string }) => c.stepName);
+			expect(subNames).toContain('cb-par.sa');
+			expect(subNames).toContain('cb-par.sb');
+		});
+
+		it('should fire onStepComplete for parent and each sub-step', async () => {
+			const onStepComplete = mock((..._: any[]): any => {});
+
+			const chain = createChain({
+				acpClient: mockACP,
+				logger: silentLogger,
+				callbacks: { onStepComplete },
+			});
+
+			chain.addStep({
+				name: 'cb-par',
+				template: createPromptTemplate('{x}'),
+				parallel: {
+					subSteps: [
+						{
+							name: 'sa',
+							template: createPromptTemplate('{x}'),
+						},
+						{
+							name: 'sb',
+							template: createPromptTemplate('{x}'),
+						},
+					],
+				},
+			});
+
+			await chain.run({ x: 'go' });
+
+			// 2 sub-steps + 1 parent = 3 onStepComplete calls
+			expect(onStepComplete).toHaveBeenCalledTimes(3);
+
+			// Last call should be the parent
+			const lastCall =
+				onStepComplete.mock.calls[onStepComplete.mock.calls.length - 1][0];
+			expect(lastCall.stepName).toBe('cb-par');
+			expect(lastCall.subResults).toHaveLength(2);
+		});
+
+		it('should fire onStepError when parallel step fails', async () => {
+			const onStepError = mock((..._: any[]): any => {});
+			const generateMock = mock((..._: any[]): any => {}).mockRejectedValue(
+				new Error('fail'),
+			);
+			const acp = createMockACPClient({
+				generate: generateMock as unknown as ACPClient['generate'],
+			});
+
+			const chain = createChain({
+				acpClient: acp,
+				logger: silentLogger,
+				callbacks: { onStepError },
+			});
+
+			chain.addStep({
+				name: 'err-par',
+				template: createPromptTemplate('{x}'),
+				parallel: {
+					subSteps: [
+						{
+							name: 'a',
+							template: createPromptTemplate('{x}'),
+						},
+						{
+							name: 'b',
+							template: createPromptTemplate('{x}'),
+						},
+					],
+				},
+			});
+
+			try {
+				await chain.run({ x: 'test' });
+			} catch {
+				// expected
+			}
+
+			expect(onStepError).toHaveBeenCalled();
+			expect(onStepError.mock.calls[0][0].stepName).toBe('err-par');
+		});
+	});
+
+	describe('run (parallel — validation)', () => {
+		it('should reject parallel steps with fewer than 2 sub-steps', () => {
+			const chain = createChain({
+				acpClient: mockACP,
+				logger: silentLogger,
+			});
+
+			expect(() =>
+				chain.addStep({
+					name: 'bad',
+					template: createPromptTemplate('{x}'),
+					parallel: {
+						subSteps: [
+							{
+								name: 'only-one',
+								template: createPromptTemplate('{x}'),
+							},
+						],
+					},
+				}),
+			).toThrow('at least 2 sub-steps');
+		});
+
+		it('should reject MCP sub-steps without mcpServerName', () => {
+			const chain = createChain({
+				acpClient: mockACP,
+				logger: silentLogger,
+			});
+
+			expect(() =>
+				chain.addStep({
+					name: 'bad-mcp',
+					template: createPromptTemplate('{x}'),
+					parallel: {
+						subSteps: [
+							{
+								name: 'ok',
+								template: createPromptTemplate('{x}'),
+							},
+							{
+								name: 'missing',
+								template: createPromptTemplate('{x}'),
+								provider: 'mcp',
+								mcpToolName: 'tool',
+							},
+						],
+					},
+				}),
+			).toThrow('mcpServerName');
+		});
+	});
+
+	describe('createChainFromDefinition (parallel)', () => {
+		it('should build parallel step from definition', async () => {
+			const callCount = { n: 0 };
+			const generateMock = mock((..._: any[]): any => {}).mockImplementation(
+				async () => {
+					callCount.n++;
+					return {
+						content: `def-${callCount.n}`,
+						agentId: 'default',
+						serverName: 'local',
+						sessionId: `s${callCount.n}`,
+					};
+				},
+			);
+			const acp = createMockACPClient({
+				generate: generateMock as unknown as ACPClient['generate'],
+			});
+
+			const definition: ChainDefinition = {
+				initialValues: { topic: 'AI' },
+				steps: [
+					{
+						name: 'research',
+						template: '{topic}',
+						parallel: {
+							subSteps: [
+								{
+									name: 'perspective-a',
+									template: 'Analyze {topic} from angle A',
+								},
+								{
+									name: 'perspective-b',
+									template: 'Analyze {topic} from angle B',
+								},
+							],
+						},
+					},
+				],
+			};
+
+			const chain = createChainFromDefinition(definition, {
+				acpClient: acp,
+				logger: silentLogger,
+			});
+
+			const results = await chain.run({ topic: 'AI' });
+
+			expect(results).toHaveLength(1);
+			expect(results[0].subResults).toHaveLength(2);
+			expect(results[0].model).toBe('parallel:2');
+			expect(generateMock).toHaveBeenCalledTimes(2);
+		});
+
+		it('should inherit agentId from definition into sub-steps', async () => {
+			const acp = createMockACPClient();
+
+			const definition: ChainDefinition = {
+				agentId: 'inherited-agent',
+				serverName: 'inherited-server',
+				initialValues: { x: 'v' },
+				steps: [
+					{
+						name: 'inherit',
+						template: '{x}',
+						parallel: {
+							subSteps: [
+								{ name: 'sa', template: '{x}' },
+								{ name: 'sb', template: '{x}' },
+							],
+						},
+					},
+				],
+			};
+
+			const chain = createChainFromDefinition(definition, {
+				acpClient: acp,
+				logger: silentLogger,
+			});
+
+			await chain.run({ x: 'v' });
+
+			// Both sub-steps should have inherited agentId/serverName
+			for (const call of (acp.generate as any).mock.calls) {
+				expect(call[1]).toMatchObject({
+					agentId: 'inherited-agent',
+					serverName: 'inherited-server',
+				});
+			}
 		});
 	});
 });

@@ -29,6 +29,14 @@ export {
 	isConfigValidationError,
 } from './config.js';
 export {
+	createLoopAbortedError,
+	createLoopError,
+	createLoopTurnLimitError,
+	isLoopAbortedError,
+	isLoopError,
+	isLoopTurnLimitError,
+} from './loop.js';
+export {
 	createMCPConnectionError,
 	createMCPError,
 	createMCPServerNotConnectedError,
@@ -61,8 +69,25 @@ export {
 	isProviderUnavailableError,
 } from './provider.js';
 export {
+	createTaskCircularDependencyError,
+	createTaskError,
+	createTaskNotFoundError,
+	isTaskCircularDependencyError,
+	isTaskError,
+	isTaskNotFoundError,
+} from './tasks.js';
+export {
 	createTemplateError,
 	createTemplateMissingVariablesError,
 	isTemplateError,
 	isTemplateMissingVariablesError,
 } from './template.js';
+export {
+	createToolError,
+	createToolExecutionError,
+	createToolNotFoundError,
+	isToolError,
+	isToolExecutionError,
+	isToolNotFoundError,
+} from './tools.js';
+export { createVFSError, isVFSError } from './vfs.js';

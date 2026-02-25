@@ -1,29 +1,11 @@
-import type { Buffer } from 'node:buffer';
+import { Buffer } from 'node:buffer';
 import { randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
-import {
-	mkdir,
-	readdir,
-	readFile,
-	rename,
-	rm,
-	writeFile,
-} from 'node:fs/promises';
-import { join, resolve } from 'node:path';
 import {
 	createMemoryError,
 	createVectorStoreCorruptionError,
-	createVectorStoreIOError,
 } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
-import {
-	type CompressionOptions,
-	compressText,
-	decodeEmbedding,
-	decompressText,
-	encodeEmbedding,
-	isGzipped,
-} from './compression.js';
+import { decodeEmbedding, encodeEmbedding } from './compression.js';
 import {
 	checkDuplicate as checkDuplicateImpl,
 	findDuplicateGroups,
@@ -35,6 +17,7 @@ import {
 	createTopicIndex,
 	type TopicIndexOptions,
 } from './indexing.js';
+import { createLearningEngine, type LearningEngine } from './learning.js';
 import {
 	computeRecommendationScore,
 	frequencyScore,
@@ -42,6 +25,7 @@ import {
 	type RecencyOptions,
 	recencyScore,
 } from './recommendation.js';
+import type { StorageBackend } from './storage.js';
 import {
 	fuzzyScore,
 	matchesAllMetadataFilters,
@@ -52,6 +36,8 @@ import type {
 	DateRange,
 	DuplicateCheckResult,
 	DuplicateGroup,
+	LearningOptions,
+	LearningProfile,
 	MetadataFilter,
 	RecommendationResult,
 	RecommendOptions,
@@ -62,27 +48,25 @@ import type {
 	TopicInfo,
 	VectorEntry,
 } from './types.js';
-import {
-	type IndexEntry,
-	type IndexFile,
-	isValidIndexEntry,
-	isValidIndexFile,
-} from './vector-persistence.js';
+import { isValidLearningState } from './vector-persistence.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
 // ---------------------------------------------------------------------------
 
 export interface VectorStoreOptions {
+	/** Pluggable storage backend. Consumers must provide their own implementation. */
+	storage: StorageBackend;
+
 	/**
-	 * If `true`, every mutation (add / delete / clear) immediately persists to disk.
+	 * If `true`, every mutation (add / delete / clear) immediately persists.
 	 * If `false`, call `save()` manually or rely on `flushIntervalMs`.
 	 * Defaults to `false` for better performance.
 	 */
 	autoSave?: boolean;
 
 	/**
-	 * When > 0, the store will automatically flush dirty state to disk every
+	 * When > 0, the store will automatically flush dirty state every
 	 * `flushIntervalMs` milliseconds. Set to 0 to disable.
 	 * Only used when `autoSave` is `false`.
 	 * Defaults to `5000` (5 seconds).
@@ -90,23 +74,10 @@ export interface VectorStoreOptions {
 	flushIntervalMs?: number;
 
 	/**
-	 * If `true`, writes are performed atomically by writing to a temporary file
-	 * first and then renaming. Prevents corruption on crash.
-	 * Defaults to `true`.
-	 */
-	atomicWrite?: boolean;
-
-	/**
 	 * Maximum allowed length for regex search patterns. Patterns exceeding this
 	 * limit are rejected to prevent ReDoS. Defaults to `256`.
 	 */
 	maxRegexPatternLength?: number;
-
-	/**
-	 * Compression options for gzip-compressed index and entry files.
-	 * Controls the gzip compression level (1–9). Defaults to `{ level: 6 }`.
-	 */
-	compression?: CompressionOptions;
 
 	/**
 	 * Options for the internal topic index used by `getTopics()` and
@@ -134,6 +105,13 @@ export interface VectorStoreOptions {
 	 * Controls the exponential decay half-life.
 	 */
 	recency?: RecencyOptions;
+
+	/**
+	 * Options for the adaptive learning engine.
+	 * When enabled, the store observes search patterns and adapts
+	 * recommendation weights and scoring in real time.
+	 */
+	learning?: LearningOptions;
 
 	/** Inject a custom logger. */
 	logger?: Logger;
@@ -178,6 +156,10 @@ export interface VectorStore {
 	readonly findDuplicates: (threshold?: number) => DuplicateGroup[];
 	readonly checkDuplicate: (embedding: number[]) => DuplicateCheckResult;
 	readonly recommend: (options?: RecommendOptions) => RecommendationResult[];
+	/** The adaptive learning engine instance (if learning is enabled). */
+	readonly learningEngine: LearningEngine | undefined;
+	/** Snapshot of the current learning profile. */
+	readonly learningProfile: LearningProfile | undefined;
 	readonly size: number;
 	readonly isDirty: boolean;
 }
@@ -186,26 +168,23 @@ export interface VectorStore {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createVectorStore(
-	storePath: string,
-	options?: VectorStoreOptions,
-): VectorStore {
+export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	let entries: VectorEntry[] = [];
-	const storeDir = resolve(process.cwd(), storePath);
-	const indexPath = join(storeDir, 'index.json');
-	const entriesDir = join(storeDir, 'entries');
-	const logger = (options?.logger ?? getDefaultLogger()).child('vector-store');
-	const autoSave = options?.autoSave ?? false;
-	const atomicWrite = options?.atomicWrite ?? true;
-	const flushIntervalMs = options?.flushIntervalMs ?? 5_000;
-	const maxRegexPatternLength = options?.maxRegexPatternLength ?? 256;
-	const compressionOpts = options?.compression;
-	const duplicateThreshold = options?.duplicateThreshold ?? 0;
-	const duplicateBehavior = options?.duplicateBehavior ?? 'warn';
-	const recencyOpts = options?.recency;
+	const logger = (options.logger ?? getDefaultLogger()).child('vector-store');
+	const storage: StorageBackend = options.storage;
+	const autoSave = options.autoSave ?? false;
+	const flushIntervalMs = options.flushIntervalMs ?? 5_000;
+	const maxRegexPatternLength = options.maxRegexPatternLength ?? 256;
+	const duplicateThreshold = options.duplicateThreshold ?? 0;
+	const duplicateBehavior = options.duplicateBehavior ?? 'warn';
+	const recencyOpts = options.recency;
+	const learningEnabled = options.learning?.enabled ?? true;
+	const learningEngine: LearningEngine | undefined = learningEnabled
+		? createLearningEngine(options.learning)
+		: undefined;
 
 	// Internal indexes
-	const topicIdx = createTopicIndex(options?.topicIndex);
+	const topicIdx = createTopicIndex(options.topicIndex);
 	const metadataIdx = createMetadataIndex();
 	const magnitudeCache = createMagnitudeCache();
 
@@ -389,18 +368,108 @@ export function createVectorStore(
 		}
 	};
 
-	/**
-	 * Read an entry's text from disk, handling both plain UTF-8 and
-	 * gzip-compressed .md files.
-	 */
-	const readEntryText = async (id: string): Promise<string | null> => {
-		const mdPath = join(entriesDir, `${id}.md`);
+	// -----------------------------------------------------------------------
+	// Entry serialization — binary format per entry value in the KV store
+	// [4b text-len][text][4b emb-b64-len][emb-b64][4b meta-json-len][meta-json]
+	// [8b timestamp][4b accessCount][8b lastAccessed]
+	// -----------------------------------------------------------------------
+
+	const LEARNING_KEY = '__learning';
+
+	const serializeEntry = (
+		entry: VectorEntry,
+		stats?: { accessCount: number; lastAccessed: number },
+	): Buffer => {
+		const textBuf = Buffer.from(entry.text, 'utf-8');
+		const embBuf = Buffer.from(encodeEmbedding(entry.embedding), 'utf-8');
+		const metaBuf = Buffer.from(JSON.stringify(entry.metadata), 'utf-8');
+
+		const totalSize =
+			4 + textBuf.length + 4 + embBuf.length + 4 + metaBuf.length + 8 + 4 + 8;
+
+		const buf = Buffer.alloc(totalSize);
+		let offset = 0;
+
+		buf.writeUInt32BE(textBuf.length, offset);
+		offset += 4;
+		textBuf.copy(buf, offset);
+		offset += textBuf.length;
+
+		buf.writeUInt32BE(embBuf.length, offset);
+		offset += 4;
+		embBuf.copy(buf, offset);
+		offset += embBuf.length;
+
+		buf.writeUInt32BE(metaBuf.length, offset);
+		offset += 4;
+		metaBuf.copy(buf, offset);
+		offset += metaBuf.length;
+
+		// Timestamp as two 32-bit halves (JS numbers are 64-bit floats)
+		const ts = entry.timestamp;
+		buf.writeUInt32BE(Math.floor(ts / 0x100000000), offset);
+		offset += 4;
+		buf.writeUInt32BE(ts >>> 0, offset);
+		offset += 4;
+
+		buf.writeUInt32BE(stats?.accessCount ?? 0, offset);
+		offset += 4;
+
+		const la = stats?.lastAccessed ?? 0;
+		buf.writeUInt32BE(Math.floor(la / 0x100000000), offset);
+		offset += 4;
+		buf.writeUInt32BE(la >>> 0, offset);
+
+		return buf;
+	};
+
+	const deserializeEntry = (
+		id: string,
+		buf: Buffer,
+	): {
+		entry: VectorEntry;
+		accessCount: number;
+		lastAccessed: number;
+	} | null => {
 		try {
-			const buf = await readFile(mdPath);
-			if (isGzipped(buf)) {
-				return decompressText(buf);
-			}
-			return buf.toString('utf-8');
+			let offset = 0;
+
+			const textLen = buf.readUInt32BE(offset);
+			offset += 4;
+			const text = buf.toString('utf-8', offset, offset + textLen);
+			offset += textLen;
+
+			const embLen = buf.readUInt32BE(offset);
+			offset += 4;
+			const embB64 = buf.toString('utf-8', offset, offset + embLen);
+			offset += embLen;
+			const embedding = decodeEmbedding(embB64);
+
+			const metaLen = buf.readUInt32BE(offset);
+			offset += 4;
+			const metaJson = buf.toString('utf-8', offset, offset + metaLen);
+			offset += metaLen;
+			const metadata: Record<string, string> = JSON.parse(metaJson);
+
+			const tsHigh = buf.readUInt32BE(offset);
+			offset += 4;
+			const tsLow = buf.readUInt32BE(offset);
+			offset += 4;
+			const timestamp = tsHigh * 0x100000000 + tsLow;
+
+			const accessCount = buf.readUInt32BE(offset);
+			offset += 4;
+
+			const laHigh = buf.readUInt32BE(offset);
+			offset += 4;
+			const laLow = buf.readUInt32BE(offset);
+			const lastAccessed = laHigh * 0x100000000 + laLow;
+
+			return {
+				entry: { id, text, embedding, metadata, timestamp },
+				accessCount,
+				lastAccessed,
+			};
 		} catch {
 			return null;
 		}
@@ -412,7 +481,7 @@ export function createVectorStore(
 		initialized = true;
 		dirtyIds.clear();
 		startFlushTimer();
-		logger.debug(reason, { path: storeDir });
+		logger.debug(reason);
 	};
 
 	// Serialize concurrent load() calls to prevent double-initialization
@@ -430,236 +499,101 @@ export function createVectorStore(
 	const doLoad = async (): Promise<void> => {
 		if (initialized) return;
 
-		if (!existsSync(indexPath)) {
-			initEmpty('No index file found — starting with empty store');
-			return;
-		}
-
-		let rawBuf: Buffer;
+		let data: Map<string, Buffer>;
 		try {
-			rawBuf = await readFile(indexPath);
+			data = await storage.load();
 		} catch (error) {
-			throw createVectorStoreIOError(storeDir, 'read', {
+			throw createVectorStoreCorruptionError('storage', {
 				cause: error,
 			});
 		}
 
-		if (rawBuf.length === 0) {
-			initEmpty('Index file is empty — starting with empty store');
+		if (data.size === 0) {
+			initEmpty('No data found — starting with empty store');
 			return;
-		}
-
-		// Decompress if gzipped
-		let jsonStr: string;
-		if (isGzipped(rawBuf)) {
-			try {
-				jsonStr = decompressText(rawBuf);
-			} catch (error) {
-				throw createVectorStoreCorruptionError(storeDir, {
-					cause: error,
-				});
-			}
-		} else {
-			jsonStr = rawBuf.toString('utf-8');
-		}
-
-		if (jsonStr.trim().length === 0) {
-			initEmpty('Index file is empty — starting with empty store');
-			return;
-		}
-
-		let parsed: unknown;
-		try {
-			parsed = JSON.parse(jsonStr);
-		} catch (error) {
-			throw createVectorStoreCorruptionError(storeDir, {
-				cause: error,
-			});
-		}
-
-		if (!isValidIndexFile(parsed)) {
-			throw createVectorStoreCorruptionError(storeDir, {
-				cause: new Error('Expected a valid IndexFile (version 2) object'),
-			});
 		}
 
 		const valid: VectorEntry[] = [];
 		let skipped = 0;
 		accessStats.clear();
 
-		for (let i = 0; i < parsed.entries.length; i++) {
-			const entry = parsed.entries[i];
-			if (!isValidIndexEntry(entry)) {
+		for (const [key, value] of data) {
+			if (key === LEARNING_KEY) continue; // handled below
+
+			const result = deserializeEntry(key, value);
+			if (result === null) {
 				skipped++;
-				logger.warn(`Skipping invalid entry at index ${i}`, {
-					entry:
-						typeof entry === 'object' && entry !== null
-							? { id: (entry as Record<string, unknown>).id }
-							: undefined,
-				});
+				logger.warn(`Skipping corrupt entry: ${key}`);
 				continue;
 			}
 
-			const text = await readEntryText(entry.id);
-			if (text === null) {
-				skipped++;
-				logger.warn(`Skipping entry at index ${i} — markdown file not found`, {
-					id: entry.id,
-				});
-				continue;
-			}
+			valid.push(result.entry);
 
-			let embedding: number[];
-			try {
-				embedding = decodeEmbedding(entry.embedding);
-			} catch {
-				skipped++;
-				logger.warn(
-					`Skipping entry at index ${i} — failed to decode embedding`,
-					{ id: entry.id },
-				);
-				continue;
-			}
-
-			valid.push({
-				id: entry.id,
-				text,
-				embedding,
-				metadata: entry.metadata,
-				timestamp: entry.timestamp,
-			});
-
-			// Restore access stats in the same pass
-			if (entry.accessCount !== undefined || entry.lastAccessed !== undefined) {
-				accessStats.set(entry.id, {
-					accessCount: entry.accessCount ?? 0,
-					lastAccessed: entry.lastAccessed ?? entry.timestamp,
+			if (result.accessCount > 0 || result.lastAccessed > 0) {
+				accessStats.set(result.entry.id, {
+					accessCount: result.accessCount,
+					lastAccessed: result.lastAccessed,
 				});
 			}
 		}
 
 		if (skipped > 0) {
 			logger.warn(
-				`Loaded ${valid.length} entries, skipped ${skipped} invalid entries`,
+				`Loaded ${valid.length} entries, skipped ${skipped} corrupt entries`,
 			);
 			dirty = true;
 		}
 
 		entries = valid;
 		rebuildIndexes();
+
+		// Restore learning state
+		if (learningEngine && data.has(LEARNING_KEY)) {
+			try {
+				const learningBuf = data.get(LEARNING_KEY);
+				if (!learningBuf) throw new Error('Missing learning key');
+				const learningJson = learningBuf.toString('utf-8');
+				const learningParsed: unknown = JSON.parse(learningJson);
+				if (isValidLearningState(learningParsed)) {
+					learningEngine.restore(learningParsed);
+					const validIds = new Set(valid.map((e) => e.id));
+					learningEngine.pruneEntries(validIds);
+					logger.debug(
+						`Restored learning state (${learningEngine.totalQueries} queries recorded)`,
+					);
+				} else {
+					logger.warn('Invalid learning state — starting fresh');
+				}
+			} catch {
+				logger.warn('Failed to restore learning state — starting fresh');
+			}
+		}
+
 		initialized = true;
 		dirtyIds.clear();
 		startFlushTimer();
-		logger.debug(`Loaded ${entries.length} entries from store`, {
-			path: storeDir,
-		});
+		logger.debug(`Loaded ${entries.length} entries from store`);
 	};
 
 	const doSave = async (): Promise<void> => {
-		try {
-			await mkdir(entriesDir, { recursive: true });
-		} catch (error) {
-			throw createVectorStoreIOError(storeDir, 'write', {
-				cause: error,
-			});
-		}
+		const data = new Map<string, Buffer>();
 
-		// Snapshot dirty IDs synchronously before any async I/O, so concurrent
-		// mutations adding to dirtyIds during writes are not lost.  We write
-		// .md files first, then the index — this ensures the index never
-		// references an .md file that hasn't been written yet (crash safety).
-		const idsToWrite = new Set(dirtyIds);
-
-		// Build compressed index (include access stats)
-		const indexEntries: IndexEntry[] = entries.map((e) => {
-			const stats = accessStats.get(e.id);
-			return {
-				id: e.id,
-				embedding: encodeEmbedding(e.embedding),
-				metadata: { ...e.metadata },
-				timestamp: e.timestamp,
-				...(stats
-					? {
-							accessCount: stats.accessCount,
-							lastAccessed: stats.lastAccessed,
-						}
-					: {}),
-			};
-		});
-
-		const indexFile: IndexFile = { version: 2, entries: indexEntries };
-		const indexJson = JSON.stringify(indexFile);
-		const compressedIndex = compressText(indexJson, compressionOpts);
-
-		// Write dirty entry .md files BEFORE the index (gzip-compressed, atomic)
-		// so that the index never points to non-existent .md files on crash.
-		const currentIds = new Set<string>();
 		for (const entry of entries) {
-			currentIds.add(entry.id);
-			if (!idsToWrite.has(entry.id)) continue;
-			const mdPath = join(entriesDir, `${entry.id}.md`);
-			try {
-				const compressedMd = compressText(entry.text, compressionOpts);
-				if (atomicWrite) {
-					const tmpMdPath = `${mdPath}.tmp`;
-					await writeFile(tmpMdPath, compressedMd);
-					await rename(tmpMdPath, mdPath);
-				} else {
-					await writeFile(mdPath, compressedMd);
-				}
-			} catch (error) {
-				throw createVectorStoreIOError(storeDir, 'write', {
-					cause: error,
-				});
-			}
+			const stats = accessStats.get(entry.id);
+			data.set(entry.id, serializeEntry(entry, stats));
 		}
 
-		// Write the index AFTER all .md files are committed
-		if (atomicWrite) {
-			const tmpPath = `${indexPath}.tmp`;
-			try {
-				await writeFile(tmpPath, compressedIndex);
-				await rename(tmpPath, indexPath);
-			} catch (error) {
-				throw createVectorStoreIOError(storeDir, 'write', {
-					cause: error,
-				});
-			}
-		} else {
-			try {
-				await writeFile(indexPath, compressedIndex);
-			} catch (error) {
-				throw createVectorStoreIOError(storeDir, 'write', {
-					cause: error,
-				});
-			}
+		// Persist learning state alongside entries
+		if (learningEngine?.hasData) {
+			const learningState = learningEngine.serialize();
+			const learningJson = JSON.stringify(learningState);
+			data.set(LEARNING_KEY, Buffer.from(learningJson, 'utf-8'));
 		}
 
-		// Clean up orphaned .md and leftover .tmp files from crashed writes
-		try {
-			const files = await readdir(entriesDir);
-			for (const file of files) {
-				if (file.endsWith('.md')) {
-					const id = file.slice(0, -3);
-					if (!currentIds.has(id)) {
-						const orphanPath = join(entriesDir, file);
-						await rm(orphanPath, { force: true });
-						logger.debug(`Removed orphaned entry file: ${file}`);
-					}
-				} else if (file.endsWith('.tmp')) {
-					const tmpPath = join(entriesDir, file);
-					await rm(tmpPath, { force: true });
-					logger.debug(`Removed leftover tmp file: ${file}`);
-				}
-			}
-		} catch {
-			// If readdir fails, that's fine — no orphans to clean
-		}
+		await storage.save(data);
 
-		// Only remove the IDs we actually wrote — any new IDs added during
-		// our async I/O remain in dirtyIds for the next save cycle.
-		for (const id of idsToWrite) dirtyIds.delete(id);
-		dirty = dirtyIds.size > 0;
+		dirtyIds.clear();
+		dirty = false;
 		logger.debug(`Saved ${entries.length} entries to store`);
 	};
 
@@ -691,6 +625,7 @@ export function createVectorStore(
 		if (dirty) {
 			await save();
 		}
+		await storage.close();
 	};
 
 	// -----------------------------------------------------------------------
@@ -937,6 +872,7 @@ export function createVectorStore(
 			magnitudeCache.clear();
 			accessStats.clear();
 			dirtyIds.clear();
+			if (learningEngine) learningEngine.clear();
 			dirty = true;
 
 			if (autoSave) {
@@ -985,6 +921,16 @@ export function createVectorStore(
 		for (const r of results) {
 			trackAccess(r.entry.id);
 		}
+
+		// Record query for adaptive learning
+		if (learningEngine && results.length > 0) {
+			learningEngine.recordQuery(
+				queryEmbedding,
+				results.map((r) => r.entry.id),
+			);
+			dirty = true;
+		}
+
 		return results;
 	};
 
@@ -1176,6 +1122,21 @@ export function createVectorStore(
 		for (const r of topResults) {
 			trackAccess(r.entry.id);
 		}
+
+		// Record query for adaptive learning (only if we have a query embedding)
+		if (
+			learningEngine &&
+			topResults.length > 0 &&
+			queryEmbedding &&
+			queryEmbedding.length > 0
+		) {
+			learningEngine.recordQuery(
+				queryEmbedding,
+				topResults.map((r) => r.entry.id),
+			);
+			dirty = true;
+		}
+
 		return topResults;
 	};
 
@@ -1234,8 +1195,7 @@ export function createVectorStore(
 
 	const checkDuplicate = (embedding: number[]): DuplicateCheckResult => {
 		ensureLoaded();
-		const t = duplicateThreshold > 0 ? duplicateThreshold : 0.95;
-		return checkDuplicateImpl(embedding, entries, t);
+		return checkDuplicateImpl(embedding, entries, duplicateThreshold);
 	};
 
 	// -----------------------------------------------------------------------
@@ -1247,7 +1207,12 @@ export function createVectorStore(
 	): RecommendationResult[] => {
 		ensureLoaded();
 		const opts = recommendOptions ?? {};
-		const weights = normalizeWeights(opts.weights);
+		// Use adapted weights from learning engine if available, falling back to user-provided or defaults
+		const baseWeights =
+			learningEngine && !opts.weights
+				? learningEngine.getAdaptedWeights()
+				: normalizeWeights(opts.weights);
+		const weights = baseWeights;
 		const maxResults = opts.maxResults ?? 10;
 		const minScore = opts.minScore ?? 0;
 
@@ -1328,10 +1293,16 @@ export function createVectorStore(
 				weights,
 			);
 
-			if (recommendation.score >= minScore) {
+			// Apply learning boost if available
+			const boost = learningEngine
+				? learningEngine.computeBoost(entry.id, entry.embedding)
+				: 1.0;
+			const boostedScore = recommendation.score * boost;
+
+			if (boostedScore >= minScore) {
 				results.push({
 					entry,
-					score: recommendation.score,
+					score: boostedScore,
 					scores: recommendation.scores,
 				});
 			}
@@ -1369,6 +1340,12 @@ export function createVectorStore(
 		findDuplicates,
 		checkDuplicate,
 		recommend,
+		get learningEngine() {
+			return learningEngine;
+		},
+		get learningProfile() {
+			return learningEngine?.getProfile();
+		},
 		get size() {
 			return entries.length;
 		},

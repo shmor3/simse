@@ -32,6 +32,7 @@ export interface ACPConnectionOptions {
 	readonly permissionPolicy?: ACPPermissionPolicy;
 	readonly clientName?: string;
 	readonly clientVersion?: string;
+	readonly stderrHandler?: (text: string) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -40,7 +41,12 @@ export interface ACPConnectionOptions {
 
 export interface ACPConnection {
 	readonly initialize: () => Promise<ACPInitializeResult>;
-	readonly request: <T>(method: string, params?: unknown) => Promise<T>;
+	readonly request: <T>(
+		method: string,
+		params?: unknown,
+		customTimeoutMs?: number,
+		signal?: AbortSignal,
+	) => Promise<T>;
 	readonly notify: (method: string, params?: unknown) => void;
 	readonly onNotification: (
 		method: string,
@@ -76,6 +82,7 @@ export function createACPConnection(
 		options.permissionPolicy ?? 'deny';
 	const clientName = options.clientName ?? 'simse';
 	const clientVersion = options.clientVersion ?? '1.0.0';
+	const stderrHandler = options.stderrHandler ?? (() => {});
 
 	let nextId = 1;
 	let child: ChildProcess | undefined;
@@ -115,9 +122,7 @@ export function createACPConnection(
 
 		if (permissionPolicy === 'auto-approve') {
 			// Pick the first "allow" option, preferring allow_always > allow_once
-			const allowAlways = options.find(
-				(o) => o.kind === 'allow_always',
-			);
+			const allowAlways = options.find((o) => o.kind === 'allow_always');
 			const allowOnce = options.find((o) => o.kind === 'allow_once');
 			const pick = allowAlways ?? allowOnce;
 
@@ -245,8 +250,11 @@ export function createACPConnection(
 
 		child.stdout?.on('data', onData);
 
-		child.stderr?.on('data', (_data: Buffer) => {
-			// stderr is not part of NDJSON — ignore or log
+		child.stderr?.on('data', (data: Buffer) => {
+			const text = data.toString().trim();
+			if (text) {
+				stderrHandler(text);
+			}
 		});
 
 		child.on('error', (err) => {
@@ -294,6 +302,7 @@ export function createACPConnection(
 		method: string,
 		params?: unknown,
 		customTimeoutMs?: number,
+		signal?: AbortSignal,
 	): Promise<T> => {
 		if (!child?.stdin?.writable) {
 			return Promise.reject(
@@ -317,6 +326,23 @@ export function createACPConnection(
 					}),
 				);
 			}, reqTimeoutMs);
+
+			if (signal) {
+				const onAbort = () => {
+					pending.delete(id);
+					clearTimeout(timer);
+					reject(
+						createProviderTimeoutError('acp', 0, {
+							cause: new Error('Request aborted'),
+						}),
+					);
+				};
+				if (signal.aborted) {
+					onAbort();
+					return;
+				}
+				signal.addEventListener('abort', onAbort, { once: true });
+			}
 
 			pending.set(id, {
 				resolve: resolve as (value: unknown) => void,

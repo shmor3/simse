@@ -1,0 +1,18 @@
+{
+	"name": "simse-code",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"bin": {
+		"simse": "./cli.ts"
+	},
+	"scripts": {
+		"start": "bun run cli.ts",
+		"bridge": "bun run acp-ollama-bridge.ts",
+		"typecheck": "bun x tsc --noEmit",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"simse": "file:.."
+	}
+}

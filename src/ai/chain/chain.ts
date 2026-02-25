@@ -7,17 +7,19 @@ import {
 	createChainError,
 	createChainNotFoundError,
 	createChainStepError,
-	createMCPToolError,
 	isChainError,
 	isChainStepError,
 	toError,
 } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
 import type { ACPClient } from '../acp/acp-client.js';
-import type { ACPGenerateResult } from '../acp/types.js';
+import type { ACPTokenUsage } from '../acp/types.js';
+import type { AgentExecutor } from '../agent/agent-executor.js';
+import { createAgentExecutor } from '../agent/agent-executor.js';
+import type { ParallelSubResult } from '../agent/types.js';
 import type { MCPClient } from '../mcp/mcp-client.js';
+import type { MCPToolCallMetrics } from '../mcp/types.js';
 import type { MemoryManager } from '../memory/memory.js';
-import { formatSearchResults } from './format.js';
 import { createPromptTemplate } from './prompt-template.js';
 import type {
 	ChainCallbacks,
@@ -87,111 +89,276 @@ export function createChain(options: ChainOptions): Chain {
 	let steps: ChainStepConfig[] = [];
 	let callbacks: ChainCallbacks | undefined = initialCallbacks;
 
+	const executor = createAgentExecutor({
+		acpClient,
+		mcpClient,
+		memoryManager,
+		logger,
+		name: chainName,
+	});
+
 	// -----------------------------------------------------------------------
-	// Internal step execution
+	// Parallel step execution
 	// -----------------------------------------------------------------------
 
-	async function executeACPStep(
+	async function runParallelStep(
 		step: ChainStepConfig,
-		prompt: string,
-	): Promise<{ output: string; model: string }> {
-		const res: ACPGenerateResult = await acpClient.generate(prompt, {
-			agentId: step.agentId,
-			serverName: step.serverName,
-			systemPrompt: step.systemPrompt,
-			config: step.agentConfig,
-		});
-		return { output: res.content, model: `acp:${res.agentId}` };
-	}
-
-	async function executeMCPStep(
-		step: ChainStepConfig,
-		prompt: string,
+		stepIndex: number,
+		totalSteps: number,
 		currentValues: Record<string, string>,
-	): Promise<{ output: string; model: string }> {
-		if (!mcpClient) {
+		currentExecutor: AgentExecutor,
+		currentCallbacks: ChainCallbacks | undefined,
+	): Promise<StepResult> {
+		if (!step.parallel) {
 			throw createChainError(
-				`MCP client is not configured but step "${step.name}" requires it`,
-				{ code: 'CHAIN_MCP_NOT_CONFIGURED', chainName },
-			);
-		}
-
-		if (!step.mcpServerName || !step.mcpToolName) {
-			throw createChainError(
-				`MCP step "${step.name}" requires both mcpServerName and mcpToolName`,
+				`Parallel step "${step.name}" has no parallel config`,
 				{ code: 'CHAIN_INVALID_STEP', chainName },
 			);
 		}
+		const {
+			subSteps,
+			mergeStrategy = 'concat',
+			failTolerant = false,
+			concatSeparator = '\n\n',
+		} = step.parallel;
+		const start = Date.now();
 
-		// Build tool arguments from mcpArguments mapping or fallback to prompt
-		const toolArgs: Record<string, unknown> = {};
-		if (step.mcpArguments) {
-			for (const [argName, sourceKey] of Object.entries(step.mcpArguments)) {
-				toolArgs[argName] = currentValues[sourceKey];
-			}
-		} else {
-			toolArgs.prompt = prompt;
+		// Fire onStepStart for the parent parallel step
+		try {
+			await currentCallbacks?.onStepStart?.({
+				stepName: step.name,
+				stepIndex,
+				totalSteps,
+				provider: 'acp',
+				prompt: `[parallel: ${subSteps.length} sub-steps]`,
+			});
+		} catch (cbError) {
+			logger.warn('onStepStart callback threw', {
+				error: toError(cbError).message,
+			});
 		}
 
-		const result = await mcpClient.callTool(
-			step.mcpServerName,
-			step.mcpToolName,
-			toolArgs,
+		logger.debug(
+			`Step ${stepIndex + 1}/${totalSteps}: "${step.name}" [parallel: ${subSteps.length} sub-steps]`,
 		);
 
-		if (result.isError) {
-			throw createMCPToolError(
-				step.mcpServerName,
-				step.mcpToolName,
-				`Tool returned an error: ${result.content}`,
-			);
+		// Resolve all sub-step templates before fanning out
+		const resolvedSubSteps: Array<{
+			config: (typeof subSteps)[number];
+			prompt: string;
+		}> = [];
+		for (const subStep of subSteps) {
+			let prompt: string;
+			try {
+				prompt = subStep.template.format(currentValues);
+			} catch (error) {
+				const stepError = createChainStepError(
+					`${step.name}.${subStep.name}`,
+					stepIndex,
+					`Template resolution failed for sub-step: ${toError(error).message}`,
+					{ chainName, cause: error },
+				);
+				try {
+					await currentCallbacks?.onStepError?.({
+						stepName: step.name,
+						stepIndex,
+						error: stepError,
+					});
+				} catch (cbError) {
+					logger.warn('onStepError callback threw', {
+						error: toError(cbError).message,
+					});
+				}
+				throw stepError;
+			}
+			resolvedSubSteps.push({ config: subStep, prompt });
 		}
 
-		return {
-			output: result.content,
-			model: `mcp:${step.mcpServerName}/${step.mcpToolName}`,
-		};
-	}
+		// Execute sub-steps concurrently
+		const subResultPromises = resolvedSubSteps.map(
+			async ({ config: subStep, prompt }) => {
+				const subStart = Date.now();
+				const provider: Provider = subStep.provider ?? defaultProvider;
 
-	async function executeMemoryStep(
-		step: ChainStepConfig,
-		prompt: string,
-	): Promise<{ output: string; model: string }> {
-		if (!memoryManager) {
-			throw createChainError(
-				`Memory manager is not configured but step "${step.name}" requires it`,
-				{ code: 'CHAIN_MEMORY_NOT_CONFIGURED', chainName },
-			);
-		}
+				// Fire onStepStart for the sub-step
+				try {
+					await currentCallbacks?.onStepStart?.({
+						stepName: `${step.name}.${subStep.name}`,
+						stepIndex,
+						totalSteps,
+						provider,
+						prompt,
+					});
+				} catch (cbError) {
+					logger.warn('onStepStart callback threw for sub-step', {
+						error: toError(cbError).message,
+					});
+				}
 
-		const results = await memoryManager.search(prompt);
-		return {
-			output: formatSearchResults(results),
-			model: 'memory:vector-search',
-		};
-	}
-
-	async function executeStep(
-		step: ChainStepConfig,
-		provider: Provider,
-		prompt: string,
-		currentValues: Record<string, string>,
-	): Promise<{ output: string; model: string }> {
-		switch (provider) {
-			case 'acp':
-				return executeACPStep(step, prompt);
-			case 'mcp':
-				return executeMCPStep(step, prompt, currentValues);
-			case 'memory':
-				return executeMemoryStep(step, prompt);
-			default: {
-				const _exhaustive: never = provider;
-				throw createChainError(`Unknown provider: ${_exhaustive}`, {
-					code: 'CHAIN_UNKNOWN_PROVIDER',
+				const agentResult = await currentExecutor.execute(
+					{
+						name: `${step.name}.${subStep.name}`,
+						agentId: subStep.agentId,
+						serverName: subStep.serverName,
+						agentConfig: subStep.agentConfig,
+						systemPrompt: subStep.systemPrompt,
+						mcpServerName: subStep.mcpServerName,
+						mcpToolName: subStep.mcpToolName,
+						mcpArguments: subStep.mcpArguments,
+					},
+					provider,
+					prompt,
+					currentValues,
 					chainName,
-				});
+				);
+
+				const rawOutput = agentResult.output;
+				const output = subStep.outputTransform
+					? subStep.outputTransform(rawOutput)
+					: rawOutput;
+				const durationMs = Date.now() - subStart;
+
+				const subResult: ParallelSubResult = {
+					subStepName: subStep.name,
+					provider,
+					model: agentResult.model,
+					input: prompt,
+					output,
+					durationMs,
+					usage: agentResult.usage,
+					toolMetrics: agentResult.toolMetrics,
+				};
+
+				// Fire onStepComplete for the sub-step
+				try {
+					await currentCallbacks?.onStepComplete?.({
+						stepName: `${step.name}.${subStep.name}`,
+						provider,
+						model: agentResult.model,
+						input: prompt,
+						output,
+						durationMs,
+						stepIndex,
+						usage: agentResult.usage,
+						toolMetrics: agentResult.toolMetrics,
+					});
+				} catch (cbError) {
+					logger.warn('onStepComplete callback threw for sub-step', {
+						error: toError(cbError).message,
+					});
+				}
+
+				return subResult;
+			},
+		);
+
+		// Fan out
+		let settledSubResults: ParallelSubResult[];
+
+		if (failTolerant) {
+			const settled = await Promise.allSettled(subResultPromises);
+			settledSubResults = settled
+				.filter(
+					(r): r is PromiseFulfilledResult<ParallelSubResult> =>
+						r.status === 'fulfilled',
+				)
+				.map((r) => r.value);
+
+			if (settledSubResults.length === 0) {
+				const stepError = createChainStepError(
+					step.name,
+					stepIndex,
+					'All parallel sub-steps failed',
+					{ chainName },
+				);
+				try {
+					await currentCallbacks?.onStepError?.({
+						stepName: step.name,
+						stepIndex,
+						error: stepError,
+					});
+				} catch (cbError) {
+					logger.warn('onStepError callback threw', {
+						error: toError(cbError).message,
+					});
+				}
+				throw stepError;
+			}
+		} else {
+			try {
+				settledSubResults = await Promise.all(subResultPromises);
+			} catch (error) {
+				const stepError = isChainStepError(error)
+					? error
+					: createChainStepError(
+							step.name,
+							stepIndex,
+							`Parallel sub-step failed: ${toError(error).message}`,
+							{ chainName, cause: error },
+						);
+				try {
+					await currentCallbacks?.onStepError?.({
+						stepName: step.name,
+						stepIndex,
+						error: stepError,
+					});
+				} catch (cbError) {
+					logger.warn('onStepError callback threw', {
+						error: toError(cbError).message,
+					});
+				}
+				throw stepError;
 			}
 		}
+
+		// Merge sub-results
+		let mergedOutput: string;
+		if (typeof mergeStrategy === 'function') {
+			mergedOutput = mergeStrategy(settledSubResults);
+		} else {
+			mergedOutput = settledSubResults
+				.map((r) => r.output)
+				.join(concatSeparator);
+		}
+
+		const durationMs = Date.now() - start;
+
+		const stepResult: StepResult = {
+			stepName: step.name,
+			provider: 'acp',
+			model: `parallel:${settledSubResults.length}`,
+			input: `[parallel: ${subSteps.length} sub-steps]`,
+			output: mergedOutput,
+			durationMs,
+			stepIndex,
+			subResults: settledSubResults,
+		};
+
+		// Fire onStepComplete for the parent step
+		try {
+			await currentCallbacks?.onStepComplete?.(stepResult);
+		} catch (cbError) {
+			logger.warn('onStepComplete callback threw', {
+				error: toError(cbError).message,
+			});
+		}
+
+		logger.info(`Parallel step "${step.name}" completed in ${durationMs}ms`, {
+			subStepCount: settledSubResults.length,
+			outputLength: mergedOutput.length,
+		});
+
+		// Populate keyed values for 'keyed' merge strategy
+		if (mergeStrategy === 'keyed') {
+			for (const sub of settledSubResults) {
+				currentValues[`${step.name}.${sub.subStepName}`] = sub.output;
+			}
+		}
+
+		currentValues[step.name] = mergedOutput;
+		currentValues.previous_output = mergedOutput;
+
+		return stepResult;
 	}
 
 	// -----------------------------------------------------------------------
@@ -215,6 +382,26 @@ export function createChain(options: ChainOptions): Chain {
 							},
 						},
 					);
+				}
+			}
+
+			// Validate parallel steps
+			if (step.parallel) {
+				if (step.parallel.subSteps.length < 2) {
+					throw createChainError(
+						`Parallel step "${step.name}" must have at least 2 sub-steps`,
+						{ code: 'CHAIN_INVALID_STEP', chainName },
+					);
+				}
+				for (const sub of step.parallel.subSteps) {
+					if (sub.provider === 'mcp') {
+						if (!sub.mcpServerName || !sub.mcpToolName) {
+							throw createChainError(
+								`MCP sub-step "${step.name}.${sub.name}" requires both mcpServerName and mcpToolName`,
+								{ code: 'CHAIN_INVALID_STEP', chainName },
+							);
+						}
+					}
 				}
 			}
 
@@ -252,8 +439,6 @@ export function createChain(options: ChainOptions): Chain {
 			try {
 				for (let stepIndex = 0; stepIndex < runSteps.length; stepIndex++) {
 					const step = runSteps[stepIndex];
-					const start = Date.now();
-					const provider = step.provider ?? defaultProvider;
 
 					// Apply input mappings
 					if (step.inputMapping) {
@@ -265,6 +450,24 @@ export function createChain(options: ChainOptions): Chain {
 							}
 						}
 					}
+
+					// Parallel step branch
+					if (step.parallel) {
+						const parallelResult = await runParallelStep(
+							step,
+							stepIndex,
+							runSteps.length,
+							currentValues,
+							executor,
+							callbacks,
+						);
+						results.push(parallelResult);
+						continue;
+					}
+
+					// Sequential step branch
+					const start = Date.now();
+					const provider = step.provider ?? defaultProvider;
 
 					// Resolve the prompt
 					let prompt: string;
@@ -313,19 +516,24 @@ export function createChain(options: ChainOptions): Chain {
 						{ promptLength: prompt.length },
 					);
 
-					// Execute the step
+					// Execute the step via agent executor
 					let rawOutput: string;
 					let model: string;
+					let stepUsage: ACPTokenUsage | undefined;
+					let stepToolMetrics: MCPToolCallMetrics | undefined;
 
 					try {
-						const result = await executeStep(
+						const result = await executor.execute(
 							step,
 							provider,
 							prompt,
 							currentValues,
+							chainName,
 						);
 						rawOutput = result.output;
 						model = result.model;
+						stepUsage = result.usage;
+						stepToolMetrics = result.toolMetrics;
 					} catch (error) {
 						const stepError = isChainStepError(error)
 							? error
@@ -408,6 +616,8 @@ export function createChain(options: ChainOptions): Chain {
 						output,
 						durationMs,
 						stepIndex,
+						usage: stepUsage,
+						toolMetrics: stepToolMetrics,
 					};
 
 					results.push(stepResult);
@@ -558,6 +768,26 @@ export function createChainFromDefinition(
 			mcpArguments: step.mcpArguments,
 			storeToMemory: step.storeToMemory,
 			memoryMetadata: step.memoryMetadata,
+			parallel: step.parallel
+				? {
+						mergeStrategy: step.parallel.mergeStrategy,
+						failTolerant: step.parallel.failTolerant,
+						concatSeparator: step.parallel.concatSeparator,
+						subSteps: step.parallel.subSteps.map((sub) => ({
+							name: sub.name,
+							template: createPromptTemplate(sub.template),
+							provider: sub.provider,
+							agentId: sub.agentId ?? step.agentId ?? definition.agentId,
+							serverName:
+								sub.serverName ?? step.serverName ?? definition.serverName,
+							agentConfig: sub.agentConfig,
+							systemPrompt: sub.systemPrompt,
+							mcpServerName: sub.mcpServerName,
+							mcpToolName: sub.mcpToolName,
+							mcpArguments: sub.mcpArguments,
+						})),
+					}
+				: undefined,
 		});
 	}
 

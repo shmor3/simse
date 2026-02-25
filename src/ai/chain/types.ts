@@ -2,6 +2,10 @@
 // Chain types — Provider, step config, step result, and callbacks
 // ---------------------------------------------------------------------------
 
+import type { ACPTokenUsage } from '../acp/types.js';
+import type { ParallelConfig, ParallelSubResult } from '../agent/types.js';
+import type { MCPToolCallMetrics } from '../mcp/types.js';
+
 /**
  * Which AI backend a chain step executes against.
  */
@@ -39,6 +43,12 @@ export interface ChainStepConfig {
 	storeToMemory?: boolean;
 	/** Metadata to attach when storing to memory. */
 	memoryMetadata?: Record<string, string>;
+	/**
+	 * When set, this step runs sub-steps concurrently instead of calling
+	 * a single provider. The step's own template/provider are ignored
+	 * when parallel is present.
+	 */
+	parallel?: ParallelConfig;
 }
 
 /**
@@ -59,6 +69,12 @@ export interface StepResult {
 	durationMs: number;
 	/** Zero-based index of this step in the chain. */
 	stepIndex: number;
+	/** Token usage from ACP provider, if available. */
+	usage?: ACPTokenUsage;
+	/** Tool call metrics from MCP provider. */
+	toolMetrics?: MCPToolCallMetrics;
+	/** Sub-step results when this step ran in parallel mode. */
+	subResults?: readonly ParallelSubResult[];
 }
 
 /**

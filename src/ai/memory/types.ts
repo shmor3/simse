@@ -278,6 +278,54 @@ export interface SummarizeResult {
 }
 
 // ---------------------------------------------------------------------------
+// Learning / Adaptive Memory
+// ---------------------------------------------------------------------------
+
+/** Per-entry feedback tracking how many unique queries retrieve this entry. */
+export interface RelevanceFeedback {
+	/** Number of unique query embeddings that retrieved this entry. */
+	readonly queryCount: number;
+	/** Total times this entry was returned across all queries. */
+	readonly totalRetrievals: number;
+	/** Epoch ms when this entry was last returned by a query. */
+	readonly lastQueryTimestamp: number;
+	/** Computed diversity score (0–1). Higher = retrieved by many diverse queries. */
+	readonly relevanceScore: number;
+}
+
+/** Snapshot of the learning engine's full state. */
+export interface LearningProfile {
+	readonly queryHistory: readonly QueryRecord[];
+	readonly adaptedWeights: Readonly<Required<WeightProfile>>;
+	readonly interestEmbedding: readonly number[] | undefined;
+	readonly totalQueries: number;
+	readonly lastUpdated: number;
+}
+
+/** Record of a single query for interest profiling. */
+export interface QueryRecord {
+	readonly embedding: readonly number[];
+	readonly timestamp: number;
+	readonly resultCount: number;
+}
+
+/** Configuration for the adaptive learning engine. */
+export interface LearningOptions {
+	/** Whether adaptive learning is enabled. Defaults to `true`. */
+	readonly enabled?: boolean;
+	/** Maximum number of query records retained. Defaults to `50`. */
+	readonly maxQueryHistory?: number;
+	/** Decay half-life in ms for interest profile weighting. Defaults to 7 days. */
+	readonly queryDecayMs?: number;
+	/** How fast weight profile adapts per query (0–1). Defaults to `0.05`. */
+	readonly weightAdaptationRate?: number;
+	/** Influence of interest embedding on recommendation boost (0–1). Defaults to `0.15`. */
+	readonly interestBoostWeight?: number;
+	/** Whether to persist learning state to disk. Defaults to `true`. */
+	readonly feedbackPersistence?: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // Memory Config
 // ---------------------------------------------------------------------------
 
@@ -285,7 +333,6 @@ export interface MemoryConfig {
 	readonly enabled: boolean;
 	/** ACP agent ID used for generating embeddings. */
 	readonly embeddingAgent?: string;
-	readonly storePath: string;
 	readonly similarityThreshold: number;
 	readonly maxResults: number;
 }

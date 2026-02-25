@@ -15,6 +15,8 @@ export interface MCPServerConnection {
 	readonly command?: string;
 	/** For stdio: arguments to the command (e.g. ["server.js"]). */
 	readonly args?: readonly string[];
+	/** For stdio: environment variables passed to the child process. */
+	readonly env?: Readonly<Record<string, string>>;
 	/** For http: the server URL (e.g. "http://localhost:3000/mcp"). */
 	readonly url?: string;
 }
@@ -22,9 +24,9 @@ export interface MCPServerConnection {
 export interface MCPClientConfig {
 	/** External MCP servers to connect to. */
 	readonly servers: readonly MCPServerConnection[];
-	/** Client name advertised during MCP handshake. Defaults to `'simse-mcp-client'`. */
+	/** Client name advertised during MCP handshake. Required when connecting to servers. */
 	readonly clientName?: string;
-	/** Client version advertised during MCP handshake. Defaults to `'1.0.0'`. */
+	/** Client version advertised during MCP handshake. Required when connecting to servers. */
 	readonly clientVersion?: string;
 }
 
@@ -43,6 +45,17 @@ export interface MCPServerConfig {
 // MCP Discovery / Result Types
 // ---------------------------------------------------------------------------
 
+export interface MCPToolCallMetrics {
+	/** Wall-clock duration of the tool call in milliseconds. */
+	readonly durationMs: number;
+	/** Name of the MCP server that handled the call. */
+	readonly serverName: string;
+	/** Name of the tool that was called. */
+	readonly toolName: string;
+	/** ISO-8601 timestamp when the call started. */
+	readonly startedAt: string;
+}
+
 export interface MCPToolResult {
 	/** Concatenated text content from the tool response. */
 	readonly content: string;
@@ -52,6 +65,16 @@ export interface MCPToolResult {
 	readonly rawContent: ReadonlyArray<
 		Readonly<{ type: string; text?: string; [key: string]: unknown }>
 	>;
+	/** Timing and identification metrics for this tool call. */
+	readonly metrics: MCPToolCallMetrics;
+}
+
+export interface MCPToolAnnotations {
+	readonly title?: string;
+	readonly readOnlyHint?: boolean;
+	readonly destructiveHint?: boolean;
+	readonly idempotentHint?: boolean;
+	readonly openWorldHint?: boolean;
 }
 
 export interface MCPToolInfo {
@@ -59,6 +82,7 @@ export interface MCPToolInfo {
 	readonly name: string;
 	readonly description?: string;
 	readonly inputSchema?: Readonly<Record<string, unknown>>;
+	readonly annotations?: MCPToolAnnotations;
 }
 
 export interface MCPResourceInfo {
@@ -76,4 +100,76 @@ export interface MCPPromptInfo {
 	readonly arguments?: ReadonlyArray<
 		Readonly<{ name: string; description?: string; required?: boolean }>
 	>;
+}
+
+// ---------------------------------------------------------------------------
+// Logging types
+// ---------------------------------------------------------------------------
+
+export type MCPLoggingLevel =
+	| 'debug'
+	| 'info'
+	| 'notice'
+	| 'warning'
+	| 'error'
+	| 'critical'
+	| 'alert'
+	| 'emergency';
+
+export interface MCPLoggingMessage {
+	readonly level: MCPLoggingLevel;
+	readonly logger?: string;
+	readonly data: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Completion types
+// ---------------------------------------------------------------------------
+
+export interface MCPCompletionRequest {
+	readonly ref: MCPCompletionRef;
+	readonly argument: {
+		readonly name: string;
+		readonly value: string;
+	};
+}
+
+export type MCPCompletionRef =
+	| { readonly type: 'ref/resource'; readonly uri: string }
+	| { readonly type: 'ref/prompt'; readonly name: string };
+
+export interface MCPCompletionResult {
+	readonly values: readonly string[];
+	readonly hasMore?: boolean;
+	readonly total?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Root types
+// ---------------------------------------------------------------------------
+
+export interface MCPRoot {
+	readonly uri: string;
+	readonly name?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Resource subscription types
+// ---------------------------------------------------------------------------
+
+export interface MCPResourceSubscription {
+	readonly uri: string;
+	readonly serverName: string;
+}
+
+// ---------------------------------------------------------------------------
+// Resource template types
+// ---------------------------------------------------------------------------
+
+export interface MCPResourceTemplateInfo {
+	readonly serverName: string;
+	readonly uriTemplate: string;
+	readonly name?: string;
+	readonly description?: string;
+	readonly mimeType?: string;
 }

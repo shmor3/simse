@@ -1,10 +1,11 @@
 // ---------------------------------------------------------------------------
-// Pure TypeScript Configuration Validation (no Zod)
+// Pure TypeScript Configuration Validation
 // ---------------------------------------------------------------------------
 //
-// All validation is done via type-guard functions and a lightweight
-// `ValidationIssue` accumulator.  Every validator is a pure function that
-// returns either a list of issues (invalid) or an empty array (valid).
+// All validators accept typed interfaces — TypeScript handles structural
+// validation at compile time. These validators only check semantic
+// constraints: URL format, numeric ranges, cross-references, conditional
+// requirements, duplicate names, regex patterns, and semver format.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -26,37 +27,23 @@ const combine = (
 ): readonly ValidationIssue[] => Object.freeze(results.flat());
 
 // ---------------------------------------------------------------------------
-// Type guards
+// Reusable semantic validators
 // ---------------------------------------------------------------------------
 
-const isString = (v: unknown): v is string => typeof v === 'string';
-const isNumber = (v: unknown): v is number =>
-	typeof v === 'number' && !Number.isNaN(v);
-const isBoolean = (v: unknown): v is boolean => typeof v === 'boolean';
-const isObject = (v: unknown): v is Record<string, unknown> =>
-	typeof v === 'object' && v !== null && !Array.isArray(v);
-const isArray = (v: unknown): v is readonly unknown[] => Array.isArray(v);
-
-// ---------------------------------------------------------------------------
-// Reusable field validators
-// ---------------------------------------------------------------------------
-
-const validateNonEmptyString = (
-	value: unknown,
+const validateNonEmpty = (
+	value: string,
 	path: string,
 	label: string,
 ): readonly ValidationIssue[] => {
-	if (!isString(value)) return issue(path, `${label} must be a string`);
 	if (value.length === 0) return issue(path, `${label} cannot be empty`);
 	return ok;
 };
 
 const validateUrl = (
-	value: unknown,
+	value: string,
 	path: string,
 	label: string,
 ): readonly ValidationIssue[] => {
-	if (!isString(value)) return issue(path, `${label} must be a string`);
 	try {
 		new URL(value);
 		return ok;
@@ -65,43 +52,23 @@ const validateUrl = (
 	}
 };
 
-const validateOptionalString = (
-	value: unknown,
+const validateRange = (
+	value: number,
 	path: string,
 	label: string,
-): readonly ValidationIssue[] => {
-	if (value === undefined || value === null) return ok;
-	return validateNonEmptyString(value, path, label);
-};
-
-const validateOptionalNumber = (
-	value: unknown,
-	path: string,
-	label: string,
-	constraints?: {
+	constraints: {
 		readonly min?: number;
 		readonly max?: number;
 		readonly integer?: boolean;
 	},
 ): readonly ValidationIssue[] => {
-	if (value === undefined || value === null) return ok;
-	if (!isNumber(value)) return issue(path, `${label} must be a number`);
-	if (constraints?.integer && !Number.isInteger(value))
+	if (Number.isNaN(value)) return issue(path, `${label} must be a number`);
+	if (constraints.integer && !Number.isInteger(value))
 		return issue(path, `${label} must be an integer`);
-	if (constraints?.min !== undefined && value < constraints.min)
+	if (constraints.min !== undefined && value < constraints.min)
 		return issue(path, `${label} must be at least ${constraints.min}`);
-	if (constraints?.max !== undefined && value > constraints.max)
+	if (constraints.max !== undefined && value > constraints.max)
 		return issue(path, `${label} must be at most ${constraints.max}`);
-	return ok;
-};
-
-const validateOptionalBoolean = (
-	value: unknown,
-	path: string,
-	label: string,
-): readonly ValidationIssue[] => {
-	if (value === undefined || value === null) return ok;
-	if (!isBoolean(value)) return issue(path, `${label} must be a boolean`);
 	return ok;
 };
 
@@ -111,35 +78,38 @@ const validateOptionalBoolean = (
 
 export interface ACPServerEntryInput {
 	readonly name: string;
-	readonly url: string;
+	/** Command to spawn the ACP server (required — ACP uses stdio). */
+	readonly command: string;
+	readonly args?: readonly string[];
+	readonly cwd?: string;
+	readonly env?: Readonly<Record<string, string>>;
 	readonly defaultAgent?: string;
-	readonly apiKey?: string;
 	readonly timeoutMs?: number;
+	readonly permissionPolicy?: 'auto-approve' | 'prompt' | 'deny';
 }
 
 export const validateACPServerEntry = (
-	value: unknown,
+	value: ACPServerEntryInput,
 	path: string,
-): readonly ValidationIssue[] => {
-	if (!isObject(value))
-		return issue(path, 'ACP server entry must be an object');
-
-	return combine(
-		validateNonEmptyString(value.name, `${path}.name`, 'ACP server name'),
-		validateUrl(value.url, `${path}.url`, 'ACP server URL'),
-		validateOptionalString(
-			value.defaultAgent,
-			`${path}.defaultAgent`,
-			'Default agent ID',
-		),
-		validateOptionalString(value.apiKey, `${path}.apiKey`, 'API key'),
-		validateOptionalNumber(value.timeoutMs, `${path}.timeoutMs`, 'timeoutMs', {
-			min: 1000,
-			max: 600_000,
-			integer: true,
-		}),
+): readonly ValidationIssue[] =>
+	combine(
+		validateNonEmpty(value.name, `${path}.name`, 'ACP server name'),
+		validateNonEmpty(value.command, `${path}.command`, 'ACP server command'),
+		value.defaultAgent !== undefined
+			? validateNonEmpty(
+					value.defaultAgent,
+					`${path}.defaultAgent`,
+					'Default agent ID',
+				)
+			: ok,
+		value.timeoutMs !== undefined
+			? validateRange(value.timeoutMs, `${path}.timeoutMs`, 'timeoutMs', {
+					min: 1000,
+					max: 600_000,
+					integer: true,
+				})
+			: ok,
 	);
-};
 
 // ---------------------------------------------------------------------------
 // ACP Config
@@ -152,20 +122,16 @@ export interface ACPConfigInput {
 }
 
 export const validateACPConfig = (
-	value: unknown,
+	value: ACPConfigInput,
 	path: string,
 ): readonly ValidationIssue[] => {
-	if (!isObject(value)) return issue(path, 'ACP config must be an object');
-
-	const issues: ValidationIssue[] = [];
-
-	if (!isArray(value.servers))
-		return issue(`${path}.servers`, 'ACP servers must be an array');
 	if (value.servers.length === 0)
 		return issue(
 			`${path}.servers`,
 			'At least one ACP server must be configured',
 		);
+
+	const issues: ValidationIssue[] = [];
 
 	for (let i = 0; i < value.servers.length; i++) {
 		issues.push(
@@ -175,43 +141,43 @@ export const validateACPConfig = (
 
 	// Detect duplicate server names
 	if (issues.length === 0) {
-		const names = (value.servers as readonly { name: unknown }[])
-			.map((s) => s.name)
-			.filter((n): n is string => typeof n === 'string');
 		const seen = new Set<string>();
-		for (const name of names) {
-			if (seen.has(name)) {
+		for (const server of value.servers) {
+			if (seen.has(server.name)) {
 				issues.push(
-					...issue(`${path}.servers`, `Duplicate ACP server name: "${name}"`),
+					...issue(
+						`${path}.servers`,
+						`Duplicate ACP server name: "${server.name}"`,
+					),
 				);
 			}
-			seen.add(name);
+			seen.add(server.name);
 		}
 	}
 
-	issues.push(
-		...validateOptionalString(
-			value.defaultServer,
-			`${path}.defaultServer`,
-			'Default server name',
-		),
-		...validateOptionalString(
-			value.defaultAgent,
-			`${path}.defaultAgent`,
-			'Default agent ID',
-		),
-	);
+	if (value.defaultServer !== undefined) {
+		issues.push(
+			...validateNonEmpty(
+				value.defaultServer,
+				`${path}.defaultServer`,
+				'Default server name',
+			),
+		);
+	}
+
+	if (value.defaultAgent !== undefined) {
+		issues.push(
+			...validateNonEmpty(
+				value.defaultAgent,
+				`${path}.defaultAgent`,
+				'Default agent ID',
+			),
+		);
+	}
 
 	// Cross-validate: defaultServer must reference a configured server name
-	if (
-		typeof value.defaultServer === 'string' &&
-		value.defaultServer.length > 0
-	) {
-		const serverNames = new Set(
-			(value.servers as readonly { name: unknown }[])
-				.map((s) => s.name)
-				.filter((n): n is string => typeof n === 'string'),
-		);
+	if (value.defaultServer !== undefined && value.defaultServer.length > 0) {
+		const serverNames = new Set(value.servers.map((s) => s.name));
 		if (!serverNames.has(value.defaultServer)) {
 			issues.push(
 				...issue(
@@ -234,6 +200,7 @@ export interface MCPStdioConnectionInput {
 	readonly transport: 'stdio';
 	readonly command: string;
 	readonly args?: readonly string[];
+	readonly env?: Readonly<Record<string, string>>;
 	readonly url?: string;
 }
 
@@ -250,51 +217,19 @@ export type MCPServerConnectionInput =
 	| MCPHttpConnectionInput;
 
 export const validateMCPServerConnection = (
-	value: unknown,
+	value: MCPServerConnectionInput,
 	path: string,
 ): readonly ValidationIssue[] => {
-	if (!isObject(value))
-		return issue(path, 'MCP server connection must be an object');
-
 	const issues: ValidationIssue[] = [];
 
 	issues.push(
-		...validateNonEmptyString(value.name, `${path}.name`, 'MCP server name'),
+		...validateNonEmpty(value.name, `${path}.name`, 'MCP server name'),
 	);
-
-	if (value.transport !== 'stdio' && value.transport !== 'http') {
-		return combine(
-			Object.freeze(issues),
-			issue(`${path}.transport`, 'MCP transport must be "stdio" or "http"'),
-		);
-	}
 
 	if (value.transport === 'stdio') {
 		issues.push(
-			...validateNonEmptyString(
-				value.command,
-				`${path}.command`,
-				'stdio command',
-			),
+			...validateNonEmpty(value.command, `${path}.command`, 'stdio command'),
 		);
-		if (value.args !== undefined) {
-			if (!isArray(value.args)) {
-				issues.push(
-					...issue(`${path}.args`, 'stdio args must be an array of strings'),
-				);
-			} else {
-				for (let j = 0; j < value.args.length; j++) {
-					if (!isString(value.args[j])) {
-						issues.push(
-							...issue(
-								`${path}.args[${j}]`,
-								`stdio arg at index ${j} must be a string`,
-							),
-						);
-					}
-				}
-			}
-		}
 	}
 
 	if (value.transport === 'http') {
@@ -310,18 +245,17 @@ export const validateMCPServerConnection = (
 
 export interface MCPClientConfigInput {
 	readonly servers?: readonly MCPServerConnectionInput[];
+	/** Client name advertised during MCP handshake. */
+	readonly clientName?: string;
+	/** Client version advertised during MCP handshake. */
+	readonly clientVersion?: string;
 }
 
 export const validateMCPClientConfig = (
-	value: unknown,
+	value: MCPClientConfigInput,
 	path: string,
 ): readonly ValidationIssue[] => {
-	if (!isObject(value))
-		return issue(path, 'MCP client config must be an object');
-
-	if (value.servers === undefined) return ok;
-	if (!isArray(value.servers))
-		return issue(`${path}.servers`, 'MCP client servers must be an array');
+	if (value.servers === undefined || value.servers.length === 0) return ok;
 
 	const issues: ValidationIssue[] = [];
 	for (let i = 0; i < value.servers.length; i++) {
@@ -332,17 +266,17 @@ export const validateMCPClientConfig = (
 
 	// Detect duplicate server names
 	if (issues.length === 0) {
-		const names = (value.servers as readonly { name: unknown }[])
-			.map((s) => s.name)
-			.filter((n): n is string => typeof n === 'string');
 		const seen = new Set<string>();
-		for (const name of names) {
-			if (seen.has(name)) {
+		for (const server of value.servers) {
+			if (seen.has(server.name)) {
 				issues.push(
-					...issue(`${path}.servers`, `Duplicate MCP server name: "${name}"`),
+					...issue(
+						`${path}.servers`,
+						`Duplicate MCP server name: "${server.name}"`,
+					),
 				);
 			}
-			seen.add(name);
+			seen.add(server.name);
 		}
 	}
 
@@ -363,37 +297,40 @@ export interface MCPServerConfigInput {
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 
 export const validateMCPServerConfig = (
-	value: unknown,
+	value: MCPServerConfigInput,
 	path: string,
 ): readonly ValidationIssue[] => {
-	if (!isObject(value))
-		return issue(path, 'MCP server config must be an object');
-
 	const issues: ValidationIssue[] = [];
+	const enabled = value.enabled === true;
 
-	issues.push(
-		...validateOptionalBoolean(
-			value.enabled,
-			`${path}.enabled`,
-			'MCP server enabled',
-		),
-	);
-
-	if (value.name !== undefined) {
+	if (enabled && value.name === undefined) {
 		issues.push(
-			...validateNonEmptyString(value.name, `${path}.name`, 'MCP server name'),
+			...issue(`${path}.name`, 'MCP server name is required when enabled'),
 		);
 	}
 
-	if (value.version !== undefined) {
-		if (!isString(value.version) || !SEMVER_RE.test(value.version)) {
-			issues.push(
-				...issue(
-					`${path}.version`,
-					'MCP server version must be semver (e.g. 1.0.0)',
-				),
-			);
-		}
+	if (value.name !== undefined) {
+		issues.push(
+			...validateNonEmpty(value.name, `${path}.name`, 'MCP server name'),
+		);
+	}
+
+	if (enabled && value.version === undefined) {
+		issues.push(
+			...issue(
+				`${path}.version`,
+				'MCP server version is required when enabled',
+			),
+		);
+	}
+
+	if (value.version !== undefined && !SEMVER_RE.test(value.version)) {
+		issues.push(
+			...issue(
+				`${path}.version`,
+				'MCP server version must be semver (e.g. 1.0.0)',
+			),
+		);
 	}
 
 	return Object.freeze(issues);
@@ -409,12 +346,10 @@ export interface MCPConfigInput {
 }
 
 export const validateMCPConfig = (
-	value: unknown,
+	value: MCPConfigInput,
 	path: string,
-): readonly ValidationIssue[] => {
-	if (!isObject(value)) return issue(path, 'MCP config must be an object');
-
-	return combine(
+): readonly ValidationIssue[] =>
+	combine(
 		value.client !== undefined
 			? validateMCPClientConfig(value.client, `${path}.client`)
 			: ok,
@@ -422,7 +357,6 @@ export const validateMCPConfig = (
 			? validateMCPServerConfig(value.server, `${path}.server`)
 			: ok,
 	);
-};
 
 // ---------------------------------------------------------------------------
 // Memory Config
@@ -431,58 +365,57 @@ export const validateMCPConfig = (
 export interface MemoryConfigInput {
 	readonly enabled?: boolean;
 	readonly embeddingAgent?: string;
-	readonly storePath?: string;
 	readonly similarityThreshold?: number;
 	readonly maxResults?: number;
 }
 
 export const validateMemoryConfig = (
-	value: unknown,
+	value: MemoryConfigInput,
 	path: string,
 ): readonly ValidationIssue[] => {
-	if (!isObject(value)) return issue(path, 'Memory config must be an object');
-
 	const enabled = value.enabled !== false;
 
 	return combine(
-		validateOptionalBoolean(value.enabled, `${path}.enabled`, 'Memory enabled'),
-		enabled
-			? validateNonEmptyString(
-					value.embeddingAgent,
+		enabled && value.embeddingAgent === undefined
+			? issue(
 					`${path}.embeddingAgent`,
-					'Embedding agent ID (required when memory is enabled)',
+					'Embedding agent ID is required when memory is enabled',
 				)
-			: validateOptionalString(
+			: ok,
+		value.embeddingAgent !== undefined
+			? validateNonEmpty(
 					value.embeddingAgent,
 					`${path}.embeddingAgent`,
 					'Embedding agent ID',
-				),
-		value.storePath !== undefined
-			? validateNonEmptyString(
-					value.storePath,
-					`${path}.storePath`,
-					'Store path',
 				)
 			: ok,
-		validateOptionalNumber(
-			value.similarityThreshold,
-			`${path}.similarityThreshold`,
-			'Similarity threshold',
-			{
-				min: 0,
-				max: 1,
-			},
-		),
-		validateOptionalNumber(
-			value.maxResults,
-			`${path}.maxResults`,
-			'maxResults',
-			{
-				min: 1,
-				max: 100,
-				integer: true,
-			},
-		),
+		enabled && value.similarityThreshold === undefined
+			? issue(
+					`${path}.similarityThreshold`,
+					'Similarity threshold is required when memory is enabled',
+				)
+			: ok,
+		value.similarityThreshold !== undefined
+			? validateRange(
+					value.similarityThreshold,
+					`${path}.similarityThreshold`,
+					'Similarity threshold',
+					{ min: 0, max: 1 },
+				)
+			: ok,
+		enabled && value.maxResults === undefined
+			? issue(
+					`${path}.maxResults`,
+					'Max results is required when memory is enabled',
+				)
+			: ok,
+		value.maxResults !== undefined
+			? validateRange(value.maxResults, `${path}.maxResults`, 'maxResults', {
+					min: 1,
+					max: 100,
+					integer: true,
+				})
+			: ok,
 	);
 };
 
@@ -491,6 +424,26 @@ export const validateMemoryConfig = (
 // ---------------------------------------------------------------------------
 
 const STEP_NAME_RE = /^[a-zA-Z_][\w-]*$/;
+
+export interface ParallelSubStepDefinitionInput {
+	readonly name: string;
+	readonly template: string;
+	readonly provider?: 'acp' | 'mcp' | 'memory';
+	readonly agentId?: string;
+	readonly serverName?: string;
+	readonly agentConfig?: Readonly<Record<string, unknown>>;
+	readonly systemPrompt?: string;
+	readonly mcpServerName?: string;
+	readonly mcpToolName?: string;
+	readonly mcpArguments?: Readonly<Record<string, string>>;
+}
+
+export interface ParallelConfigInput {
+	readonly subSteps: readonly ParallelSubStepDefinitionInput[];
+	readonly mergeStrategy?: 'concat' | 'keyed';
+	readonly failTolerant?: boolean;
+	readonly concatSeparator?: string;
+}
 
 export interface ChainStepDefinitionInput {
 	readonly name: string;
@@ -506,28 +459,116 @@ export interface ChainStepDefinitionInput {
 	readonly mcpArguments?: Readonly<Record<string, string>>;
 	readonly storeToMemory?: boolean;
 	readonly memoryMetadata?: Readonly<Record<string, string>>;
+	readonly parallel?: ParallelConfigInput;
 }
 
-export const validateChainStepDefinition = (
-	value: unknown,
+const validateParallelSubStep = (
+	value: ParallelSubStepDefinitionInput,
 	path: string,
 ): readonly ValidationIssue[] => {
-	if (!isObject(value)) return issue(path, 'Chain step must be an object');
+	const issues: ValidationIssue[] = [];
 
+	const nameIssues = validateNonEmpty(
+		value.name,
+		`${path}.name`,
+		'Sub-step name',
+	);
+	issues.push(...nameIssues);
+	if (nameIssues.length === 0 && !STEP_NAME_RE.test(value.name)) {
+		issues.push(
+			...issue(
+				`${path}.name`,
+				'Sub-step name must start with a letter or underscore and contain only word characters or hyphens',
+			),
+		);
+	}
+
+	issues.push(
+		...validateNonEmpty(
+			value.template,
+			`${path}.template`,
+			'Sub-step template',
+		),
+	);
+
+	if (value.provider === 'mcp') {
+		if (value.mcpServerName === undefined || value.mcpServerName.length === 0) {
+			issues.push(
+				...issue(
+					`${path}.mcpServerName`,
+					'MCP sub-step requires "mcpServerName" to be set',
+				),
+			);
+		}
+		if (value.mcpToolName === undefined || value.mcpToolName.length === 0) {
+			issues.push(
+				...issue(
+					`${path}.mcpToolName`,
+					'MCP sub-step requires "mcpToolName" to be set',
+				),
+			);
+		}
+	}
+
+	return Object.freeze(issues);
+};
+
+const validateParallelConfig = (
+	value: ParallelConfigInput,
+	path: string,
+): readonly ValidationIssue[] => {
+	const issues: ValidationIssue[] = [];
+
+	if (value.subSteps.length < 2) {
+		issues.push(
+			...issue(
+				`${path}.subSteps`,
+				'Parallel config must have at least 2 sub-steps',
+			),
+		);
+	}
+
+	for (let i = 0; i < value.subSteps.length; i++) {
+		issues.push(
+			...validateParallelSubStep(value.subSteps[i], `${path}.subSteps[${i}]`),
+		);
+	}
+
+	// Detect duplicate sub-step names
+	if (issues.length === 0) {
+		const seen = new Set<string>();
+		for (const sub of value.subSteps) {
+			if (sub.name.length > 0) {
+				if (seen.has(sub.name)) {
+					issues.push(
+						...issue(
+							`${path}.subSteps`,
+							`Duplicate sub-step name: "${sub.name}"`,
+						),
+					);
+				}
+				seen.add(sub.name);
+			}
+		}
+	}
+
+	return Object.freeze(issues);
+};
+
+export const validateChainStepDefinition = (
+	value: ChainStepDefinitionInput,
+	path: string,
+): readonly ValidationIssue[] => {
 	const issues: ValidationIssue[] = [];
 
 	// name
-	const nameIssues = validateNonEmptyString(
+	const nameIssues = validateNonEmpty(
 		value.name,
 		`${path}.name`,
 		'Chain step name',
 	);
 	issues.push(...nameIssues);
-	if (
-		nameIssues.length === 0 &&
-		isString(value.name) &&
-		!STEP_NAME_RE.test(value.name)
-	) {
+	if (nameIssues.length === 0 && !STEP_NAME_RE.test(value.name)) {
 		issues.push(
 			...issue(
 				`${path}.name`,
@@ -538,66 +579,16 @@ export const validateChainStepDefinition = (
 
 	// template
 	issues.push(
-		...validateNonEmptyString(
+		...validateNonEmpty(
 			value.template,
 			`${path}.template`,
 			'Chain step template',
 		),
 	);
 
-	// provider
-	if (value.provider !== undefined) {
-		if (
-			value.provider !== 'acp' &&
-			value.provider !== 'mcp' &&
-			value.provider !== 'memory'
-		) {
-			issues.push(
-				...issue(
-					`${path}.provider`,
-					'Provider must be "acp", "mcp", or "memory"',
-				),
-			);
-		}
-	}
-
-	// optional strings
-	issues.push(
-		...validateOptionalString(value.agentId, `${path}.agentId`, 'Agent ID'),
-		...validateOptionalString(
-			value.serverName,
-			`${path}.serverName`,
-			'Server name',
-		),
-		...validateOptionalString(
-			value.mcpServerName,
-			`${path}.mcpServerName`,
-			'MCP server name',
-		),
-		...validateOptionalString(
-			value.mcpToolName,
-			`${path}.mcpToolName`,
-			'MCP tool name',
-		),
-	);
-
-	// optional fields
-	issues.push(
-		...validateOptionalString(
-			value.systemPrompt,
-			`${path}.systemPrompt`,
-			'System prompt',
-		),
-	);
-	if (value.storeToMemory !== undefined && !isBoolean(value.storeToMemory)) {
-		issues.push(
-			...issue(`${path}.storeToMemory`, 'storeToMemory must be a boolean'),
-		);
-	}
-
 	// MCP provider requires mcpServerName and mcpToolName
 	if (value.provider === 'mcp') {
-		if (!isString(value.mcpServerName) || value.mcpServerName.length === 0) {
+		if (value.mcpServerName === undefined || value.mcpServerName.length === 0) {
 			issues.push(
 				...issue(
 					`${path}.mcpServerName`,
@@ -605,7 +596,7 @@ export const validateChainStepDefinition = (
 				),
 			);
 		}
-		if (!isString(value.mcpToolName) || value.mcpToolName.length === 0) {
+		if (value.mcpToolName === undefined || value.mcpToolName.length === 0) {
 			issues.push(
 				...issue(
 					`${path}.mcpToolName`,
@@ -613,6 +604,11 @@ export const validateChainStepDefinition = (
 				),
 			);
 		}
+	}
+
+	// Parallel config validation
+	if (value.parallel !== undefined) {
+		issues.push(...validateParallelConfig(value.parallel, `${path}.parallel`));
 	}
 
 	return Object.freeze(issues);
@@ -631,31 +627,13 @@ export interface ChainDefinitionInput {
 }
 
 export const validateChainDefinition = (
-	value: unknown,
+	value: ChainDefinitionInput,
 	path: string,
 ): readonly ValidationIssue[] => {
-	if (!isObject(value))
-		return issue(path, 'Chain definition must be an object');
-
-	const issues: ValidationIssue[] = [];
-
-	if (!isArray(value.steps))
-		return issue(`${path}.steps`, 'Chain steps must be an array');
 	if (value.steps.length === 0)
 		return issue(`${path}.steps`, 'A chain must have at least one step');
 
-	issues.push(
-		...validateOptionalString(
-			value.agentId,
-			`${path}.agentId`,
-			'Chain agent ID',
-		),
-		...validateOptionalString(
-			value.serverName,
-			`${path}.serverName`,
-			'Chain server name',
-		),
-	);
+	const issues: ValidationIssue[] = [];
 
 	for (let i = 0; i < value.steps.length; i++) {
 		issues.push(
@@ -666,15 +644,14 @@ export const validateChainDefinition = (
 	// Detect duplicate step names
 	if (issues.length === 0) {
 		const stepNames = new Set<string>();
-		for (const step of value.steps as readonly Record<string, unknown>[]) {
-			const name = step?.name;
-			if (typeof name === 'string' && name.length > 0) {
-				if (stepNames.has(name)) {
+		for (const step of value.steps) {
+			if (step.name.length > 0) {
+				if (stepNames.has(step.name)) {
 					issues.push(
-						...issue(`${path}.steps`, `Duplicate step name: "${name}"`),
+						...issue(`${path}.steps`, `Duplicate step name: "${step.name}"`),
 					);
 				}
-				stepNames.add(name);
+				stepNames.add(step.name);
 			}
 		}
 	}
@@ -694,19 +671,12 @@ export interface AppConfigInput {
 }
 
 export const validateAppConfig = (
-	value: unknown,
-	path = '(root)',
+	value: AppConfigInput,
 ): readonly ValidationIssue[] => {
-	if (!isObject(value)) return issue(path, 'Config must be an object');
-
 	const issues: ValidationIssue[] = [];
 
 	// acp (required)
-	if (value.acp === undefined) {
-		issues.push(...issue('acp', 'ACP configuration is required'));
-	} else {
-		issues.push(...validateACPConfig(value.acp, 'acp'));
-	}
+	issues.push(...validateACPConfig(value.acp, 'acp'));
 
 	// mcp (optional)
 	if (value.mcp !== undefined) {
@@ -720,14 +690,8 @@ export const validateAppConfig = (
 
 	// chains (optional)
 	if (value.chains !== undefined) {
-		if (!isObject(value.chains)) {
-			issues.push(...issue('chains', 'Chains must be an object'));
-		} else {
-			for (const [chainName, chainDef] of Object.entries(value.chains)) {
-				issues.push(
-					...validateChainDefinition(chainDef, `chains.${chainName}`),
-				);
-			}
+		for (const [chainName, chainDef] of Object.entries(value.chains)) {
+			issues.push(...validateChainDefinition(chainDef, `chains.${chainName}`));
 		}
 	}
 

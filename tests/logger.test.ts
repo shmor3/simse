@@ -751,7 +751,7 @@ describe('retry', () => {
 			try {
 				await retry(fn, { maxAttempts: 4, baseDelayMs: 0 });
 				throw new Error('should have thrown');
-			} catch (e) {
+			} catch (e: any) {
 				expect(isRetryExhaustedError(e)).toBe(true);
 				expect(e.attempts).toBe(4);
 				expect(e.code).toBe('RETRY_EXHAUSTED');
@@ -770,7 +770,7 @@ describe('retry', () => {
 			try {
 				await retry(fn, { maxAttempts: 3, baseDelayMs: 0 });
 				throw new Error('should have thrown');
-			} catch (e) {
+			} catch (e: any) {
 				expect(e.cause).toBe(lastError);
 			}
 		});
@@ -823,7 +823,7 @@ describe('retry', () => {
 					shouldRetry: () => false,
 				});
 				throw new Error('should have thrown');
-			} catch (e) {
+			} catch (e: any) {
 				expect(e).toBe(error);
 				expect(e.code).not.toBe('RETRY_EXHAUSTED');
 			}
@@ -868,7 +868,8 @@ describe('retry', () => {
 				retry(fn, {
 					maxAttempts: 5,
 					baseDelayMs: 0,
-					shouldRetry: (err) => !(err && err.name === 'TypeError'),
+					shouldRetry: (err) =>
+						!(err instanceof Error && err.name === 'TypeError'),
 				}),
 			).rejects.toThrow(expect.anything());
 

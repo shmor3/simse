@@ -83,9 +83,7 @@ export interface ACPSessionNewParams {
 	readonly mcpServers: readonly unknown[];
 }
 
-export interface ACPSessionNewResult {
-	readonly sessionId: string;
-}
+export type ACPSessionNewResult = ACPSessionInfo;
 
 // ---------------------------------------------------------------------------
 // ACP protocol — content blocks
@@ -278,6 +276,7 @@ export interface ACPGenerateOptions {
 	readonly serverName?: string;
 	readonly systemPrompt?: string;
 	readonly config?: Readonly<Record<string, unknown>>;
+	readonly sampling?: ACPSamplingParams;
 }
 
 export interface ACPChatMessage {
@@ -289,4 +288,112 @@ export interface ACPChatOptions {
 	readonly agentId?: string;
 	readonly serverName?: string;
 	readonly config?: Readonly<Record<string, unknown>>;
+	readonly sampling?: ACPSamplingParams;
+}
+
+// ---------------------------------------------------------------------------
+// Sampling parameters for generation
+// ---------------------------------------------------------------------------
+
+export interface ACPSamplingParams {
+	readonly temperature?: number;
+	readonly maxTokens?: number;
+	readonly topP?: number;
+	readonly topK?: number;
+	readonly stopSequences?: readonly string[];
+}
+
+// ---------------------------------------------------------------------------
+// Tool call types from session/update notifications
+// ---------------------------------------------------------------------------
+
+export interface ACPToolCall {
+	readonly toolCallId: string;
+	readonly title: string;
+	readonly kind:
+		| 'read'
+		| 'edit'
+		| 'delete'
+		| 'move'
+		| 'search'
+		| 'execute'
+		| 'think'
+		| 'fetch'
+		| 'other';
+	readonly status:
+		| 'pending'
+		| 'in_progress'
+		| 'completed'
+		| 'failed'
+		| 'cancelled';
+}
+
+export interface ACPToolCallUpdate {
+	readonly toolCallId: string;
+	readonly status:
+		| 'pending'
+		| 'in_progress'
+		| 'completed'
+		| 'failed'
+		| 'cancelled';
+	readonly content?: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Model info from session/new response
+// ---------------------------------------------------------------------------
+
+export interface ACPModelInfo {
+	readonly modelId: string;
+	readonly name: string;
+	readonly description?: string;
+}
+
+export interface ACPModelsInfo {
+	readonly availableModels: readonly ACPModelInfo[];
+	readonly currentModelId: string;
+}
+
+// ---------------------------------------------------------------------------
+// Mode info from session/new response
+// ---------------------------------------------------------------------------
+
+export interface ACPModeInfo {
+	readonly id: string;
+	readonly name: string;
+	readonly description?: string;
+}
+
+export interface ACPModesInfo {
+	readonly currentModeId: string;
+	readonly availableModes: readonly ACPModeInfo[];
+}
+
+// ---------------------------------------------------------------------------
+// Extended session info with models and modes
+// ---------------------------------------------------------------------------
+
+export interface ACPSessionInfo {
+	readonly sessionId: string;
+	readonly models?: ACPModelsInfo;
+	readonly modes?: ACPModesInfo;
+}
+
+// ---------------------------------------------------------------------------
+// Session list/load types
+// ---------------------------------------------------------------------------
+
+export interface ACPSessionListEntry {
+	readonly sessionId: string;
+	readonly createdAt?: string;
+	readonly lastActiveAt?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Client capabilities for init
+// ---------------------------------------------------------------------------
+
+export interface ACPClientCapabilities {
+	readonly permissions?: boolean;
+	readonly streaming?: boolean;
 }

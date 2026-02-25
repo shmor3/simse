@@ -1,6 +1,15 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import {
+	getDefaultEnvironment,
+	StdioClientTransport,
+} from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {
+	LoggingMessageNotificationSchema,
+	PromptListChangedNotificationSchema,
+	ResourceListChangedNotificationSchema,
+	ToolListChangedNotificationSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import {
 	createMCPConnectionError,
 	createMCPError,
@@ -12,10 +21,17 @@ import {
 	toError,
 } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
+import { isTransientError, retry } from '../../utils/retry.js';
 import type {
 	MCPClientConfig,
+	MCPCompletionRef,
+	MCPCompletionResult,
+	MCPLoggingLevel,
+	MCPLoggingMessage,
 	MCPPromptInfo,
 	MCPResourceInfo,
+	MCPResourceTemplateInfo,
+	MCPRoot,
 	MCPServerConnection,
 	MCPToolInfo,
 	MCPToolResult,
@@ -51,12 +67,39 @@ export interface MCPClient {
 	) => Promise<MCPToolResult>;
 	readonly listResources: (serverName?: string) => Promise<MCPResourceInfo[]>;
 	readonly readResource: (serverName: string, uri: string) => Promise<string>;
+	readonly listResourceTemplates: (
+		serverName?: string,
+	) => Promise<MCPResourceTemplateInfo[]>;
 	readonly listPrompts: (serverName?: string) => Promise<MCPPromptInfo[]>;
 	readonly getPrompt: (
 		serverName: string,
 		promptName: string,
 		args: Record<string, string>,
 	) => Promise<string>;
+	readonly setLoggingLevel: (
+		serverName: string,
+		level: MCPLoggingLevel,
+	) => Promise<void>;
+	readonly onLoggingMessage: (
+		handler: (message: MCPLoggingMessage & { serverName: string }) => void,
+	) => () => void;
+	readonly onToolsChanged: (
+		handler: (serverName: string) => void,
+	) => () => void;
+	readonly onResourcesChanged: (
+		handler: (serverName: string) => void,
+	) => () => void;
+	readonly onPromptsChanged: (
+		handler: (serverName: string) => void,
+	) => () => void;
+	readonly complete: (
+		serverName: string,
+		ref: MCPCompletionRef,
+		argument: { name: string; value: string },
+	) => Promise<MCPCompletionResult>;
+	readonly sendRootsListChanged: () => Promise<void>;
+	readonly setRoots: (roots: MCPRoot[]) => void;
+	readonly roots: readonly MCPRoot[];
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +112,18 @@ export function createMCPClient(
 ): MCPClient {
 	const logger = (loggerOpt ?? getDefaultLogger()).child('mcp-client');
 	const connections = new Map<string, ConnectedServer>();
+
+	// -----------------------------------------------------------------------
+	// Notification handler registries
+	// -----------------------------------------------------------------------
+
+	const loggingHandlers = new Set<
+		(message: MCPLoggingMessage & { serverName: string }) => void
+	>();
+	const toolsChangedHandlers = new Set<(serverName: string) => void>();
+	const resourcesChangedHandlers = new Set<(serverName: string) => void>();
+	const promptsChangedHandlers = new Set<(serverName: string) => void>();
+	let currentRoots: MCPRoot[] = [];
 
 	// -----------------------------------------------------------------------
 	// Internal helpers
@@ -84,10 +139,24 @@ export function createMCPClient(
 					'stdio transport requires a "command" field',
 				);
 			}
-			return new StdioClientTransport({
+
+			const params: {
+				command: string;
+				args: string[];
+				env?: Record<string, string>;
+			} = {
 				command: serverConfig.command,
 				args: serverConfig.args ? [...serverConfig.args] : [],
-			});
+			};
+
+			if (serverConfig.env) {
+				params.env = {
+					...getDefaultEnvironment(),
+					...serverConfig.env,
+				};
+			}
+
+			return new StdioClientTransport(params);
 		}
 
 		if (!serverConfig.url) {
@@ -185,9 +254,16 @@ export function createMCPClient(
 			);
 		}
 
+		if (!config.clientName || !config.clientVersion) {
+			throw createMCPConnectionError(
+				serverName,
+				'MCP client requires clientName and clientVersion in config',
+			);
+		}
+
 		const client = new Client({
-			name: config.clientName ?? 'simse-mcp-client',
-			version: config.clientVersion ?? '1.0.0',
+			name: config.clientName,
+			version: config.clientVersion,
 		});
 
 		try {
@@ -207,6 +283,33 @@ export function createMCPClient(
 				{ cause: error },
 			);
 		}
+
+		// Register notification handlers
+		client.setNotificationHandler(
+			LoggingMessageNotificationSchema,
+			(notification) => {
+				for (const handler of loggingHandlers) {
+					handler({
+						level: notification.params.level as MCPLoggingLevel,
+						logger: notification.params.logger,
+						data: notification.params.data,
+						serverName,
+					});
+				}
+			},
+		);
+
+		client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
+			for (const handler of toolsChangedHandlers) handler(serverName);
+		});
+
+		client.setNotificationHandler(ResourceListChangedNotificationSchema, () => {
+			for (const handler of resourcesChangedHandlers) handler(serverName);
+		});
+
+		client.setNotificationHandler(PromptListChangedNotificationSchema, () => {
+			for (const handler of promptsChangedHandlers) handler(serverName);
+		});
 
 		connections.set(serverName, {
 			config: serverConfig,
@@ -287,11 +390,29 @@ export function createMCPClient(
 			try {
 				const response = await conn.client.listTools();
 				for (const tool of response.tools) {
+					const annotations = (tool as Record<string, unknown>).annotations as
+						| Record<string, unknown>
+						| undefined;
 					results.push({
 						serverName: name,
 						name: tool.name,
 						description: tool.description,
 						inputSchema: tool.inputSchema as Record<string, unknown>,
+						annotations: annotations
+							? {
+									title: annotations.title as string | undefined,
+									readOnlyHint: annotations.readOnlyHint as boolean | undefined,
+									destructiveHint: annotations.destructiveHint as
+										| boolean
+										| undefined,
+									idempotentHint: annotations.idempotentHint as
+										| boolean
+										| undefined,
+									openWorldHint: annotations.openWorldHint as
+										| boolean
+										| undefined,
+								}
+							: undefined,
 					});
 				}
 			} catch (error) {
@@ -315,59 +436,83 @@ export function createMCPClient(
 		toolName: string,
 		args: Record<string, unknown>,
 	): Promise<MCPToolResult> => {
-		const conn = getConnection(serverName);
+		return retry(
+			async () => {
+				const conn = getConnection(serverName);
 
-		logger.debug(`Calling tool "${toolName}" on server "${serverName}"`, {
-			argKeys: Object.keys(args),
-		});
+				logger.debug(`Calling tool "${toolName}" on server "${serverName}"`, {
+					argKeys: Object.keys(args),
+				});
 
-		let response: Awaited<ReturnType<Client['callTool']>>;
-		try {
-			response = await conn.client.callTool({
-				name: toolName,
-				arguments: args,
-			});
-		} catch (error) {
-			throw createMCPToolError(
-				serverName,
-				toolName,
-				`Tool call failed: ${toError(error).message}`,
-				{ cause: error },
-			);
-		}
+				const startedAt = new Date().toISOString();
+				const startMs = performance.now();
 
-		const rawContent = (response.content ?? []) as Array<{
-			type: string;
-			text?: string;
-			[key: string]: unknown;
-		}>;
+				let response: Awaited<ReturnType<Client['callTool']>>;
+				try {
+					response = await conn.client.callTool({
+						name: toolName,
+						arguments: args,
+					});
+				} catch (error) {
+					throw createMCPToolError(
+						serverName,
+						toolName,
+						`Tool call failed: ${toError(error).message}`,
+						{ cause: error },
+					);
+				}
 
-		const textParts = rawContent
-			.filter(
-				(item): item is typeof item & { text: string } =>
-					item.type === 'text' &&
-					typeof item.text === 'string' &&
-					item.text.length > 0,
-			)
-			.map((item) => item.text);
+				const durationMs = performance.now() - startMs;
 
-		const result: MCPToolResult = {
-			content: textParts.join('\n'),
-			isError: response.isError === true,
-			rawContent,
-		};
+				const rawContent = (response.content ?? []) as Array<{
+					type: string;
+					text?: string;
+					[key: string]: unknown;
+				}>;
 
-		if (result.isError) {
-			logger.warn(`Tool "${toolName}" on "${serverName}" returned an error`, {
-				content: result.content.slice(0, 200),
-			});
-		} else {
-			logger.debug(`Tool "${toolName}" completed successfully`, {
-				contentLength: result.content.length,
-			});
-		}
+				const textParts = rawContent
+					.filter(
+						(item): item is typeof item & { text: string } =>
+							item.type === 'text' &&
+							typeof item.text === 'string' &&
+							item.text.length > 0,
+					)
+					.map((item) => item.text);
 
-		return result;
+				const result: MCPToolResult = {
+					content: textParts.join('\n'),
+					isError: response.isError === true,
+					rawContent,
+					metrics: {
+						durationMs,
+						serverName,
+						toolName,
+						startedAt,
+					},
+				};
+
+				if (result.isError) {
+					logger.warn(
+						`Tool "${toolName}" on "${serverName}" returned an error`,
+						{
+							content: result.content.slice(0, 200),
+						},
+					);
+				} else {
+					logger.debug(`Tool "${toolName}" completed successfully`, {
+						contentLength: result.content.length,
+						durationMs,
+					});
+				}
+
+				return result;
+			},
+			{
+				maxAttempts: 2,
+				baseDelayMs: 500,
+				shouldRetry: (error) => isTransientError(error),
+			},
+		);
 	};
 
 	// -----------------------------------------------------------------------
@@ -412,28 +557,37 @@ export function createMCPClient(
 		serverName: string,
 		uri: string,
 	): Promise<string> => {
-		const conn = getConnection(serverName);
+		return retry(
+			async () => {
+				const conn = getConnection(serverName);
 
-		logger.debug(`Reading resource "${uri}" from server "${serverName}"`);
+				logger.debug(`Reading resource "${uri}" from server "${serverName}"`);
 
-		let response: Awaited<ReturnType<Client['readResource']>>;
-		try {
-			response = await conn.client.readResource({ uri });
-		} catch (error) {
-			throw createMCPError(
-				`Failed to read resource "${uri}" from server "${serverName}": ${toError(error).message}`,
-				{
-					code: 'MCP_READ_RESOURCE_FAILED',
-					cause: error,
-					metadata: { serverName, uri },
-				},
-			);
-		}
+				let response: Awaited<ReturnType<Client['readResource']>>;
+				try {
+					response = await conn.client.readResource({ uri });
+				} catch (error) {
+					throw createMCPError(
+						`Failed to read resource "${uri}" from server "${serverName}": ${toError(error).message}`,
+						{
+							code: 'MCP_READ_RESOURCE_FAILED',
+							cause: error,
+							metadata: { serverName, uri },
+						},
+					);
+				}
 
-		const first = response.contents[0];
-		if (!first) return '';
-		if ('text' in first) return first.text as string;
-		return JSON.stringify(first);
+				const first = response.contents[0];
+				if (!first) return '';
+				if ('text' in first) return first.text as string;
+				return JSON.stringify(first);
+			},
+			{
+				maxAttempts: 2,
+				baseDelayMs: 500,
+				shouldRetry: (error) => isTransientError(error),
+			},
+		);
 	};
 
 	// -----------------------------------------------------------------------
@@ -506,6 +660,139 @@ export function createMCPClient(
 	};
 
 	// -----------------------------------------------------------------------
+	// Logging
+	// -----------------------------------------------------------------------
+
+	const setLoggingLevel = async (
+		serverName: string,
+		level: MCPLoggingLevel,
+	): Promise<void> => {
+		const conn = connections.get(serverName);
+		if (!conn) {
+			throw createMCPServerNotConnectedError(serverName);
+		}
+		await conn.client.setLoggingLevel(level);
+	};
+
+	const onLoggingMessage = (
+		handler: (message: MCPLoggingMessage & { serverName: string }) => void,
+	): (() => void) => {
+		loggingHandlers.add(handler);
+		return () => {
+			loggingHandlers.delete(handler);
+		};
+	};
+
+	// -----------------------------------------------------------------------
+	// List-changed notifications
+	// -----------------------------------------------------------------------
+
+	const onToolsChanged = (
+		handler: (serverName: string) => void,
+	): (() => void) => {
+		toolsChangedHandlers.add(handler);
+		return () => {
+			toolsChangedHandlers.delete(handler);
+		};
+	};
+
+	const onResourcesChanged = (
+		handler: (serverName: string) => void,
+	): (() => void) => {
+		resourcesChangedHandlers.add(handler);
+		return () => {
+			resourcesChangedHandlers.delete(handler);
+		};
+	};
+
+	const onPromptsChanged = (
+		handler: (serverName: string) => void,
+	): (() => void) => {
+		promptsChangedHandlers.add(handler);
+		return () => {
+			promptsChangedHandlers.delete(handler);
+		};
+	};
+
+	// -----------------------------------------------------------------------
+	// Completions
+	// -----------------------------------------------------------------------
+
+	const complete = async (
+		serverName: string,
+		ref: MCPCompletionRef,
+		argument: { name: string; value: string },
+	): Promise<MCPCompletionResult> => {
+		const conn = connections.get(serverName);
+		if (!conn) {
+			throw createMCPServerNotConnectedError(serverName);
+		}
+		const result = await conn.client.complete({ ref, argument });
+		return {
+			values: result.completion.values,
+			hasMore: result.completion.hasMore,
+			total: result.completion.total,
+		};
+	};
+
+	// -----------------------------------------------------------------------
+	// Roots
+	// -----------------------------------------------------------------------
+
+	const setRoots = (roots: MCPRoot[]): void => {
+		currentRoots = [...roots];
+	};
+
+	const sendRootsListChanged = async (): Promise<void> => {
+		for (const conn of connections.values()) {
+			try {
+				await conn.client.sendRootsListChanged();
+			} catch {
+				// Server may not support roots
+			}
+		}
+	};
+
+	// -----------------------------------------------------------------------
+	// Resource templates
+	// -----------------------------------------------------------------------
+
+	const listResourceTemplates = async (
+		serverName?: string,
+	): Promise<MCPResourceTemplateInfo[]> => {
+		if (serverName) {
+			const conn = connections.get(serverName);
+			if (!conn) throw createMCPServerNotConnectedError(serverName);
+			const result = await conn.client.listResourceTemplates();
+			return (result.resourceTemplates ?? []).map((t) => ({
+				serverName,
+				uriTemplate: t.uriTemplate,
+				name: t.name,
+				description: t.description,
+				mimeType: t.mimeType,
+			}));
+		}
+		const all: MCPResourceTemplateInfo[] = [];
+		for (const [name, conn] of connections) {
+			try {
+				const result = await conn.client.listResourceTemplates();
+				for (const t of result.resourceTemplates ?? []) {
+					all.push({
+						serverName: name,
+						uriTemplate: t.uriTemplate,
+						name: t.name,
+						description: t.description,
+						mimeType: t.mimeType,
+					});
+				}
+			} catch {
+				// Server may not support resource templates
+			}
+		}
+		return all;
+	};
+
+	// -----------------------------------------------------------------------
 	// Return the record
 	// -----------------------------------------------------------------------
 
@@ -525,7 +812,19 @@ export function createMCPClient(
 		callTool,
 		listResources,
 		readResource,
+		listResourceTemplates,
 		listPrompts,
 		getPrompt,
+		setLoggingLevel,
+		onLoggingMessage,
+		onToolsChanged,
+		onResourcesChanged,
+		onPromptsChanged,
+		complete,
+		sendRootsListChanged,
+		setRoots,
+		get roots() {
+			return [...currentRoots];
+		},
 	});
 }

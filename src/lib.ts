@@ -6,7 +6,19 @@
 // need to configure, build, and run chains programmatically.
 // ---------------------------------------------------------------------------
 
-export type { ACPClient, ACPClientOptions } from './ai/acp/acp-client.js';
+export type {
+	ACPEmbedderOptions,
+	ACPGeneratorOptions,
+} from './ai/acp/acp-adapters.js';
+export {
+	createACPEmbedder,
+	createACPGenerator,
+} from './ai/acp/acp-adapters.js';
+export type {
+	ACPClient,
+	ACPClientOptions,
+	ACPStreamOptions,
+} from './ai/acp/acp-client.js';
 // ---- ACP (Agent Client Protocol) ------------------------------------------
 export { createACPClient } from './ai/acp/acp-client.js';
 export type {
@@ -14,21 +26,33 @@ export type {
 	ACPConnectionOptions,
 } from './ai/acp/acp-connection.js';
 export { createACPConnection } from './ai/acp/acp-connection.js';
+export {
+	extractToolCall,
+	extractToolCallUpdate,
+} from './ai/acp/acp-results.js';
 export type {
+	ACPAgentCapabilities,
 	ACPAgentInfo,
 	ACPChatMessage,
 	ACPChatOptions,
+	ACPClientCapabilities,
 	ACPConfig,
 	ACPContentBlock,
 	ACPDataContent,
-	ACPAgentCapabilities,
 	ACPEmbedResult,
 	ACPGenerateOptions,
 	ACPGenerateResult,
 	ACPInitializeResult,
+	ACPModeInfo,
+	ACPModelInfo,
+	ACPModelsInfo,
+	ACPModesInfo,
 	ACPPermissionPolicy,
+	ACPSamplingParams,
 	ACPServerEntry,
 	ACPServerInfo,
+	ACPSessionInfo,
+	ACPSessionListEntry,
 	ACPSessionPromptResult,
 	ACPStopReason,
 	ACPStreamChunk,
@@ -36,6 +60,8 @@ export type {
 	ACPStreamDelta,
 	ACPTextContent,
 	ACPTokenUsage,
+	ACPToolCall,
+	ACPToolCallUpdate,
 	JsonRpcError,
 	JsonRpcMessage,
 	JsonRpcNotification,
@@ -72,17 +98,43 @@ export {
 	isPromptTemplate,
 	runNamedChain,
 } from './ai/chain/index.js';
+// ---- Conversation ---------------------------------------------------------
+export type {
+	Conversation,
+	ConversationMessage,
+	ConversationOptions,
+	ConversationRole,
+} from './ai/conversation/index.js';
+export { createConversation } from './ai/conversation/index.js';
+// ---- Agentic Loop ---------------------------------------------------------
+export type {
+	AgenticLoop,
+	AgenticLoopOptions,
+	AgenticLoopResult,
+	LoopCallbacks,
+	LoopTurn,
+} from './ai/loop/index.js';
+export { createAgenticLoop } from './ai/loop/index.js';
 export type { MCPClient } from './ai/mcp/mcp-client.js';
 // ---- MCP (Model Context Protocol) ----------------------------------------
 export { createMCPClient } from './ai/mcp/mcp-client.js';
-export type { SimseMCPServer } from './ai/mcp/mcp-server.js';
+export type { MCPServerOptions, SimseMCPServer } from './ai/mcp/mcp-server.js';
 export { createMCPServer } from './ai/mcp/mcp-server.js';
 export type {
 	MCPClientConfig,
+	MCPCompletionRef,
+	MCPCompletionRequest,
+	MCPCompletionResult,
+	MCPLoggingLevel,
+	MCPLoggingMessage,
 	MCPPromptInfo,
 	MCPResourceInfo,
+	MCPResourceSubscription,
+	MCPResourceTemplateInfo,
+	MCPRoot,
 	MCPServerConfig,
 	MCPServerConnection,
+	MCPToolAnnotations,
 	MCPToolCallMetrics,
 	MCPToolInfo,
 	MCPToolResult,
@@ -132,6 +184,35 @@ export type {
 	VectorStoreOptions,
 } from './ai/memory/vector-store.js';
 export { createVectorStore } from './ai/memory/vector-store.js';
+// ---- Task List ------------------------------------------------------------
+export type {
+	TaskCreateInput,
+	TaskItem,
+	TaskList,
+	TaskListOptions,
+	TaskStatus,
+	TaskUpdateInput,
+} from './ai/tasks/index.js';
+export { createTaskList } from './ai/tasks/index.js';
+// ---- Tool Registry --------------------------------------------------------
+export type {
+	RegisteredTool,
+	ToolAnnotations,
+	ToolCallRequest,
+	ToolCallResult,
+	ToolCategory,
+	ToolDefinition,
+	ToolHandler,
+	ToolPermissionResolver,
+	ToolRegistry,
+	ToolRegistryOptions,
+} from './ai/tools/index.js';
+export {
+	createToolRegistry,
+	registerMemoryTools,
+	registerTaskTools,
+	registerVFSTools,
+} from './ai/tools/index.js';
 // ---- Virtual Filesystem ---------------------------------------------------
 export type {
 	VFSCommitOperation,
@@ -207,6 +288,10 @@ export {
 	createConfigParseError,
 	createConfigValidationError,
 	createEmbeddingError,
+	// Loop
+	createLoopAbortedError,
+	createLoopError,
+	createLoopTurnLimitError,
 	createMCPConnectionError,
 	// MCP
 	createMCPError,
@@ -222,9 +307,17 @@ export {
 	createProviderUnavailableError,
 	// Base
 	createSimseError,
+	// Tasks
+	createTaskCircularDependencyError,
+	createTaskError,
+	createTaskNotFoundError,
 	// Template
 	createTemplateError,
 	createTemplateMissingVariablesError,
+	// Tools
+	createToolError,
+	createToolExecutionError,
+	createToolNotFoundError,
 	createVectorStoreCorruptionError,
 	createVectorStoreIOError,
 	// VFS
@@ -237,6 +330,9 @@ export {
 	isConfigParseError,
 	isConfigValidationError,
 	isEmbeddingError,
+	isLoopAbortedError,
+	isLoopError,
+	isLoopTurnLimitError,
 	isMCPConnectionError,
 	isMCPError,
 	isMCPServerNotConnectedError,
@@ -248,8 +344,14 @@ export {
 	isProviderTimeoutError,
 	isProviderUnavailableError,
 	isSimseError,
+	isTaskCircularDependencyError,
+	isTaskError,
+	isTaskNotFoundError,
 	isTemplateError,
 	isTemplateMissingVariablesError,
+	isToolError,
+	isToolExecutionError,
+	isToolNotFoundError,
 	isVectorStoreCorruptionError,
 	isVectorStoreIOError,
 	isVFSError,

@@ -2,7 +2,12 @@
 // ACP result extraction — parse token usage and content from ACP responses
 // ---------------------------------------------------------------------------
 
-import type { ACPContentBlock, ACPTokenUsage } from './types.js';
+import type {
+	ACPContentBlock,
+	ACPTokenUsage,
+	ACPToolCall,
+	ACPToolCallUpdate,
+} from './types.js';
 
 /**
  * Extract token usage from metadata.
@@ -65,4 +70,35 @@ export function extractContentText(
 		}
 	}
 	return text;
+}
+
+/**
+ * Extract a tool call from a session update notification.
+ * Returns undefined if the update is not a tool_call event.
+ */
+export function extractToolCall(
+	update: Record<string, unknown>,
+): ACPToolCall | undefined {
+	if (update.sessionUpdate !== 'tool_call') return undefined;
+	return {
+		toolCallId: update.toolCallId as string,
+		title: (update.title as string) ?? '',
+		kind: (update.kind as ACPToolCall['kind']) ?? 'other',
+		status: (update.status as ACPToolCall['status']) ?? 'pending',
+	};
+}
+
+/**
+ * Extract a tool call update from a session update notification.
+ * Returns undefined if the update is not a tool_call_update event.
+ */
+export function extractToolCallUpdate(
+	update: Record<string, unknown>,
+): ACPToolCallUpdate | undefined {
+	if (update.sessionUpdate !== 'tool_call_update') return undefined;
+	return {
+		toolCallId: update.toolCallId as string,
+		status: (update.status as ACPToolCallUpdate['status']) ?? 'in_progress',
+		content: update.content,
+	};
 }

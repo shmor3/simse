@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 //
 // The config layer is entirely interface-driven.  No classes, no Zod.
-// `defineConfig` is a pure function that validates a plain JSON object
+// `defineConfig` is a pure function that validates a typed config object
 // and returns a frozen, fully-resolved `AppConfig`.
 // ---------------------------------------------------------------------------
 
@@ -23,6 +23,8 @@ import {
 	type ChainStepDefinitionInput,
 	type MCPConfigInput,
 	type MemoryConfigInput,
+	type ParallelConfigInput,
+	type ParallelSubStepDefinitionInput,
 	type ValidationIssue,
 	validateAppConfig,
 } from './schema.js';
@@ -39,6 +41,8 @@ export type {
 	ChainStepDefinitionInput,
 	MCPConfigInput,
 	MemoryConfigInput,
+	ParallelConfigInput,
+	ParallelSubStepDefinitionInput,
 	ValidationIssue,
 };
 
@@ -46,7 +50,29 @@ export type {
 // Resolved config interfaces (output — all defaults applied)
 // ---------------------------------------------------------------------------
 
-/** JSON-serialisable step definition (no class instances or functions). */
+/** Resolved parallel sub-step definition. */
+export interface ParallelSubStepDefinition {
+	readonly name: string;
+	readonly template: string;
+	readonly provider?: 'acp' | 'mcp' | 'memory';
+	readonly agentId?: string;
+	readonly serverName?: string;
+	readonly agentConfig?: Readonly<Record<string, unknown>>;
+	readonly systemPrompt?: string;
+	readonly mcpServerName?: string;
+	readonly mcpToolName?: string;
+	readonly mcpArguments?: Readonly<Record<string, string>>;
+}
+
+/** Resolved parallel config definition. */
+export interface ParallelConfigDefinition {
+	readonly subSteps: readonly ParallelSubStepDefinition[];
+	readonly mergeStrategy?: 'concat' | 'keyed';
+	readonly failTolerant?: boolean;
+	readonly concatSeparator?: string;
+}
+
+/** Resolved step definition (no class instances or functions). */
 export interface ChainStepDefinition {
 	readonly name: string;
 	readonly template: string;
@@ -61,6 +87,7 @@ export interface ChainStepDefinition {
 	readonly mcpArguments?: Readonly<Record<string, string>>;
 	readonly storeToMemory?: boolean;
 	readonly memoryMetadata?: Readonly<Record<string, string>>;
+	readonly parallel?: ParallelConfigDefinition;
 }
 
 export interface ChainDefinition {
@@ -99,12 +126,15 @@ export interface AppConfig {
  *
  * const config = defineConfig({
  *   acp: {
- *     servers: [{ name: "local", url: "http://localhost:8000" }],
- *     defaultServer: "local",
+ *     servers: [{ name: "copilot", command: "copilot", args: ["--acp"] }],
+ *     defaultServer: "copilot",
  *     defaultAgent: "default",
  *   },
  *   memory: {
- *     storePath: ".my-app/memory",
+ *     enabled: true,
+ *     embeddingAgent: "default",
+ *     similarityThreshold: 0.7,
+ *     maxResults: 10,
  *   },
  *   chains: {
  *     summarize: {
@@ -144,42 +174,56 @@ export interface DefineConfigOptions {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve API keys from environment variables for ACP servers.
- *
- * Looks for `ACP_API_KEY_<UPPER_NAME>` where UPPER_NAME is the server name
- * uppercased with hyphens replaced by underscores.
- */
-const resolveACPApiKeys = (
-	servers: readonly ACPServerEntryInput[],
-): readonly ACPServerEntryInput[] =>
-	servers.map((server): ACPServerEntryInput => {
-		if (server.apiKey) return server;
-
-		if (server.name) {
-			const envKey = `ACP_API_KEY_${server.name.toUpperCase().replace(/-/g, '_')}`;
-			const envValue = process.env[envKey];
-			if (envValue) {
-				return { ...server, apiKey: envValue };
-			}
-		}
-
-		return server;
-	});
-
-/**
  * Convert an input step definition to a resolved step definition.
  */
+const resolveParallelSubStep = (
+	sub: ParallelSubStepDefinitionInput,
+	stepAgentId?: string,
+	stepServerName?: string,
+): ParallelSubStepDefinition =>
+	Object.freeze({
+		name: sub.name,
+		template: sub.template,
+		provider: sub.provider,
+		agentId: sub.agentId ?? stepAgentId,
+		serverName: sub.serverName ?? stepServerName,
+		agentConfig: sub.agentConfig,
+		systemPrompt: sub.systemPrompt,
+		mcpServerName: sub.mcpServerName,
+		mcpToolName: sub.mcpToolName,
+		mcpArguments: sub.mcpArguments,
+	});
+
+const resolveParallelConfig = (
+	config: ParallelConfigInput,
+	stepAgentId?: string,
+	stepServerName?: string,
+): ParallelConfigDefinition =>
+	Object.freeze({
+		subSteps: Object.freeze(
+			config.subSteps.map((sub) =>
+				resolveParallelSubStep(sub, stepAgentId, stepServerName),
+			),
+		),
+		mergeStrategy: config.mergeStrategy,
+		failTolerant: config.failTolerant,
+		concatSeparator: config.concatSeparator,
+	});
+
 const resolveStepDefinition = (
 	step: ChainStepDefinitionInput,
 	chainAgentId?: string,
 	chainServerName?: string,
-): ChainStepDefinition =>
-	Object.freeze({
+): ChainStepDefinition => {
+	const agentId = step.agentId ?? chainAgentId;
+	const serverName = step.serverName ?? chainServerName;
+
+	return Object.freeze({
 		name: step.name,
 		template: step.template,
 		provider: step.provider,
-		agentId: step.agentId ?? chainAgentId,
-		serverName: step.serverName ?? chainServerName,
+		agentId,
+		serverName,
 		agentConfig: step.agentConfig,
 		systemPrompt: step.systemPrompt,
 		inputMapping: step.inputMapping,
@@ -188,7 +232,11 @@ const resolveStepDefinition = (
 		mcpArguments: step.mcpArguments,
 		storeToMemory: step.storeToMemory,
 		memoryMetadata: step.memoryMetadata,
+		parallel: step.parallel
+			? resolveParallelConfig(step.parallel, agentId, serverName)
+			: undefined,
 	});
+};
 
 /**
  * Convert an input chain definition to a resolved chain definition.
@@ -228,10 +276,13 @@ const resolveChains = (
 const resolveACPServerEntry = (input: ACPServerEntryInput): ACPServerEntry =>
 	Object.freeze({
 		name: input.name,
-		url: input.url,
+		command: input.command,
+		args: input.args ? Object.freeze([...input.args]) : undefined,
+		cwd: input.cwd,
+		env: input.env ? Object.freeze({ ...input.env }) : undefined,
 		defaultAgent: input.defaultAgent,
-		apiKey: input.apiKey,
 		timeoutMs: input.timeoutMs ?? 30_000,
+		permissionPolicy: input.permissionPolicy,
 	});
 
 /**
@@ -245,6 +296,7 @@ const resolveMCPServerConnection = (
 		transport: input.transport,
 		command: input.command,
 		args: input.args ? [...input.args] : undefined,
+		env: input.env ? { ...input.env } : undefined,
 		url: input.url,
 	});
 
@@ -269,7 +321,7 @@ const resolveMCPServerConnection = (
  * ```ts
  * const config = defineConfig({
  *   acp: {
- *     servers: [{ name: "local", url: "http://localhost:8000" }],
+ *     servers: [{ name: "copilot", command: "copilot", args: ["--acp"] }],
  *   },
  * });
  * ```
@@ -298,24 +350,43 @@ export const defineConfig = (
 			const invalidPaths = new Set(issues.map((i) => i.path));
 			input = { ...rawInput };
 			if (rawInput.memory) {
-				const mem = { ...rawInput.memory } as Record<string, unknown>;
-				if (invalidPaths.has('memory.enabled')) mem.enabled = undefined;
-				if (invalidPaths.has('memory.storePath')) mem.storePath = undefined;
-				if (invalidPaths.has('memory.similarityThreshold'))
-					mem.similarityThreshold = undefined;
-				if (invalidPaths.has('memory.maxResults')) mem.maxResults = undefined;
-				if (invalidPaths.has('memory.embeddingAgent'))
-					mem.embeddingAgent = undefined;
-				input = { ...input, memory: mem as typeof rawInput.memory };
-			}
-			if (rawInput.mcp?.server) {
-				const srv = { ...rawInput.mcp.server } as Record<string, unknown>;
-				if (invalidPaths.has('mcp.server.enabled')) srv.enabled = undefined;
-				if (invalidPaths.has('mcp.server.name')) srv.name = undefined;
-				if (invalidPaths.has('mcp.server.version')) srv.version = undefined;
 				input = {
 					...input,
-					mcp: { ...rawInput.mcp, server: srv as typeof rawInput.mcp.server },
+					memory: {
+						...rawInput.memory,
+						...(invalidPaths.has('memory.enabled') && {
+							enabled: undefined,
+						}),
+						...(invalidPaths.has('memory.similarityThreshold') && {
+							similarityThreshold: undefined,
+						}),
+						...(invalidPaths.has('memory.maxResults') && {
+							maxResults: undefined,
+						}),
+						...(invalidPaths.has('memory.embeddingAgent') && {
+							embeddingAgent: undefined,
+						}),
+					},
+				};
+			}
+			if (rawInput.mcp?.server) {
+				input = {
+					...input,
+					mcp: {
+						...rawInput.mcp,
+						server: {
+							...rawInput.mcp.server,
+							...(invalidPaths.has('mcp.server.enabled') && {
+								enabled: undefined,
+							}),
+							...(invalidPaths.has('mcp.server.name') && {
+								name: undefined,
+							}),
+							...(invalidPaths.has('mcp.server.version') && {
+								version: undefined,
+							}),
+						},
+					},
 				};
 			}
 		} else {
@@ -323,12 +394,8 @@ export const defineConfig = (
 		}
 	}
 
-	// Guard against structurally invalid input (lenient mode may suppress errors)
-	if (
-		!input.acp ||
-		!Array.isArray(input.acp.servers) ||
-		input.acp.servers.length === 0
-	) {
+	// Guard: lenient mode may suppress errors, but we still need at least one server
+	if (input.acp.servers.length === 0) {
 		throw createConfigValidationError([
 			{
 				path: 'acp.servers',
@@ -337,13 +404,10 @@ export const defineConfig = (
 		]);
 	}
 
-	// Resolve ACP API keys from environment
-	const acpServers = resolveACPApiKeys(input.acp.servers);
-
 	// Build fully resolved config
 	const config: AppConfig = Object.freeze({
 		acp: Object.freeze({
-			servers: Object.freeze(acpServers.map(resolveACPServerEntry)),
+			servers: Object.freeze(input.acp.servers.map(resolveACPServerEntry)),
 			defaultServer: input.acp.defaultServer,
 			defaultAgent: input.acp.defaultAgent,
 		}),
@@ -352,20 +416,21 @@ export const defineConfig = (
 				servers: Object.freeze(
 					(input.mcp?.client?.servers ?? []).map(resolveMCPServerConnection),
 				),
+				clientName: input.mcp?.client?.clientName,
+				clientVersion: input.mcp?.client?.clientVersion,
 			}),
 			server: Object.freeze({
 				enabled: input.mcp?.server?.enabled ?? false,
 				transport: 'stdio' as const,
-				name: input.mcp?.server?.name ?? 'simse',
-				version: input.mcp?.server?.version ?? '1.0.0',
+				name: input.mcp?.server?.name as string,
+				version: input.mcp?.server?.version as string,
 			}),
 		}),
 		memory: Object.freeze({
 			enabled: input.memory?.enabled ?? false,
 			embeddingAgent: input.memory?.embeddingAgent,
-			storePath: input.memory?.storePath ?? '.simse/memory',
-			similarityThreshold: input.memory?.similarityThreshold ?? 0.7,
-			maxResults: input.memory?.maxResults ?? 5,
+			similarityThreshold: input.memory?.similarityThreshold as number,
+			maxResults: input.memory?.maxResults as number,
 		}),
 		chains: resolveChains(input.chains),
 	});

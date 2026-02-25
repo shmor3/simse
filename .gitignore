@@ -3,3 +3,6 @@ dist/
 .env
 *.tsbuildinfo
 bun.lock
+.claude/
+.simse-example/
+.simse-app-example/

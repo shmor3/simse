@@ -16,7 +16,7 @@ bun test --coverage    # bun test --coverage
 
 ## Architecture
 
-simse is a modular pipeline framework for orchestrating multi-step AI workflows. It connects to AI backends via **ACP** (Agent Communication Protocol), exposes tools via **MCP** (Model Context Protocol), and provides a file-backed **vector memory** store with compression, indexing, deduplication, recommendation, and summarization.
+simse is a modular pipeline framework for orchestrating multi-step AI workflows. It connects to AI backends via **ACP** (Agent Client Protocol), exposes tools via **MCP** (Model Context Protocol), and provides a file-backed **vector memory** store with compression, indexing, deduplication, recommendation, and summarization.
 
 ### Module Layout
 
@@ -34,19 +34,38 @@ src/
     memory.ts               # Memory/Embedding/VectorStore error factories + guards
     index.ts                # Barrel re-export
   config/
-    schema.ts               # Hand-rolled config validation (no Zod)
+    schema.ts               # Typed config validation (semantic-only, no runtime type guards)
     settings.ts             # AppConfig type + defineConfig()
   ai/
     acp/
       acp-client.ts         # ACP client: generate(), generateStream(), chat(), embed()
-      acp-http.ts           # HTTP helpers: fetchWithTimeout, httpGet, httpPost
-      acp-results.ts        # Response parsing: extractGenerateResult, extractEmbeddings
-      acp-stream.ts         # SSE delta extraction: extractStreamDelta
-      types.ts              # ACP types (servers, agents, responses)
+                             # Session management: listSessions(), loadSession(), deleteSession()
+                             # Mode/model switching: setSessionMode(), setSessionModel()
+      acp-connection.ts      # JSON-RPC 2.0 over NDJSON stdio transport
+                             # Permission handling with ACP option selection
+                             # AbortSignal support for request cancellation
+                             # Stderr routing to logger
+      acp-results.ts        # Response parsing: extractContentText, extractTokenUsage
+                             # Tool call extraction: extractToolCall, extractToolCallUpdate
+      types.ts              # ACP types: sessions, content blocks, streaming, permissions,
+                             # tool calls, sampling params, model/mode info
     mcp/
-      mcp-client.ts         # MCP client (connects to external MCP servers)
-      mcp-server.ts         # MCP server (exposes simse tools: generate, run-chain, list-agents)
-      types.ts              # MCP config types
+      mcp-client.ts         # MCP client: tools, resources, prompts, completions
+                             # Logging: setLoggingLevel(), onLoggingMessage()
+                             # List-changed: onToolsChanged(), onResourcesChanged()
+                             # Roots: setRoots(), sendRootsListChanged()
+                             # Resource templates: listResourceTemplates()
+                             # Retry logic on tool calls and resource reads
+      mcp-server.ts         # MCP server: generate, run-chain, list-agents,
+                             # memory-search, memory-add tools
+                             # List-changed notifications
+                             # Logging support
+      types.ts              # MCP types: tools, resources, prompts, logging,
+                             # completions, roots, resource templates, annotations
+    agent/
+      agent-executor.ts     # Step execution dispatcher (acp/mcp/memory providers)
+      types.ts              # AgentResult, AgentStepConfig, ParallelConfig, SwarmMerge
+      index.ts              # Barrel re-export
     chain/
       chain.ts              # createChain factory, createChainFromDefinition, runNamedChain
       prompt-template.ts    # PromptTemplate interface + createPromptTemplate
@@ -57,7 +76,7 @@ src/
       memory.ts             # MemoryManager: add/search/recommend/summarize/findDuplicates
       vector-store.ts       # VectorStore: file-backed storage with indexes + compression
       cosine.ts             # Pure cosineSimilarity function (clamped to [-1, 1])
-      vector-persistence.ts # IndexEntry (v1) + CompressedIndexEntry (v2) + guards
+      vector-persistence.ts # IndexEntry / IndexFile types + validation guards
       text-search.ts        # Text search: exact, substring, fuzzy, regex, token modes
       compression.ts        # Float32 base64 embedding encode/decode, gzip wrappers
       indexing.ts            # TopicIndex, MetadataIndex, MagnitudeCache factories
@@ -76,9 +95,35 @@ src/
 - **`toError(unknown)`**: Always wrap catch-block errors with `toError()` from `errors/index.js` before accessing `.message`.
 - **ESM-only**: All imports use `.js` extensions (`import { foo } from './bar.js'`). The `verbatimModuleSyntax` tsconfig flag is enabled — use `import type` for type-only imports.
 - **Write-lock serialization**: `vector-store.ts` uses a promise-chain (`writeLock`) to serialize concurrent mutations (add, delete, save). Never bypass the write lock for mutating operations.
-- **In-flight promise deduplication**: `load()`, MCP `start()`, and MCP `connect()` use a stored promise to deduplicate concurrent callers. The pattern is: check for existing promise → create if missing → clear in `.finally()`.
+- **In-flight promise deduplication**: `load()`, `initialize()`, MCP `start()`, and MCP `connect()` use a stored promise to deduplicate concurrent callers. The pattern is: check for existing promise → create if missing → clear in `.finally()`.
 - **Crash-safe persistence**: The vector store writes `.md` content files before the index file, so the index never references non-existent files.
 - **Compressed v2 format**: On-disk embeddings use Float32 base64 (not JSON arrays). The index file is gzipped. Loading auto-detects v1 (plain JSON array) vs v2 (gzipped `{ version: 2, entries }`).
+
+### ACP Protocol
+
+The ACP client implements the [Agent Client Protocol](https://agentclientprotocol.com) over JSON-RPC 2.0 / NDJSON stdio:
+
+- **Protocol version**: 1
+- **Field naming**: camelCase throughout (`sessionId`, `stopReason`, `agentInfo`, not snake_case)
+- **Session lifecycle**: `session/new` → `session/prompt` → `session/update` notifications → response
+- **Permission flow**: Agent sends `session/request_permission` with options array; client selects `allow_once`/`allow_always`/`reject_once`/`reject_always` via `{ outcome: { outcome: "selected", optionId } }`
+- **Session modes**: Set via `session/set_config_option` (configOptionId: "mode", groupId: modeId)
+- **Tool call lifecycle**: `tool_call` → `tool_call_update` (in_progress) → `tool_call_update` (completed) — all via `session/update` notifications
+- **Sampling params**: `temperature`, `maxTokens`, `topP`, `topK`, `stopSequences` passed in prompt metadata
+- **Agent fallback**: When no agentId is configured, falls back to server name
+
+### MCP Protocol
+
+The MCP implementation uses `@modelcontextprotocol/sdk`:
+
+- **Client**: Connects to external MCP servers via stdio or HTTP transport
+- **Server**: Exposes simse capabilities as MCP tools (generate, run-chain, list-agents, memory-search, memory-add)
+- **Logging**: `setLoggingLevel()` + `onLoggingMessage()` for structured log collection
+- **List-changed**: Notification handlers for dynamic tool/resource/prompt discovery
+- **Completions**: `complete()` for argument autocomplete
+- **Roots**: `setRoots()` + `sendRootsListChanged()` for workspace awareness
+- **Resource templates**: `listResourceTemplates()` for URI pattern discovery
+- **Retry**: Tool calls and resource reads use exponential backoff
 
 ### Memory System
 

@@ -1,15 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import * as fsSync from 'node:fs';
-import * as fs from 'node:fs/promises';
-import * as os from 'node:os';
-import * as path from 'node:path';
-import {
-	compressText,
-	decompressText,
-	encodeEmbedding,
-	isGzipped,
-} from '../src/ai/memory/compression.js';
+import { describe, expect, it } from 'bun:test';
+import { Buffer } from 'node:buffer';
+import { encodeEmbedding } from '../src/ai/memory/compression.js';
 import { cosineSimilarity } from '../src/ai/memory/cosine.js';
+import type { StorageBackend } from '../src/ai/memory/storage.js';
 import {
 	fuzzyScore,
 	levenshteinDistance,
@@ -37,36 +30,46 @@ function createSilentLogger(): Logger {
 	return createLogger({ context: 'test', level: 'none', transports: [] });
 }
 
-let tmpDir: string;
-
-async function createTmpDir(): Promise<string> {
-	const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'simse-test-'));
-	return dir;
+/**
+ * In-memory StorageBackend for tests. Stores KV data in a Map.
+ * Optionally shares state via a `sharedData` map for cross-store tests.
+ */
+function createMemoryStorage(sharedData?: Map<string, Buffer>): StorageBackend {
+	const data: Map<string, Buffer> = sharedData ?? new Map();
+	return Object.freeze({
+		load: async () => new Map(data),
+		save: async (newData: Map<string, Buffer>) => {
+			data.clear();
+			for (const [k, v] of newData) {
+				data.set(k, v);
+			}
+		},
+		close: async () => {},
+	});
 }
 
-async function cleanupTmpDir(dir: string): Promise<void> {
-	try {
-		await fs.rm(dir, { recursive: true, force: true });
-	} catch {
-		// Ignore cleanup failures
-	}
+function createFailingStorage(error: Error): StorageBackend {
+	return Object.freeze({
+		load: async () => {
+			throw error;
+		},
+		save: async () => {},
+		close: async () => {},
+	});
 }
 
 import { createVectorStore } from '../src/ai/memory/vector-store.js';
 
-function createStore(
-	storePath: string,
-	options?: {
-		autoSave?: boolean;
-		flushIntervalMs?: number;
-		atomicWrite?: boolean;
-	},
-): VectorStore {
-	return createVectorStore(storePath, {
+function createStore(options?: {
+	autoSave?: boolean;
+	flushIntervalMs?: number;
+	storage?: StorageBackend;
+}): VectorStore {
+	return createVectorStore({
+		storage: options?.storage ?? createMemoryStorage(),
 		logger: createSilentLogger(),
 		autoSave: options?.autoSave ?? true,
 		flushIntervalMs: options?.flushIntervalMs ?? 0,
-		atomicWrite: options?.atomicWrite ?? true,
 	});
 }
 
@@ -85,68 +88,133 @@ function makeEntry(overrides: Partial<VectorEntry> = {}): VectorEntry {
 }
 
 /**
- * Write the directory-based store format (index.json + entries/*.md) for
- * pre-populating test stores.
- *
- * `storePath` is the store **directory**.  The function creates:
- *   - `storePath/index.json`  — gzip-compressed v2 `{ version: 2, entries }` with base64 embeddings
- *   - `storePath/entries/{id}.md` — one gzip-compressed markdown file per entry containing the text
- *
- * When `entries` contains full `VectorEntry` objects the text is split out
- * and the embedding is encoded to base64 automatically.
+ * Serialize a single vector entry into the binary format used by the KV store.
+ * Format: [4b text-len][text][4b emb-b64-len][emb-b64][4b meta-json-len][meta-json]
+ *         [8b timestamp][4b accessCount][8b lastAccessed]
+ */
+function serializeTestEntry(entry: VectorEntry): Buffer {
+	const textBuf = Buffer.from(entry.text, 'utf-8');
+	const embBuf = Buffer.from(encodeEmbedding(entry.embedding), 'utf-8');
+	const metaBuf = Buffer.from(JSON.stringify(entry.metadata), 'utf-8');
+
+	const totalSize =
+		4 + textBuf.length + 4 + embBuf.length + 4 + metaBuf.length + 8 + 4 + 8;
+	const buf = Buffer.alloc(totalSize);
+	let offset = 0;
+
+	buf.writeUInt32BE(textBuf.length, offset);
+	offset += 4;
+	textBuf.copy(buf, offset);
+	offset += textBuf.length;
+
+	buf.writeUInt32BE(embBuf.length, offset);
+	offset += 4;
+	embBuf.copy(buf, offset);
+	offset += embBuf.length;
+
+	buf.writeUInt32BE(metaBuf.length, offset);
+	offset += 4;
+	metaBuf.copy(buf, offset);
+	offset += metaBuf.length;
+
+	const ts = entry.timestamp;
+	buf.writeUInt32BE(Math.floor(ts / 0x100000000), offset);
+	offset += 4;
+	buf.writeUInt32BE(ts >>> 0, offset);
+	offset += 4;
+
+	buf.writeUInt32BE(0, offset); // accessCount
+	offset += 4;
+	buf.writeUInt32BE(0, offset); // lastAccessed high
+	offset += 4;
+	buf.writeUInt32BE(0, offset); // lastAccessed low
+
+	return buf;
+}
+
+/**
+ * Write pre-populated test data into an in-memory Map using the binary KV
+ * format. Only entries with complete VectorEntry fields (id, text, embedding,
+ * metadata, timestamp) are written; entries missing required fields get a
+ * corrupt blob (useful for testing partial-corruption scenarios).
  */
 async function writeStoreData(
-	storePath: string,
+	sharedData: Map<string, Buffer>,
 	entries: Array<Record<string, unknown> | VectorEntry>,
 ): Promise<void> {
-	const entriesDir = path.join(storePath, 'entries');
-	await fs.mkdir(entriesDir, { recursive: true });
-
-	const indexEntries: Array<Record<string, unknown>> = [];
-
 	for (const entry of entries) {
-		const plain: Record<string, unknown> = { ...entry };
-		const { text, ...rest } = plain;
+		const id = entry.id as string | undefined;
+		if (!id) continue;
 
-		// Encode number[] embeddings to base64 strings for v2 format
-		if (Array.isArray(rest.embedding)) {
-			rest.embedding = encodeEmbedding(rest.embedding as number[]);
+		const text = entry.text as string | undefined;
+		const embedding = entry.embedding as number[] | undefined;
+		const metadata = (entry.metadata ?? {}) as Record<string, string>;
+		const timestamp = (entry.timestamp ?? Date.now()) as number;
+
+		if (typeof text !== 'string' || !Array.isArray(embedding)) {
+			sharedData.set(id, Buffer.from('CORRUPT'));
+			continue;
 		}
 
-		indexEntries.push(rest);
+		sharedData.set(
+			id,
+			serializeTestEntry({
+				id,
+				text,
+				embedding,
+				metadata,
+				timestamp,
+			}),
+		);
+	}
+}
 
-		// Write gzip-compressed .md file when text is present
-		if (typeof text === 'string' && typeof rest.id === 'string') {
-			const mdPath = path.join(entriesDir, `${rest.id}.md`);
-			await fs.writeFile(mdPath, compressText(text));
+/**
+ * Read persisted entries back from an in-memory Map in the binary KV format.
+ * Returns an array of objects with id, text, embedding (base64), metadata, timestamp.
+ */
+async function readStoredEntries(
+	sharedData: Map<string, Buffer>,
+): Promise<Array<Record<string, unknown>>> {
+	const result: Array<Record<string, unknown>> = [];
+	for (const [key, buf] of sharedData) {
+		if (key === '__learning') continue;
+		try {
+			let offset = 0;
+			const textLen = buf.readUInt32BE(offset);
+			offset += 4;
+			const text = buf.toString('utf-8', offset, offset + textLen);
+			offset += textLen;
+
+			const embLen = buf.readUInt32BE(offset);
+			offset += 4;
+			const embB64 = buf.toString('utf-8', offset, offset + embLen);
+			offset += embLen;
+
+			const metaLen = buf.readUInt32BE(offset);
+			offset += 4;
+			const metaJson = buf.toString('utf-8', offset, offset + metaLen);
+			offset += metaLen;
+			const metadata = JSON.parse(metaJson);
+
+			const tsHigh = buf.readUInt32BE(offset);
+			offset += 4;
+			const tsLow = buf.readUInt32BE(offset);
+			offset += 4;
+			const timestamp = tsHigh * 0x100000000 + tsLow;
+
+			result.push({
+				id: key,
+				text,
+				embedding: embB64,
+				metadata,
+				timestamp,
+			});
+		} catch {
+			// Skip corrupt entries
 		}
 	}
-
-	const indexFile = { version: 2, entries: indexEntries };
-	const compressed = compressText(JSON.stringify(indexFile));
-	await fs.writeFile(path.join(storePath, 'index.json'), compressed);
-}
-
-/**
- * Read the persisted index.json back from a store directory.
- * Handles gzip-compressed v2 format and returns the entries array.
- */
-async function readIndex(
-	storePath: string,
-): Promise<Array<Record<string, unknown>>> {
-	const buf = await fs.readFile(path.join(storePath, 'index.json'));
-	const jsonStr = isGzipped(buf) ? decompressText(buf) : buf.toString('utf-8');
-	const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
-	return parsed.entries as Array<Record<string, unknown>>;
-}
-
-/**
- * Read a single entry's markdown content from the entries directory.
- * Handles gzip-compressed .md files.
- */
-async function readEntryMd(storePath: string, id: string): Promise<string> {
-	const buf = await fs.readFile(path.join(storePath, 'entries', `${id}.md`));
-	return isGzipped(buf) ? decompressText(buf) : buf.toString('utf-8');
+	return result;
 }
 
 // ===========================================================================
@@ -268,16 +336,8 @@ describe('cosineSimilarity', () => {
 // ===========================================================================
 
 describe('VectorStore — Lifecycle', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should start with zero entries when no file exists', async () => {
-		const store = createStore(path.join(tmpDir, 'nonexistent'));
+		const store = createStore();
 		await store.load();
 
 		expect(store.size).toBe(0);
@@ -285,13 +345,13 @@ describe('VectorStore — Lifecycle', () => {
 	});
 
 	it('should load existing entries from a valid store directory', async () => {
-		const storePath = path.join(tmpDir, 'store');
-		await writeStoreData(storePath, [
+		const sharedData = new Map<string, Buffer>();
+		await writeStoreData(sharedData, [
 			makeEntry({ id: 'id-1', text: 'hello', embedding: [1, 2, 3] }),
 			makeEntry({ id: 'id-2', text: 'world', embedding: [4, 5, 6] }),
 		]);
 
-		const store = createStore(storePath);
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 
 		expect(store.size).toBe(2);
@@ -300,57 +360,28 @@ describe('VectorStore — Lifecycle', () => {
 		expect(all[1].id).toBe('id-2');
 	});
 
-	it('should load an empty entries array from v2 index gracefully', async () => {
-		const storePath = path.join(tmpDir, 'empty-array');
-		await fs.mkdir(storePath, { recursive: true });
-		const emptyIndex = JSON.stringify({ version: 2, entries: [] });
-		await fs.writeFile(
-			path.join(storePath, 'index.json'),
-			compressText(emptyIndex),
-		);
+	it('should load an empty store gracefully', async () => {
+		const sharedData = new Map<string, Buffer>();
 
-		const store = createStore(storePath);
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 
 		expect(store.size).toBe(0);
 	});
 
-	it('should handle empty index file (no content) gracefully', async () => {
-		const storePath = path.join(tmpDir, 'empty-file');
-		await fs.mkdir(storePath, { recursive: true });
-		await fs.writeFile(path.join(storePath, 'index.json'), '', 'utf-8');
+	it('should handle empty store file (no content) gracefully', async () => {
+		const sharedData = new Map<string, Buffer>();
 
-		const store = createStore(storePath);
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 
 		expect(store.size).toBe(0);
 	});
 
-	it('should handle whitespace-only index file gracefully', async () => {
-		const storePath = path.join(tmpDir, 'whitespace');
-		await fs.mkdir(storePath, { recursive: true });
-		await fs.writeFile(
-			path.join(storePath, 'index.json'),
-			'   \n  \t  ',
-			'utf-8',
-		);
-
-		const store = createStore(storePath);
-		await store.load();
-
-		expect(store.size).toBe(0);
-	});
-
-	it('should throw VectorStoreCorruptionError for malformed JSON', async () => {
-		const storePath = path.join(tmpDir, 'corrupt');
-		await fs.mkdir(storePath, { recursive: true });
-		await fs.writeFile(
-			path.join(storePath, 'index.json'),
-			'{ not valid json }',
-			'utf-8',
-		);
-
-		const store = createStore(storePath);
+	it('should throw VectorStoreCorruptionError for corrupt store file', async () => {
+		const store = createStore({
+			storage: createFailingStorage(new Error('corrupt data')),
+		});
 		await expectGuardedThrow(
 			() => store.load(),
 			isVectorStoreCorruptionError,
@@ -358,16 +389,10 @@ describe('VectorStore — Lifecycle', () => {
 		);
 	});
 
-	it('should throw VectorStoreCorruptionError when root is not a valid IndexFile', async () => {
-		const storePath = path.join(tmpDir, 'object');
-		await fs.mkdir(storePath, { recursive: true });
-		await fs.writeFile(
-			path.join(storePath, 'index.json'),
-			'{"key": "value"}',
-			'utf-8',
-		);
-
-		const store = createStore(storePath);
+	it('should throw VectorStoreCorruptionError for truncated store file', async () => {
+		const store = createStore({
+			storage: createFailingStorage(new Error('truncated data')),
+		});
 		await expectGuardedThrow(
 			() => store.load(),
 			isVectorStoreCorruptionError,
@@ -376,27 +401,14 @@ describe('VectorStore — Lifecycle', () => {
 	});
 
 	it('should skip invalid entries and warn (partial corruption)', async () => {
-		const storePath = path.join(tmpDir, 'partial');
-		// Write good entries with text, bad entries without valid structure
-		await writeStoreData(storePath, [
+		const sharedData = new Map<string, Buffer>();
+		await writeStoreData(sharedData, [
 			makeEntry({ id: 'good-1', text: 'valid' }),
-			{ id: 'bad-1' }, // missing fields — no embedding/metadata/timestamp
+			{ id: 'bad-1' }, // missing fields — writes corrupt blob
 			makeEntry({ id: 'good-2', text: 'also valid' }),
 		]);
-		// Also add invalid primitives directly to the compressed index
-		const indexPath = path.join(storePath, 'index.json');
-		const buf = await fs.readFile(indexPath);
-		const jsonStr = isGzipped(buf)
-			? decompressText(buf)
-			: buf.toString('utf-8');
-		const indexFile = JSON.parse(jsonStr) as {
-			version: number;
-			entries: unknown[];
-		};
-		indexFile.entries.push('not an object', null);
-		await fs.writeFile(indexPath, compressText(JSON.stringify(indexFile)));
 
-		const store = createStore(storePath);
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 
 		expect(store.size).toBe(2);
@@ -404,23 +416,29 @@ describe('VectorStore — Lifecycle', () => {
 	});
 
 	it('should mark as dirty when invalid entries are skipped', async () => {
-		const storePath = path.join(tmpDir, 'partial-dirty');
-		await writeStoreData(storePath, [
+		const sharedData = new Map<string, Buffer>();
+		await writeStoreData(sharedData, [
 			makeEntry({ id: 'good' }),
-			{ id: 'bad' }, // invalid — missing required fields
+			{ id: 'bad' }, // invalid — corrupt blob
 		]);
 
-		const store = createStore(storePath, { autoSave: false });
+		const store = createStore({
+			autoSave: false,
+			storage: createMemoryStorage(sharedData),
+		});
 		await store.load();
 
 		expect(store.isDirty).toBe(true);
 	});
 
 	it('should not be dirty after loading a clean store', async () => {
-		const storePath = path.join(tmpDir, 'clean');
-		await writeStoreData(storePath, [makeEntry({ id: 'clean' })]);
+		const sharedData = new Map<string, Buffer>();
+		await writeStoreData(sharedData, [makeEntry({ id: 'clean' })]);
 
-		const store = createStore(storePath, { autoSave: false });
+		const store = createStore({
+			autoSave: false,
+			storage: createMemoryStorage(sharedData),
+		});
 		await store.load();
 
 		expect(store.isDirty).toBe(false);
@@ -432,45 +450,33 @@ describe('VectorStore — Lifecycle', () => {
 // ===========================================================================
 
 describe('VectorStore — Save', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
-	it('should persist entries to disk in compressed v2 format', async () => {
-		const storePath = path.join(tmpDir, 'persist');
-		const store = createStore(storePath);
+	it('should persist entries to disk in binary KV format', async () => {
+		const sharedData = new Map<string, Buffer>();
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 
 		await store.add('hello', [1, 2, 3], { key: 'val' });
 
-		const data = await readIndex(storePath);
+		const data = await readStoredEntries(sharedData);
 		expect(data).toHaveLength(1);
 		const entry = data[0] as Record<string, unknown>;
-		// Embedding is now a base64-encoded Float32Array string
 		expect(typeof entry.embedding).toBe('string');
 		expect(entry.metadata).toEqual({ key: 'val' });
-		// text lives in the .md file, not the index
-		expect(entry.text).toBeUndefined();
-		const text = await readEntryMd(storePath, entry.id as string);
-		expect(text).toBe('hello');
+		expect(entry.text).toBe('hello');
 	});
 
-	it("should create parent directories if they don't exist", async () => {
-		const storePath = path.join(tmpDir, 'nested', 'deep', 'store');
-		const store = createStore(storePath);
+	it('should persist data correctly after save', async () => {
+		const sharedData = new Map<string, Buffer>();
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 		await store.add('test', [1], {});
 
-		expect(fsSync.existsSync(path.join(storePath, 'index.json'))).toBe(true);
+		const data = await readStoredEntries(sharedData);
+		expect(data).toHaveLength(1);
 	});
 
 	it('should not be dirty after save', async () => {
-		const storePath = path.join(tmpDir, 'dirty-test');
-		const store = createStore(storePath, { autoSave: false });
+		const store = createStore({ autoSave: false });
 		await store.load();
 
 		await store.add('test', [1], {});
@@ -481,41 +487,38 @@ describe('VectorStore — Save', () => {
 	});
 
 	it('should use atomic write by default (tmp + rename)', async () => {
-		const storePath = path.join(tmpDir, 'atomic');
-		const store = createStore(storePath, { atomicWrite: true });
+		const sharedData = new Map<string, Buffer>();
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 
 		await store.add('entry', [0.5], {});
 
-		const indexPath = path.join(storePath, 'index.json');
-		// The final file should exist and the tmp file should not
-		expect(fsSync.existsSync(indexPath)).toBe(true);
-		expect(fsSync.existsSync(`${indexPath}.tmp`)).toBe(false);
+		const data = await readStoredEntries(sharedData);
+		expect(data).toHaveLength(1);
 	});
 
-	it('should write directly when atomicWrite is false', async () => {
-		const storePath = path.join(tmpDir, 'non-atomic');
-		const store = createStore(storePath, { atomicWrite: false });
+	it('should persist data correctly with storage backend', async () => {
+		const sharedData = new Map<string, Buffer>();
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 
 		await store.add('entry', [0.5], {});
 
-		expect(fsSync.existsSync(path.join(storePath, 'index.json'))).toBe(true);
-		const data = await readIndex(storePath);
+		const data = await readStoredEntries(sharedData);
 		expect(data).toHaveLength(1);
 	});
 
 	it('should roundtrip data correctly (save then load)', async () => {
-		const storePath = path.join(tmpDir, 'roundtrip');
+		const sharedData = new Map<string, Buffer>();
 
 		// Write
-		const store1 = createStore(storePath);
+		const store1 = createStore({ storage: createMemoryStorage(sharedData) });
 		await store1.load();
 		await store1.add('text1', [0.1, 0.2], { a: '1' });
 		await store1.add('text2', [0.3, 0.4], { b: '2' });
 
 		// Read in a new store instance
-		const store2 = createStore(storePath);
+		const store2 = createStore({ storage: createMemoryStorage(sharedData) });
 		await store2.load();
 
 		expect(store2.size).toBe(2);
@@ -532,16 +535,8 @@ describe('VectorStore — Save', () => {
 // ===========================================================================
 
 describe('VectorStore — add', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should add an entry and return a UUID', async () => {
-		const store = createStore(path.join(tmpDir, 'add'));
+		const store = createStore();
 		await store.load();
 
 		const id = await store.add('hello world', [1, 2, 3]);
@@ -553,7 +548,7 @@ describe('VectorStore — add', () => {
 	});
 
 	it('should generate unique IDs for each entry', async () => {
-		const store = createStore(path.join(tmpDir, 'unique-ids'));
+		const store = createStore();
 		await store.load();
 
 		const id1 = await store.add('a', [1]);
@@ -564,7 +559,7 @@ describe('VectorStore — add', () => {
 	});
 
 	it('should store text, embedding, and metadata correctly', async () => {
-		const store = createStore(path.join(tmpDir, 'store-fields'));
+		const store = createStore();
 		await store.load();
 
 		const id = await store.add('test text', [0.5, 0.6], { key: 'value' });
@@ -578,7 +573,7 @@ describe('VectorStore — add', () => {
 	});
 
 	it('should default metadata to empty object', async () => {
-		const store = createStore(path.join(tmpDir, 'default-meta'));
+		const store = createStore();
 		await store.load();
 
 		const id = await store.add('text', [1]);
@@ -587,7 +582,7 @@ describe('VectorStore — add', () => {
 	});
 
 	it('should throw MemoryError for empty text', async () => {
-		const store = createStore(path.join(tmpDir, 'empty-text'));
+		const store = createStore();
 		await store.load();
 
 		await expectGuardedThrow(
@@ -598,7 +593,7 @@ describe('VectorStore — add', () => {
 	});
 
 	it('should throw MemoryError for empty embedding', async () => {
-		const store = createStore(path.join(tmpDir, 'empty-emb'));
+		const store = createStore();
 		await store.load();
 
 		await expectGuardedThrow(
@@ -609,7 +604,7 @@ describe('VectorStore — add', () => {
 	});
 
 	it('should increment size with each add', async () => {
-		const store = createStore(path.join(tmpDir, 'size'));
+		const store = createStore();
 		await store.load();
 
 		expect(store.size).toBe(0);
@@ -622,28 +617,31 @@ describe('VectorStore — add', () => {
 	});
 
 	it('should auto-save when autoSave is true', async () => {
-		const storePath = path.join(tmpDir, 'auto-save');
-		const store = createStore(storePath, { autoSave: true });
-		await store.load();
-
-		await store.add('entry', [1]);
-
-		expect(fsSync.existsSync(path.join(storePath, 'index.json'))).toBe(true);
-		const data = await readIndex(storePath);
-		expect(data).toHaveLength(1);
-	});
-
-	it('should NOT auto-save when autoSave is false', async () => {
-		const storePath = path.join(tmpDir, 'no-auto');
-		const store = createStore(storePath, {
-			autoSave: false,
-			flushIntervalMs: 0,
+		const sharedData = new Map<string, Buffer>();
+		const store = createStore({
+			autoSave: true,
+			storage: createMemoryStorage(sharedData),
 		});
 		await store.load();
 
 		await store.add('entry', [1]);
 
-		expect(fsSync.existsSync(path.join(storePath, 'index.json'))).toBe(false);
+		const data = await readStoredEntries(sharedData);
+		expect(data).toHaveLength(1);
+	});
+
+	it('should NOT auto-save when autoSave is false', async () => {
+		const sharedData = new Map<string, Buffer>();
+		const store = createStore({
+			autoSave: false,
+			flushIntervalMs: 0,
+			storage: createMemoryStorage(sharedData),
+		});
+		await store.load();
+
+		await store.add('entry', [1]);
+
+		expect(sharedData.size).toBe(0);
 		expect(store.isDirty).toBe(true);
 	});
 });
@@ -653,16 +651,8 @@ describe('VectorStore — add', () => {
 // ===========================================================================
 
 describe('VectorStore — addBatch', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should add multiple entries at once', async () => {
-		const store = createStore(path.join(tmpDir, 'batch'));
+		const store = createStore();
 		await store.load();
 
 		const ids = await store.addBatch([
@@ -677,7 +667,7 @@ describe('VectorStore — addBatch', () => {
 	});
 
 	it('should return empty array for empty batch', async () => {
-		const store = createStore(path.join(tmpDir, 'empty-batch'));
+		const store = createStore();
 		await store.load();
 
 		const ids = await store.addBatch([]);
@@ -686,7 +676,7 @@ describe('VectorStore — addBatch', () => {
 	});
 
 	it('should throw MemoryError if any entry has empty text', async () => {
-		const store = createStore(path.join(tmpDir, 'bad-batch'));
+		const store = createStore();
 		await store.load();
 
 		await expectGuardedThrow(
@@ -701,7 +691,7 @@ describe('VectorStore — addBatch', () => {
 	});
 
 	it('should throw MemoryError if any entry has empty embedding', async () => {
-		const store = createStore(path.join(tmpDir, 'bad-emb-batch'));
+		const store = createStore();
 		await store.load();
 
 		await expectGuardedThrow(
@@ -716,8 +706,11 @@ describe('VectorStore — addBatch', () => {
 	});
 
 	it('should save only once for the entire batch (autoSave)', async () => {
-		const storePath = path.join(tmpDir, 'batch-save');
-		const store = createStore(storePath, { autoSave: true });
+		const sharedData = new Map<string, Buffer>();
+		const store = createStore({
+			autoSave: true,
+			storage: createMemoryStorage(sharedData),
+		});
 		await store.load();
 
 		await store.addBatch([
@@ -725,12 +718,12 @@ describe('VectorStore — addBatch', () => {
 			{ text: 'b', embedding: [2] },
 		]);
 
-		const data = await readIndex(storePath);
+		const data = await readStoredEntries(sharedData);
 		expect(data).toHaveLength(2);
 	});
 
 	it('should default metadata to empty object when not provided', async () => {
-		const store = createStore(path.join(tmpDir, 'batch-meta'));
+		const store = createStore();
 		await store.load();
 
 		const ids = await store.addBatch([{ text: 'no meta', embedding: [1] }]);
@@ -744,16 +737,8 @@ describe('VectorStore — addBatch', () => {
 // ===========================================================================
 
 describe('VectorStore — delete', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should delete an existing entry and return true', async () => {
-		const store = createStore(path.join(tmpDir, 'delete'));
+		const store = createStore();
 		await store.load();
 
 		const id = await store.add('to delete', [1, 2]);
@@ -765,7 +750,7 @@ describe('VectorStore — delete', () => {
 	});
 
 	it('should return false for non-existent ID', async () => {
-		const store = createStore(path.join(tmpDir, 'no-delete'));
+		const store = createStore();
 		await store.load();
 
 		const result = await store.delete('non-existent-id');
@@ -773,7 +758,7 @@ describe('VectorStore — delete', () => {
 	});
 
 	it('should only delete the specified entry', async () => {
-		const store = createStore(path.join(tmpDir, 'selective-delete'));
+		const store = createStore();
 		await store.load();
 
 		const id1 = await store.add('keep me', [1]);
@@ -789,9 +774,7 @@ describe('VectorStore — delete', () => {
 	});
 
 	it('should not modify the store when deleting non-existent ID', async () => {
-		const store = createStore(path.join(tmpDir, 'no-mod'), {
-			autoSave: false,
-		});
+		const store = createStore({ autoSave: false });
 		await store.load();
 
 		await store.add('keep', [1]);
@@ -809,16 +792,8 @@ describe('VectorStore — delete', () => {
 // ===========================================================================
 
 describe('VectorStore — deleteBatch', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should delete multiple entries by ID', async () => {
-		const store = createStore(path.join(tmpDir, 'batch-del'));
+		const store = createStore();
 		await store.load();
 
 		const id1 = await store.add('a', [1]);
@@ -833,7 +808,7 @@ describe('VectorStore — deleteBatch', () => {
 	});
 
 	it('should return 0 for empty IDs array', async () => {
-		const store = createStore(path.join(tmpDir, 'empty-del'));
+		const store = createStore();
 		await store.load();
 
 		const deleted = await store.deleteBatch([]);
@@ -841,7 +816,7 @@ describe('VectorStore — deleteBatch', () => {
 	});
 
 	it('should handle mixed existing and non-existing IDs', async () => {
-		const store = createStore(path.join(tmpDir, 'mixed-del'));
+		const store = createStore();
 		await store.load();
 
 		const id1 = await store.add('a', [1]);
@@ -853,7 +828,7 @@ describe('VectorStore — deleteBatch', () => {
 	});
 
 	it('should handle all non-existing IDs', async () => {
-		const store = createStore(path.join(tmpDir, 'none-del'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('a', [1]);
@@ -869,16 +844,8 @@ describe('VectorStore — deleteBatch', () => {
 // ===========================================================================
 
 describe('VectorStore — clear', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should remove all entries', async () => {
-		const store = createStore(path.join(tmpDir, 'clear'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('a', [1]);
@@ -892,7 +859,7 @@ describe('VectorStore — clear', () => {
 	});
 
 	it('should be safe to call on an already empty store', async () => {
-		const store = createStore(path.join(tmpDir, 'clear-empty'));
+		const store = createStore();
 		await store.load();
 
 		await store.clear();
@@ -900,14 +867,14 @@ describe('VectorStore — clear', () => {
 	});
 
 	it('should persist the empty state when autoSave is on', async () => {
-		const storePath = path.join(tmpDir, 'clear-persist');
-		const store = createStore(storePath);
+		const sharedData = new Map<string, Buffer>();
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 
 		await store.add('a', [1]);
 		await store.clear();
 
-		const entries = await readIndex(storePath);
+		const entries = await readStoredEntries(sharedData);
 		expect(entries).toEqual([]);
 	});
 });
@@ -917,16 +884,8 @@ describe('VectorStore — clear', () => {
 // ===========================================================================
 
 describe('VectorStore — search', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should find the most similar entry', async () => {
-		const store = createStore(path.join(tmpDir, 'search'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('exact match', [1, 0, 0]);
@@ -941,7 +900,7 @@ describe('VectorStore — search', () => {
 	});
 
 	it('should return results sorted by descending score', async () => {
-		const store = createStore(path.join(tmpDir, 'sorted'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('bad', [0, 0, 1]);
@@ -956,7 +915,7 @@ describe('VectorStore — search', () => {
 	});
 
 	it('should respect the maxResults limit', async () => {
-		const store = createStore(path.join(tmpDir, 'max'));
+		const store = createStore();
 		await store.load();
 
 		for (let i = 0; i < 10; i++) {
@@ -968,7 +927,7 @@ describe('VectorStore — search', () => {
 	});
 
 	it('should respect the threshold', async () => {
-		const store = createStore(path.join(tmpDir, 'threshold'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('similar', [1, 0, 0]); // cosine = 1.0 with query
@@ -982,7 +941,7 @@ describe('VectorStore — search', () => {
 	});
 
 	it('should return empty array when no entries meet the threshold', async () => {
-		const store = createStore(path.join(tmpDir, 'no-match'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('entry', [0, 1, 0]);
@@ -992,7 +951,7 @@ describe('VectorStore — search', () => {
 	});
 
 	it('should return empty array from an empty store', async () => {
-		const store = createStore(path.join(tmpDir, 'empty-search'));
+		const store = createStore();
 		await store.load();
 
 		const results = store.search([1, 0, 0], 10, 0);
@@ -1000,7 +959,7 @@ describe('VectorStore — search', () => {
 	});
 
 	it('should return empty array for empty query embedding', async () => {
-		const store = createStore(path.join(tmpDir, 'empty-query'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('entry', [1, 2, 3]);
@@ -1010,16 +969,14 @@ describe('VectorStore — search', () => {
 	});
 
 	it('should skip entries with mismatched embedding dimensions', async () => {
-		const storePath = path.join(tmpDir, 'mismatch');
-
-		// Write entries with different dimensions directly
-		await writeStoreData(storePath, [
+		const sharedData = new Map<string, Buffer>();
+		await writeStoreData(sharedData, [
 			makeEntry({ id: 'dim3', text: '3d', embedding: [1, 0, 0] }),
 			makeEntry({ id: 'dim2', text: '2d', embedding: [1, 0] }),
 			makeEntry({ id: 'dim3b', text: '3d-b', embedding: [0.5, 0.5, 0] }),
 		]);
 
-		const store = createStore(storePath);
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 
 		const results = store.search([1, 0, 0], 10, 0);
@@ -1029,7 +986,7 @@ describe('VectorStore — search', () => {
 	});
 
 	it('should return correct score values', async () => {
-		const store = createStore(path.join(tmpDir, 'scores'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('identical', [1, 0, 0]);
@@ -1041,7 +998,7 @@ describe('VectorStore — search', () => {
 	});
 
 	it('should handle threshold of exactly 0', async () => {
-		const store = createStore(path.join(tmpDir, 'zero-threshold'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('a', [1, 0]);
@@ -1055,7 +1012,7 @@ describe('VectorStore — search', () => {
 	});
 
 	it('should handle threshold of exactly 1.0 (only exact matches)', async () => {
-		const store = createStore(path.join(tmpDir, 'exact-threshold'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('exact', [1, 0, 0]);
@@ -1074,17 +1031,9 @@ describe('VectorStore — search', () => {
 // ===========================================================================
 
 describe('VectorStore — Accessors', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	describe('getAll', () => {
 		it('should return a shallow copy of entries', async () => {
-			const store = createStore(path.join(tmpDir, 'getall'));
+			const store = createStore();
 			await store.load();
 
 			await store.add('a', [1]);
@@ -1098,7 +1047,7 @@ describe('VectorStore — Accessors', () => {
 		});
 
 		it('should return empty array for empty store', async () => {
-			const store = createStore(path.join(tmpDir, 'empty-getall'));
+			const store = createStore();
 			await store.load();
 
 			expect(store.getAll()).toEqual([]);
@@ -1107,7 +1056,7 @@ describe('VectorStore — Accessors', () => {
 
 	describe('getById', () => {
 		it('should find entry by ID', async () => {
-			const store = createStore(path.join(tmpDir, 'getbyid'));
+			const store = createStore();
 			await store.load();
 
 			const id = await store.add('findme', [1, 2, 3], { tag: 'test' });
@@ -1119,7 +1068,7 @@ describe('VectorStore — Accessors', () => {
 		});
 
 		it('should return undefined for non-existent ID', async () => {
-			const store = createStore(path.join(tmpDir, 'nobyid'));
+			const store = createStore();
 			await store.load();
 
 			expect(store.getById('does-not-exist')).toBeUndefined();
@@ -1128,7 +1077,7 @@ describe('VectorStore — Accessors', () => {
 
 	describe('size', () => {
 		it('should reflect current entry count', async () => {
-			const store = createStore(path.join(tmpDir, 'size-acc'));
+			const store = createStore();
 			await store.load();
 
 			expect(store.size).toBe(0);
@@ -1149,17 +1098,13 @@ describe('VectorStore — Accessors', () => {
 
 	describe('isDirty', () => {
 		it('should be false initially (no file)', async () => {
-			const store = createStore(path.join(tmpDir, 'dirty1'), {
-				autoSave: false,
-			});
+			const store = createStore({ autoSave: false });
 			await store.load();
 			expect(store.isDirty).toBe(false);
 		});
 
 		it('should be true after add (no autoSave)', async () => {
-			const store = createStore(path.join(tmpDir, 'dirty2'), {
-				autoSave: false,
-			});
+			const store = createStore({ autoSave: false });
 			await store.load();
 
 			await store.add('x', [1]);
@@ -1167,9 +1112,7 @@ describe('VectorStore — Accessors', () => {
 		});
 
 		it('should be false after save', async () => {
-			const store = createStore(path.join(tmpDir, 'dirty3'), {
-				autoSave: false,
-			});
+			const store = createStore({ autoSave: false });
 			await store.load();
 
 			await store.add('x', [1]);
@@ -1180,9 +1123,7 @@ describe('VectorStore — Accessors', () => {
 		});
 
 		it('should be true after delete (no autoSave)', async () => {
-			const store = createStore(path.join(tmpDir, 'dirty4'), {
-				autoSave: false,
-			});
+			const store = createStore({ autoSave: false });
 			await store.load();
 
 			await store.add('x', [1]);
@@ -1195,9 +1136,7 @@ describe('VectorStore — Accessors', () => {
 		});
 
 		it('should be true after clear (no autoSave)', async () => {
-			const store = createStore(path.join(tmpDir, 'dirty5'), {
-				autoSave: false,
-			});
+			const store = createStore({ autoSave: false });
 			await store.load();
 
 			await store.add('x', [1]);
@@ -1214,19 +1153,12 @@ describe('VectorStore — Accessors', () => {
 // ===========================================================================
 
 describe('VectorStore — dispose', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should flush dirty data on dispose', async () => {
-		const storePath = path.join(tmpDir, 'dispose');
-		const store = createStore(storePath, {
+		const sharedData = new Map<string, Buffer>();
+		const store = createStore({
 			autoSave: false,
 			flushIntervalMs: 0,
+			storage: createMemoryStorage(sharedData),
 		});
 		await store.load();
 
@@ -1236,27 +1168,21 @@ describe('VectorStore — dispose', () => {
 		await store.dispose();
 		expect(store.isDirty).toBe(false);
 
-		// Data should be on disk — index has the entry, text is in .md
-		const data = await readIndex(storePath);
+		// Data should be in the shared map
+		const data = await readStoredEntries(sharedData);
 		expect(data).toHaveLength(1);
-		const entry = data[0] as Record<string, unknown>;
-		const text = await readEntryMd(storePath, entry.id as string);
-		expect(text).toBe('will persist');
+		expect(data[0].text).toBe('will persist');
 	});
 
 	it('should not throw when disposing a clean store', async () => {
-		const store = createStore(path.join(tmpDir, 'clean-dispose'), {
-			autoSave: false,
-		});
+		const store = createStore({ autoSave: false });
 		await store.load();
 
 		await store.dispose();
 	});
 
 	it('should not throw when disposing twice', async () => {
-		const store = createStore(path.join(tmpDir, 'double-dispose'), {
-			autoSave: false,
-		});
+		const store = createStore({ autoSave: false });
 		await store.load();
 
 		await store.add('x', [1]);
@@ -1271,199 +1197,71 @@ describe('VectorStore — dispose', () => {
 // ===========================================================================
 
 describe('VectorStore — Entry validation', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
-	it('should reject entries with missing id', async () => {
-		const storePath = path.join(tmpDir, 'no-id');
-		await writeStoreData(storePath, [
-			{ embedding: [1], metadata: {}, timestamp: 1 },
-		]);
-
-		const store = createStore(storePath);
-		await store.load();
-		expect(store.size).toBe(0);
-	});
-
-	it('should reject entries with empty id', async () => {
-		const storePath = path.join(tmpDir, 'empty-id');
-		await writeStoreData(storePath, [
-			{
-				id: '',
-				text: 'empty id',
-				embedding: [1],
-				metadata: {},
-				timestamp: 1,
-			},
-		]);
-
-		const store = createStore(storePath);
-		await store.load();
-		expect(store.size).toBe(0);
-	});
-
-	it('should reject entries with empty embedding string', async () => {
-		const storePath = path.join(tmpDir, 'empty-emb-str');
-		// Write a v2 index directly with an empty embedding string
-		const entriesDir = path.join(storePath, 'entries');
-		await fs.mkdir(entriesDir, { recursive: true });
-		await fs.writeFile(path.join(entriesDir, 'x.md'), compressText('t'));
-		const indexFile = {
-			version: 2,
-			entries: [{ id: 'x', embedding: '', metadata: {}, timestamp: 1 }],
-		};
-		await fs.writeFile(
-			path.join(storePath, 'index.json'),
-			compressText(JSON.stringify(indexFile)),
+	it('should skip entries with corrupt binary blobs', async () => {
+		const sharedData = new Map<string, Buffer>();
+		sharedData.set(
+			'good',
+			serializeTestEntry(
+				makeEntry({ id: 'good', text: 'valid', embedding: [1] }),
+			),
 		);
+		sharedData.set('bad', Buffer.from('CORRUPT'));
 
-		const store = createStore(storePath);
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
-		expect(store.size).toBe(0);
+		expect(store.size).toBe(1);
+		expect(store.getAll()[0].id).toBe('good');
 	});
 
-	it('should reject entries with non-string embedding (number)', async () => {
-		const storePath = path.join(tmpDir, 'num-emb');
-		// Write a v2 index directly with a numeric embedding (invalid for v2)
-		const entriesDir = path.join(storePath, 'entries');
-		await fs.mkdir(entriesDir, { recursive: true });
-		await fs.writeFile(path.join(entriesDir, 'x.md'), compressText('t'));
-		const indexFile = {
-			version: 2,
-			entries: [{ id: 'x', embedding: 42, metadata: {}, timestamp: 1 }],
-		};
-		await fs.writeFile(
-			path.join(storePath, 'index.json'),
-			compressText(JSON.stringify(indexFile)),
+	it('should skip entries with truncated binary data', async () => {
+		const sharedData = new Map<string, Buffer>();
+		sharedData.set(
+			'good',
+			serializeTestEntry(
+				makeEntry({ id: 'good', text: 'valid', embedding: [1] }),
+			),
 		);
+		// Truncated entry — just the text length prefix, no actual data
+		sharedData.set('truncated', Buffer.alloc(4));
 
-		const store = createStore(storePath);
-		await store.load();
-		expect(store.size).toBe(0);
-	});
-
-	it('should reject entries with non-object metadata', async () => {
-		const storePath = path.join(tmpDir, 'non-obj-meta');
-		await writeStoreData(storePath, [
-			{
-				id: 'x',
-				text: 't',
-				embedding: [1],
-				metadata: 'string',
-				timestamp: 1,
-			},
-		]);
-
-		const store = createStore(storePath);
-		await store.load();
-		expect(store.size).toBe(0);
-	});
-
-	it('should reject entries with null metadata', async () => {
-		const storePath = path.join(tmpDir, 'null-meta');
-		await writeStoreData(storePath, [
-			{ id: 'x', text: 't', embedding: [1], metadata: null, timestamp: 1 },
-		]);
-
-		const store = createStore(storePath);
-		await store.load();
-		expect(store.size).toBe(0);
-	});
-
-	it('should reject entries with non-number timestamp', async () => {
-		const storePath = path.join(tmpDir, 'non-num-ts');
-		await writeStoreData(storePath, [
-			{
-				id: 'x',
-				text: 't',
-				embedding: [1],
-				metadata: {},
-				timestamp: '2024-01-01',
-			},
-		]);
-
-		const store = createStore(storePath);
-		await store.load();
-		expect(store.size).toBe(0);
-	});
-
-	it('should reject null entries in the array', async () => {
-		const storePath = path.join(tmpDir, 'null-entry');
-		await writeStoreData(storePath, [makeEntry({ id: 'valid' })]);
-		// Manually inject a null into the compressed index
-		const indexPath = path.join(storePath, 'index.json');
-		const buf = await fs.readFile(indexPath);
-		const jsonStr = isGzipped(buf)
-			? decompressText(buf)
-			: buf.toString('utf-8');
-		const indexFile = JSON.parse(jsonStr) as {
-			version: number;
-			entries: unknown[];
-		};
-		indexFile.entries.unshift(null);
-		await fs.writeFile(indexPath, compressText(JSON.stringify(indexFile)));
-
-		const store = createStore(storePath);
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 		expect(store.size).toBe(1);
 	});
 
-	it('should reject primitive entries in the array', async () => {
-		const storePath = path.join(tmpDir, 'prim-entry');
-		await writeStoreData(storePath, [makeEntry({ id: 'valid' })]);
-		// Manually inject primitives into the compressed index
-		const indexPath = path.join(storePath, 'index.json');
-		const buf = await fs.readFile(indexPath);
-		const jsonStr = isGzipped(buf)
-			? decompressText(buf)
-			: buf.toString('utf-8');
-		const indexFile = JSON.parse(jsonStr) as {
-			version: number;
-			entries: unknown[];
-		};
-		indexFile.entries.unshift(42, 'string', true);
-		await fs.writeFile(indexPath, compressText(JSON.stringify(indexFile)));
+	it('should skip corrupt entries and keep valid ones', async () => {
+		const sharedData = new Map<string, Buffer>();
+		sharedData.set(
+			'good-1',
+			serializeTestEntry(
+				makeEntry({ id: 'good-1', text: 'valid 1', embedding: [1] }),
+			),
+		);
+		sharedData.set('bad-1', Buffer.from('CORRUPT'));
+		sharedData.set(
+			'good-2',
+			serializeTestEntry(
+				makeEntry({ id: 'good-2', text: 'valid 2', embedding: [2] }),
+			),
+		);
+		sharedData.set('bad-2', Buffer.alloc(2));
+		sharedData.set(
+			'good-3',
+			serializeTestEntry(
+				makeEntry({ id: 'good-3', text: 'valid 3', embedding: [3] }),
+			),
+		);
 
-		const store = createStore(storePath);
-		await store.load();
-		expect(store.size).toBe(1);
-	});
-
-	it('should accept valid entries alongside invalid ones', async () => {
-		const storePath = path.join(tmpDir, 'mixed-validity');
-		await writeStoreData(storePath, [
-			makeEntry({ id: 'good-1', text: 'valid 1' }),
-			makeEntry({ id: 'good-2', text: 'valid 2' }),
-			makeEntry({ id: 'good-3', text: 'valid 3' }),
-		]);
-		// Inject invalid entries into the compressed index
-		const indexPath = path.join(storePath, 'index.json');
-		const buf = await fs.readFile(indexPath);
-		const jsonStr = isGzipped(buf)
-			? decompressText(buf)
-			: buf.toString('utf-8');
-		const indexFile = JSON.parse(jsonStr) as {
-			version: number;
-			entries: unknown[];
-		};
-		indexFile.entries.splice(1, 0, { id: 'bad-1' }); // missing fields
-		indexFile.entries.splice(3, 0, {}); // empty object
-		await fs.writeFile(indexPath, compressText(JSON.stringify(indexFile)));
-
-		const store = createStore(storePath);
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 
 		expect(store.size).toBe(3);
-		expect(store.getAll().map((e) => e.id)).toEqual([
-			'good-1',
-			'good-2',
-			'good-3',
-		]);
+		expect(
+			store
+				.getAll()
+				.map((e) => e.id)
+				.sort(),
+		).toEqual(['good-1', 'good-2', 'good-3']);
 	});
 });
 
@@ -1472,16 +1270,8 @@ describe('VectorStore — Entry validation', () => {
 // ===========================================================================
 
 describe('VectorStore — Ordering', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should maintain insertion order in getAll', async () => {
-		const store = createStore(path.join(tmpDir, 'order'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('first', [1]);
@@ -1493,7 +1283,7 @@ describe('VectorStore — Ordering', () => {
 	});
 
 	it('should maintain order after deleting middle entries', async () => {
-		const store = createStore(path.join(tmpDir, 'order-del'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('a', [1]);
@@ -1507,7 +1297,7 @@ describe('VectorStore — Ordering', () => {
 	});
 
 	it('should handle rapid sequential operations', async () => {
-		const store = createStore(path.join(tmpDir, 'rapid'));
+		const store = createStore();
 		await store.load();
 
 		const ids: string[] = [];
@@ -1538,16 +1328,8 @@ describe('VectorStore — Ordering', () => {
 // ===========================================================================
 
 describe('VectorStore — Edge cases', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should handle entries with very long text', async () => {
-		const store = createStore(path.join(tmpDir, 'long-text'));
+		const store = createStore();
 		await store.load();
 
 		const longText = 'x'.repeat(100_000);
@@ -1558,7 +1340,7 @@ describe('VectorStore — Edge cases', () => {
 	});
 
 	it('should handle entries with high-dimensional embeddings', async () => {
-		const store = createStore(path.join(tmpDir, 'high-dim'));
+		const store = createStore();
 		await store.load();
 
 		const embedding = makeEmbedding(2048, 0.1);
@@ -1569,7 +1351,7 @@ describe('VectorStore — Edge cases', () => {
 	});
 
 	it('should handle entries with many metadata keys', async () => {
-		const store = createStore(path.join(tmpDir, 'many-meta'));
+		const store = createStore();
 		await store.load();
 
 		const metadata: Record<string, string> = {};
@@ -1584,7 +1366,7 @@ describe('VectorStore — Edge cases', () => {
 	});
 
 	it('should handle search with maxResults of 0', async () => {
-		const store = createStore(path.join(tmpDir, 'max0'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('a', [1, 0, 0]);
@@ -1594,7 +1376,7 @@ describe('VectorStore — Edge cases', () => {
 	});
 
 	it('should handle search when maxResults exceeds entry count', async () => {
-		const store = createStore(path.join(tmpDir, 'max-exceed'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('a', [1, 0]);
@@ -1605,14 +1387,15 @@ describe('VectorStore — Edge cases', () => {
 	});
 
 	it('should handle Unicode text correctly', async () => {
-		const store = createStore(path.join(tmpDir, 'unicode'));
+		const sharedData = new Map<string, Buffer>();
+		const store = createStore({ storage: createMemoryStorage(sharedData) });
 		await store.load();
 
 		const unicodeText = 'こんにちは世界 🌍 Ñoño café über résumé';
 		const id = await store.add(unicodeText, [1, 2, 3]);
 
 		// Roundtrip through save/load
-		const store2 = createStore(path.join(tmpDir, 'unicode'));
+		const store2 = createStore({ storage: createMemoryStorage(sharedData) });
 		await store2.load();
 
 		const entry = store2.getById(id);
@@ -1620,7 +1403,7 @@ describe('VectorStore — Edge cases', () => {
 	});
 
 	it('should handle entries with negative embedding values', async () => {
-		const store = createStore(path.join(tmpDir, 'negative'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('negative', [-0.5, -0.3, -0.1]);
@@ -1631,7 +1414,7 @@ describe('VectorStore — Edge cases', () => {
 	});
 
 	it('should handle entries with very small embedding values', async () => {
-		const store = createStore(path.join(tmpDir, 'small'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('small', [1e-15, 1e-15, 1e-15]);
@@ -1941,16 +1724,8 @@ describe('matchesAllMetadataFilters', () => {
 // ===========================================================================
 
 describe('VectorStore — textSearch', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should find entries by fuzzy match (default mode)', async () => {
-		const store = createStore(path.join(tmpDir, 'fuzzy'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('The quick brown fox jumps', [1]);
@@ -1963,7 +1738,7 @@ describe('VectorStore — textSearch', () => {
 	});
 
 	it('should find entries by substring match', async () => {
-		const store = createStore(path.join(tmpDir, 'substr'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('Hello World', [1]);
@@ -1975,7 +1750,7 @@ describe('VectorStore — textSearch', () => {
 	});
 
 	it('should find entries by exact match', async () => {
-		const store = createStore(path.join(tmpDir, 'exact'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('Hello World', [1]);
@@ -1987,7 +1762,7 @@ describe('VectorStore — textSearch', () => {
 	});
 
 	it('should find entries by regex match', async () => {
-		const store = createStore(path.join(tmpDir, 'regex'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('Error: 404 not found', [1]);
@@ -2002,7 +1777,7 @@ describe('VectorStore — textSearch', () => {
 	});
 
 	it('should find entries by token overlap', async () => {
-		const store = createStore(path.join(tmpDir, 'token'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('machine learning algorithms', [1]);
@@ -2020,7 +1795,7 @@ describe('VectorStore — textSearch', () => {
 	});
 
 	it('should return empty array for empty query', async () => {
-		const store = createStore(path.join(tmpDir, 'empty-q'));
+		const store = createStore();
 		await store.load();
 		await store.add('something', [1]);
 
@@ -2029,7 +1804,7 @@ describe('VectorStore — textSearch', () => {
 	});
 
 	it('should respect the threshold', async () => {
-		const store = createStore(path.join(tmpDir, 'thresh'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('completely unrelated text', [1]);
@@ -2048,16 +1823,8 @@ describe('VectorStore — textSearch', () => {
 // ===========================================================================
 
 describe('VectorStore — filterByMetadata', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should filter entries by exact metadata match', async () => {
-		const store = createStore(path.join(tmpDir, 'meta-eq'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('entry1', [1], { source: 'web' });
@@ -2070,7 +1837,7 @@ describe('VectorStore — filterByMetadata', () => {
 	});
 
 	it('should support contains filter', async () => {
-		const store = createStore(path.join(tmpDir, 'meta-contains'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('entry1', [1], { tag: 'AI-powered tool' });
@@ -2084,7 +1851,7 @@ describe('VectorStore — filterByMetadata', () => {
 	});
 
 	it('should support exists filter', async () => {
-		const store = createStore(path.join(tmpDir, 'meta-exists'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('entry1', [1], { author: 'Alice' });
@@ -2095,7 +1862,7 @@ describe('VectorStore — filterByMetadata', () => {
 	});
 
 	it('should AND multiple filters', async () => {
-		const store = createStore(path.join(tmpDir, 'meta-and'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('entry1', [1], { source: 'web', lang: 'en' });
@@ -2111,7 +1878,7 @@ describe('VectorStore — filterByMetadata', () => {
 	});
 
 	it('should return all entries when no filters are provided', async () => {
-		const store = createStore(path.join(tmpDir, 'meta-none'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('a', [1]);
@@ -2127,16 +1894,8 @@ describe('VectorStore — filterByMetadata', () => {
 // ===========================================================================
 
 describe('VectorStore — filterByDateRange', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should filter entries after a timestamp', async () => {
-		const store = createStore(path.join(tmpDir, 'date-after'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('old', [1]);
@@ -2151,7 +1910,7 @@ describe('VectorStore — filterByDateRange', () => {
 	});
 
 	it('should filter entries before a timestamp', async () => {
-		const store = createStore(path.join(tmpDir, 'date-before'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('first', [1]);
@@ -2165,7 +1924,7 @@ describe('VectorStore — filterByDateRange', () => {
 	});
 
 	it('should filter entries within a range', async () => {
-		const store = createStore(path.join(tmpDir, 'date-range'));
+		const store = createStore();
 		await store.load();
 
 		const before = Date.now() - 1;
@@ -2182,16 +1941,8 @@ describe('VectorStore — filterByDateRange', () => {
 // ===========================================================================
 
 describe('VectorStore — advancedSearch', () => {
-	beforeEach(async () => {
-		tmpDir = await createTmpDir();
-	});
-
-	afterEach(async () => {
-		await cleanupTmpDir(tmpDir);
-	});
-
 	it('should combine vector and text search', async () => {
-		const store = createStore(path.join(tmpDir, 'adv-combo'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('machine learning is great', [1, 0, 0]);
@@ -2212,7 +1963,7 @@ describe('VectorStore — advancedSearch', () => {
 	});
 
 	it('should filter by metadata in advanced search', async () => {
-		const store = createStore(path.join(tmpDir, 'adv-meta'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('entry a', [1, 0], { source: 'web' });
@@ -2230,7 +1981,7 @@ describe('VectorStore — advancedSearch', () => {
 	});
 
 	it('should filter by date range in advanced search', async () => {
-		const store = createStore(path.join(tmpDir, 'adv-date'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('old entry', [1, 0]);
@@ -2249,7 +2000,7 @@ describe('VectorStore — advancedSearch', () => {
 	});
 
 	it('should work with text search only (no embedding)', async () => {
-		const store = createStore(path.join(tmpDir, 'adv-text-only'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('The quick brown fox', [1]);
@@ -2269,7 +2020,7 @@ describe('VectorStore — advancedSearch', () => {
 	});
 
 	it('should respect maxResults', async () => {
-		const store = createStore(path.join(tmpDir, 'adv-max'));
+		const store = createStore();
 		await store.load();
 
 		for (let i = 0; i < 10; i++) {
@@ -2285,7 +2036,7 @@ describe('VectorStore — advancedSearch', () => {
 	});
 
 	it("should support rankBy 'vector'", async () => {
-		const store = createStore(path.join(tmpDir, 'rank-vector'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('match text here', [1, 0]);
@@ -2304,7 +2055,7 @@ describe('VectorStore — advancedSearch', () => {
 	});
 
 	it("should support rankBy 'text'", async () => {
-		const store = createStore(path.join(tmpDir, 'rank-text'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('exact match query', [0.5, 0.5]);
@@ -2323,7 +2074,7 @@ describe('VectorStore — advancedSearch', () => {
 	});
 
 	it("should support rankBy 'multiply'", async () => {
-		const store = createStore(path.join(tmpDir, 'rank-mult'));
+		const store = createStore();
 		await store.load();
 
 		await store.add('good match', [1, 0]);

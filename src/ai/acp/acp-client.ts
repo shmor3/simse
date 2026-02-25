@@ -20,12 +20,17 @@ import type {
 	ACPEmbedResult,
 	ACPGenerateResult,
 	ACPPermissionPolicy,
+	ACPSamplingParams,
 	ACPServerEntry,
+	ACPSessionInfo,
+	ACPSessionListEntry,
 	ACPSessionNewResult,
 	ACPSessionPromptResult,
 	ACPSessionUpdateParams,
 	ACPStreamChunk,
 	ACPTokenUsage,
+	ACPToolCall,
+	ACPToolCallUpdate,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -49,6 +54,16 @@ export interface ACPClientOptions {
 	clientVersion?: string;
 }
 
+export interface ACPStreamOptions {
+	readonly agentId?: string;
+	readonly serverName?: string;
+	readonly systemPrompt?: string;
+	readonly config?: Record<string, unknown>;
+	readonly sampling?: ACPSamplingParams;
+	readonly onToolCall?: (toolCall: ACPToolCall) => void;
+	readonly onToolCallUpdate?: (update: ACPToolCallUpdate) => void;
+}
+
 // ---------------------------------------------------------------------------
 // ACPClient interface
 // ---------------------------------------------------------------------------
@@ -70,6 +85,7 @@ export interface ACPClient {
 			serverName?: string;
 			systemPrompt?: string;
 			config?: Record<string, unknown>;
+			sampling?: ACPSamplingParams;
 		},
 	) => Promise<ACPGenerateResult>;
 	readonly chat: (
@@ -81,16 +97,12 @@ export interface ACPClient {
 			agentId?: string;
 			serverName?: string;
 			config?: Record<string, unknown>;
+			sampling?: ACPSamplingParams;
 		},
 	) => Promise<ACPGenerateResult>;
 	readonly generateStream: (
 		prompt: string,
-		options?: {
-			agentId?: string;
-			serverName?: string;
-			systemPrompt?: string;
-			config?: Record<string, unknown>;
-		},
+		options?: ACPStreamOptions,
 	) => AsyncGenerator<ACPStreamChunk>;
 	readonly embed: (
 		input: string | string[],
@@ -100,6 +112,27 @@ export interface ACPClient {
 	readonly isAvailable: (serverName?: string) => Promise<boolean>;
 	/** Set the permission policy on all active connections. */
 	readonly setPermissionPolicy: (policy: ACPPermissionPolicy) => void;
+	readonly listSessions: (
+		serverName?: string,
+	) => Promise<ACPSessionListEntry[]>;
+	readonly loadSession: (
+		sessionId: string,
+		serverName?: string,
+	) => Promise<ACPSessionInfo>;
+	readonly deleteSession: (
+		sessionId: string,
+		serverName?: string,
+	) => Promise<void>;
+	readonly setSessionMode: (
+		sessionId: string,
+		modeId: string,
+		serverName?: string,
+	) => Promise<void>;
+	readonly setSessionModel: (
+		sessionId: string,
+		modelId: string,
+		serverName?: string,
+	) => Promise<void>;
 	readonly serverNames: string[];
 	readonly serverCount: number;
 	readonly defaultServerName: string | undefined;
@@ -148,6 +181,9 @@ export function createACPClient(
 					permissionPolicy: entry.permissionPolicy,
 					clientName,
 					clientVersion,
+					stderrHandler: (text) => {
+						logger.debug(`ACP server "${entry.name}" stderr: ${text}`);
+					},
 				});
 
 				const result = await connection.initialize();
@@ -306,10 +342,12 @@ export function createACPClient(
 		connection: ACPConnection,
 		sessionId: string,
 		content: readonly ACPContentBlock[],
+		metadata?: Record<string, unknown>,
 	): Promise<ACPSessionPromptResult> => {
 		return connection.request<ACPSessionPromptResult>('session/prompt', {
 			sessionId,
 			prompt: content,
+			...(metadata && { metadata }),
 		});
 	};
 
@@ -327,6 +365,21 @@ export function createACPClient(
 		}
 		blocks.push({ type: 'text', text: prompt });
 		return blocks;
+	};
+
+	const buildSamplingMetadata = (
+		sampling?: ACPSamplingParams,
+	): Record<string, unknown> | undefined => {
+		if (!sampling) return undefined;
+		const meta: Record<string, unknown> = {};
+		if (sampling.temperature !== undefined)
+			meta.temperature = sampling.temperature;
+		if (sampling.maxTokens !== undefined) meta.max_tokens = sampling.maxTokens;
+		if (sampling.topP !== undefined) meta.top_p = sampling.topP;
+		if (sampling.topK !== undefined) meta.top_k = sampling.topK;
+		if (sampling.stopSequences !== undefined)
+			meta.stop_sequences = sampling.stopSequences;
+		return Object.keys(meta).length > 0 ? meta : undefined;
 	};
 
 	// -----------------------------------------------------------------------
@@ -382,6 +435,7 @@ export function createACPClient(
 			serverName?: string;
 			systemPrompt?: string;
 			config?: Record<string, unknown>;
+			sampling?: ACPSamplingParams;
 		},
 	): Promise<ACPGenerateResult> => {
 		const { connection, entry, name } = resolveConnection(
@@ -399,7 +453,12 @@ export function createACPClient(
 		return withRetry('generate', async () => {
 			const sessionId = await createSession(connection);
 			const content = buildTextContent(prompt, generateOptions?.systemPrompt);
-			const result = await sendPrompt(connection, sessionId, content);
+			const result = await sendPrompt(
+				connection,
+				sessionId,
+				content,
+				buildSamplingMetadata(generateOptions?.sampling),
+			);
 
 			return {
 				content: extractContentText(result.content),
@@ -421,6 +480,7 @@ export function createACPClient(
 			agentId?: string;
 			serverName?: string;
 			config?: Record<string, unknown>;
+			sampling?: ACPSamplingParams;
 		},
 	): Promise<ACPGenerateResult> => {
 		if (messages.length === 0) {
@@ -458,7 +518,12 @@ export function createACPClient(
 				content.push({ type: 'text', text: `${prefix}${msg.content}` });
 			}
 
-			const result = await sendPrompt(connection, sessionId, content);
+			const result = await sendPrompt(
+				connection,
+				sessionId,
+				content,
+				buildSamplingMetadata(chatOptions?.sampling),
+			);
 
 			return {
 				content: extractContentText(result.content),
@@ -473,12 +538,7 @@ export function createACPClient(
 
 	async function* generateStream(
 		prompt: string,
-		streamOptions?: {
-			agentId?: string;
-			serverName?: string;
-			systemPrompt?: string;
-			config?: Record<string, unknown>;
-		},
+		streamOptions?: ACPStreamOptions,
 	): AsyncGenerator<ACPStreamChunk> {
 		const { connection, entry, name } = resolveConnection(
 			streamOptions?.serverName,
@@ -509,20 +569,33 @@ export function createACPClient(
 				const update = p.update;
 				if (!update) return;
 
-				if (
-					update.sessionUpdate === 'agent_message_chunk' &&
-					update.content
-				) {
+				if (update.sessionUpdate === 'agent_message_chunk' && update.content) {
 					const content = update.content;
 					// Content may be a single block or an array
 					const blocks = Array.isArray(content) ? content : [content];
-					const text = extractContentText(
-						blocks as readonly ACPContentBlock[],
-					);
+					const text = extractContentText(blocks as readonly ACPContentBlock[]);
 					if (text) {
 						chunks.push({ text });
 						chunkResolve?.();
 					}
+				}
+
+				if (update.sessionUpdate === 'tool_call') {
+					streamOptions?.onToolCall?.({
+						toolCallId: update.toolCallId as string,
+						title: update.title as string,
+						kind: (update.kind as ACPToolCall['kind']) ?? 'other',
+						status: (update.status as ACPToolCall['status']) ?? 'pending',
+					});
+				}
+
+				if (update.sessionUpdate === 'tool_call_update') {
+					streamOptions?.onToolCallUpdate?.({
+						toolCallId: update.toolCallId as string,
+						status:
+							(update.status as ACPToolCallUpdate['status']) ?? 'in_progress',
+						content: update.content,
+					});
 				}
 
 				if (update.metadata) {
@@ -535,18 +608,21 @@ export function createACPClient(
 		);
 
 		// Send the prompt — don't await yet, chunks arrive as notifications
-		const promptPromise = sendPrompt(connection, sessionId, content).then(
-			(result) => {
-				// Final result arrived — mark stream as done
-				if (result.metadata) {
-					const usage = extractTokenUsage(result.metadata);
-					if (usage) streamUsage = usage;
-				}
-				chunks.push({ done: true });
-				chunkResolve?.();
-				return result;
-			},
-		);
+		const promptPromise = sendPrompt(
+			connection,
+			sessionId,
+			content,
+			buildSamplingMetadata(streamOptions?.sampling),
+		).then((result) => {
+			// Final result arrived — mark stream as done
+			if (result.metadata) {
+				const usage = extractTokenUsage(result.metadata);
+				if (usage) streamUsage = usage;
+			}
+			chunks.push({ done: true });
+			chunkResolve?.();
+			return result;
+		});
 
 		try {
 			// Set a stream-level timeout
@@ -679,6 +755,62 @@ export function createACPClient(
 		});
 	};
 
+	const listSessions = async (
+		serverName?: string,
+	): Promise<ACPSessionListEntry[]> => {
+		const { connection } = resolveConnection(serverName);
+		const result = await connection.request<{
+			sessions: ACPSessionListEntry[];
+		}>('session/list', {});
+		return result.sessions ?? [];
+	};
+
+	const loadSession = async (
+		sessionId: string,
+		serverName?: string,
+	): Promise<ACPSessionInfo> => {
+		const { connection } = resolveConnection(serverName);
+		return connection.request<ACPSessionInfo>('session/load', { sessionId });
+	};
+
+	const deleteSession = async (
+		sessionId: string,
+		serverName?: string,
+	): Promise<void> => {
+		const { connection } = resolveConnection(serverName);
+		await connection.request('session/delete', { sessionId });
+	};
+
+	const setSessionMode = async (
+		sessionId: string,
+		modeId: string,
+		serverName?: string,
+	): Promise<void> => {
+		const { connection } = resolveConnection(serverName);
+		await connection
+			.request('session/set_config_option', {
+				sessionId,
+				configOptionId: 'mode',
+				groupId: modeId,
+			})
+			.catch(() => {}); // Best-effort
+	};
+
+	const setSessionModel = async (
+		sessionId: string,
+		modelId: string,
+		serverName?: string,
+	): Promise<void> => {
+		const { connection } = resolveConnection(serverName);
+		await connection
+			.request('session/set_config_option', {
+				sessionId,
+				configOptionId: 'model',
+				groupId: modelId,
+			})
+			.catch(() => {}); // Best-effort
+	};
+
 	const isAvailable = async (serverName?: string): Promise<boolean> => {
 		try {
 			const name =
@@ -712,6 +844,11 @@ export function createACPClient(
 		embed,
 		isAvailable,
 		setPermissionPolicy,
+		listSessions,
+		loadSession,
+		deleteSession,
+		setSessionMode,
+		setSessionModel,
 		get serverNames() {
 			return config.servers.map((s) => s.name);
 		},

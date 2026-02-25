@@ -5,12 +5,14 @@ import {
 	toError,
 } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
+import type { StorageBackend } from './storage.js';
 import type {
 	AdvancedSearchResult,
 	DateRange,
 	DuplicateCheckResult,
 	DuplicateGroup,
 	EmbeddingProvider,
+	LearningProfile,
 	MemoryConfig,
 	MetadataFilter,
 	RecommendationResult,
@@ -32,10 +34,12 @@ import { createVectorStore, type VectorStoreOptions } from './vector-store.js';
 // ---------------------------------------------------------------------------
 
 export interface MemoryManagerOptions {
+	/** Pluggable storage backend. Consumers must provide their own implementation. */
+	storage: StorageBackend;
 	/** Inject a custom logger. */
 	logger?: Logger;
-	/** Override vector store options. */
-	vectorStoreOptions?: Omit<VectorStoreOptions, 'logger'>;
+	/** Override vector store options (except storage and logger, which are set at this level). */
+	vectorStoreOptions?: Omit<VectorStoreOptions, 'logger' | 'storage'>;
 	/**
 	 * Optional text generation provider used for summarization.
 	 * Can also be set later via `setTextGenerator()`.
@@ -83,11 +87,12 @@ export interface MemoryManager {
 	readonly delete: (id: string) => Promise<boolean>;
 	readonly deleteBatch: (ids: string[]) => Promise<number>;
 	readonly clear: () => Promise<void>;
+	/** Snapshot of the adaptive learning profile, or undefined if learning is disabled. */
+	readonly learningProfile: LearningProfile | undefined;
 	readonly size: number;
 	readonly isInitialized: boolean;
 	readonly isDirty: boolean;
 	readonly embeddingAgent: string | undefined;
-	readonly storePath: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,12 +102,13 @@ export interface MemoryManager {
 export function createMemoryManager(
 	embedder: EmbeddingProvider,
 	config: MemoryConfig,
-	options?: MemoryManagerOptions,
+	options: MemoryManagerOptions,
 ): MemoryManager {
-	const logger = (options?.logger ?? getDefaultLogger()).child('memory');
-	const store = createVectorStore(config.storePath, {
+	const logger = (options.logger ?? getDefaultLogger()).child('memory');
+	const store = createVectorStore({
+		storage: options.storage,
 		logger,
-		...(options?.vectorStoreOptions ?? {}),
+		...(options.vectorStoreOptions ?? {}),
 	});
 
 	let initialized = false;
@@ -169,7 +175,6 @@ export function createMemoryManager(
 
 		initPromise = (async () => {
 			logger.debug('Initializing memory manager', {
-				storePath: config.storePath,
 				embeddingAgent: config.embeddingAgent,
 			});
 
@@ -647,6 +652,9 @@ export function createMemoryManager(
 		delete: deleteEntry,
 		deleteBatch,
 		clear,
+		get learningProfile() {
+			return store.learningProfile;
+		},
 		get size() {
 			return store.size;
 		},
@@ -658,9 +666,6 @@ export function createMemoryManager(
 		},
 		get embeddingAgent() {
 			return config.embeddingAgent;
-		},
-		get storePath() {
-			return config.storePath;
 		},
 	});
 }

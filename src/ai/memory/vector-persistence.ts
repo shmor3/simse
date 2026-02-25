@@ -29,6 +29,60 @@ export interface IndexFile {
 	readonly entries: readonly IndexEntry[];
 }
 
+// ---------------------------------------------------------------------------
+// Learning state persistence
+// ---------------------------------------------------------------------------
+
+/** Per-entry feedback record stored on disk. */
+export interface FeedbackEntry {
+	readonly id: string;
+	readonly queryCount: number;
+	readonly totalRetrievals: number;
+	readonly lastQueryTimestamp: number;
+}
+
+/** Serialised query record for the learning state file. */
+export interface SerializedQueryRecord {
+	/** Base64-encoded Float32Array embedding. */
+	readonly embedding: string;
+	readonly timestamp: number;
+	readonly resultCount: number;
+}
+
+/** Root structure of the learning.json file. */
+export interface LearningState {
+	readonly version: 1;
+	readonly feedback: readonly FeedbackEntry[];
+	readonly queryHistory: readonly SerializedQueryRecord[];
+	readonly adaptedWeights: {
+		readonly vector: number;
+		readonly recency: number;
+		readonly frequency: number;
+	};
+	readonly interestEmbedding: string | undefined;
+	readonly totalQueries: number;
+	readonly lastUpdated: number;
+}
+
+/**
+ * Type-guard that validates an unknown value conforms to the `LearningState` shape.
+ */
+export function isValidLearningState(value: unknown): value is LearningState {
+	if (typeof value !== 'object' || value === null || Array.isArray(value))
+		return false;
+
+	const obj = value as Record<string, unknown>;
+	if (obj.version !== 1) return false;
+	if (!Array.isArray(obj.feedback)) return false;
+	if (!Array.isArray(obj.queryHistory)) return false;
+	if (typeof obj.adaptedWeights !== 'object' || obj.adaptedWeights === null)
+		return false;
+	if (typeof obj.totalQueries !== 'number') return false;
+	if (typeof obj.lastUpdated !== 'number') return false;
+
+	return true;
+}
+
 /**
  * Type-guard that validates an unknown value conforms to the `IndexEntry` shape.
  */

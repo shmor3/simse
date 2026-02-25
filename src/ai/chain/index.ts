@@ -2,6 +2,17 @@
 // Chain module — barrel re-export
 // ---------------------------------------------------------------------------
 
+export type {
+	AgentExecutor,
+	AgentExecutorOptions,
+	AgentResult,
+	AgentStepConfig,
+	ParallelConfig,
+	ParallelSubResult,
+	ParallelSubStepConfig,
+	SwarmMergeStrategy,
+} from '../agent/index.js';
+export { createAgentExecutor } from '../agent/index.js';
 export type { Chain, ChainOptions } from './chain.js';
 export {
 	createChain,

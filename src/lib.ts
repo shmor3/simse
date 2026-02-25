@@ -150,6 +150,15 @@ export type {
 export type { CompressionOptions } from './ai/memory/compression.js';
 export { cosineSimilarity } from './ai/memory/cosine.js';
 export type { TopicIndexOptions } from './ai/memory/indexing.js';
+export type {
+	BM25Options,
+	BM25Result,
+	InvertedIndex,
+} from './ai/memory/inverted-index.js';
+export {
+	createInvertedIndex,
+	tokenizeForIndex,
+} from './ai/memory/inverted-index.js';
 export type { LearningEngine } from './ai/memory/learning.js';
 export { createLearningEngine } from './ai/memory/learning.js';
 export type {
@@ -176,6 +185,7 @@ export type {
 	QueryRecord,
 	RecommendationResult,
 	RecommendOptions,
+	RelatedTopic,
 	RelevanceFeedback,
 	SearchOptions,
 	SearchResult,
@@ -189,6 +199,24 @@ export type {
 	VectorEntry,
 	WeightProfile,
 } from './ai/memory/types.js';
+export { computeRecommendations } from './ai/memory/vector-recommend.js';
+export type { VectorSearchConfig } from './ai/memory/vector-search.js';
+export {
+	advancedVectorSearch,
+	filterEntriesByDateRange,
+	filterEntriesByMetadata,
+	textSearchEntries,
+	vectorSearch,
+} from './ai/memory/vector-search.js';
+export type {
+	AccessStats,
+	DeserializedData,
+	SerializedData,
+} from './ai/memory/vector-serialize.js';
+export {
+	deserializeFromStorage,
+	serializeToStorage,
+} from './ai/memory/vector-serialize.js';
 export type {
 	VectorStore,
 	VectorStoreOptions,

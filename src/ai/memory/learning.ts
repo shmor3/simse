@@ -28,6 +28,7 @@ import type {
 	WeightProfile,
 } from './types.js';
 import type {
+	CorrelationEntry,
 	ExplicitFeedbackEntry,
 	FeedbackEntry,
 	LearningState,
@@ -64,6 +65,11 @@ export interface LearningEngine {
 		entryEmbedding: readonly number[],
 		topic?: string,
 	) => number;
+	/** Get entries that frequently co-appear with the given entry in query results. */
+	readonly getCorrelatedEntries: (entryId: string) => ReadonlyArray<{
+		readonly entryId: string;
+		readonly strength: number;
+	}>;
 	/** Serialize all learning state for persistence. */
 	readonly serialize: () => LearningState;
 	/** Restore learning state from a previously serialized snapshot. */
@@ -155,6 +161,9 @@ export function createLearningEngine(
 
 	/** Per-topic learning state. */
 	const topicStates = new Map<string, TopicState>();
+
+	/** Per-entry co-occurrence correlations: entryId -> Map<entryId, count>. */
+	const correlations = new Map<string, Map<string, number>>();
 
 	// -- Helpers --------------------------------------------------------------
 
@@ -363,6 +372,28 @@ export function createLearningEngine(
 			}
 		}
 
+		// Update co-occurrence correlations for each pair of result IDs
+		for (let i = 0; i < resultIds.length; i++) {
+			for (let j = i + 1; j < resultIds.length; j++) {
+				const a = resultIds[i];
+				const b = resultIds[j];
+
+				let mapA = correlations.get(a);
+				if (!mapA) {
+					mapA = new Map();
+					correlations.set(a, mapA);
+				}
+				mapA.set(b, (mapA.get(b) ?? 0) + 1);
+
+				let mapB = correlations.get(b);
+				if (!mapB) {
+					mapB = new Map();
+					correlations.set(b, mapB);
+				}
+				mapB.set(a, (mapB.get(a) ?? 0) + 1);
+			}
+		}
+
 		// Adapt global weights
 		adaptedWeights = adaptWeightsForResults(adaptedWeights, resultIds);
 
@@ -510,6 +541,26 @@ export function createLearningEngine(
 		return Math.min(BOOST_MAX, Math.max(BOOST_MIN, boost));
 	};
 
+	const getCorrelatedEntries = (
+		entryId: string,
+	): ReadonlyArray<{
+		readonly entryId: string;
+		readonly strength: number;
+	}> => {
+		const map = correlations.get(entryId);
+		if (!map || map.size === 0) return [];
+
+		const results: Array<{
+			readonly entryId: string;
+			readonly strength: number;
+		}> = [];
+		for (const [id, count] of map) {
+			results.push({ entryId: id, strength: count });
+		}
+		results.sort((a, b) => b.strength - a.strength);
+		return results;
+	};
+
 	const serialize = (): LearningState => {
 		const serializedFeedback: FeedbackEntry[] = [];
 		for (const [id, entry] of feedback) {
@@ -551,6 +602,19 @@ export function createLearningEngine(
 			});
 		}
 
+		// Serialize correlations
+		const serializedCorrelations: CorrelationEntry[] = [];
+		for (const [entryId, map] of correlations) {
+			const correlated: Array<{
+				readonly entryId: string;
+				readonly count: number;
+			}> = [];
+			for (const [corrId, count] of map) {
+				correlated.push({ entryId: corrId, count });
+			}
+			serializedCorrelations.push({ entryId, correlated });
+		}
+
 		return {
 			version: 1,
 			feedback: serializedFeedback,
@@ -569,6 +633,8 @@ export function createLearningEngine(
 				serializedTopicProfiles.length > 0
 					? serializedTopicProfiles
 					: undefined,
+			correlations:
+				serializedCorrelations.length > 0 ? serializedCorrelations : undefined,
 		};
 	};
 
@@ -658,6 +724,18 @@ export function createLearningEngine(
 			}
 		}
 
+		// Restore correlations
+		correlations.clear();
+		if (state.correlations) {
+			for (const entry of state.correlations) {
+				const map = new Map<string, number>();
+				for (const pair of entry.correlated) {
+					map.set(pair.entryId, pair.count);
+				}
+				correlations.set(entry.entryId, map);
+			}
+		}
+
 		totalQueriesCount = state.totalQueries;
 		lastUpdated = state.lastUpdated;
 	};
@@ -671,6 +749,7 @@ export function createLearningEngine(
 		totalQueriesCount = 0;
 		lastUpdated = 0;
 		topicStates.clear();
+		correlations.clear();
 	};
 
 	const pruneEntries = (validIds: ReadonlySet<string>): void => {
@@ -682,6 +761,20 @@ export function createLearningEngine(
 		for (const id of explicitFeedback.keys()) {
 			if (!validIds.has(id)) {
 				explicitFeedback.delete(id);
+			}
+		}
+		// Remove entire correlation maps for pruned entries
+		for (const id of correlations.keys()) {
+			if (!validIds.has(id)) {
+				correlations.delete(id);
+			}
+		}
+		// Remove references to pruned entries from remaining correlation maps
+		for (const map of correlations.values()) {
+			for (const id of map.keys()) {
+				if (!validIds.has(id)) {
+					map.delete(id);
+				}
 			}
 		}
 	};
@@ -704,6 +797,7 @@ export function createLearningEngine(
 		getRelevanceFeedback,
 		getAdaptedWeights,
 		getInterestEmbedding,
+		getCorrelatedEntries,
 		computeBoost,
 		serialize,
 		restore,

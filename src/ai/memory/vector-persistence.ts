@@ -56,6 +56,18 @@ export interface ExplicitFeedbackEntry {
 	readonly negativeCount: number;
 }
 
+/** Single correlated entry within a CorrelationEntry. */
+export interface CorrelatedPair {
+	readonly entryId: string;
+	readonly count: number;
+}
+
+/** Per-entry correlation data stored on disk. */
+export interface CorrelationEntry {
+	readonly entryId: string;
+	readonly correlated: readonly CorrelatedPair[];
+}
+
 /** Per-topic learning profile stored on disk. */
 export interface TopicProfileEntry {
 	readonly topic: string;
@@ -84,6 +96,7 @@ export interface LearningState {
 	readonly lastUpdated: number;
 	readonly explicitFeedback?: ReadonlyArray<ExplicitFeedbackEntry>;
 	readonly topicProfiles?: ReadonlyArray<TopicProfileEntry>;
+	readonly correlations?: ReadonlyArray<CorrelationEntry>;
 }
 
 /**
@@ -111,6 +124,10 @@ export function isValidLearningState(value: unknown): value is LearningState {
 
 	// Optional topicProfiles array
 	if (obj.topicProfiles !== undefined && !Array.isArray(obj.topicProfiles))
+		return false;
+
+	// Optional correlations array
+	if (obj.correlations !== undefined && !Array.isArray(obj.correlations))
 		return false;
 
 	return true;

@@ -165,3 +165,92 @@ describe('per-topic weight profiles', () => {
 		expect(weights).toEqual(global);
 	});
 });
+
+describe('query-result correlation', () => {
+	it('tracks co-appearing entries across queries', () => {
+		const engine = createLearningEngine({ enabled: true });
+		engine.recordQuery([1, 0, 0], ['a', 'b']);
+		engine.recordQuery([0, 1, 0], ['a', 'b']);
+		engine.recordQuery([0, 0, 1], ['a', 'c']);
+
+		const correlated = engine.getCorrelatedEntries('a');
+		expect(correlated.length).toBeGreaterThan(0);
+
+		const bCorr = correlated.find((c) => c.entryId === 'b');
+		const cCorr = correlated.find((c) => c.entryId === 'c');
+		expect(bCorr).toBeDefined();
+		expect(cCorr).toBeDefined();
+		// 'b' appeared with 'a' in 2 queries, 'c' in 1
+		expect(bCorr!.strength).toBeGreaterThan(cCorr!.strength);
+	});
+
+	it('returns empty for unknown entry', () => {
+		const engine = createLearningEngine({ enabled: true });
+		expect(engine.getCorrelatedEntries('nonexistent')).toHaveLength(0);
+	});
+
+	it('correlations persist through serialize/restore', () => {
+		const engine = createLearningEngine({ enabled: true });
+		engine.recordQuery([1, 0, 0], ['a', 'b']);
+		engine.recordQuery([0, 1, 0], ['a', 'b']);
+
+		const state = engine.serialize();
+		const engine2 = createLearningEngine({ enabled: true });
+		engine2.restore(state);
+
+		const correlated = engine2.getCorrelatedEntries('a');
+		expect(correlated.find((c) => c.entryId === 'b')?.strength).toBe(2);
+	});
+
+	it('pruneEntries removes correlations for deleted entries', () => {
+		const engine = createLearningEngine({ enabled: true });
+		engine.recordQuery([1, 0, 0], ['a', 'b', 'c']);
+
+		engine.pruneEntries(new Set(['a', 'c']));
+
+		const corrA = engine.getCorrelatedEntries('a');
+		// 'b' was pruned, so 'a' should only correlate with 'c'
+		expect(corrA.find((c) => c.entryId === 'b')).toBeUndefined();
+		expect(corrA.find((c) => c.entryId === 'c')).toBeDefined();
+	});
+
+	it('clear removes all correlations', () => {
+		const engine = createLearningEngine({ enabled: true });
+		engine.recordQuery([1, 0, 0], ['a', 'b']);
+		engine.clear();
+
+		expect(engine.getCorrelatedEntries('a')).toHaveLength(0);
+	});
+
+	it('correlations are sorted by strength descending', () => {
+		const engine = createLearningEngine({ enabled: true });
+		engine.recordQuery([1, 0, 0], ['a', 'b', 'c']);
+		engine.recordQuery([0, 1, 0], ['a', 'b']);
+		engine.recordQuery([0, 0, 1], ['a', 'b']);
+
+		const correlated = engine.getCorrelatedEntries('a');
+		// 'b' co-appeared 3 times, 'c' co-appeared 1 time
+		expect(correlated[0].entryId).toBe('b');
+		expect(correlated[0].strength).toBe(3);
+		expect(correlated[1].entryId).toBe('c');
+		expect(correlated[1].strength).toBe(1);
+	});
+
+	it('correlations are symmetric', () => {
+		const engine = createLearningEngine({ enabled: true });
+		engine.recordQuery([1, 0, 0], ['x', 'y']);
+
+		const corrX = engine.getCorrelatedEntries('x');
+		const corrY = engine.getCorrelatedEntries('y');
+
+		expect(corrX.find((c) => c.entryId === 'y')?.strength).toBe(1);
+		expect(corrY.find((c) => c.entryId === 'x')?.strength).toBe(1);
+	});
+
+	it('disabled engine returns empty correlations', () => {
+		const engine = createLearningEngine({ enabled: false });
+		engine.recordQuery([1, 0, 0], ['a', 'b']);
+
+		expect(engine.getCorrelatedEntries('a')).toHaveLength(0);
+	});
+});

@@ -48,8 +48,14 @@ export interface DiffDisplayOptions {
 // Render
 // ---------------------------------------------------------------------------
 
+// ANSI background colors for diff highlighting
+const RED_BG = '\x1b[41m';
+const GREEN_BG = '\x1b[42m';
+const RESET = '\x1b[0m';
+
 /**
- * Render a unified diff with ANSI colors.
+ * Render a unified diff with ANSI colors — Claude Code style.
+ * Uses background colors for full-line highlighting.
  */
 export function renderUnifiedDiff(
 	diff: DiffResult,
@@ -60,23 +66,21 @@ export function renderUnifiedDiff(
 	const showLineNumbers = options?.lineNumbers ?? true;
 	const lines: string[] = [];
 
-	// File header
-	lines.push(colors.bold(`--- ${diff.oldPath}`));
-	lines.push(colors.bold(`+++ ${diff.newPath}`));
-
 	let lineCount = 0;
 
 	for (const hunk of diff.hunks) {
-		// Hunk header
-		const header = `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`;
-		lines.push(colors.cyan(header));
-		lineCount++;
+		// Hunk header (only if multiple hunks or non-contiguous)
+		if (diff.hunks.length > 1) {
+			const header = `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`;
+			lines.push(`    ${colors.cyan(header)}`);
+			lineCount++;
+		}
 
 		for (const line of hunk.lines) {
 			if (lineCount >= maxLines) {
 				lines.push(
 					colors.dim(
-						`  ... (${diff.additions + diff.deletions - lineCount} more changes)`,
+						`    ... (${diff.additions + diff.deletions - lineCount} more changes)`,
 					),
 				);
 				break;
@@ -86,13 +90,21 @@ export function renderUnifiedDiff(
 
 			switch (line.type) {
 				case 'add':
-					lines.push(`${lineNum}${colors.green(`+${line.content}`)}`);
+					if (colors.enabled) {
+						lines.push(`    ${lineNum}${GREEN_BG}+${line.content}${RESET}`);
+					} else {
+						lines.push(`    ${lineNum}+${line.content}`);
+					}
 					break;
 				case 'remove':
-					lines.push(`${lineNum}${colors.red(`-${line.content}`)}`);
+					if (colors.enabled) {
+						lines.push(`    ${lineNum}${RED_BG}-${line.content}${RESET}`);
+					} else {
+						lines.push(`    ${lineNum}-${line.content}`);
+					}
 					break;
 				case 'context':
-					lines.push(`${lineNum}${colors.dim(` ${line.content}`)}`);
+					lines.push(`    ${lineNum}${colors.dim(` ${line.content}`)}`);
 					break;
 			}
 			lineCount++;

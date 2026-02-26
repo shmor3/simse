@@ -558,6 +558,7 @@ async function handleBareTextInput(
 			}
 			console.log(
 				renderToolResultCollapsed(
+					toolResult.name,
 					toolResult.output,
 					toolResult.isError,
 					colors,
@@ -603,7 +604,12 @@ async function handleBareTextInput(
 					);
 				}
 				console.log(
-					renderToolResultCollapsed(output, update.status === 'failed', colors),
+					renderToolResultCollapsed(
+						'',
+						output,
+						update.status === 'failed',
+						colors,
+					),
 				);
 				spinner.start();
 			}
@@ -775,6 +781,7 @@ async function handleSkillInvocation(
 			}
 			console.log(
 				renderToolResultCollapsed(
+					toolResult.name,
 					toolResult.output,
 					toolResult.isError,
 					colors,

@@ -297,20 +297,76 @@ export interface ThinkingSpinnerOptions {
 	readonly verbIntervalMs?: number;
 }
 
+export interface ThinkingSpinner extends Spinner {
+	/** Update the token count displayed in the spinner suffix. */
+	readonly setTokens: (tokens: number) => void;
+	/** Update the thinking/processing state label. */
+	readonly setState: (state: string) => void;
+}
+
 export function createThinkingSpinner(
 	options?: ThinkingSpinnerOptions,
-): Spinner {
+): ThinkingSpinner {
+	const colors = options?.colors ?? createColors();
+	const stream = options?.stream ?? process.stderr;
+	const isTTY = stream.isTTY === true;
 	const verbs = options?.verbs ?? THINKING_VERBS;
 	const verbInterval = options?.verbIntervalMs ?? 3000;
-	const inner = createSpinner({
-		colors: options?.colors,
-		stream: options?.stream,
-	});
+	const frames = isTTY ? SPINNER_FRAMES : ASCII_FRAMES;
 
+	let timer: ReturnType<typeof setInterval> | undefined;
 	let verbTimer: ReturnType<typeof setInterval> | undefined;
+	let frameIdx = 0;
+	let brailleIdx = 0;
 	let verbIdx = 0;
+	let currentVerb = '';
+	let startedAt = 0;
+	let tokenCount = 0;
+	let stateLabel = 'thinking';
+
+	const formatSuffix = (): string => {
+		const parts: string[] = [];
+		if (startedAt > 0) {
+			const elapsed = Date.now() - startedAt;
+			parts.push(formatDuration(elapsed));
+		}
+		if (tokenCount > 0) {
+			const formatted =
+				tokenCount >= 1000
+					? `${(tokenCount / 1000).toFixed(1)}k`
+					: String(tokenCount);
+			parts.push(`↓ ${formatted} tokens`);
+		}
+		if (stateLabel) {
+			parts.push(stateLabel);
+		}
+		return parts.length > 0 ? ` ${colors.dim(`(${parts.join(' · ')})`)}` : '';
+	};
+
+	const clearLine = (): void => {
+		if (isTTY) stream.write('\x1b[2K\r');
+	};
+
+	const setTabTitle = (title: string): void => {
+		if (isTTY) stream.write(`\x1b]0;${title}\x07`);
+	};
+
+	const render = (): void => {
+		const frame = colors.yellow(frames[frameIdx % frames.length]);
+		clearLine();
+		const suffix = formatSuffix();
+		stream.write(`  ${frame} ${colors.dim(`${currentVerb}...`)}${suffix}`);
+		frameIdx++;
+		const braille = BRAILLE_FRAMES[brailleIdx % BRAILLE_FRAMES.length];
+		setTabTitle(`${braille} simse`);
+		brailleIdx++;
+	};
 
 	const clearTimers = (): void => {
+		if (timer) {
+			clearInterval(timer);
+			timer = undefined;
+		}
 		if (verbTimer) {
 			clearInterval(verbTimer);
 			verbTimer = undefined;
@@ -319,44 +375,88 @@ export function createThinkingSpinner(
 
 	const start = (message?: string): void => {
 		clearTimers();
+		startedAt = Date.now();
+		frameIdx = 0;
+		brailleIdx = 0;
 
 		if (message) {
-			inner.start(message);
+			currentVerb = message.replace(/\.{3}$/, '');
+			if (!isTTY) {
+				stream.write(`  ${message}\n`);
+				return;
+			}
+			stream.write('\x1b[?25l');
+			render();
+			timer = setInterval(render, 120);
 			return;
 		}
 
 		verbIdx = Math.floor(Math.random() * verbs.length);
-		inner.start(`${verbs[verbIdx]}...`);
+		currentVerb = verbs[verbIdx];
+
+		if (!isTTY) {
+			stream.write(`  ${currentVerb}...\n`);
+			return;
+		}
+
+		stream.write('\x1b[?25l');
+		render();
+		timer = setInterval(render, 120);
 
 		if (verbs.length > 1) {
 			verbTimer = setInterval(() => {
 				verbIdx = (verbIdx + 1) % verbs.length;
-				inner.update(`${verbs[verbIdx]}...`);
+				currentVerb = verbs[verbIdx];
 			}, verbInterval);
 		}
 	};
 
 	const update = (message: string): void => {
-		clearTimers();
-		inner.update(message);
+		currentVerb = message.replace(/\.{3}$/, '');
+		if (!isTTY) {
+			stream.write(`  ${message}\n`);
+		}
 	};
 
 	const stop = (): void => {
 		clearTimers();
-		inner.stop();
+		if (isTTY) {
+			clearLine();
+			stream.write('\x1b[?25h');
+			setTabTitle('simse');
+		}
+		startedAt = 0;
+		tokenCount = 0;
+		stateLabel = 'thinking';
 	};
 
 	const succeed = (message: string): void => {
-		clearTimers();
-		inner.succeed(message);
+		stop();
+		stream.write(`  ${colors.green('●')} ${message}\n`);
 	};
 
 	const fail = (message: string): void => {
-		clearTimers();
-		inner.fail(message);
+		stop();
+		stream.write(`  ${colors.red('●')} ${message}\n`);
 	};
 
-	return Object.freeze({ start, update, succeed, fail, stop });
+	const setTokens = (tokens: number): void => {
+		tokenCount = tokens;
+	};
+
+	const setState = (state: string): void => {
+		stateLabel = state;
+	};
+
+	return Object.freeze({
+		start,
+		update,
+		succeed,
+		fail,
+		stop,
+		setTokens,
+		setState,
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -563,92 +663,79 @@ export function renderHelp(
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Tool category icons — Claude Code style
+// Tool display names — Claude Code style function-call labels
 // ---------------------------------------------------------------------------
 
-const TOOL_ICONS: Readonly<Record<string, string>> = {
-	bash: '$',
-	shell: '$',
-	exec: '$',
-	execute: '$',
-	run_command: '$',
-	vfs_write: '>',
-	vfs_read: '<',
-	vfs_delete: 'x',
-	vfs_rename: '~',
-	vfs_list: '#',
-	vfs_stat: '#',
-	vfs_search: '?',
-	vfs_diff: '±',
-	vfs_mkdir: '+',
-	file_write: '>',
-	file_read: '<',
-	file_edit: '>',
-	file_create: '+',
-	glob: '?',
-	grep: '?',
-	memory_search: '◈',
-	memory_add: '◈',
-	memory_list: '◈',
-	task_list: '☐',
-	task_create: '☐',
-	task_update: '☐',
-	task_get: '☐',
+const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+	bash: 'Bash',
+	shell: 'Bash',
+	exec: 'Bash',
+	execute: 'Bash',
+	run_command: 'Bash',
+	vfs_write: 'Write',
+	vfs_read: 'Read',
+	vfs_delete: 'Delete',
+	vfs_rename: 'Rename',
+	vfs_list: 'List',
+	vfs_stat: 'Stat',
+	vfs_search: 'Search',
+	vfs_diff: 'Diff',
+	vfs_mkdir: 'Mkdir',
+	file_write: 'Write',
+	file_read: 'Read',
+	file_edit: 'Update',
+	file_create: 'Write',
+	glob: 'Search',
+	grep: 'Search',
+	memory_search: 'Search',
+	memory_add: 'Add',
+	memory_list: 'List',
+	memory_delete: 'Delete',
+	task_list: 'TaskList',
+	task_create: 'TaskCreate',
+	task_update: 'TaskUpdate',
+	task_get: 'TaskGet',
+	task_delete: 'TaskDelete',
 };
 
-function getToolIcon(name: string): string {
-	return TOOL_ICONS[name] ?? '●';
+function getToolDisplayName(name: string): string {
+	return (
+		TOOL_DISPLAY_NAMES[name] ?? name.charAt(0).toUpperCase() + name.slice(1)
+	);
 }
 
 // ---------------------------------------------------------------------------
-// Tool verb mappings — human-readable active/completed verbs
+// Tool summary verbs — for completed tool result lines
 // ---------------------------------------------------------------------------
 
-interface VerbPair {
-	readonly active: string;
-	readonly completed: string;
-}
-
-const TOOL_VERBS: Readonly<Record<string, VerbPair>> = {
-	bash: { active: 'Running', completed: 'Ran' },
-	shell: { active: 'Running', completed: 'Ran' },
-	exec: { active: 'Running', completed: 'Ran' },
-	execute: { active: 'Running', completed: 'Ran' },
-	run_command: { active: 'Running', completed: 'Ran' },
-	vfs_write: { active: 'Writing', completed: 'Wrote' },
-	vfs_read: { active: 'Reading', completed: 'Read' },
-	vfs_delete: { active: 'Deleting', completed: 'Deleted' },
-	vfs_rename: { active: 'Renaming', completed: 'Renamed' },
-	vfs_list: { active: 'Listing', completed: 'Listed' },
-	vfs_stat: { active: 'Checking', completed: 'Checked' },
-	vfs_search: { active: 'Searching', completed: 'Searched' },
-	vfs_diff: { active: 'Diffing', completed: 'Diffed' },
-	vfs_mkdir: { active: 'Creating directory', completed: 'Created directory' },
-	file_write: { active: 'Writing', completed: 'Wrote' },
-	file_read: { active: 'Reading', completed: 'Read' },
-	file_edit: { active: 'Editing', completed: 'Edited' },
-	file_create: { active: 'Creating', completed: 'Created' },
-	glob: { active: 'Searching files', completed: 'Found files' },
-	grep: { active: 'Searching', completed: 'Searched' },
-	memory_search: { active: 'Searching memory', completed: 'Searched memory' },
-	memory_add: { active: 'Saving to memory', completed: 'Saved to memory' },
-	memory_list: { active: 'Listing memory', completed: 'Listed memory' },
-	task_list: { active: 'Listing tasks', completed: 'Listed tasks' },
-	task_create: { active: 'Creating task', completed: 'Created task' },
-	task_update: { active: 'Updating task', completed: 'Updated task' },
-	task_get: { active: 'Getting task', completed: 'Got task' },
+const TOOL_SUMMARY_VERBS: Readonly<Record<string, string>> = {
+	vfs_write: 'Wrote',
+	vfs_read: 'Read',
+	vfs_delete: 'Deleted',
+	file_write: 'Wrote',
+	file_read: 'Read',
+	file_edit: 'Updated',
+	file_create: 'Created',
+	glob: 'Found',
+	grep: 'Searched',
+	memory_search: 'Found',
+	memory_add: 'Saved',
 };
 
-const KIND_VERBS: Readonly<Record<string, VerbPair>> = {
-	read: { active: 'Reading', completed: 'Read' },
-	edit: { active: 'Editing', completed: 'Edited' },
-	delete: { active: 'Deleting', completed: 'Deleted' },
-	move: { active: 'Moving', completed: 'Moved' },
-	search: { active: 'Searching', completed: 'Searched' },
-	execute: { active: 'Running', completed: 'Ran' },
-	think: { active: 'Thinking', completed: 'Thought' },
-	fetch: { active: 'Fetching', completed: 'Fetched' },
-	other: { active: 'Processing', completed: 'Processed' },
+// ---------------------------------------------------------------------------
+// Agent kind display names — Claude Code style
+// ---------------------------------------------------------------------------
+
+const KIND_DISPLAY_NAMES: Readonly<Record<string, string>> = {
+	read: 'Read',
+	edit: 'Update',
+	delete: 'Delete',
+	move: 'Move',
+	search: 'Search',
+	execute: 'Bash',
+	think: 'Think',
+	fetch: 'Fetch',
+	other: 'Tool',
 };
 
 /**
@@ -700,28 +787,35 @@ export interface ToolCallCompletedOptions {
 	readonly verbose?: boolean;
 }
 
-/** Render an active (in-progress) tool call: ● Reading src/lib.ts */
+/**
+ * Render an active (in-progress) tool call — Claude Code style:
+ *   ● Read(src/lib.ts)
+ */
 export function renderToolCallActive(
 	name: string,
 	argsStr: string,
 	colors: TermColors,
 ): string {
-	const verb = TOOL_VERBS[name]?.active ?? name;
+	const displayName = getToolDisplayName(name);
 	const arg = extractPrimaryArg(name, argsStr);
-	const display = arg ? `${verb} ${arg}` : verb;
-	return `  ${colors.magenta('●')} ${display}`;
+	const display = arg ? `${displayName}(${arg})` : displayName;
+	return `  ${colors.magenta('●')} ${colors.bold(display)}`;
 }
 
-/** Render a completed tool call: ✓ Read src/lib.ts (150 lines, 42ms) */
+/**
+ * Render a completed tool call — Claude Code style:
+ *   ● Read(src/lib.ts)
+ *   ⎿ Read 150 lines (42ms)
+ */
 export function renderToolCallCompleted(
 	name: string,
 	argsStr: string,
 	colors: TermColors,
 	options?: ToolCallCompletedOptions,
 ): string {
-	const verb = TOOL_VERBS[name]?.completed ?? name;
+	const displayName = getToolDisplayName(name);
 	const arg = extractPrimaryArg(name, argsStr);
-	const display = arg ? `${verb} ${arg}` : verb;
+	const display = arg ? `${displayName}(${arg})` : displayName;
 
 	const parts: string[] = [];
 	if (options?.summary) parts.push(options.summary);
@@ -731,27 +825,33 @@ export function renderToolCallCompleted(
 	const suffix =
 		parts.length > 0 ? ` ${colors.dim(`(${parts.join(', ')})`)}` : '';
 
-	return `  ${colors.green('✓')} ${display}${suffix}`;
+	return `  ${colors.magenta('●')} ${colors.bold(display)}${suffix}`;
 }
 
-/** Render a failed tool call: ✗ Failed to read file.ts — not found */
+/**
+ * Render a failed tool call — Claude Code style:
+ *   ● Read(src/lib.ts)
+ *   ⎿ Error: file not found
+ */
 export function renderToolCallFailed(
 	name: string,
 	argsStr: string,
 	error: string,
 	colors: TermColors,
 ): string {
-	const verb = TOOL_VERBS[name]?.completed ?? name;
+	const displayName = getToolDisplayName(name);
 	const arg = extractPrimaryArg(name, argsStr);
-	const prefix = arg
-		? `Failed to ${verb.toLowerCase()} ${arg}`
-		: `${verb} failed`;
+	const display = arg ? `${displayName}(${arg})` : displayName;
 	const errMsg = error.length > 120 ? `${error.slice(0, 117)}...` : error;
-	return `  ${colors.red('✗')} ${prefix} ${colors.dim('—')} ${errMsg}`;
+	return `  ${colors.red('●')} ${colors.bold(display)}\n    ${colors.dim('⎿')} ${colors.red(errMsg)}`;
 }
 
-/** Render a collapsed tool result: ⎿ 150 lines  or  ⎿ Error: ... */
+/**
+ * Render a collapsed tool result — Claude Code style:
+ *   ⎿ Read 150 lines (ctrl+o to expand)
+ */
 export function renderToolResultCollapsed(
+	name: string,
 	output: string,
 	isError: boolean,
 	colors: TermColors,
@@ -763,29 +863,42 @@ export function renderToolResultCollapsed(
 		return `    ${colors.dim('⎿')} ${colors.red(errMsg)}`;
 	}
 	const lineCount = output.split('\n').length;
-	return `    ${colors.dim('⎿')} ${colors.dim(`${lineCount} line${lineCount !== 1 ? 's' : ''}`)}`;
+	const summaryVerb = TOOL_SUMMARY_VERBS[name] ?? '';
+	const summary = summaryVerb
+		? `${summaryVerb} ${lineCount} line${lineCount !== 1 ? 's' : ''}`
+		: `${lineCount} line${lineCount !== 1 ? 's' : ''}`;
+	return `    ${colors.dim('⎿')} ${summary} ${colors.dim('(ctrl+o to expand)')}`;
 }
 
-/** Render an active agent tool call: ● Reading file.ts */
+/**
+ * Render an active agent tool call — Claude Code style:
+ *   ● Read(file.ts)
+ */
 export function renderAgentToolCallActive(
 	title: string,
 	kind: string,
 	colors: TermColors,
+	modelBadge?: string,
 ): string {
-	const verb = KIND_VERBS[kind]?.active ?? 'Processing';
-	const display = title ? `${verb} ${title}` : verb;
-	return `  ${colors.magenta('●')} ${display}`;
+	const displayName = KIND_DISPLAY_NAMES[kind] ?? 'Tool';
+	const display = title ? `${displayName}(${title})` : displayName;
+	const badge = modelBadge ? ` ${colors.dim(modelBadge)}` : '';
+	return `  ${colors.magenta('●')} ${colors.bold(display)}${badge}`;
 }
 
-/** Render a completed agent tool call: ✓ Read file.ts (1.2s) */
+/**
+ * Render a completed agent tool call — Claude Code style:
+ *   ● Read(file.ts)
+ *   ⎿ Done (45 tool uses · 106.6k tokens · 3m 37s)
+ */
 export function renderAgentToolCallCompleted(
 	title: string,
 	kind: string,
 	colors: TermColors,
 	options?: ToolCallCompletedOptions,
 ): string {
-	const verb = KIND_VERBS[kind]?.completed ?? 'Processed';
-	const display = title ? `${verb} ${title}` : verb;
+	const displayName = KIND_DISPLAY_NAMES[kind] ?? 'Tool';
+	const display = title ? `${displayName}(${title})` : displayName;
 
 	const parts: string[] = [];
 	if (options?.summary) parts.push(options.summary);
@@ -793,20 +906,60 @@ export function renderAgentToolCallCompleted(
 		parts.push(formatDuration(options.durationMs));
 	}
 	const suffix =
-		parts.length > 0 ? ` ${colors.dim(`(${parts.join(', ')})`)}` : '';
+		parts.length > 0 ? ` ${colors.dim(`(${parts.join(' · ')})`)}` : '';
 
-	return `  ${colors.green('✓')} ${display}${suffix}`;
+	return `  ${colors.magenta('●')} ${colors.bold(display)}${suffix}`;
 }
 
-/** Render a failed agent tool call: ✗ Failed — error msg */
+/**
+ * Render a failed agent tool call — Claude Code style:
+ *   ● Tool(operation)
+ *   ⎿ Error: error msg
+ */
 export function renderAgentToolCallFailed(
 	kind: string,
 	error: string,
 	colors: TermColors,
 ): string {
-	const verb = KIND_VERBS[kind]?.completed ?? 'Operation';
+	const displayName = KIND_DISPLAY_NAMES[kind] ?? 'Tool';
 	const errMsg = error.length > 120 ? `${error.slice(0, 117)}...` : error;
-	return `  ${colors.red('✗')} ${verb} failed ${colors.dim('—')} ${errMsg}`;
+	return `  ${colors.red('●')} ${colors.bold(displayName)}\n    ${colors.dim('⎿')} ${colors.red(errMsg)}`;
+}
+
+/**
+ * Render a sub-agent result summary — Claude Code style:
+ *   ⎿ Done (45 tool uses · 106.6k tokens · 3m 37s)
+ *   (ctrl+o to expand)
+ */
+export function renderSubagentResult(
+	colors: TermColors,
+	options?: {
+		readonly toolUses?: number;
+		readonly tokens?: number;
+		readonly durationMs?: number;
+	},
+): string {
+	const parts: string[] = [];
+	if (options?.toolUses !== undefined) {
+		parts.push(
+			`${options.toolUses} tool use${options.toolUses !== 1 ? 's' : ''}`,
+		);
+	}
+	if (options?.tokens !== undefined) {
+		const formatted =
+			options.tokens >= 1000
+				? `${(options.tokens / 1000).toFixed(1)}k`
+				: String(options.tokens);
+		parts.push(`${formatted} tokens`);
+	}
+	if (options?.durationMs !== undefined) {
+		parts.push(formatDuration(options.durationMs));
+	}
+	const suffix = parts.length > 0 ? ` (${parts.join(' · ')})` : '';
+	const lines: string[] = [];
+	lines.push(`    ${colors.dim('⎿')} Done${suffix}`);
+	lines.push(`    ${colors.dim('(ctrl+o to expand)')}`);
+	return lines.join('\n');
 }
 
 export interface RichToolCallOptions {
@@ -814,48 +967,44 @@ export interface RichToolCallOptions {
 	readonly durationMs?: number;
 }
 
-/** Render a tool call: ● ToolName(args) with optional duration */
+/** Render a tool call — Claude Code style: ● ToolName(primary_arg) */
 export function renderToolCall(
 	name: string,
 	argsStr: string,
 	colors: TermColors,
 	options?: RichToolCallOptions,
 ): string {
-	const icon = getToolIcon(name);
+	const displayName = getToolDisplayName(name);
 	const verbose = options?.verbose ?? false;
-	const maxLen = verbose ? 500 : 120;
 
-	let formattedArgs = '';
-	try {
-		const parsed = JSON.parse(argsStr) as Record<string, unknown>;
-		const parts = Object.entries(parsed).map(([k, v]) => {
-			const val =
-				typeof v === 'string'
-					? verbose
-						? `"${v}"`
-						: `"${v.length > 80 ? `${v.slice(0, 77)}...` : v}"`
-					: String(v);
-			return `${k}: ${val}`;
-		});
-		if (parts.length > 0) {
-			formattedArgs = `(${parts.join(', ')})`;
+	let argDisplay = '';
+	if (verbose) {
+		// Verbose mode: show all args
+		try {
+			const parsed = JSON.parse(argsStr) as Record<string, unknown>;
+			const parts = Object.entries(parsed).map(([k, v]) => {
+				const val =
+					typeof v === 'string'
+						? `"${v.length > 80 ? `${v.slice(0, 77)}...` : v}"`
+						: String(v);
+				return `${k}: ${val}`;
+			});
+			if (parts.length > 0) argDisplay = parts.join(', ');
+		} catch {
+			if (argsStr && argsStr !== '{}') argDisplay = argsStr;
 		}
-	} catch {
-		if (argsStr && argsStr !== '{}') {
-			formattedArgs = `(${argsStr})`;
-		}
+	} else {
+		argDisplay = extractPrimaryArg(name, argsStr);
 	}
 
-	const full = `${name}${formattedArgs}`;
-	const display =
-		full.length > maxLen ? `${full.slice(0, maxLen - 3)}...` : full;
+	const display = argDisplay ? `${displayName}(${argDisplay})` : displayName;
 
 	let suffix = '';
 	if (options?.durationMs !== undefined) {
 		suffix = ` ${colors.dim(`(${formatDuration(options.durationMs)})`)}`;
 	}
 
-	return `  ${colors.magenta(icon)} ${colors.bold(display)}${suffix}`;
+	return `  ${colors.magenta('●')} ${colors.bold(display)}${suffix}`;
 }
 
 export interface RichToolResultOptions {

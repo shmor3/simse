@@ -26,14 +26,14 @@ export interface StatusLineOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Mode labels (compact for status line)
+// Mode labels — Claude Code style descriptive text
 // ---------------------------------------------------------------------------
 
-const MODE_SHORT: Readonly<Record<PermissionMode, string>> = {
-	default: '',
-	acceptEdits: 'AUTO-EDIT',
-	plan: 'PLAN',
-	dontAsk: 'YOLO',
+const MODE_DESCRIPTIONS: Readonly<Record<PermissionMode, string>> = {
+	default: 'permissions on',
+	acceptEdits: 'auto-edit on',
+	plan: 'plan mode',
+	dontAsk: 'bypass permissions on',
 };
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,6 @@ const MODE_SHORT: Readonly<Record<PermissionMode, string>> = {
 // ---------------------------------------------------------------------------
 
 export function createStatusLine(options: StatusLineOptions): StatusLine {
-	const { colors } = options;
 	const stream = options.stream ?? process.stderr;
 	const enabled = (options.enabled ?? true) && stream.isTTY === true;
 
@@ -64,78 +63,54 @@ export function createStatusLine(options: StatusLineOptions): StatusLine {
 		const rows = stream.rows ?? 24;
 		const cols = stream.columns ?? 80;
 
-		// Build segments
-		const segments: string[] = [];
+		// Determine if bypass/yolo mode — use red background
+		const isBypass = currentData.permissionMode === 'dontAsk';
 
-		// Model
-		if (currentData.model) {
-			segments.push(currentData.model);
-		}
+		// Build left segments (permission info)
+		const leftParts: string[] = [];
 
-		// Context usage
-		if (currentData.contextPercent > 0) {
-			const pct = Math.round(currentData.contextPercent * 100);
-			const contextColor =
-				pct > 90 ? colors.red : pct > 70 ? colors.yellow : colors.green;
-			segments.push(contextColor(`${pct}%`));
-		}
+		// Permission mode with lock icon
+		const modeDesc =
+			MODE_DESCRIPTIONS[currentData.permissionMode] ?? 'permissions on';
+		const lockIcon = isBypass ? '🔓' : '🔒';
+		leftParts.push(`${lockIcon} ${modeDesc}`);
+		leftParts.push('(shift+tab to cycle)');
 
-		// File changes
-		if (currentData.additions > 0 || currentData.deletions > 0) {
-			const parts: string[] = [];
-			if (currentData.additions > 0)
-				parts.push(colors.green(`+${currentData.additions}`));
-			if (currentData.deletions > 0)
-				parts.push(colors.red(`-${currentData.deletions}`));
-			segments.push(parts.join(' '));
-		}
-
-		// Permission mode
-		const modeLabel = MODE_SHORT[currentData.permissionMode];
-		if (modeLabel) {
-			const modeColor =
-				currentData.permissionMode === 'dontAsk'
-					? colors.red
-					: currentData.permissionMode === 'plan'
-						? colors.yellow
-						: colors.green;
-			segments.push(modeColor(`[${modeLabel}]`));
-		}
-
-		// Plan mode indicator
-		if (currentData.planMode) {
-			segments.push(colors.yellow('[PLAN]'));
-		}
+		// Build right segments (status info)
+		const rightParts: string[] = [];
 
 		// Background tasks
 		if (currentData.bgTaskCount > 0) {
-			segments.push(colors.cyan(`(${currentData.bgTaskCount} bg)`));
+			rightParts.push(`${currentData.bgTaskCount} bg`);
 		}
 
 		// Todos
 		if (currentData.todoCount > 0) {
-			segments.push(
-				colors.dim(`${currentData.todoDone}/${currentData.todoCount} todos`),
-			);
+			rightParts.push(`${currentData.todoDone}/${currentData.todoCount} todos`);
 		}
 
-		// Cost estimate
-		if (currentData.costEstimate) {
-			segments.push(colors.dim(currentData.costEstimate));
-		}
+		rightParts.push('esc to interrupt');
 
-		const content = segments.join(colors.dim(' │ '));
+		const left = leftParts.join(' ');
+		const right = rightParts.join(' · ');
 
-		// Save cursor position, move to last row, render, restore cursor
+		// Save cursor, move to last row, render, restore cursor
 		stream.write('\x1b7'); // save cursor
 		stream.write(`\x1b[${rows};1H`); // move to last row
 		stream.write('\x1b[2K'); // clear line
-		stream.write(`\x1b[7m`); // reverse video (inverted bar)
 
-		// Pad to full width
-		const plainLen = stripAnsi(content).length;
-		const padding = Math.max(0, cols - plainLen - 2);
-		stream.write(` ${content}${' '.repeat(padding)} `);
+		// Background color: red for bypass, default reverse for normal
+		if (isBypass) {
+			stream.write('\x1b[41m\x1b[97m'); // red bg, bright white text
+		} else {
+			stream.write('\x1b[7m'); // reverse video
+		}
+
+		// Layout: left-aligned permission info, right-aligned status
+		const totalContent = `${left}${right}`;
+		const plainLen = stripAnsi(totalContent).length;
+		const gap = Math.max(1, cols - plainLen - 4);
+		stream.write(` ${left}${' '.repeat(gap)}${right}  `);
 
 		stream.write('\x1b[0m'); // reset
 		stream.write('\x1b8'); // restore cursor

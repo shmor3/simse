@@ -4,6 +4,7 @@ import {
 	isEmbeddingError,
 	toError,
 } from '../../errors/index.js';
+import type { EventBus } from '../../events/types.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
 import { parseQuery } from './query-dsl.js';
 import type { StorageBackend } from './storage.js';
@@ -46,6 +47,8 @@ export interface MemoryManagerOptions {
 	 * Can also be set later via `setTextGenerator()`.
 	 */
 	textGenerator?: TextGenerationProvider;
+	/** Optional event bus for publishing memory lifecycle events. */
+	eventBus?: EventBus;
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +123,7 @@ export function createMemoryManager(
 	options: MemoryManagerOptions,
 ): MemoryManager {
 	const logger = (options.logger ?? getDefaultLogger()).child('memory');
+	const eventBus = options.eventBus;
 	const store = createVectorStore({
 		storage: options.storage,
 		logger,
@@ -243,6 +247,8 @@ export function createMemoryManager(
 			metadataKeys: Object.keys(metadata),
 		});
 
+		eventBus?.publish('memory.add', { id, contentLength: text.length });
+
 		return id;
 	};
 
@@ -324,6 +330,7 @@ export function createMemoryManager(
 			threshold: threshold ?? config.similarityThreshold,
 		});
 
+		const start = Date.now();
 		const queryEmbedding = await getEmbedding(query);
 
 		const results = store.search(
@@ -332,7 +339,13 @@ export function createMemoryManager(
 			threshold ?? config.similarityThreshold,
 		);
 
+		const durationMs = Date.now() - start;
 		logger.debug(`Found ${results.length} matching memories`);
+		eventBus?.publish('memory.search', {
+			query,
+			resultCount: results.length,
+			durationMs,
+		});
 		return results;
 	};
 
@@ -696,6 +709,7 @@ export function createMemoryManager(
 
 		if (deleted) {
 			logger.debug(`Deleted memory entry "${id}"`);
+			eventBus?.publish('memory.delete', { id });
 		} else {
 			logger.debug(`Memory entry "${id}" not found for deletion`);
 		}

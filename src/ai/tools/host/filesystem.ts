@@ -5,7 +5,15 @@
 // All paths are sandboxed to the configured working directory.
 // ---------------------------------------------------------------------------
 
-import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
+import {
+	mkdir,
+	readdir,
+	readFile,
+	rename,
+	rm,
+	stat,
+	writeFile,
+} from 'node:fs/promises';
 import { dirname, join, relative, resolve } from 'node:path';
 import { toError } from '../../../errors/base.js';
 import type { ToolDefinition, ToolHandler, ToolRegistry } from '../types.js';
@@ -445,6 +453,139 @@ export function registerFilesystemTools(
 				return entries
 					.map((e) => `${e.type === 'directory' ? 'd' : 'f'} ${e.name}`)
 					.join('\n');
+			} catch (err) {
+				throw toError(err);
+			}
+		},
+	);
+
+	// -----------------------------------------------------------------------
+	// fs_stat — file metadata (size, mtime, type)
+	// -----------------------------------------------------------------------
+	registerTool(
+		registry,
+		{
+			name: 'fs_stat',
+			description:
+				'Get file or directory metadata: size, modification time, type (file/directory/symlink), and permissions.',
+			parameters: {
+				path: {
+					type: 'string',
+					description: 'File or directory path (relative to working directory)',
+					required: true,
+				},
+			},
+			category: 'read',
+			annotations: { readOnly: true },
+		},
+		async (args) => {
+			try {
+				const filePath = sandboxPath(String(args.path ?? ''));
+				const fileStat = await stat(filePath);
+				const type = fileStat.isDirectory()
+					? 'directory'
+					: fileStat.isSymbolicLink()
+						? 'symlink'
+						: 'file';
+
+				return JSON.stringify(
+					{
+						size: fileStat.size,
+						modified: fileStat.mtime.toISOString(),
+						type,
+						permissions: `0${(fileStat.mode & 0o777).toString(8)}`,
+					},
+					null,
+					2,
+				);
+			} catch (err) {
+				throw toError(err);
+			}
+		},
+	);
+
+	// -----------------------------------------------------------------------
+	// fs_delete — remove a file or directory
+	// -----------------------------------------------------------------------
+	registerTool(
+		registry,
+		{
+			name: 'fs_delete',
+			description:
+				'Remove a file or empty directory. Set recursive=true to remove non-empty directories.',
+			parameters: {
+				path: {
+					type: 'string',
+					description: 'File or directory path (relative to working directory)',
+					required: true,
+				},
+				recursive: {
+					type: 'boolean',
+					description:
+						'If true, recursively remove directory contents (default: false)',
+				},
+			},
+			category: 'edit',
+			annotations: { destructive: true },
+		},
+		async (args) => {
+			try {
+				const filePath = sandboxPath(String(args.path ?? ''));
+				const recursive = args.recursive === true;
+				const fileStat = await stat(filePath);
+
+				if (fileStat.isDirectory() && !recursive) {
+					// Check if directory is empty before attempting non-recursive delete
+					const entries = await readdir(filePath);
+					if (entries.length > 0) {
+						throw new Error(
+							`Directory "${String(args.path)}" is not empty. Use recursive=true to remove non-empty directories.`,
+						);
+					}
+				}
+
+				await rm(filePath, { recursive: recursive || fileStat.isDirectory() });
+				return `Deleted ${String(args.path)}${recursive ? ' (recursive)' : ''}`;
+			} catch (err) {
+				throw toError(err);
+			}
+		},
+	);
+
+	// -----------------------------------------------------------------------
+	// fs_move — rename/move a file or directory
+	// -----------------------------------------------------------------------
+	registerTool(
+		registry,
+		{
+			name: 'fs_move',
+			description:
+				'Move or rename a file or directory. Both source and destination are sandboxed to the working directory.',
+			parameters: {
+				source: {
+					type: 'string',
+					description: 'Source path (relative to working directory)',
+					required: true,
+				},
+				destination: {
+					type: 'string',
+					description: 'Destination path (relative to working directory)',
+					required: true,
+				},
+			},
+			category: 'edit',
+			annotations: { destructive: true },
+		},
+		async (args) => {
+			try {
+				const srcPath = sandboxPath(String(args.source ?? ''));
+				const dstPath = sandboxPath(String(args.destination ?? ''));
+
+				// Auto-create parent directories for destination
+				await mkdir(dirname(dstPath), { recursive: true });
+				await rename(srcPath, dstPath);
+
+				return `Moved ${String(args.source)} → ${String(args.destination)}`;
 			} catch (err) {
 				throw toError(err);
 			}

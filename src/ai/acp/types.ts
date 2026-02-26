@@ -268,8 +268,24 @@ export interface ACPStreamComplete {
 	readonly usage?: ACPTokenUsage;
 }
 
+/** A tool call event from a streaming response. */
+export interface ACPStreamToolCall {
+	readonly type: 'tool_call';
+	readonly toolCall: ACPToolCall;
+}
+
+/** A tool call progress update from a streaming response. */
+export interface ACPStreamToolCallUpdate {
+	readonly type: 'tool_call_update';
+	readonly update: ACPToolCallUpdate;
+}
+
 /** Discriminated union yielded by `generateStream()`. */
-export type ACPStreamChunk = ACPStreamDelta | ACPStreamComplete;
+export type ACPStreamChunk =
+	| ACPStreamDelta
+	| ACPStreamComplete
+	| ACPStreamToolCall
+	| ACPStreamToolCallUpdate;
 
 // ---------------------------------------------------------------------------
 // Client result types

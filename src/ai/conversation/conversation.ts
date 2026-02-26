@@ -21,6 +21,7 @@ export function createConversation(
 ): Conversation {
 	const maxMessages = options?.maxMessages ?? 0;
 	const autoCompactChars = options?.autoCompactChars ?? 100_000;
+	const tokenEstimator = options?.tokenEstimator;
 	let systemPrompt = options?.systemPrompt;
 	const messages: ConversationMessage[] = [];
 
@@ -149,6 +150,17 @@ export function createConversation(
 		},
 		get estimatedChars() {
 			return estimateChars();
+		},
+		get estimatedTokens() {
+			if (tokenEstimator) {
+				let total = 0;
+				if (systemPrompt) total += tokenEstimator(systemPrompt);
+				for (const msg of messages) {
+					total += tokenEstimator(msg.content);
+				}
+				return total;
+			}
+			return Math.ceil(estimateChars() / 4);
 		},
 		get needsCompaction() {
 			return estimateChars() > autoCompactChars;

@@ -53,6 +53,30 @@ export interface EventPayloadMap {
 		readonly allowed: boolean;
 	};
 	abort: { readonly reason: string };
+	// Memory events
+	'memory.add': { readonly id: string; readonly contentLength: number };
+	'memory.search': {
+		readonly query: string;
+		readonly resultCount: number;
+		readonly durationMs: number;
+	};
+	'memory.delete': { readonly id: string };
+	// Subagent events
+	'subagent.start': {
+		readonly subagentId: string;
+		readonly type: string;
+		readonly task: string;
+	};
+	'subagent.complete': {
+		readonly subagentId: string;
+		readonly type: string;
+		readonly durationMs: number;
+	};
+	'subagent.error': {
+		readonly subagentId: string;
+		readonly type: string;
+		readonly error: Error;
+	};
 }
 
 /** Union of all recognised event names. */

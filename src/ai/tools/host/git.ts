@@ -225,4 +225,179 @@ export function registerGitTools(
 			}
 		},
 	);
+
+	// -- git_add -------------------------------------------------------------
+
+	registerTool(
+		registry,
+		{
+			name: 'git_add',
+			description:
+				'Stage files for the next commit. Provide specific paths or use all=true to stage everything.',
+			parameters: {
+				paths: {
+					type: 'string',
+					description:
+						'Space-separated file paths to stage (relative to working directory)',
+				},
+				all: {
+					type: 'boolean',
+					description: 'If true, stage all changes (git add -A)',
+				},
+			},
+			category: 'execute',
+		},
+		async (args) => {
+			try {
+				if (args.all === true) {
+					return runGit(['add', '-A'], workingDirectory);
+				}
+
+				const paths = String(args.paths ?? '').trim();
+				if (paths.length === 0) {
+					throw new Error('Either provide paths to stage or set all=true');
+				}
+
+				const pathList = paths.split(/\s+/);
+				return runGit(['add', ...pathList], workingDirectory);
+			} catch (err) {
+				throw toError(err);
+			}
+		},
+	);
+
+	// -- git_stash -----------------------------------------------------------
+
+	registerTool(
+		registry,
+		{
+			name: 'git_stash',
+			description:
+				'Save, apply, pop, or list stashed changes. Default action is save.',
+			parameters: {
+				action: {
+					type: 'string',
+					description:
+						'Stash action: save, pop, apply, or list (default: save)',
+				},
+				message: {
+					type: 'string',
+					description: 'Optional message for the stash (only for save)',
+				},
+			},
+			category: 'execute',
+		},
+		async (args) => {
+			try {
+				const action = String(args.action ?? 'save');
+
+				switch (action) {
+					case 'save': {
+						const gitArgs = ['stash'];
+						const message =
+							typeof args.message === 'string' ? args.message : '';
+						if (message.length > 0) {
+							gitArgs.push('-m', message);
+						}
+						return runGit(gitArgs, workingDirectory);
+					}
+					case 'pop':
+						return runGit(['stash', 'pop'], workingDirectory);
+					case 'apply':
+						return runGit(['stash', 'apply'], workingDirectory);
+					case 'list':
+						return runGit(['stash', 'list'], workingDirectory);
+					default:
+						throw new Error(
+							`Unknown stash action: "${action}". Use save, pop, apply, or list.`,
+						);
+				}
+			} catch (err) {
+				throw toError(err);
+			}
+		},
+	);
+
+	// -- git_push ------------------------------------------------------------
+
+	registerTool(
+		registry,
+		{
+			name: 'git_push',
+			description: 'Push commits to a remote repository. Defaults to origin.',
+			parameters: {
+				remote: {
+					type: 'string',
+					description: 'Remote name (default: origin)',
+				},
+				branch: {
+					type: 'string',
+					description: 'Branch to push (default: current branch)',
+				},
+				setUpstream: {
+					type: 'boolean',
+					description: 'If true, set upstream tracking (-u flag)',
+				},
+			},
+			category: 'execute',
+			annotations: { destructive: true },
+		},
+		async (args) => {
+			try {
+				const remote = String(args.remote ?? 'origin');
+				const gitArgs = ['push'];
+
+				if (args.setUpstream === true) {
+					gitArgs.push('-u');
+				}
+
+				gitArgs.push(remote);
+
+				const branch = typeof args.branch === 'string' ? args.branch : '';
+				if (branch.length > 0) {
+					gitArgs.push(branch);
+				}
+
+				return runGit(gitArgs, workingDirectory);
+			} catch (err) {
+				throw toError(err);
+			}
+		},
+	);
+
+	// -- git_pull ------------------------------------------------------------
+
+	registerTool(
+		registry,
+		{
+			name: 'git_pull',
+			description: 'Pull changes from a remote repository. Defaults to origin.',
+			parameters: {
+				remote: {
+					type: 'string',
+					description: 'Remote name (default: origin)',
+				},
+				branch: {
+					type: 'string',
+					description: 'Branch to pull (default: current branch tracking)',
+				},
+			},
+			category: 'execute',
+		},
+		async (args) => {
+			try {
+				const remote = String(args.remote ?? 'origin');
+				const gitArgs = ['pull', remote];
+
+				const branch = typeof args.branch === 'string' ? args.branch : '';
+				if (branch.length > 0) {
+					gitArgs.push(branch);
+				}
+
+				return runGit(gitArgs, workingDirectory);
+			} catch (err) {
+				throw toError(err);
+			}
+		},
+	);
 }

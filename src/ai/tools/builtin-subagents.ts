@@ -7,6 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import { toError } from '../../errors/base.js';
+import type { EventBus } from '../../events/types.js';
 import type { ACPClient } from '../acp/acp-client.js';
 import { createConversation } from '../conversation/conversation.js';
 import { createAgenticLoop } from '../loop/agentic-loop.js';
@@ -35,6 +36,8 @@ export interface BuiltinSubagentOptions {
 	readonly exploreMaxTurns?: number;
 	/** Max turns for the plan subagent. Default: 10. */
 	readonly planMaxTurns?: number;
+	/** Optional event bus for publishing subagent lifecycle events. */
+	readonly eventBus?: EventBus;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +141,7 @@ export function registerBuiltinSubagents(
 		agentId,
 		exploreMaxTurns = 5,
 		planMaxTurns = 10,
+		eventBus,
 	} = options;
 
 	// subagent_explore — fast, read-only codebase exploration
@@ -175,6 +179,11 @@ export function registerBuiltinSubagents(
 				mode: 'spawn' as const,
 			});
 			callbacks?.onSubagentStart?.(info);
+			eventBus?.publish('subagent.start', {
+				subagentId: id,
+				type: 'explore',
+				task,
+			});
 
 			try {
 				const childRegistry = createFilteredChildRegistry(options.toolRegistry);
@@ -199,17 +208,28 @@ export function registerBuiltinSubagents(
 					},
 				});
 
+				const durationMs = Date.now() - start;
 				const subResult: SubagentResult = Object.freeze({
 					text: result.finalText,
 					turns: result.totalTurns,
-					durationMs: Date.now() - start,
+					durationMs,
 				});
 
 				callbacks?.onSubagentComplete?.(id, subResult);
+				eventBus?.publish('subagent.complete', {
+					subagentId: id,
+					type: 'explore',
+					durationMs,
+				});
 				return result.finalText;
 			} catch (err) {
 				const error = toError(err);
 				callbacks?.onSubagentError?.(id, error);
+				eventBus?.publish('subagent.error', {
+					subagentId: id,
+					type: 'explore',
+					error,
+				});
 				throw error;
 			}
 		},
@@ -250,6 +270,11 @@ export function registerBuiltinSubagents(
 				mode: 'spawn' as const,
 			});
 			callbacks?.onSubagentStart?.(info);
+			eventBus?.publish('subagent.start', {
+				subagentId: id,
+				type: 'plan',
+				task,
+			});
 
 			try {
 				const childRegistry = createFilteredChildRegistry(options.toolRegistry);
@@ -274,17 +299,28 @@ export function registerBuiltinSubagents(
 					},
 				});
 
+				const durationMs = Date.now() - start;
 				const subResult: SubagentResult = Object.freeze({
 					text: result.finalText,
 					turns: result.totalTurns,
-					durationMs: Date.now() - start,
+					durationMs,
 				});
 
 				callbacks?.onSubagentComplete?.(id, subResult);
+				eventBus?.publish('subagent.complete', {
+					subagentId: id,
+					type: 'plan',
+					durationMs,
+				});
 				return result.finalText;
 			} catch (err) {
 				const error = toError(err);
 				callbacks?.onSubagentError?.(id, error);
+				eventBus?.publish('subagent.error', {
+					subagentId: id,
+					type: 'plan',
+					error,
+				});
 				throw error;
 			}
 		},

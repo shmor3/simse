@@ -83,3 +83,58 @@ describe('conversation replaceMessages', () => {
 		expect(Object.isFrozen(msgs[0])).toBe(true);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// estimatedTokens
+// ---------------------------------------------------------------------------
+
+describe('conversation estimatedTokens', () => {
+	it('returns estimatedChars / 4 by default', () => {
+		const conv = createConversation();
+		conv.addUser('hello world'); // 11 chars
+		// Math.ceil(11 / 4) = 3
+		expect(conv.estimatedTokens).toBe(Math.ceil(conv.estimatedChars / 4));
+	});
+
+	it('includes system prompt in default estimate', () => {
+		const conv = createConversation({ systemPrompt: 'You are a helper' }); // 16 chars
+		conv.addUser('hi'); // 2 chars
+		// Total: 18 chars, Math.ceil(18 / 4) = 5
+		expect(conv.estimatedTokens).toBe(Math.ceil(18 / 4));
+	});
+
+	it('uses custom tokenEstimator when provided', () => {
+		// Custom estimator: count words
+		const conv = createConversation({
+			tokenEstimator: (text) => text.split(/\s+/).filter(Boolean).length,
+		});
+		conv.addUser('hello world foo bar'); // 4 words
+
+		expect(conv.estimatedTokens).toBe(4);
+	});
+
+	it('custom tokenEstimator includes system prompt', () => {
+		const conv = createConversation({
+			systemPrompt: 'be helpful',
+			tokenEstimator: (text) => text.split(/\s+/).filter(Boolean).length,
+		});
+		conv.addUser('hello world'); // 2 words + 2 system words = 4
+
+		expect(conv.estimatedTokens).toBe(4);
+	});
+
+	it('estimatedTokens updates after adding messages', () => {
+		const conv = createConversation();
+		const tokensBefore = conv.estimatedTokens;
+		conv.addUser('a'.repeat(100)); // 100 chars
+		expect(conv.estimatedTokens).toBeGreaterThan(tokensBefore);
+	});
+
+	it('estimatedTokens updates after clear', () => {
+		const conv = createConversation();
+		conv.addUser('a'.repeat(100));
+		expect(conv.estimatedTokens).toBeGreaterThan(0);
+		conv.clear();
+		expect(conv.estimatedTokens).toBe(0);
+	});
+});

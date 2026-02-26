@@ -68,6 +68,8 @@ export type {
 	ACPStreamChunk,
 	ACPStreamComplete,
 	ACPStreamDelta,
+	ACPStreamToolCall,
+	ACPStreamToolCallUpdate,
 	ACPTextContent,
 	ACPTokenUsage,
 	ACPToolCall,

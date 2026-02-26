@@ -21,6 +21,8 @@ export interface ConversationOptions {
 	readonly pruneProtectTurns?: number;
 	/** Tool names whose results should never be pruned by the context pruner. */
 	readonly pruneProtectedTools?: readonly string[];
+	/** Custom token estimator function. Default: `Math.ceil(chars / 4)`. */
+	readonly tokenEstimator?: (text: string) => number;
 }
 
 export interface Conversation {
@@ -41,6 +43,8 @@ export interface Conversation {
 	readonly messageCount: number;
 	/** Approximate character count of the serialized conversation. */
 	readonly estimatedChars: number;
+	/** Approximate token count (chars / 4 by default, or custom estimator). */
+	readonly estimatedTokens: number;
 	/** True when conversation exceeds the auto-compact threshold. */
 	readonly needsCompaction: boolean;
 }

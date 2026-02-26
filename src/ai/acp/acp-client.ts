@@ -28,6 +28,8 @@ import type {
 	ACPContentBlock,
 	ACPEmbedResult,
 	ACPGenerateResult,
+	ACPModelsInfo,
+	ACPModesInfo,
 	ACPPermissionPolicy,
 	ACPSamplingParams,
 	ACPServerEntry,
@@ -154,6 +156,14 @@ export interface ACPClient {
 		modelId: string,
 		serverName?: string,
 	) => Promise<void>;
+	readonly getSessionModels: (
+		sessionId: string,
+		serverName?: string,
+	) => Promise<ACPModelsInfo | undefined>;
+	readonly getSessionModes: (
+		sessionId: string,
+		serverName?: string,
+	) => Promise<ACPModesInfo | undefined>;
 	readonly getServerHealth: (serverName?: string) => HealthSnapshot | undefined;
 	readonly serverNames: string[];
 	readonly serverCount: number;
@@ -193,6 +203,9 @@ export function createACPClient(
 	// Per-server circuit breakers and health monitors
 	const breakers = new Map<string, CircuitBreaker>();
 	const monitors = new Map<string, HealthMonitor>();
+
+	// Session info cache — stores models/modes from session/new and loadSession
+	const sessionInfoCache = new Map<string, ACPSessionInfo>();
 
 	// -----------------------------------------------------------------------
 	// Initialize / dispose
@@ -381,6 +394,9 @@ export function createACPClient(
 				mcpServers: config.mcpServers ?? [],
 			},
 		);
+
+		// Cache session info (models/modes) for later retrieval
+		sessionInfoCache.set(result.sessionId, result);
 
 		// Set the permission mode based on the connection's policy.
 		// This tells the agent how to handle tool permissions for this session.
@@ -646,7 +662,12 @@ export function createACPClient(
 			const content = buildTextContent(prompt, streamOptions?.systemPrompt);
 
 			// Collect streaming chunks via notification handler
-			type ChunkItem = { text: string } | { keepalive: true } | { done: true };
+			type ChunkItem =
+				| { text: string }
+				| { keepalive: true }
+				| { done: true }
+				| { toolCall: ACPToolCall }
+				| { toolCallUpdate: ACPToolCallUpdate };
 			const chunks: ChunkItem[] = [];
 			let chunkResolve: (() => void) | undefined;
 			let streamUsage: ACPTokenUsage | undefined;
@@ -682,25 +703,29 @@ export function createACPClient(
 					}
 
 					if (update.sessionUpdate === 'tool_call') {
-						streamOptions?.onToolCall?.({
+						const tc: ACPToolCall = {
 							toolCallId: update.toolCallId as string,
 							title: update.title as string,
 							kind: (update.kind as ACPToolCall['kind']) ?? 'other',
 							status: (update.status as ACPToolCall['status']) ?? 'pending',
-						});
-						// Keep the sliding-window timer alive while tools execute
-						pushKeepalive();
+						};
+						streamOptions?.onToolCall?.(tc);
+						// Yield as a typed chunk so consumers can render tool progress
+						chunks.push({ toolCall: tc });
+						chunkResolve?.();
 					}
 
 					if (update.sessionUpdate === 'tool_call_update') {
-						streamOptions?.onToolCallUpdate?.({
+						const tcu: ACPToolCallUpdate = {
 							toolCallId: update.toolCallId as string,
 							status:
 								(update.status as ACPToolCallUpdate['status']) ?? 'in_progress',
 							content: update.content,
-						});
-						// Keep the sliding-window timer alive during tool progress
-						pushKeepalive();
+						};
+						streamOptions?.onToolCallUpdate?.(tcu);
+						// Yield as a typed chunk so consumers can render tool progress
+						chunks.push({ toolCallUpdate: tcu });
+						chunkResolve?.();
 					}
 
 					if (update.metadata) {
@@ -750,6 +775,17 @@ export function createACPClient(
 						if ('done' in chunk) break;
 						// Keepalive chunks reset lastActivity but don't yield text
 						if ('keepalive' in chunk) continue;
+						if ('toolCall' in chunk) {
+							yield { type: 'tool_call', toolCall: chunk.toolCall };
+							continue;
+						}
+						if ('toolCallUpdate' in chunk) {
+							yield {
+								type: 'tool_call_update',
+								update: chunk.toolCallUpdate,
+							};
+							continue;
+						}
 						yield { type: 'delta', text: chunk.text };
 					} else {
 						const elapsed = Date.now() - lastActivity;
@@ -914,7 +950,12 @@ export function createACPClient(
 		serverName?: string,
 	): Promise<ACPSessionInfo> => {
 		const { connection } = resolveConnection(serverName);
-		return connection.request<ACPSessionInfo>('session/load', { sessionId });
+		const info = await connection.request<ACPSessionInfo>('session/load', {
+			sessionId,
+		});
+		// Update session info cache with fresh data
+		sessionInfoCache.set(sessionId, info);
+		return info;
 	};
 
 	const deleteSession = async (
@@ -977,6 +1018,20 @@ export function createACPClient(
 		return monitors.get(name)?.getHealth();
 	};
 
+	const getSessionModels = async (
+		sessionId: string,
+		_serverName?: string,
+	): Promise<ACPModelsInfo | undefined> => {
+		return sessionInfoCache.get(sessionId)?.models;
+	};
+
+	const getSessionModes = async (
+		sessionId: string,
+		_serverName?: string,
+	): Promise<ACPModesInfo | undefined> => {
+		return sessionInfoCache.get(sessionId)?.modes;
+	};
+
 	const setPermissionPolicy = (policy: ACPPermissionPolicy): void => {
 		for (const conn of connections.values()) {
 			conn.setPermissionPolicy(policy);
@@ -994,6 +1049,8 @@ export function createACPClient(
 		embed,
 		isAvailable,
 		setPermissionPolicy,
+		getSessionModels,
+		getSessionModes,
 		getServerHealth,
 		listSessions,
 		loadSession,

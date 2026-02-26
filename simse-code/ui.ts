@@ -600,6 +600,217 @@ function getToolIcon(name: string): string {
 	return TOOL_ICONS[name] ?? '●';
 }
 
+// ---------------------------------------------------------------------------
+// Tool verb mappings — human-readable active/completed verbs
+// ---------------------------------------------------------------------------
+
+interface VerbPair {
+	readonly active: string;
+	readonly completed: string;
+}
+
+const TOOL_VERBS: Readonly<Record<string, VerbPair>> = {
+	bash: { active: 'Running', completed: 'Ran' },
+	shell: { active: 'Running', completed: 'Ran' },
+	exec: { active: 'Running', completed: 'Ran' },
+	execute: { active: 'Running', completed: 'Ran' },
+	run_command: { active: 'Running', completed: 'Ran' },
+	vfs_write: { active: 'Writing', completed: 'Wrote' },
+	vfs_read: { active: 'Reading', completed: 'Read' },
+	vfs_delete: { active: 'Deleting', completed: 'Deleted' },
+	vfs_rename: { active: 'Renaming', completed: 'Renamed' },
+	vfs_list: { active: 'Listing', completed: 'Listed' },
+	vfs_stat: { active: 'Checking', completed: 'Checked' },
+	vfs_search: { active: 'Searching', completed: 'Searched' },
+	vfs_diff: { active: 'Diffing', completed: 'Diffed' },
+	vfs_mkdir: { active: 'Creating directory', completed: 'Created directory' },
+	file_write: { active: 'Writing', completed: 'Wrote' },
+	file_read: { active: 'Reading', completed: 'Read' },
+	file_edit: { active: 'Editing', completed: 'Edited' },
+	file_create: { active: 'Creating', completed: 'Created' },
+	glob: { active: 'Searching files', completed: 'Found files' },
+	grep: { active: 'Searching', completed: 'Searched' },
+	memory_search: { active: 'Searching memory', completed: 'Searched memory' },
+	memory_add: { active: 'Saving to memory', completed: 'Saved to memory' },
+	memory_list: { active: 'Listing memory', completed: 'Listed memory' },
+	task_list: { active: 'Listing tasks', completed: 'Listed tasks' },
+	task_create: { active: 'Creating task', completed: 'Created task' },
+	task_update: { active: 'Updating task', completed: 'Updated task' },
+	task_get: { active: 'Getting task', completed: 'Got task' },
+};
+
+const KIND_VERBS: Readonly<Record<string, VerbPair>> = {
+	read: { active: 'Reading', completed: 'Read' },
+	edit: { active: 'Editing', completed: 'Edited' },
+	delete: { active: 'Deleting', completed: 'Deleted' },
+	move: { active: 'Moving', completed: 'Moved' },
+	search: { active: 'Searching', completed: 'Searched' },
+	execute: { active: 'Running', completed: 'Ran' },
+	think: { active: 'Thinking', completed: 'Thought' },
+	fetch: { active: 'Fetching', completed: 'Fetched' },
+	other: { active: 'Processing', completed: 'Processed' },
+};
+
+/**
+ * Extract the most useful display argument from a tool call's JSON args.
+ * Returns a short string like a file path, command, or query.
+ */
+function extractPrimaryArg(_name: string, argsStr: string): string {
+	try {
+		const parsed = JSON.parse(argsStr) as Record<string, unknown>;
+		// Try common arg keys in priority order
+		for (const key of [
+			'path',
+			'file_path',
+			'filePath',
+			'filename',
+			'command',
+			'query',
+			'pattern',
+			'name',
+			'url',
+		]) {
+			const val = parsed[key];
+			if (typeof val === 'string' && val.length > 0) {
+				return val.length > 80 ? `${val.slice(0, 77)}...` : val;
+			}
+		}
+		// Fall back to first string value
+		for (const val of Object.values(parsed)) {
+			if (typeof val === 'string' && val.length > 0) {
+				return val.length > 60 ? `${val.slice(0, 57)}...` : val;
+			}
+		}
+	} catch {
+		// Not valid JSON — return trimmed raw string
+		if (argsStr && argsStr !== '{}') {
+			return argsStr.length > 60
+				? `${argsStr.slice(0, 57)}...`
+				: argsStr;
+		}
+	}
+	return '';
+}
+
+// ---------------------------------------------------------------------------
+// Rich tool call renderers — Claude Code style
+// ---------------------------------------------------------------------------
+
+export interface ToolCallCompletedOptions {
+	readonly durationMs?: number;
+	readonly summary?: string;
+	readonly verbose?: boolean;
+}
+
+/** Render an active (in-progress) tool call: ● Reading src/lib.ts */
+export function renderToolCallActive(
+	name: string,
+	argsStr: string,
+	colors: TermColors,
+): string {
+	const verb = TOOL_VERBS[name]?.active ?? name;
+	const arg = extractPrimaryArg(name, argsStr);
+	const display = arg ? `${verb} ${arg}` : verb;
+	return `  ${colors.magenta('●')} ${display}`;
+}
+
+/** Render a completed tool call: ✓ Read src/lib.ts (150 lines, 42ms) */
+export function renderToolCallCompleted(
+	name: string,
+	argsStr: string,
+	colors: TermColors,
+	options?: ToolCallCompletedOptions,
+): string {
+	const verb = TOOL_VERBS[name]?.completed ?? name;
+	const arg = extractPrimaryArg(name, argsStr);
+	const display = arg ? `${verb} ${arg}` : verb;
+
+	const parts: string[] = [];
+	if (options?.summary) parts.push(options.summary);
+	if (options?.durationMs !== undefined) {
+		parts.push(formatDuration(options.durationMs));
+	}
+	const suffix =
+		parts.length > 0 ? ` ${colors.dim(`(${parts.join(', ')})`)}` : '';
+
+	return `  ${colors.green('✓')} ${display}${suffix}`;
+}
+
+/** Render a failed tool call: ✗ Failed to read file.ts — not found */
+export function renderToolCallFailed(
+	name: string,
+	argsStr: string,
+	error: string,
+	colors: TermColors,
+): string {
+	const verb = TOOL_VERBS[name]?.completed ?? name;
+	const arg = extractPrimaryArg(name, argsStr);
+	const prefix = arg ? `Failed to ${verb.toLowerCase()} ${arg}` : `${verb} failed`;
+	const errMsg = error.length > 120 ? `${error.slice(0, 117)}...` : error;
+	return `  ${colors.red('✗')} ${prefix} ${colors.dim('—')} ${errMsg}`;
+}
+
+/** Render a collapsed tool result: ⎿ 150 lines  or  ⎿ Error: ... */
+export function renderToolResultCollapsed(
+	output: string,
+	isError: boolean,
+	colors: TermColors,
+): string {
+	if (isError) {
+		const firstLine = output.split('\n')[0] ?? output;
+		const errMsg =
+			firstLine.length > 120
+				? `${firstLine.slice(0, 117)}...`
+				: firstLine;
+		return `    ${colors.dim('⎿')} ${colors.red(errMsg)}`;
+	}
+	const lineCount = output.split('\n').length;
+	return `    ${colors.dim('⎿')} ${colors.dim(`${lineCount} line${lineCount !== 1 ? 's' : ''}`)}`;
+}
+
+/** Render an active agent tool call: ● Reading file.ts */
+export function renderAgentToolCallActive(
+	title: string,
+	kind: string,
+	colors: TermColors,
+): string {
+	const verb = KIND_VERBS[kind]?.active ?? 'Processing';
+	const display = title ? `${verb} ${title}` : verb;
+	return `  ${colors.magenta('●')} ${display}`;
+}
+
+/** Render a completed agent tool call: ✓ Read file.ts (1.2s) */
+export function renderAgentToolCallCompleted(
+	title: string,
+	kind: string,
+	colors: TermColors,
+	options?: ToolCallCompletedOptions,
+): string {
+	const verb = KIND_VERBS[kind]?.completed ?? 'Processed';
+	const display = title ? `${verb} ${title}` : verb;
+
+	const parts: string[] = [];
+	if (options?.summary) parts.push(options.summary);
+	if (options?.durationMs !== undefined) {
+		parts.push(formatDuration(options.durationMs));
+	}
+	const suffix =
+		parts.length > 0 ? ` ${colors.dim(`(${parts.join(', ')})`)}` : '';
+
+	return `  ${colors.green('✓')} ${display}${suffix}`;
+}
+
+/** Render a failed agent tool call: ✗ Failed — error msg */
+export function renderAgentToolCallFailed(
+	kind: string,
+	error: string,
+	colors: TermColors,
+): string {
+	const verb = KIND_VERBS[kind]?.completed ?? 'Operation';
+	const errMsg = error.length > 120 ? `${error.slice(0, 117)}...` : error;
+	return `  ${colors.red('✗')} ${verb} failed ${colors.dim('—')} ${errMsg}`;
+}
+
 export interface RichToolCallOptions {
 	readonly verbose?: boolean;
 	readonly durationMs?: number;

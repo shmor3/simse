@@ -61,6 +61,9 @@ import {
 	createMarkdownRenderer,
 	createSpinner,
 	createThinkingSpinner,
+	renderAgentToolCallActive,
+	renderAgentToolCallCompleted,
+	renderAgentToolCallFailed,
 	renderAssistantMessage,
 	renderBanner,
 	renderContextGrid,
@@ -70,12 +73,46 @@ import {
 	renderModeBadge,
 	renderServiceStatus,
 	renderSkillLoading,
-	renderToolCall,
-	renderToolResult,
+	renderToolCallActive,
+	renderToolCallCompleted,
+	renderToolCallFailed,
+	renderToolResultCollapsed,
 	type TermColors,
 } from './ui.js';
 import { createUsageTracker, renderUsageChart } from './usage-tracker.js';
 import { createVerboseState } from './verbose.js';
+
+// ---------------------------------------------------------------------------
+// Stream / tool display helpers
+// ---------------------------------------------------------------------------
+
+/** Indent continuation lines so streaming text aligns under the ● bullet. */
+function writeStreamText(text: string): void {
+	process.stdout.write(text.replace(/\n/g, '\n    '));
+}
+
+/** Derive a brief summary from tool output (line count, result count, etc.). */
+function deriveToolSummary(name: string, output: string): string | undefined {
+	const lines = output.split('\n');
+	const lineCount = lines.length;
+	if (
+		name.startsWith('vfs_') ||
+		name.startsWith('file_') ||
+		name === 'glob' ||
+		name === 'grep'
+	) {
+		return `${lineCount} line${lineCount !== 1 ? 's' : ''}`;
+	}
+	if (name.includes('search') || name.includes('list')) {
+		return `${lineCount} result${lineCount !== 1 ? 's' : ''}`;
+	}
+	if (name.includes('write') || name.includes('create') || name.includes('edit')) {
+		const bytes = Buffer.byteLength(output, 'utf-8');
+		if (bytes < 1024) return `${bytes} bytes`;
+		return `${(bytes / 1024).toFixed(1)} KB`;
+	}
+	return `${lineCount} line${lineCount !== 1 ? 's' : ''}`;
+}
 
 // ---------------------------------------------------------------------------
 // Embed state — tracks which provider was used for current embeddings
@@ -464,6 +501,8 @@ async function handleBareTextInput(
 	spinner.start();
 	let firstChunk = true;
 	let hadError = false;
+	const toolTimings = new Map<string, number>();
+	const toolArgs = new Map<string, string>();
 
 	const result = await loop.run(enrichedInput, {
 		onStreamStart: () => {
@@ -475,7 +514,7 @@ async function handleBareTextInput(
 				process.stdout.write(`\n  ${colors.magenta('●')} `);
 				firstChunk = false;
 			}
-			process.stdout.write(text);
+			writeStreamText(text);
 		},
 		onToolCallStart: (call) => {
 			if (!firstChunk) {
@@ -483,15 +522,45 @@ async function handleBareTextInput(
 				firstChunk = true;
 			}
 			spinner.stop();
-			console.log(
-				renderToolCall(call.name, JSON.stringify(call.arguments), colors),
-			);
+			const argsStr = JSON.stringify(call.arguments);
+			toolTimings.set(call.id, Date.now());
+			toolArgs.set(call.id, argsStr);
+			console.log(renderToolCallActive(call.name, argsStr, colors));
 			spinner.start();
 		},
 		onToolCallEnd: (toolResult) => {
 			spinner.stop();
+			const startTime = toolTimings.get(toolResult.id);
+			const durationMs =
+				startTime !== undefined ? Date.now() - startTime : undefined;
+			const argsStr = toolArgs.get(toolResult.id) ?? '{}';
+			if (toolResult.isError) {
+				console.log(
+					renderToolCallFailed(
+						toolResult.name,
+						argsStr,
+						toolResult.output,
+						colors,
+					),
+				);
+			} else {
+				const summary = deriveToolSummary(
+					toolResult.name,
+					toolResult.output,
+				);
+				console.log(
+					renderToolCallCompleted(toolResult.name, argsStr, colors, {
+						durationMs,
+						summary,
+					}),
+				);
+			}
 			console.log(
-				renderToolResult(toolResult.output, toolResult.isError, colors),
+				renderToolResultCollapsed(
+					toolResult.output,
+					toolResult.isError,
+					colors,
+				),
 			);
 			spinner.start();
 		},
@@ -501,8 +570,9 @@ async function handleBareTextInput(
 				firstChunk = true;
 			}
 			spinner.stop();
+			toolTimings.set(toolCall.toolCallId, Date.now());
 			console.log(
-				renderToolCall(
+				renderAgentToolCallActive(
 					toolCall.title || toolCall.toolCallId,
 					toolCall.kind,
 					colors,
@@ -513,14 +583,32 @@ async function handleBareTextInput(
 		onAgentToolCallUpdate: (update) => {
 			if (update.status === 'completed' || update.status === 'failed') {
 				spinner.stop();
+				const startTime = toolTimings.get(update.toolCallId);
+				const durationMs =
+					startTime !== undefined ? Date.now() - startTime : undefined;
 				const output =
 					typeof update.content === 'string'
 						? update.content
 						: update.content
 							? JSON.stringify(update.content)
 							: update.status;
+				if (update.status === 'failed') {
+					console.log(
+						renderAgentToolCallFailed('other', output, colors),
+					);
+				} else {
+					console.log(
+						renderAgentToolCallCompleted('', 'other', colors, {
+							durationMs,
+						}),
+					);
+				}
 				console.log(
-					renderToolResult(output, update.status === 'failed', colors),
+					renderToolResultCollapsed(
+						output,
+						update.status === 'failed',
+						colors,
+					),
 				);
 				spinner.start();
 			}
@@ -641,6 +729,8 @@ async function handleSkillInvocation(
 	spinner.start();
 	let firstChunk = true;
 	let hadError = false;
+	const skillToolTimings = new Map<string, number>();
+	const skillToolArgs = new Map<string, string>();
 
 	const result = await loop.run(userMessage, {
 		onStreamStart: () => {},
@@ -650,7 +740,7 @@ async function handleSkillInvocation(
 				process.stdout.write(`\n  ${colors.magenta('●')} `);
 				firstChunk = false;
 			}
-			process.stdout.write(text);
+			writeStreamText(text);
 		},
 		onToolCallStart: (call) => {
 			if (!firstChunk) {
@@ -658,15 +748,45 @@ async function handleSkillInvocation(
 				firstChunk = true;
 			}
 			spinner.stop();
-			console.log(
-				renderToolCall(call.name, JSON.stringify(call.arguments), colors),
-			);
+			const argsStr = JSON.stringify(call.arguments);
+			skillToolTimings.set(call.id, Date.now());
+			skillToolArgs.set(call.id, argsStr);
+			console.log(renderToolCallActive(call.name, argsStr, colors));
 			spinner.start();
 		},
 		onToolCallEnd: (toolResult) => {
 			spinner.stop();
+			const startTime = skillToolTimings.get(toolResult.id);
+			const durationMs =
+				startTime !== undefined ? Date.now() - startTime : undefined;
+			const argsStr = skillToolArgs.get(toolResult.id) ?? '{}';
+			if (toolResult.isError) {
+				console.log(
+					renderToolCallFailed(
+						toolResult.name,
+						argsStr,
+						toolResult.output,
+						colors,
+					),
+				);
+			} else {
+				const summary = deriveToolSummary(
+					toolResult.name,
+					toolResult.output,
+				);
+				console.log(
+					renderToolCallCompleted(toolResult.name, argsStr, colors, {
+						durationMs,
+						summary,
+					}),
+				);
+			}
 			console.log(
-				renderToolResult(toolResult.output, toolResult.isError, colors),
+				renderToolResultCollapsed(
+					toolResult.output,
+					toolResult.isError,
+					colors,
+				),
 			);
 			spinner.start();
 		},

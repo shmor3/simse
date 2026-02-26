@@ -24,6 +24,8 @@ export { createACPClient } from './ai/acp/acp-client.js';
 export type {
 	ACPConnection,
 	ACPConnectionOptions,
+	ACPPermissionOption,
+	ACPPermissionRequestInfo,
 } from './ai/acp/acp-connection.js';
 export { createACPConnection } from './ai/acp/acp-connection.js';
 export {

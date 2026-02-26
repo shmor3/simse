@@ -201,7 +201,7 @@ export interface ACPServerEntry {
 	readonly defaultAgent?: string;
 	/** Request timeout in milliseconds. Defaults to 30 000. */
 	readonly timeoutMs?: number;
-	/** Permission policy for tool use requests from the agent. Defaults to 'deny'. */
+	/** Permission policy for tool use requests from the agent. Defaults to 'prompt'. */
 	readonly permissionPolicy?: ACPPermissionPolicy;
 }
 

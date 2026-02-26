@@ -11,6 +11,7 @@ import type { Interface as ReadlineInterface } from 'node:readline';
 import { createInterface } from 'node:readline';
 import {
 	type ACPClient,
+	type ACPPermissionRequestInfo,
 	createACPClient,
 	createDefaultValidators,
 	createLocalEmbedder,
@@ -2899,7 +2900,48 @@ async function main(): Promise<void> {
 		compressionLevel: memoryConfig.compressionLevel,
 	});
 
-	const acpClient = createACPClient(config.acp, { logger });
+	const acpClient = createACPClient(config.acp, {
+		logger,
+		onPermissionRequest: async (info: ACPPermissionRequestInfo) => {
+			const desc = info.description ?? info.title ?? 'Agent requests permission';
+			const allowOption = info.options.find(
+				(o) => o.kind === 'allow_once',
+			);
+			const rejectOption = info.options.find(
+				(o) => o.kind === 'reject_once',
+			);
+
+			// Show the permission request to the user
+			console.log(
+				`\n  ${colors.yellow('⚠')} ${colors.bold('Permission requested:')} ${desc}`,
+			);
+
+			const permRl = createInterface({
+				input: process.stdin,
+				output: process.stdout,
+				terminal: true,
+			});
+
+			const answer = await new Promise<string>((resolve) => {
+				permRl.question(
+					`  ${colors.dim('[a]llow / [d]eny?')} `,
+					resolve,
+				);
+			});
+			permRl.close();
+
+			const choice = answer.trim().toLowerCase();
+			if (
+				choice === 'a' ||
+				choice === 'allow' ||
+				choice === 'y' ||
+				choice === 'yes'
+			) {
+				return allowOption?.optionId;
+			}
+			return rejectOption?.optionId;
+		},
+	});
 	const { embedConfig } = configResult;
 	const embedder = createLocalEmbedder({
 		model: embedConfig.embeddingModel,

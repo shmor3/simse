@@ -66,6 +66,13 @@ export interface ACPClientOptions {
 		failureThreshold?: number;
 		resetTimeoutMs?: number;
 	};
+	/**
+	 * Called when an ACP agent requests permission and the policy is 'prompt'.
+	 * Return the selected optionId, or undefined to reject.
+	 */
+	onPermissionRequest?: (
+		info: import('./acp-connection.js').ACPPermissionRequestInfo,
+	) => Promise<string | undefined>;
 }
 
 export interface ACPStreamOptions {
@@ -212,6 +219,7 @@ export function createACPClient(
 					stderrHandler: (text) => {
 						logger.debug(`ACP server "${entry.name}" stderr: ${text}`);
 					},
+					onPermissionRequest: options?.onPermissionRequest,
 				});
 
 				const result = await connection.initialize();

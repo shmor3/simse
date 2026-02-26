@@ -22,6 +22,25 @@ import type {
 // Options
 // ---------------------------------------------------------------------------
 
+/**
+ * A permission option presented by the ACP agent.
+ */
+export interface ACPPermissionOption {
+	readonly optionId: string;
+	readonly kind: string;
+	readonly title?: string;
+	readonly description?: string;
+}
+
+/**
+ * Info passed to the permission handler callback in 'prompt' mode.
+ */
+export interface ACPPermissionRequestInfo {
+	readonly title?: string;
+	readonly description?: string;
+	readonly options: readonly ACPPermissionOption[];
+}
+
 export interface ACPConnectionOptions {
 	readonly command: string;
 	readonly args?: readonly string[];
@@ -33,6 +52,13 @@ export interface ACPConnectionOptions {
 	readonly clientName?: string;
 	readonly clientVersion?: string;
 	readonly stderrHandler?: (text: string) => void;
+	/**
+	 * Called when the ACP agent requests permission and the policy is 'prompt'.
+	 * Return the selected optionId, or undefined to reject.
+	 */
+	readonly onPermissionRequest?: (
+		info: ACPPermissionRequestInfo,
+	) => Promise<string | undefined>;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,10 +105,11 @@ export function createACPConnection(
 	const timeoutMs = options.timeoutMs ?? 30_000;
 	const initTimeoutMs = options.initTimeoutMs ?? 10_000;
 	let permissionPolicy: ACPPermissionPolicy =
-		options.permissionPolicy ?? 'deny';
+		options.permissionPolicy ?? 'prompt';
 	const clientName = options.clientName ?? 'simse';
 	const clientVersion = options.clientVersion ?? '1.0.0';
 	const stderrHandler = options.stderrHandler ?? (() => {});
+	const onPermissionRequest = options.onPermissionRequest;
 
 	let nextId = 1;
 	let child: ChildProcess | undefined;
@@ -116,14 +143,18 @@ export function createACPConnection(
 
 	const handlePermissionRequest = (id: number, params: unknown): void => {
 		const p = params as {
-			options?: readonly { optionId: string; kind: string }[];
+			title?: string;
+			description?: string;
+			options?: readonly ACPPermissionOption[];
 		};
-		const options = p?.options ?? [];
+		const permOptions = p?.options ?? [];
 
 		if (permissionPolicy === 'auto-approve') {
 			// Pick the first "allow" option, preferring allow_always > allow_once
-			const allowAlways = options.find((o) => o.kind === 'allow_always');
-			const allowOnce = options.find((o) => o.kind === 'allow_once');
+			const allowAlways = permOptions.find(
+				(o) => o.kind === 'allow_always',
+			);
+			const allowOnce = permOptions.find((o) => o.kind === 'allow_once');
 			const pick = allowAlways ?? allowOnce;
 
 			if (pick) {
@@ -135,13 +166,49 @@ export function createACPConnection(
 
 			// Fallback if options don't contain allow kinds
 			sendResponse(id, {
-				outcome: { outcome: 'selected', optionId: options[0]?.optionId },
+				outcome: {
+					outcome: 'selected',
+					optionId: permOptions[0]?.optionId,
+				},
 			});
 			return;
 		}
 
-		// 'deny' or 'prompt' — reject
-		const reject = options.find(
+		if (permissionPolicy === 'prompt' && onPermissionRequest) {
+			// Delegate to the consumer's handler (fire-and-forget async)
+			onPermissionRequest({
+				title: p?.title,
+				description: p?.description,
+				options: permOptions,
+			})
+				.then((selectedId) => {
+					if (selectedId) {
+						sendResponse(id, {
+							outcome: { outcome: 'selected', optionId: selectedId },
+						});
+					} else {
+						// User cancelled or handler returned undefined — reject
+						const reject = permOptions.find(
+							(o) =>
+								o.kind === 'reject_once' ||
+								o.kind === 'reject_always',
+						);
+						sendResponse(id, {
+							outcome: reject
+								? { outcome: 'selected', optionId: reject.optionId }
+								: { outcome: 'cancelled' },
+						});
+					}
+				})
+				.catch(() => {
+					// Handler threw — reject for safety
+					sendResponse(id, { outcome: { outcome: 'cancelled' } });
+				});
+			return;
+		}
+
+		// 'deny' or 'prompt' without handler — reject
+		const reject = permOptions.find(
 			(o) => o.kind === 'reject_once' || o.kind === 'reject_always',
 		);
 		if (reject) {

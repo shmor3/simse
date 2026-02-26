@@ -16,6 +16,7 @@ import {
 	createLocalEmbedder,
 	createVFSDisk,
 	createVirtualFS,
+	toError,
 	type VFSWriteEvent,
 	validateSnapshot,
 } from 'simse';
@@ -3397,10 +3398,21 @@ async function main(): Promise<void> {
 	);
 
 	serviceSpinner.start('Starting ACP servers...');
-	await acpClient.initialize();
-	serviceSpinner.succeed(
-		renderServiceStatus('ACP', 'ok', acpClient.serverNames.join(', '), colors),
-	);
+	try {
+		await acpClient.initialize();
+		serviceSpinner.succeed(
+			renderServiceStatus(
+				'ACP',
+				'ok',
+				acpClient.serverNames.join(', '),
+				colors,
+			),
+		);
+	} catch (err) {
+		serviceSpinner.fail(
+			renderServiceStatus('ACP', 'error', toError(err).message, colors),
+		);
+	}
 
 	try {
 		serviceSpinner.start('Connecting MCP tools...');

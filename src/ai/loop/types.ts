@@ -2,6 +2,7 @@
 // Agentic Loop Types
 // ---------------------------------------------------------------------------
 
+import type { EventBus } from '../../events/types.js';
 import type { Logger } from '../../logger.js';
 import type { ACPClient } from '../acp/acp-client.js';
 import type { Conversation } from '../conversation/types.js';
@@ -40,6 +41,8 @@ export interface AgenticLoopOptions {
 		readonly maxAttempts?: number;
 		readonly baseDelayMs?: number;
 	};
+	/** Optional event bus for publishing loop lifecycle events. */
+	readonly eventBus?: EventBus;
 }
 
 // ---------------------------------------------------------------------------

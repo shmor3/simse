@@ -57,6 +57,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		compactionProvider,
 		streamRetry,
 		toolRetry,
+		eventBus,
 	} = options;
 
 	const streamMaxAttempts = streamRetry?.maxAttempts ?? 2;
@@ -100,11 +101,18 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 			// Auto-compaction
 			if (autoCompact && compactionProvider && conversation.needsCompaction) {
 				try {
+					eventBus?.publish('compaction.start', {
+						messageCount: conversation.messageCount,
+						estimatedChars: conversation.estimatedChars,
+					});
 					const summary = await compactionProvider.generate(
 						`Summarize this conversation concisely, preserving key context and decisions:\n\n${conversation.serialize()}`,
 					);
 					conversation.compact(summary);
 					callbacks?.onCompaction?.(summary);
+					eventBus?.publish('compaction.complete', {
+						summaryLength: summary.length,
+					});
 				} catch (err) {
 					callbacks?.onError?.(toError(err));
 				}
@@ -153,6 +161,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 						if (chunk.type === 'delta') {
 							fullResponse += chunk.text;
 							callbacks?.onStreamDelta?.(chunk.text);
+							eventBus?.publish('stream.delta', { text: chunk.text });
 						}
 					}
 					break; // success — exit retry loop
@@ -190,6 +199,10 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 				});
 				turns.push(loopTurn);
 				callbacks?.onTurnComplete?.(loopTurn);
+				eventBus?.publish('turn.complete', {
+					turn: loopTurn.turn,
+					type: loopTurn.type,
+				});
 				lastText = parsed.text;
 
 				return Object.freeze({
@@ -217,6 +230,11 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 				}
 
 				callbacks?.onToolCallStart?.(call);
+				eventBus?.publish('tool.call.start', {
+					callId: call.id,
+					name: call.name,
+					args: call.arguments,
+				});
 
 				let result = await toolRegistry.execute(call);
 
@@ -237,6 +255,13 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 
 				toolResults.push(result);
 				callbacks?.onToolCallEnd?.(result);
+				eventBus?.publish('tool.call.end', {
+					callId: result.id,
+					name: result.name,
+					output: result.output,
+					isError: result.isError,
+					durationMs: result.durationMs ?? 0,
+				});
 
 				// Add tool result to conversation for next turn
 				conversation.addToolResult(call.id, call.name, result.output);
@@ -252,6 +277,10 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 			});
 			turns.push(loopTurn);
 			callbacks?.onTurnComplete?.(loopTurn);
+			eventBus?.publish('turn.complete', {
+				turn: loopTurn.turn,
+				type: loopTurn.type,
+			});
 			lastText = parsed.text;
 		}
 

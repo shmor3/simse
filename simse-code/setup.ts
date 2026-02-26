@@ -108,12 +108,11 @@ const presets: readonly Preset[] = [
 	},
 	{
 		label: 'Claude Code',
-		description: 'Anthropic Claude via claude-code CLI',
+		description: 'Anthropic Claude via claude-code-acp',
 		build: async () => ({
 			server: {
 				name: 'claude',
-				command: 'claude',
-				args: ['--acp'],
+				command: 'claude-code-acp',
 			},
 		}),
 	},

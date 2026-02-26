@@ -110,7 +110,7 @@ export function createSimseServer(config: SimseServerConfig): SimseServer {
 			hostname: host,
 			fetch: app.fetch,
 		});
-		resolvedPort = server.port;
+		resolvedPort = server.port ?? requestedPort;
 	};
 
 	const stop = async (): Promise<void> => {

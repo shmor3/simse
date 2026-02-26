@@ -227,6 +227,17 @@ export type {
 	VectorStoreOptions,
 } from './ai/memory/vector-store.js';
 export { createVectorStore } from './ai/memory/vector-store.js';
+// ---- Provider Prompts -----------------------------------------------------
+export type {
+	DiscoveredInstruction,
+	InstructionDiscoveryOptions,
+	ProviderPromptConfig,
+	ProviderPromptResolver,
+} from './ai/prompts/index.js';
+export {
+	createProviderPromptResolver,
+	discoverInstructions,
+} from './ai/prompts/index.js';
 // ---- Task List ------------------------------------------------------------
 export type {
 	TaskCreateInput,
@@ -237,6 +248,15 @@ export type {
 	TaskUpdateInput,
 } from './ai/tasks/index.js';
 export { createTaskList } from './ai/tasks/index.js';
+// ---- Host Tools -----------------------------------------------------------
+export type { BashToolOptions } from './ai/tools/host/bash.js';
+export { registerBashTool } from './ai/tools/host/bash.js';
+export type { FilesystemToolOptions } from './ai/tools/host/filesystem.js';
+export { registerFilesystemTools } from './ai/tools/host/filesystem.js';
+export type { FuzzyMatchResult } from './ai/tools/host/fuzzy-edit.js';
+export { fuzzyMatch } from './ai/tools/host/fuzzy-edit.js';
+export type { GitToolOptions } from './ai/tools/host/git.js';
+export { registerGitTools } from './ai/tools/host/git.js';
 // ---- Tool Registry --------------------------------------------------------
 export type {
 	RegisteredTool,
@@ -259,6 +279,13 @@ export {
 	registerTaskTools,
 	registerVFSTools,
 } from './ai/tools/index.js';
+// ---- Permissions ----------------------------------------------------------
+export type {
+	ToolPermissionConfig,
+	ToolPermissionPolicy,
+	ToolPermissionRule,
+} from './ai/tools/permissions.js';
+export { createToolPermissionResolver } from './ai/tools/permissions.js';
 // ---- Virtual Filesystem ---------------------------------------------------
 export type {
 	VFSCommitOperation,
@@ -419,7 +446,16 @@ export type {
 	EventType,
 } from './events/index.js';
 export { createEventBus } from './events/index.js';
-
+// ---- Hooks ----------------------------------------------------------------
+export type {
+	BlockedResult,
+	HookContextMap,
+	HookHandler,
+	HookResultMap,
+	HookSystem,
+	HookType,
+} from './hooks/index.js';
+export { createHookSystem } from './hooks/index.js';
 // ---- Logger ---------------------------------------------------------------
 export type {
 	LogEntry,
@@ -436,6 +472,18 @@ export {
 	getDefaultLogger,
 	setDefaultLogger,
 } from './logger.js';
+// ---- Server ---------------------------------------------------------------
+export type {
+	Session,
+	SessionManager,
+	SessionStatus,
+	SimseServer,
+	SimseServerConfig,
+} from './server/index.js';
+export {
+	createSessionManager,
+	createSimseServer,
+} from './server/index.js';
 
 // ---- Utilities ------------------------------------------------------------
 export type {

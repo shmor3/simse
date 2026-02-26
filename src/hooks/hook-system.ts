@@ -37,7 +37,7 @@ export function createHookSystem(): HookSystem {
 			set = new Set();
 			handlers.set(type, set);
 		}
-		return set as Set<HookHandler<T>>;
+		return set as unknown as Set<HookHandler<T>>;
 	}
 
 	function register<T extends HookType>(
@@ -55,43 +55,45 @@ export function createHookSystem(): HookSystem {
 		type: T,
 		context: HookContextMap[T],
 	): Promise<HookResultMap[T]> {
-		const set = handlers.get(type) as Set<HookHandler<T>> | undefined;
+		const set = handlers.get(type) as unknown as
+			| Set<HookHandler<T>>
+			| undefined;
 		const hookList = set ? [...set] : [];
 
 		switch (type) {
 			case 'tool.execute.before':
 				return runBefore(
-					hookList as HookHandler<'tool.execute.before'>[],
+					hookList as unknown as HookHandler<'tool.execute.before'>[],
 					context as HookContextMap['tool.execute.before'],
 				) as Promise<HookResultMap[T]>;
 
 			case 'tool.execute.after':
 				return runAfter(
-					hookList as HookHandler<'tool.execute.after'>[],
+					hookList as unknown as HookHandler<'tool.execute.after'>[],
 					context as HookContextMap['tool.execute.after'],
 				) as Promise<HookResultMap[T]>;
 
 			case 'tool.result.validate':
 				return runValidate(
-					hookList as HookHandler<'tool.result.validate'>[],
+					hookList as unknown as HookHandler<'tool.result.validate'>[],
 					context as HookContextMap['tool.result.validate'],
 				) as Promise<HookResultMap[T]>;
 
 			case 'prompt.system.transform':
 				return runPromptTransform(
-					hookList as HookHandler<'prompt.system.transform'>[],
+					hookList as unknown as HookHandler<'prompt.system.transform'>[],
 					context as HookContextMap['prompt.system.transform'],
 				) as Promise<HookResultMap[T]>;
 
 			case 'prompt.messages.transform':
 				return runMessagesTransform(
-					hookList as HookHandler<'prompt.messages.transform'>[],
+					hookList as unknown as HookHandler<'prompt.messages.transform'>[],
 					context as HookContextMap['prompt.messages.transform'],
 				) as Promise<HookResultMap[T]>;
 
 			case 'session.compacting':
 				return runCompacting(
-					hookList as HookHandler<'session.compacting'>[],
+					hookList as unknown as HookHandler<'session.compacting'>[],
 					context as HookContextMap['session.compacting'],
 				) as Promise<HookResultMap[T]>;
 

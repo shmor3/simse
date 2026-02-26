@@ -315,7 +315,6 @@ export type {
 	SimseConfig,
 } from './config/settings.js';
 export { defineConfig } from './config/settings.js';
-
 // ---- Errors ---------------------------------------------------------------
 export type { SimseError, SimseErrorOptions } from './errors/index.js';
 export {
@@ -406,6 +405,15 @@ export {
 	toError,
 	wrapError,
 } from './errors/index.js';
+// ---- Events ---------------------------------------------------------------
+export type {
+	EventBus,
+	EventHandler,
+	EventPayload,
+	EventPayloadMap,
+	EventType,
+} from './events/index.js';
+export { createEventBus } from './events/index.js';
 
 // ---- Logger ---------------------------------------------------------------
 export type {

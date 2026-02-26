@@ -1,8 +1,5 @@
 import { describe, expect, it, mock } from 'bun:test';
-import {
-	createToolPermissionResolver,
-	type ToolPermissionConfig,
-} from '../src/ai/tools/permissions.js';
+import { createToolPermissionResolver } from '../src/ai/tools/permissions.js';
 import type { ToolCallRequest } from '../src/ai/tools/types.js';
 
 // ---------------------------------------------------------------------------

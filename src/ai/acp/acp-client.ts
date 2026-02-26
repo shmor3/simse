@@ -532,7 +532,7 @@ export function createACPClient(
 				sessionId,
 				content,
 				buildSamplingMetadata(generateOptions?.sampling),
-				entry.timeoutMs ?? streamTimeoutMs,
+				streamTimeoutMs,
 			);
 
 			return {
@@ -598,7 +598,7 @@ export function createACPClient(
 				sessionId,
 				content,
 				buildSamplingMetadata(chatOptions?.sampling),
-				entry.timeoutMs ?? streamTimeoutMs,
+				streamTimeoutMs,
 			);
 
 			return {
@@ -704,7 +704,7 @@ export function createACPClient(
 			);
 
 			// Send the prompt — don't await yet, chunks arrive as notifications
-			const promptTimeoutMs = entry.timeoutMs ?? streamTimeoutMs;
+			const promptTimeoutMs = streamTimeoutMs;
 			const promptPromise = sendPrompt(
 				connection,
 				sessionId,
@@ -723,26 +723,28 @@ export function createACPClient(
 			});
 
 			try {
-				// Set a stream-level timeout
-				const timeoutMs = entry.timeoutMs ?? streamTimeoutMs;
-				const deadline = Date.now() + timeoutMs;
+				// Sliding-window stream timeout — resets each time a chunk arrives
+				const timeoutMs = streamTimeoutMs;
+				let lastActivity = Date.now();
 
 				let idx = 0;
 				while (true) {
 					if (idx < chunks.length) {
 						const chunk = chunks[idx++];
+						lastActivity = Date.now();
 						if ('done' in chunk) break;
 						yield { type: 'delta', text: chunk.text };
 					} else {
-						const remaining = deadline - Date.now();
-						if (remaining <= 0) {
+						const elapsed = Date.now() - lastActivity;
+						if (elapsed >= timeoutMs) {
 							throw createProviderGenerationError(
 								'acp',
-								`Stream timed out after ${timeoutMs}ms`,
+								`Stream timed out after ${timeoutMs}ms of inactivity`,
 								{ model: agentId },
 							);
 						}
 
+						const remaining = timeoutMs - elapsed;
 						await new Promise<void>((resolve) => {
 							chunkResolve = resolve;
 							setTimeout(resolve, Math.min(remaining, 100));

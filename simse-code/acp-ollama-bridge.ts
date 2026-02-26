@@ -22,6 +22,7 @@ import type {
 	ACPSessionPromptParams,
 	ACPSessionPromptResult,
 	ACPSessionUpdateParams,
+	ACPStopReason,
 	JsonRpcError,
 	JsonRpcMessage,
 	JsonRpcNotification,
@@ -59,6 +60,46 @@ interface OllamaGenerateChunk {
 	readonly eval_count?: number;
 }
 
+interface OllamaChatMessage {
+	readonly role: 'system' | 'user' | 'assistant' | 'tool';
+	readonly content: string;
+	readonly tool_calls?: readonly OllamaToolCall[];
+}
+
+interface OllamaToolCall {
+	readonly function: {
+		readonly name: string;
+		readonly arguments: Record<string, unknown>;
+	};
+}
+
+interface OllamaTool {
+	readonly type: 'function';
+	readonly function: {
+		readonly name: string;
+		readonly description: string;
+		readonly parameters: {
+			readonly type: 'object';
+			readonly properties: Record<
+				string,
+				{ readonly type: string; readonly description: string }
+			>;
+			readonly required: readonly string[];
+		};
+	};
+}
+
+interface OllamaChatResponse {
+	readonly message: {
+		readonly role: string;
+		readonly content: string;
+		readonly tool_calls?: readonly OllamaToolCall[];
+	};
+	readonly done: boolean;
+	readonly prompt_eval_count?: number;
+	readonly eval_count?: number;
+}
+
 // ---------------------------------------------------------------------------
 // JSON-RPC error codes
 // ---------------------------------------------------------------------------
@@ -87,6 +128,21 @@ interface OllamaClient {
 		system: string | undefined,
 		onChunk: (text: string) => void,
 	) => Promise<{ promptTokens: number; completionTokens: number }>;
+	readonly chat: (
+		model: string,
+		messages: readonly OllamaChatMessage[],
+		tools?: readonly OllamaTool[],
+	) => Promise<OllamaChatResponse>;
+	readonly chatStream: (
+		model: string,
+		messages: readonly OllamaChatMessage[],
+		tools: readonly OllamaTool[] | undefined,
+		onChunk: (text: string) => void,
+	) => Promise<{
+		promptTokens: number;
+		completionTokens: number;
+		toolCalls: readonly OllamaToolCall[];
+	}>;
 	readonly embed: (
 		model: string,
 		texts: readonly string[],
@@ -175,6 +231,89 @@ function createOllamaClient(baseUrl: string): OllamaClient {
 		return { promptTokens, completionTokens };
 	};
 
+	const chat = async (
+		model: string,
+		messages: readonly OllamaChatMessage[],
+		tools?: readonly OllamaTool[],
+	): Promise<OllamaChatResponse> => {
+		const body: Record<string, unknown> = {
+			model,
+			messages,
+			stream: false,
+		};
+		if (tools && tools.length > 0) body.tools = tools;
+		const response = await post('/api/chat', body);
+		return response.json() as Promise<OllamaChatResponse>;
+	};
+
+	const chatStream = async (
+		model: string,
+		messages: readonly OllamaChatMessage[],
+		tools: readonly OllamaTool[] | undefined,
+		onChunk: (text: string) => void,
+	): Promise<{
+		promptTokens: number;
+		completionTokens: number;
+		toolCalls: readonly OllamaToolCall[];
+	}> => {
+		const body: Record<string, unknown> = {
+			model,
+			messages,
+			stream: true,
+		};
+		if (tools && tools.length > 0) body.tools = tools;
+
+		const response = await post('/api/chat', body);
+		if (!response.body) {
+			throw new Error('Ollama returned no response body for streaming');
+		}
+
+		const reader = response.body.getReader();
+		const decoder = new TextDecoder();
+		let lineBuffer = '';
+		let promptTokens = 0;
+		let completionTokens = 0;
+		const toolCalls: OllamaToolCall[] = [];
+
+		try {
+			while (true) {
+				const { done, value } = await reader.read();
+				if (done) break;
+
+				lineBuffer += decoder.decode(value, { stream: true });
+				const lines = lineBuffer.split('\n');
+				lineBuffer = lines.pop() ?? '';
+
+				for (const line of lines) {
+					const trimmed = line.trim();
+					if (!trimmed) continue;
+					let chunk: OllamaChatResponse;
+					try {
+						chunk = JSON.parse(trimmed) as OllamaChatResponse;
+					} catch {
+						continue;
+					}
+					if (chunk.done) {
+						promptTokens = chunk.prompt_eval_count ?? 0;
+						completionTokens = chunk.eval_count ?? 0;
+					}
+					if (chunk.message?.content) {
+						onChunk(chunk.message.content);
+					}
+					if (chunk.message?.tool_calls) {
+						for (const tc of chunk.message.tool_calls) {
+							toolCalls.push(tc);
+						}
+					}
+				}
+			}
+		} finally {
+			reader.releaseLock();
+		}
+
+		return { promptTokens, completionTokens, toolCalls };
+	};
+
 	const embed = async (
 		model: string,
 		texts: readonly string[],
@@ -193,7 +332,7 @@ function createOllamaClient(baseUrl: string): OllamaClient {
 		};
 	};
 
-	return Object.freeze({ generate, generateStream, embed });
+	return Object.freeze({ generate, generateStream, chat, chatStream, embed });
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +458,158 @@ function extractEmbedModel(
 }
 
 // ---------------------------------------------------------------------------
+// Tool format conversion helpers
+// ---------------------------------------------------------------------------
+
+const TOOL_SECTION_START =
+	'You have access to tools. To use a tool, include a JSON block';
+const TOOL_LIST_HEADER = 'Available tools:';
+
+function parseToolsFromSystemPrompt(system: string | undefined): {
+	tools: readonly OllamaTool[];
+	cleanedSystem: string | undefined;
+} {
+	if (!system) return { tools: [], cleanedSystem: undefined };
+
+	const startIdx = system.indexOf(TOOL_SECTION_START);
+	if (startIdx === -1) return { tools: [], cleanedSystem: system };
+
+	const listIdx = system.indexOf(TOOL_LIST_HEADER, startIdx);
+	if (listIdx === -1) return { tools: [], cleanedSystem: system };
+
+	// Everything after "Available tools:\n\n" is the tool definitions
+	const toolSection = system.slice(listIdx + TOOL_LIST_HEADER.length + 1);
+	const cleaned = system.slice(0, startIdx).trim();
+
+	// Parse individual tool entries: "- name: description\n  Parameters: ..."
+	const tools: OllamaTool[] = [];
+	const toolBlocks = toolSection.split('\n\n- ');
+
+	for (let i = 0; i < toolBlocks.length; i++) {
+		let block = toolBlocks[i].trim();
+		if (i === 0 && block.startsWith('- ')) {
+			block = block.slice(2);
+		}
+		if (!block) continue;
+
+		const lines = block.split('\n');
+		const headerLine = lines[0];
+		const colonIdx = headerLine.indexOf(':');
+		if (colonIdx === -1) continue;
+
+		const name = headerLine.slice(0, colonIdx).trim();
+		const description = headerLine.slice(colonIdx + 1).trim();
+
+		const properties: Record<
+			string,
+			{ readonly type: string; readonly description: string }
+		> = {};
+		const required: string[] = [];
+
+		// Parse "  Parameters: param1 (type, required), param2 (type)"
+		const paramsLine = lines.find((l) => l.trim().startsWith('Parameters:'));
+		if (paramsLine) {
+			const paramsText = paramsLine
+				.slice(paramsLine.indexOf('Parameters:') + 'Parameters:'.length)
+				.trim();
+			const paramEntries = paramsText.split('),');
+
+			for (const entry of paramEntries) {
+				const trimmed = entry.trim();
+				if (!trimmed) continue;
+
+				const parenIdx = trimmed.indexOf('(');
+				if (parenIdx === -1) continue;
+
+				const paramName = trimmed.slice(0, parenIdx).trim();
+				const meta = trimmed
+					.slice(parenIdx + 1)
+					.replace(/\)$/, '')
+					.trim();
+				const parts = meta.split(',').map((s) => s.trim());
+				const paramType = parts[0] || 'string';
+				const isRequired = parts.includes('required');
+
+				properties[paramName] = {
+					type: paramType,
+					description: paramName,
+				};
+				if (isRequired) required.push(paramName);
+			}
+		}
+
+		tools.push({
+			type: 'function',
+			function: {
+				name,
+				description,
+				parameters: {
+					type: 'object',
+					properties,
+					required,
+				},
+			},
+		});
+	}
+
+	return {
+		tools,
+		cleanedSystem: cleaned || undefined,
+	};
+}
+
+function parseConversationMessages(prompt: string): OllamaChatMessage[] {
+	if (!prompt.trim()) return [];
+
+	// Split on message boundaries: "[Role]" or "[Tool Result: name]"
+	const segments = prompt.split(
+		/\n\n(?=\[(?:System|User|Assistant|Tool Result)[:\]])/,
+	);
+	const messages: OllamaChatMessage[] = [];
+
+	for (const segment of segments) {
+		const trimmed = segment.trim();
+		if (!trimmed) continue;
+
+		const newlineIdx = trimmed.indexOf('\n');
+		if (newlineIdx === -1) continue;
+
+		const header = trimmed.slice(0, newlineIdx).trim();
+		const content = trimmed.slice(newlineIdx + 1).trim();
+
+		if (header === '[System]') {
+			messages.push({ role: 'system', content });
+		} else if (header === '[User]') {
+			messages.push({ role: 'user', content });
+		} else if (header === '[Assistant]') {
+			messages.push({ role: 'assistant', content });
+		} else if (header.startsWith('[Tool Result:')) {
+			messages.push({ role: 'tool', content });
+		}
+	}
+
+	// If no recognized headers, treat entire prompt as a user message
+	if (messages.length === 0 && prompt.trim()) {
+		messages.push({ role: 'user', content: prompt.trim() });
+	}
+
+	return messages;
+}
+
+function formatToolCallsAsXml(toolCalls: readonly OllamaToolCall[]): string {
+	return toolCalls
+		.map((tc, i) => {
+			const json = JSON.stringify({
+				id: `call_${i + 1}`,
+				name: tc.function.name,
+				arguments: tc.function.arguments,
+			});
+			return `<tool_use>\n${json}\n</tool_use>`;
+		})
+		.join('\n\n');
+}
+
+// ---------------------------------------------------------------------------
 // ACP server
 // ---------------------------------------------------------------------------
 
@@ -390,24 +681,60 @@ function createAcpServer(
 		content: readonly ACPContentBlock[],
 	): Promise<void> => {
 		const { prompt, system } = extractTextFromContent(content);
-		const chunk = await ollama.generate(opts.defaultModel, prompt, system);
+		const { tools, cleanedSystem } = parseToolsFromSystemPrompt(system);
 
-		const text = chunk.response ?? '';
-		const promptTokens = chunk.prompt_eval_count ?? 0;
-		const completionTokens = chunk.eval_count ?? 0;
+		if (tools.length > 0) {
+			const messages = parseConversationMessages(prompt);
+			if (cleanedSystem) {
+				messages.unshift({ role: 'system', content: cleanedSystem });
+			}
 
-		const result: ACPSessionPromptResult = {
-			content: [{ type: 'text', text }],
-			stopReason: 'end_turn',
-			metadata: {
-				usage: {
-					prompt_tokens: promptTokens,
-					completion_tokens: completionTokens,
-					total_tokens: promptTokens + completionTokens,
+			const response = await ollama.chat(opts.defaultModel, messages, tools);
+
+			let text = response.message.content ?? '';
+			let stopReason: ACPStopReason = 'end_turn';
+
+			if (response.message.tool_calls?.length) {
+				const xml = formatToolCallsAsXml(response.message.tool_calls);
+				text = text ? `${text}\n\n${xml}` : xml;
+				stopReason = 'tool_use';
+			}
+
+			const promptTokens = response.prompt_eval_count ?? 0;
+			const completionTokens = response.eval_count ?? 0;
+
+			const result: ACPSessionPromptResult = {
+				content: [{ type: 'text', text }],
+				stopReason,
+				metadata: {
+					usage: {
+						prompt_tokens: promptTokens,
+						completion_tokens: completionTokens,
+						total_tokens: promptTokens + completionTokens,
+					},
 				},
-			},
-		};
-		transport.writeResponse(id, result);
+			};
+			transport.writeResponse(id, result);
+		} else {
+			const chunk = await ollama.generate(opts.defaultModel, prompt, system);
+
+			const text = chunk.response ?? '';
+			const promptTokens = chunk.prompt_eval_count ?? 0;
+			const completionTokens = chunk.eval_count ?? 0;
+
+			const result: ACPSessionPromptResult = {
+				content: [{ type: 'text', text }],
+				stopReason: 'end_turn',
+				metadata: {
+					usage: {
+						prompt_tokens: promptTokens,
+						completion_tokens: completionTokens,
+						total_tokens: promptTokens + completionTokens,
+					},
+				},
+			};
+			transport.writeResponse(id, result);
+		}
 	};
 
 	const handleGenerateStream = async (
@@ -416,37 +743,89 @@ function createAcpServer(
 		content: readonly ACPContentBlock[],
 	): Promise<void> => {
 		const { prompt, system } = extractTextFromContent(content);
+		const { tools, cleanedSystem } = parseToolsFromSystemPrompt(system);
 		let fullText = '';
 
-		const { promptTokens, completionTokens } = await ollama.generateStream(
-			opts.defaultModel,
-			prompt,
-			system,
-			(text) => {
-				fullText += text;
+		if (tools.length > 0) {
+			const messages = parseConversationMessages(prompt);
+			if (cleanedSystem) {
+				messages.unshift({ role: 'system', content: cleanedSystem });
+			}
+
+			const { promptTokens, completionTokens, toolCalls } =
+				await ollama.chatStream(opts.defaultModel, messages, tools, (text) => {
+					fullText += text;
+					const updateParams: ACPSessionUpdateParams = {
+						sessionId,
+						update: {
+							sessionUpdate: 'agent_message_chunk',
+							content: [{ type: 'text', text }],
+						},
+					};
+					transport.writeNotification('session/update', updateParams);
+				});
+
+			let stopReason: ACPStopReason = 'end_turn';
+
+			if (toolCalls.length > 0) {
+				const xml = formatToolCallsAsXml(toolCalls);
+				fullText = fullText ? `${fullText}\n\n${xml}` : xml;
+				stopReason = 'tool_use';
+
+				// Send the tool call XML as a final chunk
 				const updateParams: ACPSessionUpdateParams = {
 					sessionId,
 					update: {
 						sessionUpdate: 'agent_message_chunk',
-						content: [{ type: 'text', text }],
+						content: [{ type: 'text', text: `\n\n${xml}` }],
 					},
 				};
 				transport.writeNotification('session/update', updateParams);
-			},
-		);
+			}
 
-		const result: ACPSessionPromptResult = {
-			content: [{ type: 'text', text: fullText }],
-			stopReason: 'end_turn',
-			metadata: {
-				usage: {
-					prompt_tokens: promptTokens,
-					completion_tokens: completionTokens,
-					total_tokens: promptTokens + completionTokens,
+			const result: ACPSessionPromptResult = {
+				content: [{ type: 'text', text: fullText }],
+				stopReason,
+				metadata: {
+					usage: {
+						prompt_tokens: promptTokens,
+						completion_tokens: completionTokens,
+						total_tokens: promptTokens + completionTokens,
+					},
 				},
-			},
-		};
-		transport.writeResponse(id, result);
+			};
+			transport.writeResponse(id, result);
+		} else {
+			const { promptTokens, completionTokens } = await ollama.generateStream(
+				opts.defaultModel,
+				prompt,
+				system,
+				(text) => {
+					fullText += text;
+					const updateParams: ACPSessionUpdateParams = {
+						sessionId,
+						update: {
+							sessionUpdate: 'agent_message_chunk',
+							content: [{ type: 'text', text }],
+						},
+					};
+					transport.writeNotification('session/update', updateParams);
+				},
+			);
+
+			const result: ACPSessionPromptResult = {
+				content: [{ type: 'text', text: fullText }],
+				stopReason: 'end_turn',
+				metadata: {
+					usage: {
+						prompt_tokens: promptTokens,
+						completion_tokens: completionTokens,
+						total_tokens: promptTokens + completionTokens,
+					},
+				},
+			};
+			transport.writeResponse(id, result);
+		}
 	};
 
 	const handleEmbed = async (

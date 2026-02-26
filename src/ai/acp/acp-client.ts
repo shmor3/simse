@@ -85,6 +85,8 @@ export interface ACPStreamOptions {
 	readonly sampling?: ACPSamplingParams;
 	readonly onToolCall?: (toolCall: ACPToolCall) => void;
 	readonly onToolCallUpdate?: (update: ACPToolCallUpdate) => void;
+	/** AbortSignal to cancel the stream early. Stops yielding chunks when aborted. */
+	readonly signal?: AbortSignal;
 }
 
 // ---------------------------------------------------------------------------
@@ -769,6 +771,12 @@ export function createACPClient(
 
 				let idx = 0;
 				while (true) {
+					// Check abort signal
+					if (streamOptions?.signal?.aborted) {
+						yield { type: 'complete', usage: streamUsage };
+						return;
+					}
+
 					if (idx < chunks.length) {
 						const chunk = chunks[idx++];
 						lastActivity = Date.now();
@@ -788,6 +796,12 @@ export function createACPClient(
 						}
 						yield { type: 'delta', text: chunk.text };
 					} else {
+						// Check abort before waiting
+						if (streamOptions?.signal?.aborted) {
+							yield { type: 'complete', usage: streamUsage };
+							return;
+						}
+
 						const elapsed = Date.now() - lastActivity;
 						if (elapsed >= timeoutMs) {
 							throw createProviderGenerationError(

@@ -22,6 +22,7 @@ export type {
 	ToolCategory,
 	ToolDefinition,
 	ToolHandler,
+	ToolMetrics,
 	ToolPermissionResolver,
 	ToolRegistry,
 	ToolRegistryOptions,

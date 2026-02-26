@@ -5,7 +5,11 @@
 import type { EventBus } from '../../events/types.js';
 import type { Logger } from '../../logger.js';
 import type { ACPClient } from '../acp/acp-client.js';
-import type { ACPToolCall, ACPToolCallUpdate } from '../acp/types.js';
+import type {
+	ACPTokenUsage,
+	ACPToolCall,
+	ACPToolCallUpdate,
+} from '../acp/types.js';
 import type { ContextPruner } from '../conversation/context-pruner.js';
 import type { Conversation } from '../conversation/types.js';
 import type { MemoryMiddleware } from '../memory/middleware.js';
@@ -80,6 +84,8 @@ export interface LoopTurn {
 	readonly toolCalls?: readonly ToolCallRequest[];
 	readonly toolResults?: readonly ToolCallResult[];
 	readonly durationMs: number;
+	/** Token usage for this turn, if reported by the server. */
+	readonly usage?: ACPTokenUsage;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,6 +129,8 @@ export interface LoopCallbacks {
 	readonly onSubagentToolCallEnd?: (id: string, result: ToolCallResult) => void;
 	readonly onSubagentComplete?: (id: string, result: SubagentResult) => void;
 	readonly onSubagentError?: (id: string, error: Error) => void;
+	/** Called after each turn with the accumulated token usage across all turns. */
+	readonly onUsageUpdate?: (accumulated: ACPTokenUsage) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +144,8 @@ export interface AgenticLoopResult {
 	readonly hitTurnLimit: boolean;
 	readonly aborted: boolean;
 	readonly totalDurationMs: number;
+	/** Accumulated token usage across all turns, if reported by the server. */
+	readonly totalUsage?: ACPTokenUsage;
 }
 
 // ---------------------------------------------------------------------------

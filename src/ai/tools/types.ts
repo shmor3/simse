@@ -42,6 +42,8 @@ export interface ToolDefinition {
 	readonly parameters: Readonly<Record<string, ToolParameter>>;
 	readonly category?: ToolCategory;
 	readonly annotations?: ToolAnnotations;
+	/** Per-tool execution timeout in milliseconds. Overrides `defaultToolTimeoutMs`. */
+	readonly timeoutMs?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,11 +76,27 @@ export interface RegisteredTool {
 }
 
 // ---------------------------------------------------------------------------
+// Metrics
+// ---------------------------------------------------------------------------
+
+export interface ToolMetrics {
+	readonly name: string;
+	readonly callCount: number;
+	readonly errorCount: number;
+	readonly totalDurationMs: number;
+	readonly avgDurationMs: number;
+	readonly lastCalledAt: number;
+}
+
+// ---------------------------------------------------------------------------
 // Permission Resolver
 // ---------------------------------------------------------------------------
 
 export interface ToolPermissionResolver {
-	readonly check: (request: ToolCallRequest) => Promise<boolean>;
+	readonly check: (
+		request: ToolCallRequest,
+		definition?: ToolDefinition,
+	) => Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -91,6 +109,8 @@ export interface ToolRegistryOptions {
 	readonly vfs?: VirtualFS;
 	readonly permissionResolver?: ToolPermissionResolver;
 	readonly logger?: Logger;
+	/** Default timeout for tool execution in milliseconds. Per-tool `timeoutMs` overrides this. */
+	readonly defaultToolTimeoutMs?: number;
 }
 
 export interface ToolRegistry {
@@ -108,6 +128,8 @@ export interface ToolRegistry {
 		readonly text: string;
 		readonly toolCalls: readonly ToolCallRequest[];
 	};
+	readonly getToolMetrics: (name: string) => ToolMetrics | undefined;
+	readonly getAllToolMetrics: () => readonly ToolMetrics[];
 	readonly toolCount: number;
 	readonly toolNames: readonly string[];
 }

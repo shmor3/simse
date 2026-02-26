@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import type { ACPStreamOptions } from '../src/ai/acp/acp-client.js';
 import type {
 	ACPStreamChunk,
 	ACPStreamToolCall,
@@ -92,6 +93,17 @@ describe('ACPStreamChunk tool call types', () => {
 		} else {
 			throw new Error('Expected tool_call chunk');
 		}
+	});
+
+	it('ACPStreamOptions accepts signal field', () => {
+		const controller = new AbortController();
+		const options: ACPStreamOptions = {
+			signal: controller.signal,
+		};
+		expect(options.signal).toBeDefined();
+		expect(options.signal!.aborted).toBe(false);
+		controller.abort();
+		expect(options.signal!.aborted).toBe(true);
 	});
 
 	it('tool_call_update chunk carries optional content', () => {

@@ -9,6 +9,7 @@
 import { toError } from '../../errors/base.js';
 import { createLoopError } from '../../errors/loop.js';
 import { isTransientError } from '../../utils/retry.js';
+import type { ACPTokenUsage } from '../acp/types.js';
 import type { ToolCallResult } from '../tools/types.js';
 import type {
 	AgenticLoop,
@@ -94,6 +95,23 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 
 		const turns: LoopTurn[] = [];
 		let lastText = '';
+		let accumulatedUsage: ACPTokenUsage | undefined;
+
+		const addUsage = (usage: ACPTokenUsage): void => {
+			if (!accumulatedUsage) {
+				accumulatedUsage = { ...usage };
+			} else {
+				accumulatedUsage = {
+					promptTokens:
+						(accumulatedUsage.promptTokens ?? 0) + (usage.promptTokens ?? 0),
+					completionTokens:
+						(accumulatedUsage.completionTokens ?? 0) +
+						(usage.completionTokens ?? 0),
+					totalTokens:
+						(accumulatedUsage.totalTokens ?? 0) + (usage.totalTokens ?? 0),
+				};
+			}
+		};
 
 		for (let turn = 1; turn <= maxTurns; turn++) {
 			// Enrich system prompt with memory context each turn
@@ -123,6 +141,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 					hitTurnLimit: false,
 					aborted: true,
 					totalDurationMs: Date.now() - loopStart,
+					totalUsage: accumulatedUsage,
 				});
 			}
 
@@ -172,6 +191,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 
 			// Stream from ACP with retry on transient errors
 			let fullResponse = '';
+			let turnUsage: ACPTokenUsage | undefined;
 			callbacks?.onStreamStart?.();
 
 			for (
@@ -208,6 +228,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 								hitTurnLimit: false,
 								aborted: true,
 								totalDurationMs: Date.now() - loopStart,
+								totalUsage: accumulatedUsage,
 							});
 						}
 
@@ -215,6 +236,9 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 							fullResponse += chunk.text;
 							callbacks?.onStreamDelta?.(chunk.text);
 							eventBus?.publish('stream.delta', { text: chunk.text });
+						} else if (chunk.type === 'complete' && chunk.usage) {
+							turnUsage = chunk.usage;
+							addUsage(chunk.usage);
 						}
 					}
 					break; // success — exit retry loop
@@ -256,9 +280,13 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 					type: 'text' as const,
 					text: parsed.text,
 					durationMs: Date.now() - turnStart,
+					usage: turnUsage,
 				});
 				turns.push(loopTurn);
 				callbacks?.onTurnComplete?.(loopTurn);
+				if (accumulatedUsage) {
+					callbacks?.onUsageUpdate?.(accumulatedUsage);
+				}
 				eventBus?.publish('turn.complete', {
 					turn: loopTurn.turn,
 					type: loopTurn.type,
@@ -281,6 +309,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 					hitTurnLimit: false,
 					aborted: false,
 					totalDurationMs: Date.now() - loopStart,
+					totalUsage: accumulatedUsage,
 				});
 			}
 
@@ -295,6 +324,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 						hitTurnLimit: false,
 						aborted: true,
 						totalDurationMs: Date.now() - loopStart,
+						totalUsage: accumulatedUsage,
 					});
 				}
 
@@ -343,9 +373,13 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 				toolCalls: Object.freeze(parsed.toolCalls),
 				toolResults: Object.freeze(toolResults),
 				durationMs: Date.now() - turnStart,
+				usage: turnUsage,
 			});
 			turns.push(loopTurn);
 			callbacks?.onTurnComplete?.(loopTurn);
+			if (accumulatedUsage) {
+				callbacks?.onUsageUpdate?.(accumulatedUsage);
+			}
 			eventBus?.publish('turn.complete', {
 				turn: loopTurn.turn,
 				type: loopTurn.type,
@@ -369,6 +403,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 			hitTurnLimit: true,
 			aborted: false,
 			totalDurationMs: Date.now() - loopStart,
+			totalUsage: accumulatedUsage,
 		});
 	};
 

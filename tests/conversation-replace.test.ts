@@ -138,3 +138,44 @@ describe('conversation estimatedTokens', () => {
 		expect(conv.estimatedTokens).toBe(0);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// contextUsagePercent
+// ---------------------------------------------------------------------------
+
+describe('conversation contextUsagePercent', () => {
+	it('returns 0 when contextWindowTokens is not configured', () => {
+		const conv = createConversation();
+		conv.addUser('hello');
+		expect(conv.contextUsagePercent).toBe(0);
+	});
+
+	it('returns percentage based on estimatedTokens and contextWindowTokens', () => {
+		const conv = createConversation({ contextWindowTokens: 100 });
+		// 400 chars = ~100 tokens at default estimator
+		conv.addUser('x'.repeat(400));
+		expect(conv.contextUsagePercent).toBe(100);
+	});
+
+	it('caps at 100 percent', () => {
+		const conv = createConversation({ contextWindowTokens: 10 });
+		conv.addUser('x'.repeat(1000));
+		expect(conv.contextUsagePercent).toBe(100);
+	});
+
+	it('tracks partial usage', () => {
+		const conv = createConversation({ contextWindowTokens: 1000 });
+		// 100 chars = ~25 tokens => 25/1000 = 3%
+		conv.addUser('x'.repeat(100));
+		expect(conv.contextUsagePercent).toBe(3);
+	});
+
+	it('uses custom tokenEstimator for percentage', () => {
+		const conv = createConversation({
+			contextWindowTokens: 100,
+			tokenEstimator: (text) => text.length, // 1 char = 1 token
+		});
+		conv.addUser('x'.repeat(50));
+		expect(conv.contextUsagePercent).toBe(50);
+	});
+});

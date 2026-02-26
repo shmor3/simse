@@ -22,6 +22,7 @@ export function createConversation(
 	const maxMessages = options?.maxMessages ?? 0;
 	const autoCompactChars = options?.autoCompactChars ?? 100_000;
 	const tokenEstimator = options?.tokenEstimator;
+	const contextWindowTokens = options?.contextWindowTokens;
 	let systemPrompt = options?.systemPrompt;
 	const messages: ConversationMessage[] = [];
 
@@ -135,6 +136,18 @@ export function createConversation(
 		return total;
 	};
 
+	const estimateTokens = (): number => {
+		if (tokenEstimator) {
+			let total = 0;
+			if (systemPrompt) total += tokenEstimator(systemPrompt);
+			for (const msg of messages) {
+				total += tokenEstimator(msg.content);
+			}
+			return total;
+		}
+		return Math.ceil(estimateChars() / 4);
+	};
+
 	return Object.freeze({
 		addUser,
 		addAssistant,
@@ -152,18 +165,17 @@ export function createConversation(
 			return estimateChars();
 		},
 		get estimatedTokens() {
-			if (tokenEstimator) {
-				let total = 0;
-				if (systemPrompt) total += tokenEstimator(systemPrompt);
-				for (const msg of messages) {
-					total += tokenEstimator(msg.content);
-				}
-				return total;
-			}
-			return Math.ceil(estimateChars() / 4);
+			return estimateTokens();
 		},
 		get needsCompaction() {
 			return estimateChars() > autoCompactChars;
+		},
+		get contextUsagePercent() {
+			if (!contextWindowTokens || contextWindowTokens <= 0) return 0;
+			return Math.min(
+				100,
+				Math.round((estimateTokens() / contextWindowTokens) * 100),
+			);
 		},
 	});
 }

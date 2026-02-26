@@ -53,6 +53,8 @@ function createMockACPClient(
 		deleteSession: mock(() => Promise.resolve()),
 		setSessionMode: mock(() => Promise.resolve()),
 		setSessionModel: mock(() => Promise.resolve()),
+		getSessionModels: mock(() => Promise.resolve(undefined)),
+		getSessionModes: mock(() => Promise.resolve(undefined)),
 		getServerHealth: mock(() => undefined),
 		serverNames: ['test'],
 		serverCount: 1,
@@ -438,5 +440,71 @@ describe('createAgenticLoop', () => {
 
 		expect(errors.length).toBeGreaterThan(0);
 		expect(result.finalText).toContain('Error');
+	});
+
+	it('accumulates token usage across turns', async () => {
+		const acpClient = createMockACPClient(['Final response.']);
+		// Override generateStream to yield usage
+		(acpClient as any).generateStream = async function* () {
+			yield { type: 'delta' as const, text: 'Final response.' };
+			yield {
+				type: 'complete' as const,
+				usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+			};
+		};
+
+		const result = await createAgenticLoop({
+			acpClient,
+			toolRegistry: createToolRegistry({}),
+			conversation: createConversation(),
+		}).run('Hi');
+
+		expect(result.totalUsage).toBeDefined();
+		expect(result.totalUsage!.promptTokens).toBe(100);
+		expect(result.totalUsage!.completionTokens).toBe(50);
+		expect(result.totalUsage!.totalTokens).toBe(150);
+	});
+
+	it('includes usage on individual turns', async () => {
+		const acpClient = createMockACPClient(['done']);
+		(acpClient as any).generateStream = async function* () {
+			yield { type: 'delta' as const, text: 'done' };
+			yield {
+				type: 'complete' as const,
+				usage: { promptTokens: 10, completionTokens: 5, totalTokens: 15 },
+			};
+		};
+
+		const result = await createAgenticLoop({
+			acpClient,
+			toolRegistry: createToolRegistry({}),
+			conversation: createConversation(),
+		}).run('Hi');
+
+		expect(result.turns[0].usage).toBeDefined();
+		expect(result.turns[0].usage!.totalTokens).toBe(15);
+	});
+
+	it('fires onUsageUpdate callback after each turn', async () => {
+		const usageUpdates: Array<{ totalTokens?: number }> = [];
+		const acpClient = createMockACPClient(['Final response.']);
+		(acpClient as any).generateStream = async function* () {
+			yield { type: 'delta' as const, text: 'Final response.' };
+			yield {
+				type: 'complete' as const,
+				usage: { promptTokens: 50, completionTokens: 25, totalTokens: 75 },
+			};
+		};
+
+		await createAgenticLoop({
+			acpClient,
+			toolRegistry: createToolRegistry({}),
+			conversation: createConversation(),
+		}).run('Hi', {
+			onUsageUpdate: (usage) => usageUpdates.push(usage),
+		});
+
+		expect(usageUpdates).toHaveLength(1);
+		expect(usageUpdates[0].totalTokens).toBe(75);
 	});
 });

@@ -170,3 +170,105 @@ describe('createToolPermissionResolver', () => {
 		expect(await resolver.check(makeRequest('toolXname'))).toBe(false);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Category-based permission rules
+// ---------------------------------------------------------------------------
+
+describe('category-based permission rules', () => {
+	it('allows all tools in a category', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [{ tool: '*', category: 'read', policy: 'allow' }],
+		});
+
+		const readDef = {
+			name: 'fs_read',
+			description: '',
+			parameters: {},
+			category: 'read' as const,
+		};
+		const editDef = {
+			name: 'fs_write',
+			description: '',
+			parameters: {},
+			category: 'edit' as const,
+		};
+
+		expect(await resolver.check(makeRequest('fs_read'), readDef)).toBe(true);
+		expect(await resolver.check(makeRequest('fs_write'), editDef)).toBe(false);
+	});
+
+	it('blocks destructive tools via annotation', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'allow',
+			rules: [
+				{ tool: '*', annotations: { destructive: true }, policy: 'deny' },
+			],
+		});
+
+		const safeDef = {
+			name: 'fs_read',
+			description: '',
+			parameters: {},
+			annotations: { readOnly: true },
+		};
+		const dangerDef = {
+			name: 'fs_delete',
+			description: '',
+			parameters: {},
+			annotations: { destructive: true },
+		};
+
+		expect(await resolver.check(makeRequest('fs_read'), safeDef)).toBe(true);
+		expect(await resolver.check(makeRequest('fs_delete'), dangerDef)).toBe(
+			false,
+		);
+	});
+
+	it('works without definition (backwards compatible)', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'allow',
+			rules: [{ tool: 'bash', policy: 'deny' }],
+		});
+
+		expect(await resolver.check(makeRequest('bash'))).toBe(false);
+		expect(await resolver.check(makeRequest('fs_read'))).toBe(true);
+	});
+
+	it('category rule skipped when definition has no category', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [{ tool: '*', category: 'read', policy: 'allow' }],
+		});
+
+		const noCatDef = {
+			name: 'some_tool',
+			description: '',
+			parameters: {},
+		};
+
+		expect(await resolver.check(makeRequest('some_tool'), noCatDef)).toBe(
+			false,
+		);
+	});
+
+	it('annotation rule skipped when definition has no annotations', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'allow',
+			rules: [
+				{ tool: '*', annotations: { destructive: true }, policy: 'deny' },
+			],
+		});
+
+		const noAnnotDef = {
+			name: 'safe_tool',
+			description: '',
+			parameters: {},
+		};
+
+		expect(await resolver.check(makeRequest('safe_tool'), noAnnotDef)).toBe(
+			true,
+		);
+	});
+});

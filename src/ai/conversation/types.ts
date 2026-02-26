@@ -23,6 +23,8 @@ export interface ConversationOptions {
 	readonly pruneProtectedTools?: readonly string[];
 	/** Custom token estimator function. Default: `Math.ceil(chars / 4)`. */
 	readonly tokenEstimator?: (text: string) => number;
+	/** Total context window size in tokens. Used for `contextUsagePercent`. */
+	readonly contextWindowTokens?: number;
 }
 
 export interface Conversation {
@@ -47,4 +49,6 @@ export interface Conversation {
 	readonly estimatedTokens: number;
 	/** True when conversation exceeds the auto-compact threshold. */
 	readonly needsCompaction: boolean;
+	/** Percentage of context window used (0-100). Returns 0 when `contextWindowTokens` is not configured. */
+	readonly contextUsagePercent: number;
 }

@@ -10,6 +10,7 @@ import {
 	createToolExecutionError,
 	createToolNotFoundError,
 } from '../../errors/tools.js';
+import { withTimeout } from '../../utils/timeout.js';
 import { registerMemoryTools, registerVFSTools } from './builtin-tools.js';
 import type {
 	RegisteredTool,
@@ -17,6 +18,7 @@ import type {
 	ToolCallResult,
 	ToolDefinition,
 	ToolHandler,
+	ToolMetrics,
 	ToolParameter,
 	ToolRegistry,
 	ToolRegistryOptions,
@@ -77,8 +79,18 @@ function parseToolCallsFromResponse(response: string): ParsedResponse {
 // ---------------------------------------------------------------------------
 
 export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
-	const { mcpClient, memoryManager, vfs, permissionResolver } = options;
+	const {
+		mcpClient,
+		memoryManager,
+		vfs,
+		permissionResolver,
+		defaultToolTimeoutMs,
+	} = options;
 	const tools = new Map<string, RegisteredTool>();
+	const metricsMap = new Map<
+		string,
+		{ calls: number; errors: number; totalMs: number; lastAt: number }
+	>();
 
 	// -----------------------------------------------------------------------
 	// Registration
@@ -211,7 +223,10 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 
 		// Check permissions if a resolver is configured
 		if (permissionResolver) {
-			const allowed = await permissionResolver.check(call);
+			const allowed = await permissionResolver.check(
+				call,
+				registered.definition,
+			);
 			if (!allowed) {
 				return Object.freeze({
 					id: call.id,
@@ -223,8 +238,16 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		}
 
 		const start = Date.now();
+		let isError = false;
 		try {
-			const output = await registered.handler(call.arguments);
+			const timeoutMs = registered.definition.timeoutMs ?? defaultToolTimeoutMs;
+			const output = timeoutMs
+				? await withTimeout(
+						() => registered.handler(call.arguments),
+						timeoutMs,
+						{ operation: `tool:${call.name}` },
+					)
+				: await registered.handler(call.arguments);
 			return Object.freeze({
 				id: call.id,
 				name: call.name,
@@ -233,6 +256,7 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 				durationMs: Date.now() - start,
 			});
 		} catch (err) {
+			isError = true;
 			const error = toError(err);
 			return Object.freeze({
 				id: call.id,
@@ -241,6 +265,22 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 				isError: true,
 				durationMs: Date.now() - start,
 			});
+		} finally {
+			const elapsed = Date.now() - start;
+			const existing = metricsMap.get(call.name);
+			if (existing) {
+				existing.calls++;
+				if (isError) existing.errors++;
+				existing.totalMs += elapsed;
+				existing.lastAt = Date.now();
+			} else {
+				metricsMap.set(call.name, {
+					calls: 1,
+					errors: isError ? 1 : 0,
+					totalMs: elapsed,
+					lastAt: Date.now(),
+				});
+			}
 		}
 	};
 
@@ -276,6 +316,36 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		await discoverMCPTools();
 	};
 
+	const getToolMetrics = (name: string): ToolMetrics | undefined => {
+		const m = metricsMap.get(name);
+		if (!m) return undefined;
+		return Object.freeze({
+			name,
+			callCount: m.calls,
+			errorCount: m.errors,
+			totalDurationMs: m.totalMs,
+			avgDurationMs: m.calls > 0 ? m.totalMs / m.calls : 0,
+			lastCalledAt: m.lastAt,
+		});
+	};
+
+	const getAllToolMetrics = (): readonly ToolMetrics[] => {
+		const result: ToolMetrics[] = [];
+		for (const [name, m] of metricsMap) {
+			result.push(
+				Object.freeze({
+					name,
+					callCount: m.calls,
+					errorCount: m.errors,
+					totalDurationMs: m.totalMs,
+					avgDurationMs: m.calls > 0 ? m.totalMs / m.calls : 0,
+					lastCalledAt: m.lastAt,
+				}),
+			);
+		}
+		return Object.freeze(result);
+	};
+
 	// Build the frozen registry
 	const registry: ToolRegistry = Object.freeze({
 		discover,
@@ -286,6 +356,8 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		execute,
 		batchExecute,
 		parseToolCalls: parseToolCallsFromResponse,
+		getToolMetrics,
+		getAllToolMetrics,
 		get toolCount() {
 			return tools.size;
 		},

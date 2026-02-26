@@ -88,4 +88,42 @@ describe('tool execution metrics', () => {
 		const metrics = registry.getToolMetrics('ts_tool');
 		expect(metrics!.lastCalledAt).toBeGreaterThanOrEqual(before);
 	});
+
+	it('clearMetrics resets all metrics', async () => {
+		const registry = createToolRegistry({});
+		registry.register(
+			{ name: 'tool_a', description: 'a', parameters: {} },
+			async () => 'a',
+		);
+
+		await registry.execute({ id: 'c1', name: 'tool_a', arguments: {} });
+		expect(registry.getToolMetrics('tool_a')).toBeDefined();
+
+		registry.clearMetrics();
+		expect(registry.getToolMetrics('tool_a')).toBeUndefined();
+		expect(registry.getAllToolMetrics()).toHaveLength(0);
+	});
+
+	it('isRegistered returns true for registered tools', () => {
+		const registry = createToolRegistry({});
+		registry.register(
+			{ name: 'my_tool', description: 'test', parameters: {} },
+			async () => 'ok',
+		);
+
+		expect(registry.isRegistered('my_tool')).toBe(true);
+		expect(registry.isRegistered('nonexistent')).toBe(false);
+	});
+
+	it('isRegistered updates after unregister', () => {
+		const registry = createToolRegistry({});
+		registry.register(
+			{ name: 'temp_tool', description: 'temp', parameters: {} },
+			async () => 'ok',
+		);
+
+		expect(registry.isRegistered('temp_tool')).toBe(true);
+		registry.unregister('temp_tool');
+		expect(registry.isRegistered('temp_tool')).toBe(false);
+	});
 });

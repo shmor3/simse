@@ -51,4 +51,8 @@ export interface Conversation {
 	readonly needsCompaction: boolean;
 	/** Percentage of context window used (0-100). Returns 0 when `contextWindowTokens` is not configured. */
 	readonly contextUsagePercent: number;
+	/** Export conversation as a structured JSON string (for persistence). */
+	readonly toJSON: () => string;
+	/** Replace conversation content from a JSON string produced by `toJSON()`. */
+	readonly fromJSON: (json: string) => void;
 }

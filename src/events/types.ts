@@ -77,6 +77,24 @@ export interface EventPayloadMap {
 		readonly type: string;
 		readonly error: Error;
 	};
+	// Loop lifecycle events
+	'loop.start': { readonly userInput: string };
+	'loop.complete': {
+		readonly totalTurns: number;
+		readonly hitTurnLimit: boolean;
+		readonly aborted: boolean;
+		readonly totalDurationMs: number;
+	};
+	'stream.start': { readonly turn: number };
+	'stream.retry': {
+		readonly turn: number;
+		readonly attempt: number;
+		readonly error: string;
+	};
+	'tool.timeout': {
+		readonly name: string;
+		readonly timeoutMs: number;
+	};
 }
 
 /** Union of all recognised event names. */

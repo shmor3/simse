@@ -75,6 +75,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		callbacks?: LoopCallbacks,
 	): Promise<AgenticLoopResult> => {
 		const loopStart = Date.now();
+		eventBus?.publish('loop.start', { userInput });
 		conversation.addUser(userInput);
 
 		// Build base system prompt: use builder if provided, otherwise
@@ -193,6 +194,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 			let fullResponse = '';
 			let turnUsage: ACPTokenUsage | undefined;
 			callbacks?.onStreamStart?.();
+			eventBus?.publish('stream.start', { turn });
 
 			for (
 				let streamAttempt = 1;
@@ -244,6 +246,11 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 					break; // success — exit retry loop
 				} catch (err) {
 					if (streamAttempt < streamMaxAttempts && isTransientError(err)) {
+						eventBus?.publish('stream.retry', {
+							turn,
+							attempt: streamAttempt + 1,
+							error: toError(err).message,
+						});
 						continue; // retry
 					}
 					const error = toError(err);
@@ -302,7 +309,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 					}
 				}
 
-				return Object.freeze({
+				const result = Object.freeze({
 					finalText: lastText,
 					turns: Object.freeze(turns),
 					totalTurns: turn,
@@ -311,6 +318,13 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 					totalDurationMs: Date.now() - loopStart,
 					totalUsage: accumulatedUsage,
 				});
+				eventBus?.publish('loop.complete', {
+					totalTurns: result.totalTurns,
+					hitTurnLimit: result.hitTurnLimit,
+					aborted: result.aborted,
+					totalDurationMs: result.totalDurationMs,
+				});
+				return result;
 			}
 
 			// Execute tool calls with retry on transient-looking errors
@@ -396,7 +410,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 			}
 		}
 
-		return Object.freeze({
+		const result = Object.freeze({
 			finalText: lastText,
 			turns: Object.freeze(turns),
 			totalTurns: maxTurns,
@@ -405,6 +419,13 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 			totalDurationMs: Date.now() - loopStart,
 			totalUsage: accumulatedUsage,
 		});
+		eventBus?.publish('loop.complete', {
+			totalTurns: result.totalTurns,
+			hitTurnLimit: result.hitTurnLimit,
+			aborted: result.aborted,
+			totalDurationMs: result.totalDurationMs,
+		});
+		return result;
 	};
 
 	return Object.freeze({ run });

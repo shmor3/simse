@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import { toError } from '../../errors/base.js';
+import { isTimeoutError } from '../../errors/resilience.js';
 import {
 	createToolExecutionError,
 	createToolNotFoundError,
@@ -85,6 +86,7 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		vfs,
 		permissionResolver,
 		defaultToolTimeoutMs,
+		eventBus,
 	} = options;
 	const tools = new Map<string, RegisteredTool>();
 	const metricsMap = new Map<
@@ -258,6 +260,12 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		} catch (err) {
 			isError = true;
 			const error = toError(err);
+			if (isTimeoutError(err)) {
+				eventBus?.publish('tool.timeout', {
+					name: call.name,
+					timeoutMs: (err as { timeoutMs: number }).timeoutMs,
+				});
+			}
 			return Object.freeze({
 				id: call.id,
 				name: call.name,
@@ -346,6 +354,14 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		return Object.freeze(result);
 	};
 
+	const clearMetrics = (): void => {
+		metricsMap.clear();
+	};
+
+	const isRegistered = (name: string): boolean => {
+		return tools.has(name);
+	};
+
 	// Build the frozen registry
 	const registry: ToolRegistry = Object.freeze({
 		discover,
@@ -358,6 +374,8 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		parseToolCalls: parseToolCallsFromResponse,
 		getToolMetrics,
 		getAllToolMetrics,
+		clearMetrics,
+		isRegistered,
 		get toolCount() {
 			return tools.size;
 		},

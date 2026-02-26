@@ -2,6 +2,7 @@
 // Tool Registry Types
 // ---------------------------------------------------------------------------
 
+import type { EventBus } from '../../events/types.js';
 import type { Logger } from '../../logger.js';
 import type { MCPClient } from '../mcp/mcp-client.js';
 import type { MemoryManager } from '../memory/memory.js';
@@ -111,6 +112,8 @@ export interface ToolRegistryOptions {
 	readonly logger?: Logger;
 	/** Default timeout for tool execution in milliseconds. Per-tool `timeoutMs` overrides this. */
 	readonly defaultToolTimeoutMs?: number;
+	/** Optional event bus for publishing tool lifecycle events. */
+	readonly eventBus?: EventBus;
 }
 
 export interface ToolRegistry {
@@ -130,6 +133,8 @@ export interface ToolRegistry {
 	};
 	readonly getToolMetrics: (name: string) => ToolMetrics | undefined;
 	readonly getAllToolMetrics: () => readonly ToolMetrics[];
+	readonly clearMetrics: () => void;
+	readonly isRegistered: (name: string) => boolean;
 	readonly toolCount: number;
 	readonly toolNames: readonly string[];
 }

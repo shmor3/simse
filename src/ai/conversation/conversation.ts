@@ -116,6 +116,50 @@ export function createConversation(
 		);
 	};
 
+	const toJSON = (): string => {
+		return JSON.stringify({
+			systemPrompt: systemPrompt ?? null,
+			messages: messages.map((m) => ({
+				role: m.role,
+				content: m.content,
+				...(m.toolCallId ? { toolCallId: m.toolCallId } : {}),
+				...(m.toolName ? { toolName: m.toolName } : {}),
+				...(m.timestamp ? { timestamp: m.timestamp } : {}),
+			})),
+		});
+	};
+
+	const fromJSON = (json: string): void => {
+		const data = JSON.parse(json) as {
+			systemPrompt?: string | null;
+			messages?: Array<{
+				role: string;
+				content: string;
+				toolCallId?: string;
+				toolName?: string;
+				timestamp?: number;
+			}>;
+		};
+		if (data.systemPrompt) {
+			systemPrompt = data.systemPrompt;
+		}
+		messages.length = 0;
+		if (data.messages) {
+			for (const msg of data.messages) {
+				if (msg.role === 'system') continue;
+				messages.push(
+					Object.freeze({
+						role: msg.role as ConversationMessage['role'],
+						content: msg.content,
+						toolCallId: msg.toolCallId,
+						toolName: msg.toolName,
+						timestamp: msg.timestamp,
+					}),
+				);
+			}
+		}
+	};
+
 	const replaceMessages = (
 		newMessages: readonly ConversationMessage[],
 	): void => {
@@ -157,6 +201,8 @@ export function createConversation(
 		serialize,
 		clear,
 		compact,
+		toJSON,
+		fromJSON,
 		replaceMessages,
 		get messageCount() {
 			return messages.length;

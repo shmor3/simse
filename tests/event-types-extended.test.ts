@@ -110,6 +110,78 @@ describe('extended EventPayloadMap types', () => {
 		expect(call.error.message).toBe('Connection timeout');
 	});
 
+	it('loop.start event has correct shape', () => {
+		const bus = createEventBus();
+		const handler = mock((_payload: EventPayloadMap['loop.start']) => {});
+		bus.subscribe('loop.start', handler);
+
+		bus.publish('loop.start', { userInput: 'Hello' });
+
+		expect(handler).toHaveBeenCalledTimes(1);
+		expect(handler).toHaveBeenCalledWith({ userInput: 'Hello' });
+	});
+
+	it('loop.complete event has correct shape', () => {
+		const bus = createEventBus();
+		const handler = mock((_payload: EventPayloadMap['loop.complete']) => {});
+		bus.subscribe('loop.complete', handler);
+
+		bus.publish('loop.complete', {
+			totalTurns: 3,
+			hitTurnLimit: false,
+			aborted: false,
+			totalDurationMs: 5000,
+		});
+
+		expect(handler).toHaveBeenCalledTimes(1);
+		expect(handler).toHaveBeenCalledWith({
+			totalTurns: 3,
+			hitTurnLimit: false,
+			aborted: false,
+			totalDurationMs: 5000,
+		});
+	});
+
+	it('stream.start event has correct shape', () => {
+		const bus = createEventBus();
+		const handler = mock((_payload: EventPayloadMap['stream.start']) => {});
+		bus.subscribe('stream.start', handler);
+
+		bus.publish('stream.start', { turn: 1 });
+
+		expect(handler).toHaveBeenCalledTimes(1);
+		expect(handler).toHaveBeenCalledWith({ turn: 1 });
+	});
+
+	it('stream.retry event has correct shape', () => {
+		const bus = createEventBus();
+		const handler = mock((_payload: EventPayloadMap['stream.retry']) => {});
+		bus.subscribe('stream.retry', handler);
+
+		bus.publish('stream.retry', { turn: 1, attempt: 2, error: 'ECONNRESET' });
+
+		expect(handler).toHaveBeenCalledTimes(1);
+		expect(handler).toHaveBeenCalledWith({
+			turn: 1,
+			attempt: 2,
+			error: 'ECONNRESET',
+		});
+	});
+
+	it('tool.timeout event has correct shape', () => {
+		const bus = createEventBus();
+		const handler = mock((_payload: EventPayloadMap['tool.timeout']) => {});
+		bus.subscribe('tool.timeout', handler);
+
+		bus.publish('tool.timeout', { name: 'slow_tool', timeoutMs: 5000 });
+
+		expect(handler).toHaveBeenCalledTimes(1);
+		expect(handler).toHaveBeenCalledWith({
+			name: 'slow_tool',
+			timeoutMs: 5000,
+		});
+	});
+
 	it('subscribeAll receives memory and subagent events', () => {
 		const bus = createEventBus();
 		const events: Array<{ type: string; payload: unknown }> = [];

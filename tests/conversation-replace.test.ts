@@ -179,3 +179,57 @@ describe('conversation contextUsagePercent', () => {
 		expect(conv.contextUsagePercent).toBe(50);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// toJSON / fromJSON
+// ---------------------------------------------------------------------------
+
+describe('conversation toJSON / fromJSON', () => {
+	it('round-trips messages through JSON', () => {
+		const conv = createConversation({ systemPrompt: 'Be helpful' });
+		conv.addUser('hello');
+		conv.addAssistant('hi there');
+		conv.addToolResult('call_1', 'search', 'results');
+
+		const json = conv.toJSON();
+		const parsed = JSON.parse(json);
+		expect(parsed.systemPrompt).toBe('Be helpful');
+		expect(parsed.messages).toHaveLength(3);
+
+		// Now restore into a new conversation
+		const conv2 = createConversation();
+		conv2.fromJSON(json);
+
+		const msgs = conv2.toMessages();
+		expect(msgs[0].role).toBe('system');
+		expect(msgs[0].content).toBe('Be helpful');
+		expect(msgs[1].role).toBe('user');
+		expect(msgs[1].content).toBe('hello');
+		expect(msgs[2].role).toBe('assistant');
+		expect(msgs[2].content).toBe('hi there');
+		expect(msgs[3].role).toBe('tool_result');
+		expect(msgs[3].content).toBe('results');
+	});
+
+	it('fromJSON clears existing messages', () => {
+		const conv = createConversation();
+		conv.addUser('old');
+		conv.addUser('messages');
+		expect(conv.messageCount).toBe(2);
+
+		conv.fromJSON(
+			JSON.stringify({ messages: [{ role: 'user', content: 'new' }] }),
+		);
+		expect(conv.messageCount).toBe(1);
+		expect(conv.toMessages()[0].content).toBe('new');
+	});
+
+	it('toJSON preserves tool call metadata', () => {
+		const conv = createConversation();
+		conv.addToolResult('tc_1', 'search', 'found it');
+
+		const parsed = JSON.parse(conv.toJSON());
+		expect(parsed.messages[0].toolCallId).toBe('tc_1');
+		expect(parsed.messages[0].toolName).toBe('search');
+	});
+});

@@ -121,6 +121,7 @@ export interface ToolRegistry {
 	readonly register: (definition: ToolDefinition, handler: ToolHandler) => void;
 	readonly unregister: (name: string) => boolean;
 	readonly getToolDefinitions: () => readonly ToolDefinition[];
+	readonly getToolDefinition: (name: string) => ToolDefinition | undefined;
 	readonly formatForSystemPrompt: () => string;
 	readonly execute: (call: ToolCallRequest) => Promise<ToolCallResult>;
 	readonly batchExecute: (

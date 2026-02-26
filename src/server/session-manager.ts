@@ -19,6 +19,7 @@ export interface Session {
 	readonly eventBus: EventBus;
 	readonly status: SessionStatus;
 	readonly createdAt: number;
+	readonly updatedAt: number;
 }
 
 export interface SessionManager {
@@ -26,6 +27,10 @@ export interface SessionManager {
 	readonly get: (id: string) => Session | undefined;
 	readonly delete: (id: string) => boolean;
 	readonly list: () => readonly Session[];
+	readonly updateStatus: (
+		id: string,
+		status: SessionStatus,
+	) => Session | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -44,12 +49,14 @@ export function createSessionManager(): SessionManager {
 
 	const create = (): Session => {
 		const id = generateId();
+		const now = Date.now();
 		const session: Session = Object.freeze({
 			id,
 			conversation: createConversation(),
 			eventBus: createEventBus(),
 			status: 'active' as const,
-			createdAt: Date.now(),
+			createdAt: now,
+			updatedAt: now,
 		});
 		sessions.set(id, session);
 		return session;
@@ -61,10 +68,26 @@ export function createSessionManager(): SessionManager {
 
 	const list = (): readonly Session[] => Object.freeze([...sessions.values()]);
 
+	const updateStatus = (
+		id: string,
+		status: SessionStatus,
+	): Session | undefined => {
+		const existing = sessions.get(id);
+		if (!existing) return undefined;
+		const updated: Session = Object.freeze({
+			...existing,
+			status,
+			updatedAt: Date.now(),
+		});
+		sessions.set(id, updated);
+		return updated;
+	};
+
 	return Object.freeze({
 		create,
 		get,
 		delete: del,
 		list,
+		updateStatus,
 	});
 }

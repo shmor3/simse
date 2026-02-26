@@ -127,3 +127,39 @@ describe('tool execution metrics', () => {
 		expect(registry.isRegistered('temp_tool')).toBe(false);
 	});
 });
+
+describe('tool getToolDefinition', () => {
+	it('returns definition for registered tool', () => {
+		const registry = createToolRegistry({});
+		registry.register(
+			{
+				name: 'lookup_tool',
+				description: 'test lookup',
+				parameters: { query: { type: 'string', description: 'search query' } },
+				category: 'search',
+			},
+			async () => 'ok',
+		);
+
+		const def = registry.getToolDefinition('lookup_tool');
+		expect(def).toBeDefined();
+		expect(def!.name).toBe('lookup_tool');
+		expect(def!.description).toBe('test lookup');
+		expect(def!.category).toBe('search');
+	});
+
+	it('returns undefined for unknown tool', () => {
+		const registry = createToolRegistry({});
+		expect(registry.getToolDefinition('nonexistent')).toBeUndefined();
+	});
+
+	it('returns undefined after tool is unregistered', () => {
+		const registry = createToolRegistry({});
+		registry.register(
+			{ name: 'temp', description: 'temp', parameters: {} },
+			async () => 'ok',
+		);
+		registry.unregister('temp');
+		expect(registry.getToolDefinition('temp')).toBeUndefined();
+	});
+});

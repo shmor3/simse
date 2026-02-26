@@ -180,6 +180,10 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		return Object.freeze([...tools.values()].map((t) => t.definition));
 	};
 
+	const getToolDefinition = (name: string): ToolDefinition | undefined => {
+		return tools.get(name)?.definition;
+	};
+
 	const formatForSystemPrompt = (): string => {
 		if (tools.size === 0) return '';
 
@@ -368,6 +372,7 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		register,
 		unregister,
 		getToolDefinitions,
+		getToolDefinition,
 		formatForSystemPrompt,
 		execute,
 		batchExecute,

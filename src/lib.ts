@@ -294,6 +294,7 @@ export type {
 	ToolDefinition,
 	ToolHandler,
 	ToolMetrics,
+	ToolParameter,
 	ToolPermissionResolver,
 	ToolRegistry,
 	ToolRegistryOptions,

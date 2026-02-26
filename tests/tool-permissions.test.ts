@@ -1,0 +1,175 @@
+import { describe, expect, it, mock } from 'bun:test';
+import {
+	createToolPermissionResolver,
+	type ToolPermissionConfig,
+} from '../src/ai/tools/permissions.js';
+import type { ToolCallRequest } from '../src/ai/tools/types.js';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function makeRequest(
+	name: string,
+	args: Record<string, unknown> = {},
+): ToolCallRequest {
+	return { id: 'call-1', name, arguments: args };
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('createToolPermissionResolver', () => {
+	it('allows by default with allow policy', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'allow',
+			rules: [],
+		});
+		const result = await resolver.check(makeRequest('any_tool'));
+		expect(result).toBe(true);
+	});
+
+	it('denies by default with deny policy', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [],
+		});
+		const result = await resolver.check(makeRequest('any_tool'));
+		expect(result).toBe(false);
+	});
+
+	it('matches tool name glob pattern', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [{ tool: 'fs_*', policy: 'allow' }],
+		});
+
+		expect(await resolver.check(makeRequest('fs_read'))).toBe(true);
+		expect(await resolver.check(makeRequest('fs_write'))).toBe(true);
+		expect(await resolver.check(makeRequest('memory_search'))).toBe(false);
+	});
+
+	it('matches exact tool name', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [{ tool: 'memory_search', policy: 'allow' }],
+		});
+
+		expect(await resolver.check(makeRequest('memory_search'))).toBe(true);
+		expect(await resolver.check(makeRequest('memory_add'))).toBe(false);
+	});
+
+	it('matches bash command pattern', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [{ tool: 'bash', pattern: 'git *', policy: 'allow' }],
+		});
+
+		expect(
+			await resolver.check(makeRequest('bash', { command: 'git status' })),
+		).toBe(true);
+		expect(
+			await resolver.check(
+				makeRequest('bash', { command: 'git push origin main' }),
+			),
+		).toBe(true);
+		expect(
+			await resolver.check(makeRequest('bash', { command: 'rm -rf /' })),
+		).toBe(false);
+	});
+
+	it('skips command pattern rule when no command argument', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [{ tool: 'bash', pattern: 'git *', policy: 'allow' }],
+		});
+
+		// No command argument at all — rule should not match
+		expect(await resolver.check(makeRequest('bash', {}))).toBe(false);
+	});
+
+	it('last matching rule wins', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [
+				{ tool: 'fs_*', policy: 'allow' },
+				{ tool: 'fs_delete', policy: 'deny' },
+			],
+		});
+
+		expect(await resolver.check(makeRequest('fs_read'))).toBe(true);
+		expect(await resolver.check(makeRequest('fs_delete'))).toBe(false);
+	});
+
+	it('last matching rule wins with multiple overlapping patterns', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'allow',
+			rules: [
+				{ tool: '*', policy: 'deny' },
+				{ tool: 'safe_*', policy: 'allow' },
+			],
+		});
+
+		expect(await resolver.check(makeRequest('safe_read'))).toBe(true);
+		expect(await resolver.check(makeRequest('dangerous_exec'))).toBe(false);
+	});
+
+	it('ask policy calls onPermissionRequest callback', async () => {
+		const onPermissionRequest = mock(async () => true);
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [{ tool: 'exec_*', policy: 'ask' }],
+			onPermissionRequest,
+		});
+
+		const request = makeRequest('exec_shell');
+		const result = await resolver.check(request);
+
+		expect(result).toBe(true);
+		expect(onPermissionRequest).toHaveBeenCalledTimes(1);
+		expect(onPermissionRequest).toHaveBeenCalledWith(request);
+	});
+
+	it('ask policy returns false when callback denies', async () => {
+		const onPermissionRequest = mock(async () => false);
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [{ tool: 'exec_*', policy: 'ask' }],
+			onPermissionRequest,
+		});
+
+		const result = await resolver.check(makeRequest('exec_shell'));
+		expect(result).toBe(false);
+	});
+
+	it('ask policy defaults to false when no callback provided', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [{ tool: 'exec_*', policy: 'ask' }],
+		});
+
+		const result = await resolver.check(makeRequest('exec_shell'));
+		expect(result).toBe(false);
+	});
+
+	it('matches single-character wildcard with ?', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [{ tool: 'fs_?', policy: 'allow' }],
+		});
+
+		expect(await resolver.check(makeRequest('fs_r'))).toBe(true);
+		expect(await resolver.check(makeRequest('fs_read'))).toBe(false);
+	});
+
+	it('escapes special regex characters in glob', async () => {
+		const resolver = createToolPermissionResolver({
+			defaultPolicy: 'deny',
+			rules: [{ tool: 'tool.name', policy: 'allow' }],
+		});
+
+		expect(await resolver.check(makeRequest('tool.name'))).toBe(true);
+		expect(await resolver.check(makeRequest('toolXname'))).toBe(false);
+	});
+});

@@ -100,6 +100,10 @@ export interface ToolRegistry {
 	readonly getToolDefinitions: () => readonly ToolDefinition[];
 	readonly formatForSystemPrompt: () => string;
 	readonly execute: (call: ToolCallRequest) => Promise<ToolCallResult>;
+	readonly batchExecute: (
+		calls: readonly ToolCallRequest[],
+		options?: { readonly maxConcurrency?: number },
+	) => Promise<readonly ToolCallResult[]>;
 	readonly parseToolCalls: (response: string) => {
 		readonly text: string;
 		readonly toolCalls: readonly ToolCallRequest[];

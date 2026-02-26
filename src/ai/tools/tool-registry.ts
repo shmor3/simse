@@ -244,6 +244,32 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		}
 	};
 
+	const batchExecute = async (
+		calls: readonly ToolCallRequest[],
+		options?: { readonly maxConcurrency?: number },
+	): Promise<readonly ToolCallResult[]> => {
+		if (calls.length === 0) return Object.freeze([]);
+
+		const maxConcurrency = options?.maxConcurrency ?? 8;
+		const results = new Array<ToolCallResult>(calls.length);
+		let cursor = 0;
+
+		const worker = async (): Promise<void> => {
+			while (cursor < calls.length) {
+				const index = cursor++;
+				results[index] = await execute(calls[index]);
+			}
+		};
+
+		const workers = Array.from(
+			{ length: Math.min(maxConcurrency, calls.length) },
+			() => worker(),
+		);
+		await Promise.all(workers);
+
+		return Object.freeze(results);
+	};
+
 	const discover = async (): Promise<void> => {
 		tools.clear();
 		registerBuiltins();
@@ -258,6 +284,7 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		getToolDefinitions,
 		formatForSystemPrompt,
 		execute,
+		batchExecute,
 		parseToolCalls: parseToolCallsFromResponse,
 		get toolCount() {
 			return tools.size;

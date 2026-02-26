@@ -3418,6 +3418,11 @@ async function main(): Promise<void> {
 	const spinner = createThinkingSpinner({ colors });
 	const serviceSpinner = createSpinner({ colors });
 
+	// Mutable reference to the main REPL readline — set later once the REPL
+	// starts.  The permission handler needs to pause it so a temporary
+	// readline can take over stdin.
+	let mainRl: ReadlineInterface | undefined;
+
 	const storage = createFileStorageBackend({
 		path: join(cliArgs.dataDir, memoryConfig.storageFilename ?? 'memory.simk'),
 		atomicWrite: memoryConfig.atomicWrite,
@@ -3488,6 +3493,12 @@ async function main(): Promise<void> {
 				choices.push('[a]lways');
 			}
 
+			// Pause the main REPL readline so a temporary one can own stdin
+			if (mainRl) {
+				mainRl.pause();
+				process.stdin.pause();
+			}
+
 			const permRl = createInterface({
 				input: process.stdin,
 				output: process.stdout,
@@ -3499,7 +3510,11 @@ async function main(): Promise<void> {
 			});
 			permRl.close();
 
-			// Restart the spinner now that the user has answered
+			// Resume the main REPL readline and restart the spinner
+			if (mainRl) {
+				process.stdin.resume();
+				mainRl.resume();
+			}
 			spinner.start();
 
 			const choice = answer.trim().toLowerCase();
@@ -3727,6 +3742,7 @@ async function main(): Promise<void> {
 		output: process.stdout,
 		terminal: true,
 	});
+	mainRl = rl;
 
 	const session: SessionState = {
 		serverName: undefined,

@@ -35,6 +35,7 @@ export interface Conversation {
 		toolName: string,
 		content: string,
 	) => void;
+	readonly getSystemPrompt: () => string | undefined;
 	readonly setSystemPrompt: (prompt: string) => void;
 	readonly toMessages: () => readonly ConversationMessage[];
 	readonly serialize: () => string;

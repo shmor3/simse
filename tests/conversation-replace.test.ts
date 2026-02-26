@@ -233,3 +233,31 @@ describe('conversation toJSON / fromJSON', () => {
 		expect(parsed.messages[0].toolName).toBe('search');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// getSystemPrompt
+// ---------------------------------------------------------------------------
+
+describe('conversation getSystemPrompt', () => {
+	it('returns undefined when no system prompt is set', () => {
+		const conv = createConversation();
+		expect(conv.getSystemPrompt()).toBeUndefined();
+	});
+
+	it('returns system prompt set via constructor', () => {
+		const conv = createConversation({ systemPrompt: 'Be helpful' });
+		expect(conv.getSystemPrompt()).toBe('Be helpful');
+	});
+
+	it('returns updated prompt after setSystemPrompt', () => {
+		const conv = createConversation({ systemPrompt: 'Original' });
+		conv.setSystemPrompt('Updated');
+		expect(conv.getSystemPrompt()).toBe('Updated');
+	});
+
+	it('returns prompt restored via fromJSON', () => {
+		const conv = createConversation();
+		conv.fromJSON(JSON.stringify({ systemPrompt: 'Restored', messages: [] }));
+		expect(conv.getSystemPrompt()).toBe('Restored');
+	});
+});

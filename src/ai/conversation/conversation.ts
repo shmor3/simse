@@ -70,6 +70,8 @@ export function createConversation(
 		trimIfNeeded();
 	};
 
+	const getSystemPrompt = (): string | undefined => systemPrompt;
+
 	const setSystemPrompt = (prompt: string): void => {
 		systemPrompt = prompt;
 	};
@@ -196,6 +198,7 @@ export function createConversation(
 		addUser,
 		addAssistant,
 		addToolResult,
+		getSystemPrompt,
 		setSystemPrompt,
 		toMessages,
 		serialize,

@@ -3445,29 +3445,37 @@ async function main(): Promise<void> {
 				`\n  ${colors.yellow('⚠')} ${colors.bold('Permission requested:')} ${desc}`,
 			);
 
-			// Show tool input details if available (file path, command, etc.)
+			// Show tool input details if available (command, content, etc.)
+			// The title usually contains the file path already, so we
+			// prioritise fields that add new information.
 			if (info.toolCall?.rawInput != null) {
 				const raw = info.toolCall.rawInput;
 				let detail: string | undefined;
 				if (typeof raw === 'object' && raw !== null) {
 					const obj = raw as Record<string, unknown>;
-					// Show the most useful fields for common tool types
 					if (typeof obj.command === 'string') {
 						detail = obj.command;
-					} else if (typeof obj.file_path === 'string') {
-						detail = obj.file_path;
+					} else if (typeof obj.content === 'string') {
+						detail = obj.content;
+					} else if (typeof obj.old_string === 'string') {
+						detail = obj.old_string;
 					} else if (typeof obj.pattern === 'string') {
 						detail = obj.pattern;
-					} else {
-						detail = JSON.stringify(raw);
 					}
 				} else if (typeof raw === 'string') {
 					detail = raw;
 				}
 				if (detail) {
-					const truncated =
-						detail.length > 200 ? `${detail.slice(0, 197)}...` : detail;
-					console.log(`    ${colors.dim(truncated)}`);
+					// Show first few lines, trimmed
+					const lines = detail.split('\n').slice(0, 6);
+					if (detail.split('\n').length > 6) {
+						lines.push('...');
+					}
+					for (const line of lines) {
+						const trimmed =
+							line.length > 120 ? `${line.slice(0, 117)}...` : line;
+						console.log(`    ${colors.dim(trimmed)}`);
+					}
 				}
 			}
 

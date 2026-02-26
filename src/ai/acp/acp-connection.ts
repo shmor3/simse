@@ -302,7 +302,11 @@ export function createACPConnection(
 		if (connected && serverInfo) return serverInfo;
 
 		const args = options.args ? [...options.args] : [];
-		const env = options.env ? { ...process.env, ...options.env } : process.env;
+		const baseEnv = { ...process.env, ...options.env };
+		// Strip CLAUDECODE env var so child ACP processes aren't blocked
+		// by Claude Code's nested-session detection
+		delete baseEnv.CLAUDECODE;
+		const env = baseEnv;
 
 		child = spawn(options.command, args, {
 			stdio: ['pipe', 'pipe', 'pipe'],

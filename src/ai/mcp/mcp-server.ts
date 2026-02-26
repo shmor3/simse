@@ -459,6 +459,52 @@ export function createMCPServer(
 					}
 				},
 			);
+			// Tool: memory-delete — remove an entry from the vector memory store
+			server.registerTool(
+				'memory-delete',
+				{
+					title: 'Memory Delete',
+					description: 'Delete an entry from the vector memory store',
+					inputSchema: {
+						id: z.string().describe('The memory entry ID to delete'),
+					},
+				},
+				async ({ id }) => {
+					try {
+						const deleted = await memoryManager.delete(id as string);
+						if (!deleted) {
+							return {
+								content: [
+									{
+										type: 'text' as const,
+										text: `Memory entry not found: ${id}`,
+									},
+								],
+								isError: true,
+							};
+						}
+						return {
+							content: [
+								{
+									type: 'text' as const,
+									text: `Deleted memory entry: ${id}`,
+								},
+							],
+						};
+					} catch (error) {
+						const message = toError(error).message;
+						sendLog(
+							'error',
+							`Memory delete failed: ${message}`,
+							'memory-delete',
+						);
+						return {
+							content: [{ type: 'text' as const, text: `Error: ${message}` }],
+							isError: true,
+						};
+					}
+				},
+			);
 		}
 
 		// -- VFS tools --

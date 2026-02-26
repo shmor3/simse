@@ -100,6 +100,34 @@ export function registerMemoryTools(
 			}
 		},
 	);
+
+	registerTool(
+		registry,
+		{
+			name: 'memory_delete',
+			description: 'Delete a memory entry by ID.',
+			parameters: {
+				id: {
+					type: 'string',
+					description: 'The memory entry ID to delete',
+					required: true,
+				},
+			},
+			category: 'memory',
+			annotations: { destructive: true },
+		},
+		async (args) => {
+			try {
+				const id = String(args.id ?? '');
+				const deleted = await memoryManager.delete(id);
+				return deleted
+					? `Deleted memory entry: ${id}`
+					: `Memory entry not found: ${id}`;
+			} catch (err) {
+				throw toError(err);
+			}
+		},
+	);
 }
 
 // ---------------------------------------------------------------------------

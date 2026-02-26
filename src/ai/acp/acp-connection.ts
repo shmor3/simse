@@ -133,6 +133,7 @@ export function createACPConnection(
 	let connected = false;
 	let serverInfo: ACPInitializeResult | undefined;
 	let buffer = '';
+	let permissionPending = false;
 
 	const pending = new Map<number, PendingRequest>();
 	const notificationHandlers = new Map<
@@ -169,7 +170,9 @@ export function createACPConnection(
 
 		// Suspend the prompt timeout entirely while a permission prompt is
 		// active — the user may take an arbitrary amount of time to decide.
-		// The timeout is restored after the permission response is sent.
+		// The flag also prevents session/update notifications from
+		// re-creating the timeout while we're waiting.
+		permissionPending = true;
 		for (const [, req] of pending) {
 			if (req.method === 'session/prompt') {
 				clearTimeout(req.timer);
@@ -177,6 +180,7 @@ export function createACPConnection(
 		}
 
 		const restorePromptTimeouts = (): void => {
+			permissionPending = false;
 			for (const [, req] of pending) {
 				if (req.method === 'session/prompt') {
 					req.timer = setTimeout(() => {
@@ -327,8 +331,9 @@ export function createACPConnection(
 			}
 		} else if (isJsonRpcNotification(msg)) {
 			// Reset timeout for pending prompt requests on session/update
-			// notifications — the server is actively streaming, not stalled
-			if (msg.method === 'session/update') {
+			// notifications — the server is actively streaming, not stalled.
+			// Skip while a permission prompt is active (timeouts are suspended).
+			if (msg.method === 'session/update' && !permissionPending) {
 				for (const [, req] of pending) {
 					if (req.method === 'session/prompt') {
 						clearTimeout(req.timer);

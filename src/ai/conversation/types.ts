@@ -17,6 +17,10 @@ export interface ConversationOptions {
 	readonly maxMessages?: number;
 	/** Approximate max character budget before auto-compact triggers. Default: 100_000 (~25k tokens). */
 	readonly autoCompactChars?: number;
+	/** Number of recent user-turns to protect from context pruning. Default: 2. */
+	readonly pruneProtectTurns?: number;
+	/** Tool names whose results should never be pruned by the context pruner. */
+	readonly pruneProtectedTools?: readonly string[];
 }
 
 export interface Conversation {

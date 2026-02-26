@@ -106,12 +106,17 @@ export {
 } from './ai/chain/index.js';
 // ---- Conversation ---------------------------------------------------------
 export type {
+	ContextPruner,
+	ContextPrunerOptions,
 	Conversation,
 	ConversationMessage,
 	ConversationOptions,
 	ConversationRole,
 } from './ai/conversation/index.js';
-export { createConversation } from './ai/conversation/index.js';
+export {
+	createContextPruner,
+	createConversation,
+} from './ai/conversation/index.js';
 // ---- Agentic Loop ---------------------------------------------------------
 export type {
 	AgenticLoop,

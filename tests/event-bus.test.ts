@@ -162,6 +162,40 @@ describe('createEventBus', () => {
 		expect(Object.isFrozen(bus)).toBe(true);
 	});
 
+	it('clear removes all per-type and global handlers', () => {
+		const bus = createEventBus();
+		const handler = mock(() => {});
+		const globalHandler = mock((_type: string, _payload: unknown) => {});
+
+		bus.subscribe('session.created', handler);
+		bus.subscribeAll(globalHandler);
+
+		bus.publish('session.created', { sessionId: 'before' });
+		expect(handler).toHaveBeenCalledTimes(1);
+		expect(globalHandler).toHaveBeenCalledTimes(1);
+
+		bus.clear();
+
+		bus.publish('session.created', { sessionId: 'after' });
+		expect(handler).toHaveBeenCalledTimes(1); // Not called again
+		expect(globalHandler).toHaveBeenCalledTimes(1); // Not called again
+	});
+
+	it('clear allows re-subscribing after reset', () => {
+		const bus = createEventBus();
+		const handler = mock(() => {});
+
+		bus.subscribe('abort', handler);
+		bus.clear();
+
+		const newHandler = mock(() => {});
+		bus.subscribe('abort', newHandler);
+		bus.publish('abort', { reason: 'new' });
+
+		expect(handler).not.toHaveBeenCalled();
+		expect(newHandler).toHaveBeenCalledTimes(1);
+	});
+
 	it('correctly types tool call payloads', () => {
 		const bus = createEventBus();
 		const calls: Array<{ id: string; name: string }> = [];

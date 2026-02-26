@@ -729,6 +729,39 @@ export function createMCPServer(
 			);
 
 			server.registerTool(
+				'task-delete',
+				{
+					title: 'Task Delete',
+					description: 'Delete a task by ID',
+					inputSchema: {
+						id: z.string().describe('The task ID to delete'),
+					},
+				},
+				async ({ id }) => {
+					const deleted = taskList.delete(id as string);
+					if (!deleted) {
+						return {
+							content: [
+								{
+									type: 'text' as const,
+									text: `Task not found: ${id}`,
+								},
+							],
+							isError: true,
+						};
+					}
+					return {
+						content: [
+							{
+								type: 'text' as const,
+								text: `Deleted task #${id}`,
+							},
+						],
+					};
+				},
+			);
+
+			server.registerTool(
 				'task-list',
 				{
 					title: 'Task List',

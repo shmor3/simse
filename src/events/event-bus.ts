@@ -76,5 +76,10 @@ export const createEventBus = (): EventBus => {
 		};
 	};
 
-	return Object.freeze({ publish, subscribe, subscribeAll });
+	const clear = (): void => {
+		handlers.clear();
+		globalHandlers.clear();
+	};
+
+	return Object.freeze({ publish, subscribe, subscribeAll, clear });
 };

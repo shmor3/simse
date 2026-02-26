@@ -131,4 +131,6 @@ export interface EventBus {
 	readonly subscribeAll: (
 		handler: (type: EventType, payload: unknown) => void,
 	) => () => void;
+	/** Remove all event handlers (both per-type and global). */
+	readonly clear: () => void;
 }

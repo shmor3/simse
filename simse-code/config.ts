@@ -420,7 +420,10 @@ export function createCLIConfig(options?: CLIConfigOptions): CLIConfigResult {
 
 	// Precedence: CLI flags > workspace settings > global config
 	const logLevel =
-		options?.logLevel ?? workspaceSettings.logLevel ?? userConfig.logLevel ?? 'warn';
+		options?.logLevel ??
+		workspaceSettings.logLevel ??
+		userConfig.logLevel ??
+		'warn';
 	const defaultAgent =
 		options?.defaultAgent ??
 		workspaceSettings.defaultAgent ??

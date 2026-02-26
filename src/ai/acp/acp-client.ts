@@ -311,7 +311,7 @@ export function createACPClient(
 			});
 		}
 
-		const entry = config.servers.find((s) => s.name === name)!;
+		const entry = config.servers.find((s) => s.name === name) as ACPServerEntry;
 		return { connection, entry, name };
 	};
 

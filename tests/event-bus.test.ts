@@ -1,6 +1,5 @@
 import { describe, expect, it, mock, spyOn } from 'bun:test';
 import { createEventBus } from '../src/events/event-bus.js';
-import type { EventBus } from '../src/events/types.js';
 
 describe('createEventBus', () => {
 	it('delivers events to subscribers', () => {

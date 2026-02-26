@@ -67,7 +67,8 @@ function spawnBridge(): BridgeProcess {
 
 	const receive = (): Promise<JsonRpcResponse> => {
 		if (lines.length > 0) {
-			return Promise.resolve(JSON.parse(lines.shift()!) as JsonRpcResponse);
+			const line = lines.shift() as string;
+			return Promise.resolve(JSON.parse(line) as JsonRpcResponse);
 		}
 		return new Promise<JsonRpcResponse>((resolve) => {
 			resolveNext = (line) => resolve(JSON.parse(line) as JsonRpcResponse);

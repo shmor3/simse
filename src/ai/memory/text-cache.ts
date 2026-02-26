@@ -68,7 +68,7 @@ export function createTextCache(options?: TextCacheOptions): TextCache {
 			const first = cache.keys().next();
 			if (first.done) break;
 			const key = first.value;
-			const text = cache.get(key)!;
+			const text = cache.get(key) as string;
 			totalBytes -= byteLength(text);
 			cache.delete(key);
 		}

@@ -13,10 +13,6 @@ import { createMemoryStorage, createSilentLogger } from './utils/mocks.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeEmbedding(dim: number, fill: number = 0.5): number[] {
-	return new Array(dim).fill(fill);
-}
-
 function createMockEmbedder(dim = 3): EmbeddingProvider {
 	let callCount = 0;
 	return {

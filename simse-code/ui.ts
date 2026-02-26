@@ -684,9 +684,7 @@ function extractPrimaryArg(_name: string, argsStr: string): string {
 	} catch {
 		// Not valid JSON — return trimmed raw string
 		if (argsStr && argsStr !== '{}') {
-			return argsStr.length > 60
-				? `${argsStr.slice(0, 57)}...`
-				: argsStr;
+			return argsStr.length > 60 ? `${argsStr.slice(0, 57)}...` : argsStr;
 		}
 	}
 	return '';
@@ -745,7 +743,9 @@ export function renderToolCallFailed(
 ): string {
 	const verb = TOOL_VERBS[name]?.completed ?? name;
 	const arg = extractPrimaryArg(name, argsStr);
-	const prefix = arg ? `Failed to ${verb.toLowerCase()} ${arg}` : `${verb} failed`;
+	const prefix = arg
+		? `Failed to ${verb.toLowerCase()} ${arg}`
+		: `${verb} failed`;
 	const errMsg = error.length > 120 ? `${error.slice(0, 117)}...` : error;
 	return `  ${colors.red('✗')} ${prefix} ${colors.dim('—')} ${errMsg}`;
 }
@@ -759,9 +759,7 @@ export function renderToolResultCollapsed(
 	if (isError) {
 		const firstLine = output.split('\n')[0] ?? output;
 		const errMsg =
-			firstLine.length > 120
-				? `${firstLine.slice(0, 117)}...`
-				: firstLine;
+			firstLine.length > 120 ? `${firstLine.slice(0, 117)}...` : firstLine;
 		return `    ${colors.dim('⎿')} ${colors.red(errMsg)}`;
 	}
 	const lineCount = output.split('\n').length;

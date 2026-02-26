@@ -106,7 +106,11 @@ function deriveToolSummary(name: string, output: string): string | undefined {
 	if (name.includes('search') || name.includes('list')) {
 		return `${lineCount} result${lineCount !== 1 ? 's' : ''}`;
 	}
-	if (name.includes('write') || name.includes('create') || name.includes('edit')) {
+	if (
+		name.includes('write') ||
+		name.includes('create') ||
+		name.includes('edit')
+	) {
 		const bytes = Buffer.byteLength(output, 'utf-8');
 		if (bytes < 1024) return `${bytes} bytes`;
 		return `${(bytes / 1024).toFixed(1)} KB`;
@@ -544,10 +548,7 @@ async function handleBareTextInput(
 					),
 				);
 			} else {
-				const summary = deriveToolSummary(
-					toolResult.name,
-					toolResult.output,
-				);
+				const summary = deriveToolSummary(toolResult.name, toolResult.output);
 				console.log(
 					renderToolCallCompleted(toolResult.name, argsStr, colors, {
 						durationMs,
@@ -593,9 +594,7 @@ async function handleBareTextInput(
 							? JSON.stringify(update.content)
 							: update.status;
 				if (update.status === 'failed') {
-					console.log(
-						renderAgentToolCallFailed('other', output, colors),
-					);
+					console.log(renderAgentToolCallFailed('other', output, colors));
 				} else {
 					console.log(
 						renderAgentToolCallCompleted('', 'other', colors, {
@@ -604,11 +603,7 @@ async function handleBareTextInput(
 					);
 				}
 				console.log(
-					renderToolResultCollapsed(
-						output,
-						update.status === 'failed',
-						colors,
-					),
+					renderToolResultCollapsed(output, update.status === 'failed', colors),
 				);
 				spinner.start();
 			}
@@ -770,10 +765,7 @@ async function handleSkillInvocation(
 					),
 				);
 			} else {
-				const summary = deriveToolSummary(
-					toolResult.name,
-					toolResult.output,
-				);
+				const summary = deriveToolSummary(toolResult.name, toolResult.output);
 				console.log(
 					renderToolCallCompleted(toolResult.name, argsStr, colors, {
 						durationMs,

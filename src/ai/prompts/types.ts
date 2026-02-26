@@ -44,3 +44,56 @@ export interface DiscoveredInstruction {
 	readonly path: string;
 	readonly content: string;
 }
+
+// ---------------------------------------------------------------------------
+// Environment Context
+// ---------------------------------------------------------------------------
+
+export interface EnvironmentContext {
+	readonly platform: string;
+	readonly shell: string;
+	readonly cwd: string;
+	readonly date: string;
+	readonly gitBranch?: string;
+	readonly gitStatus?: string;
+}
+
+// ---------------------------------------------------------------------------
+// System Prompt Builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Agent operating mode.
+ * - `build`: Default mode — gathers context, takes actions, verifies results.
+ * - `plan`: Research and planning only — no code modifications.
+ * - `explore`: Fast, read-only codebase exploration.
+ */
+export type AgentMode = 'build' | 'plan' | 'explore';
+
+export interface SystemPromptBuilderOptions {
+	/** Agent identity line. Default: "You are a software development assistant." */
+	readonly identity?: string;
+	/** Override mode instructions per mode. */
+	readonly modeInstructions?: Readonly<Partial<Record<AgentMode, string>>>;
+	/** Additional custom sections appended after tool guidelines. */
+	readonly customSections?: readonly string[];
+	/** Tool registry for generating tool definitions section. */
+	readonly toolRegistry?: {
+		readonly formatForSystemPrompt: () => string;
+	};
+}
+
+export interface SystemPromptBuildContext {
+	/** Current operating mode. Default: 'build'. */
+	readonly mode?: AgentMode;
+	/** Environment context (platform, shell, cwd, git). */
+	readonly environment?: EnvironmentContext;
+	/** Discovered instruction files (SIMSE.md, CLAUDE.md, etc.). */
+	readonly instructions?: readonly DiscoveredInstruction[];
+	/** Dynamic memory context injected per turn. */
+	readonly memoryContext?: string;
+}
+
+export interface SystemPromptBuilder {
+	readonly build: (context?: SystemPromptBuildContext) => string;
+}

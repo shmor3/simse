@@ -1,3 +1,8 @@
+export type {
+	BuiltinSubagentCallbacks,
+	BuiltinSubagentOptions,
+} from './builtin-subagents.js';
+export { registerBuiltinSubagents } from './builtin-subagents.js';
 export {
 	registerMemoryTools,
 	registerTaskTools,

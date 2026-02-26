@@ -36,6 +36,8 @@ export interface Conversation {
 	readonly serialize: () => string;
 	readonly clear: () => void;
 	readonly compact: (summary: string) => void;
+	/** Replace all messages (excluding system prompt). Used by the context pruner. */
+	readonly replaceMessages?: (messages: readonly ConversationMessage[]) => void;
 	readonly messageCount: number;
 	/** Approximate character count of the serialized conversation. */
 	readonly estimatedChars: number;

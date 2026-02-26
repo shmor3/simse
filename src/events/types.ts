@@ -38,6 +38,10 @@ export interface EventPayloadMap {
 		readonly messageCount: number;
 		readonly estimatedChars: number;
 	};
+	'compaction.prune': {
+		readonly messageCount: number;
+		readonly estimatedChars: number;
+	};
 	'compaction.complete': { readonly summaryLength: number };
 	'permission.request': {
 		readonly callId: string;

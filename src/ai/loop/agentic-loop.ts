@@ -60,6 +60,8 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		eventBus,
 		memoryMiddleware,
 		agentManagesTools = false,
+		systemPromptBuilder,
+		contextPruner,
 	} = options;
 
 	const streamMaxAttempts = streamRetry?.maxAttempts ?? 2;
@@ -74,15 +76,21 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		const loopStart = Date.now();
 		conversation.addUser(userInput);
 
-		// Build base system prompt: tool definitions + user-provided system prompt
+		// Build base system prompt: use builder if provided, otherwise
+		// concatenate tool definitions + user-provided system prompt.
 		// When agentManagesTools is true, skip injecting tool definitions — the
 		// ACP agent discovers tools via MCP servers passed during session/new.
-		const toolPrompt = agentManagesTools
-			? ''
-			: toolRegistry.formatForSystemPrompt();
-		const baseSystemPrompt = [toolPrompt, systemPrompt]
-			.filter(Boolean)
-			.join('\n\n');
+		let baseSystemPrompt: string;
+		if (systemPromptBuilder) {
+			baseSystemPrompt = systemPromptBuilder.build();
+		} else {
+			const toolPrompt = agentManagesTools
+				? ''
+				: toolRegistry.formatForSystemPrompt();
+			baseSystemPrompt = [toolPrompt, systemPrompt]
+				.filter(Boolean)
+				.join('\n\n');
+		}
 
 		const turns: LoopTurn[] = [];
 		let lastText = '';
@@ -118,23 +126,42 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 				});
 			}
 
-			// Auto-compaction
-			if (autoCompact && compactionProvider && conversation.needsCompaction) {
-				try {
-					eventBus?.publish('compaction.start', {
-						messageCount: conversation.messageCount,
-						estimatedChars: conversation.estimatedChars,
-					});
-					const summary = await compactionProvider.generate(
-						`Summarize this conversation concisely, preserving key context and decisions:\n\n${conversation.serialize()}`,
-					);
-					conversation.compact(summary);
-					callbacks?.onCompaction?.(summary);
-					eventBus?.publish('compaction.complete', {
-						summaryLength: summary.length,
-					});
-				} catch (err) {
-					callbacks?.onError?.(toError(err));
+			// Two-stage compaction:
+			// Stage 1: Lightweight pruning — strip old tool outputs
+			// Stage 2: Full summarization — only if still over threshold after pruning
+			if (autoCompact && conversation.needsCompaction) {
+				// Stage 1: Context pruning (no LLM call needed)
+				if (contextPruner && conversation.replaceMessages) {
+					try {
+						const pruned = contextPruner.prune(conversation.toMessages());
+						conversation.replaceMessages(pruned);
+						eventBus?.publish('compaction.prune', {
+							messageCount: conversation.messageCount,
+							estimatedChars: conversation.estimatedChars,
+						});
+					} catch (err) {
+						callbacks?.onError?.(toError(err));
+					}
+				}
+
+				// Stage 2: Full summarization (only if still over threshold)
+				if (compactionProvider && conversation.needsCompaction) {
+					try {
+						eventBus?.publish('compaction.start', {
+							messageCount: conversation.messageCount,
+							estimatedChars: conversation.estimatedChars,
+						});
+						const summary = await compactionProvider.generate(
+							`Summarize this conversation concisely, preserving key context and decisions:\n\n${conversation.serialize()}`,
+						);
+						conversation.compact(summary);
+						callbacks?.onCompaction?.(summary);
+						eventBus?.publish('compaction.complete', {
+							summaryLength: summary.length,
+						});
+					} catch (err) {
+						callbacks?.onError?.(toError(err));
+					}
 				}
 			}
 

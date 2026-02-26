@@ -646,10 +646,15 @@ export function createACPClient(
 			const content = buildTextContent(prompt, streamOptions?.systemPrompt);
 
 			// Collect streaming chunks via notification handler
-			type ChunkItem = { text: string } | { done: true };
+			type ChunkItem = { text: string } | { keepalive: true } | { done: true };
 			const chunks: ChunkItem[] = [];
 			let chunkResolve: (() => void) | undefined;
 			let streamUsage: ACPTokenUsage | undefined;
+
+			const pushKeepalive = (): void => {
+				chunks.push({ keepalive: true });
+				chunkResolve?.();
+			};
 
 			const unsubscribe = connection.onNotification(
 				'session/update',
@@ -683,6 +688,8 @@ export function createACPClient(
 							kind: (update.kind as ACPToolCall['kind']) ?? 'other',
 							status: (update.status as ACPToolCall['status']) ?? 'pending',
 						});
+						// Keep the sliding-window timer alive while tools execute
+						pushKeepalive();
 					}
 
 					if (update.sessionUpdate === 'tool_call_update') {
@@ -692,6 +699,8 @@ export function createACPClient(
 								(update.status as ACPToolCallUpdate['status']) ?? 'in_progress',
 							content: update.content,
 						});
+						// Keep the sliding-window timer alive during tool progress
+						pushKeepalive();
 					}
 
 					if (update.metadata) {
@@ -702,6 +711,12 @@ export function createACPClient(
 					}
 				},
 			);
+
+			// Subscribe to permission activity events to push keepalives
+			// while the user decides — prevents stream timeout during prompts
+			const unsubscribePermission = connection.onPermissionActivity(() => {
+				pushKeepalive();
+			});
 
 			// Send the prompt — don't await yet, chunks arrive as notifications
 			const promptTimeoutMs = streamTimeoutMs;
@@ -733,6 +748,8 @@ export function createACPClient(
 						const chunk = chunks[idx++];
 						lastActivity = Date.now();
 						if ('done' in chunk) break;
+						// Keepalive chunks reset lastActivity but don't yield text
+						if ('keepalive' in chunk) continue;
 						yield { type: 'delta', text: chunk.text };
 					} else {
 						const elapsed = Date.now() - lastActivity;
@@ -775,6 +792,7 @@ export function createACPClient(
 				);
 			} finally {
 				unsubscribe();
+				unsubscribePermission();
 				// Ensure the prompt promise settles
 				promptPromise.catch(() => {});
 			}

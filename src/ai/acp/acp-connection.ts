@@ -93,6 +93,12 @@ export interface ACPConnection {
 		method: string,
 		handler: (params: unknown) => void,
 	) => () => void;
+	/**
+	 * Subscribe to permission activity events. Fires whenever a
+	 * `session/request_permission` request arrives or is resolved.
+	 * Useful for keeping stream timeouts alive during permission prompts.
+	 */
+	readonly onPermissionActivity: (handler: () => void) => () => void;
 	readonly close: () => Promise<void>;
 	readonly setPermissionPolicy: (policy: ACPPermissionPolicy) => void;
 	readonly isConnected: boolean;
@@ -140,6 +146,17 @@ export function createACPConnection(
 		string,
 		Set<(params: unknown) => void>
 	>();
+	const permissionActivityHandlers = new Set<() => void>();
+
+	const emitPermissionActivity = (): void => {
+		for (const handler of permissionActivityHandlers) {
+			try {
+				handler();
+			} catch {
+				// Swallow handler errors
+			}
+		}
+	};
 
 	// -----------------------------------------------------------------------
 	// Message parsing
@@ -173,6 +190,7 @@ export function createACPConnection(
 		// The flag also prevents session/update notifications from
 		// re-creating the timeout while we're waiting.
 		permissionPending = true;
+		emitPermissionActivity();
 		for (const [, req] of pending) {
 			if (req.method === 'session/prompt') {
 				clearTimeout(req.timer);
@@ -571,6 +589,7 @@ export function createACPConnection(
 		);
 
 		notificationHandlers.clear();
+		permissionActivityHandlers.clear();
 
 		if (child) {
 			child.stdin?.end();
@@ -583,11 +602,19 @@ export function createACPConnection(
 	// Return frozen interface
 	// -----------------------------------------------------------------------
 
+	const onPermissionActivity = (handler: () => void): (() => void) => {
+		permissionActivityHandlers.add(handler);
+		return () => {
+			permissionActivityHandlers.delete(handler);
+		};
+	};
+
 	return Object.freeze({
 		initialize,
 		request: sendRequest,
 		notify: sendNotify,
 		onNotification,
+		onPermissionActivity,
 		close,
 		setPermissionPolicy: (policy: ACPPermissionPolicy) => {
 			permissionPolicy = policy;

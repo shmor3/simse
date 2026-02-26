@@ -3505,17 +3505,20 @@ async function main(): Promise<void> {
 				terminal: true,
 			});
 
-			const answer = await new Promise<string>((resolve) => {
-				permRl.question(`  ${colors.dim(choices.join(' / '))} `, resolve);
-			});
-			permRl.close();
-
-			// Resume the main REPL readline and restart the spinner
-			if (mainRl) {
-				process.stdin.resume();
-				mainRl.resume();
+			let answer: string;
+			try {
+				answer = await new Promise<string>((resolve) => {
+					permRl.question(`  ${colors.dim(choices.join(' / '))} `, resolve);
+				});
+			} finally {
+				permRl.close();
+				// Always resume the main REPL readline, even if the prompt threw
+				if (mainRl) {
+					process.stdin.resume();
+					mainRl.resume();
+				}
+				spinner.start();
 			}
-			spinner.start();
 
 			const choice = answer.trim().toLowerCase();
 			if (choice === 'a' || choice === 'always') {

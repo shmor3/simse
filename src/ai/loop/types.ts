@@ -6,9 +6,11 @@ import type { EventBus } from '../../events/types.js';
 import type { Logger } from '../../logger.js';
 import type { ACPClient } from '../acp/acp-client.js';
 import type { ACPToolCall, ACPToolCallUpdate } from '../acp/types.js';
+import type { ContextPruner } from '../conversation/context-pruner.js';
 import type { Conversation } from '../conversation/types.js';
 import type { MemoryMiddleware } from '../memory/middleware.js';
 import type { TextGenerationProvider } from '../memory/types.js';
+import type { SystemPromptBuilder } from '../prompts/types.js';
 import type {
 	ToolCallRequest,
 	ToolCallResult,
@@ -55,6 +57,16 @@ export interface AgenticLoopOptions {
 	 * `session/update` notifications.
 	 */
 	readonly agentManagesTools?: boolean;
+	/**
+	 * When provided, the builder constructs the base system prompt instead of
+	 * simple concatenation of tool definitions and user system prompt.
+	 */
+	readonly systemPromptBuilder?: SystemPromptBuilder;
+	/**
+	 * Context pruner for lightweight pre-compaction pass. When provided,
+	 * prunes old tool outputs before falling through to full summarization.
+	 */
+	readonly contextPruner?: ContextPruner;
 }
 
 // ---------------------------------------------------------------------------

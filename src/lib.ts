@@ -241,15 +241,22 @@ export type {
 	VectorStoreOptions,
 } from './ai/memory/vector-store.js';
 export { createVectorStore } from './ai/memory/vector-store.js';
-// ---- Provider Prompts -----------------------------------------------------
+// ---- Provider Prompts & System Prompt Builder -----------------------------
 export type {
+	AgentMode,
 	DiscoveredInstruction,
+	EnvironmentContext,
 	InstructionDiscoveryOptions,
 	ProviderPromptConfig,
 	ProviderPromptResolver,
+	SystemPromptBuildContext,
+	SystemPromptBuilder,
+	SystemPromptBuilderOptions,
 } from './ai/prompts/index.js';
 export {
+	collectEnvironmentContext,
 	createProviderPromptResolver,
+	createSystemPromptBuilder,
 	discoverInstructions,
 } from './ai/prompts/index.js';
 // ---- Task List ------------------------------------------------------------
@@ -273,6 +280,8 @@ export type { GitToolOptions } from './ai/tools/host/git.js';
 export { registerGitTools } from './ai/tools/host/git.js';
 // ---- Tool Registry --------------------------------------------------------
 export type {
+	BuiltinSubagentCallbacks,
+	BuiltinSubagentOptions,
 	RegisteredTool,
 	SubagentCallbacks,
 	SubagentToolsOptions,
@@ -288,6 +297,7 @@ export type {
 } from './ai/tools/index.js';
 export {
 	createToolRegistry,
+	registerBuiltinSubagents,
 	registerMemoryTools,
 	registerSubagentTools,
 	registerTaskTools,

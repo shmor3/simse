@@ -114,6 +114,18 @@ export function createConversation(
 		);
 	};
 
+	const replaceMessages = (
+		newMessages: readonly ConversationMessage[],
+	): void => {
+		messages.length = 0;
+		// Filter out system messages — those are managed via setSystemPrompt
+		for (const msg of newMessages) {
+			if (msg.role !== 'system') {
+				messages.push(Object.freeze({ ...msg }));
+			}
+		}
+	};
+
 	const estimateChars = (): number => {
 		let total = systemPrompt?.length ?? 0;
 		for (const msg of messages) {
@@ -131,6 +143,7 @@ export function createConversation(
 		serialize,
 		clear,
 		compact,
+		replaceMessages,
 		get messageCount() {
 			return messages.length;
 		},

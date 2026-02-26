@@ -92,7 +92,9 @@ export interface ACPConnection {
 interface PendingRequest {
 	readonly resolve: (value: unknown) => void;
 	readonly reject: (reason: unknown) => void;
-	readonly timer: ReturnType<typeof setTimeout>;
+	timer: ReturnType<typeof setTimeout>;
+	readonly timeoutMs: number;
+	readonly method: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +274,31 @@ export function createACPConnection(
 				sendResponse(msg.id, undefined);
 			}
 		} else if (isJsonRpcNotification(msg)) {
+			// Reset timeout for pending prompt requests on session/update
+			// notifications — the server is actively streaming, not stalled
+			if (msg.method === 'session/update') {
+				for (const [, req] of pending) {
+					if (req.method === 'session/prompt') {
+						clearTimeout(req.timer);
+						req.timer = setTimeout(() => {
+							for (const [reqId, r] of pending) {
+								if (r === req) {
+									pending.delete(reqId);
+									break;
+								}
+							}
+							req.reject(
+								createProviderTimeoutError('acp', req.timeoutMs, {
+									cause: new Error(
+										`ACP request "${req.method}" timed out after ${req.timeoutMs}ms`,
+									),
+								}),
+							);
+						}, req.timeoutMs);
+					}
+				}
+			}
+
 			const handlers = notificationHandlers.get(msg.method);
 			if (handlers) {
 				for (const handler of handlers) {
@@ -415,6 +442,8 @@ export function createACPConnection(
 				resolve: resolve as (value: unknown) => void,
 				reject,
 				timer,
+				timeoutMs: reqTimeoutMs,
+				method,
 			});
 
 			const request: JsonRpcRequest = {

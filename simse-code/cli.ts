@@ -3427,15 +3427,55 @@ async function main(): Promise<void> {
 	const acpClient = createACPClient(config.acp, {
 		logger,
 		onPermissionRequest: async (info: ACPPermissionRequestInfo) => {
+			// Derive a human-readable description from the best available source.
+			// ACP spec puts tool details in toolCall; legacy servers may use
+			// top-level title/description.
 			const desc =
-				info.description ?? info.title ?? 'Agent requests permission';
+				info.toolCall?.title ??
+				info.description ??
+				info.title ??
+				'Agent requests permission';
+
 			const allowOption = info.options.find((o) => o.kind === 'allow_once');
+			const alwaysOption = info.options.find((o) => o.kind === 'allow_always');
 			const rejectOption = info.options.find((o) => o.kind === 'reject_once');
 
 			// Show the permission request to the user
 			console.log(
 				`\n  ${colors.yellow('⚠')} ${colors.bold('Permission requested:')} ${desc}`,
 			);
+
+			// Show tool input details if available (file path, command, etc.)
+			if (info.toolCall?.rawInput != null) {
+				const raw = info.toolCall.rawInput;
+				let detail: string | undefined;
+				if (typeof raw === 'object' && raw !== null) {
+					const obj = raw as Record<string, unknown>;
+					// Show the most useful fields for common tool types
+					if (typeof obj.command === 'string') {
+						detail = obj.command;
+					} else if (typeof obj.file_path === 'string') {
+						detail = obj.file_path;
+					} else if (typeof obj.pattern === 'string') {
+						detail = obj.pattern;
+					} else {
+						detail = JSON.stringify(raw);
+					}
+				} else if (typeof raw === 'string') {
+					detail = raw;
+				}
+				if (detail) {
+					const truncated =
+						detail.length > 200 ? `${detail.slice(0, 197)}...` : detail;
+					console.log(`    ${colors.dim(truncated)}`);
+				}
+			}
+
+			// Build prompt choices based on available options
+			const choices: string[] = ['[y]es', '[n]o'];
+			if (alwaysOption) {
+				choices.push('[a]lways');
+			}
 
 			const permRl = createInterface({
 				input: process.stdin,
@@ -3444,17 +3484,15 @@ async function main(): Promise<void> {
 			});
 
 			const answer = await new Promise<string>((resolve) => {
-				permRl.question(`  ${colors.dim('[a]llow / [d]eny?')} `, resolve);
+				permRl.question(`  ${colors.dim(choices.join(' / '))} `, resolve);
 			});
 			permRl.close();
 
 			const choice = answer.trim().toLowerCase();
-			if (
-				choice === 'a' ||
-				choice === 'allow' ||
-				choice === 'y' ||
-				choice === 'yes'
-			) {
+			if (choice === 'a' || choice === 'always') {
+				return alwaysOption?.optionId ?? allowOption?.optionId;
+			}
+			if (choice === 'y' || choice === 'yes' || choice === 'allow') {
 				return allowOption?.optionId;
 			}
 			return rejectOption?.optionId;

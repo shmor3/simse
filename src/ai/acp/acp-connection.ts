@@ -167,29 +167,36 @@ export function createACPConnection(
 		};
 		const permOptions = p?.options ?? [];
 
-		// The server is alive and waiting for our response — reset any
-		// pending prompt timeout so we don't time out while the user
-		// is deciding on the permission.
+		// Suspend the prompt timeout entirely while a permission prompt is
+		// active — the user may take an arbitrary amount of time to decide.
+		// The timeout is restored after the permission response is sent.
 		for (const [, req] of pending) {
 			if (req.method === 'session/prompt') {
 				clearTimeout(req.timer);
-				req.timer = setTimeout(() => {
-					for (const [reqId, r] of pending) {
-						if (r === req) {
-							pending.delete(reqId);
-							break;
-						}
-					}
-					req.reject(
-						createProviderTimeoutError('acp', req.timeoutMs, {
-							cause: new Error(
-								`ACP request "${req.method}" timed out after ${req.timeoutMs}ms`,
-							),
-						}),
-					);
-				}, req.timeoutMs);
 			}
 		}
+
+		const restorePromptTimeouts = (): void => {
+			for (const [, req] of pending) {
+				if (req.method === 'session/prompt') {
+					req.timer = setTimeout(() => {
+						for (const [reqId, r] of pending) {
+							if (r === req) {
+								pending.delete(reqId);
+								break;
+							}
+						}
+						req.reject(
+							createProviderTimeoutError('acp', req.timeoutMs, {
+								cause: new Error(
+									`ACP request "${req.method}" timed out after ${req.timeoutMs}ms`,
+								),
+							}),
+						);
+					}, req.timeoutMs);
+				}
+			}
+		};
 
 		if (permissionPolicy === 'auto-approve') {
 			// Pick the first "allow" option, preferring allow_always > allow_once
@@ -201,16 +208,16 @@ export function createACPConnection(
 				sendResponse(id, {
 					outcome: { outcome: 'selected', optionId: pick.optionId },
 				});
-				return;
+			} else {
+				// Fallback if options don't contain allow kinds
+				sendResponse(id, {
+					outcome: {
+						outcome: 'selected',
+						optionId: permOptions[0]?.optionId,
+					},
+				});
 			}
-
-			// Fallback if options don't contain allow kinds
-			sendResponse(id, {
-				outcome: {
-					outcome: 'selected',
-					optionId: permOptions[0]?.optionId,
-				},
-			});
+			restorePromptTimeouts();
 			return;
 		}
 
@@ -242,6 +249,9 @@ export function createACPConnection(
 				.catch(() => {
 					// Handler threw — reject for safety
 					sendResponse(id, { outcome: { outcome: 'cancelled' } });
+				})
+				.finally(() => {
+					restorePromptTimeouts();
 				});
 			return;
 		}
@@ -257,6 +267,7 @@ export function createACPConnection(
 		} else {
 			sendResponse(id, { outcome: { outcome: 'cancelled' } });
 		}
+		restorePromptTimeouts();
 	};
 
 	const sendResponse = (id: number, result: unknown): void => {

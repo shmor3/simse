@@ -378,7 +378,7 @@ export function createACPClient(
 			'session/new',
 			{
 				cwd: process.cwd(),
-				mcpServers: [],
+				mcpServers: config.mcpServers ?? [],
 			},
 		);
 
@@ -412,12 +412,17 @@ export function createACPClient(
 		sessionId: string,
 		content: readonly ACPContentBlock[],
 		metadata?: Record<string, unknown>,
+		promptTimeoutMs?: number,
 	): Promise<ACPSessionPromptResult> => {
-		return connection.request<ACPSessionPromptResult>('session/prompt', {
-			sessionId,
-			prompt: content,
-			...(metadata && { metadata }),
-		});
+		return connection.request<ACPSessionPromptResult>(
+			'session/prompt',
+			{
+				sessionId,
+				prompt: content,
+				...(metadata && { metadata }),
+			},
+			promptTimeoutMs,
+		);
 	};
 
 	// -----------------------------------------------------------------------
@@ -527,6 +532,7 @@ export function createACPClient(
 				sessionId,
 				content,
 				buildSamplingMetadata(generateOptions?.sampling),
+				entry.timeoutMs ?? streamTimeoutMs,
 			);
 
 			return {
@@ -592,6 +598,7 @@ export function createACPClient(
 				sessionId,
 				content,
 				buildSamplingMetadata(chatOptions?.sampling),
+				entry.timeoutMs ?? streamTimeoutMs,
 			);
 
 			return {
@@ -697,11 +704,13 @@ export function createACPClient(
 			);
 
 			// Send the prompt — don't await yet, chunks arrive as notifications
+			const promptTimeoutMs = entry.timeoutMs ?? streamTimeoutMs;
 			const promptPromise = sendPrompt(
 				connection,
 				sessionId,
 				content,
 				buildSamplingMetadata(streamOptions?.sampling),
+				promptTimeoutMs,
 			).then((result) => {
 				// Final result arrived — mark stream as done
 				if (result.metadata) {

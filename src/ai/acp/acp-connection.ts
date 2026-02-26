@@ -151,9 +151,7 @@ export function createACPConnection(
 
 		if (permissionPolicy === 'auto-approve') {
 			// Pick the first "allow" option, preferring allow_always > allow_once
-			const allowAlways = permOptions.find(
-				(o) => o.kind === 'allow_always',
-			);
+			const allowAlways = permOptions.find((o) => o.kind === 'allow_always');
 			const allowOnce = permOptions.find((o) => o.kind === 'allow_once');
 			const pick = allowAlways ?? allowOnce;
 
@@ -189,9 +187,7 @@ export function createACPConnection(
 					} else {
 						// User cancelled or handler returned undefined — reject
 						const reject = permOptions.find(
-							(o) =>
-								o.kind === 'reject_once' ||
-								o.kind === 'reject_always',
+							(o) => o.kind === 'reject_once' || o.kind === 'reject_always',
 						);
 						sendResponse(id, {
 							outcome: reject

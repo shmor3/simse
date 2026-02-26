@@ -119,6 +119,8 @@ export interface ACPConfigInput {
 	readonly servers: readonly ACPServerEntryInput[];
 	readonly defaultServer?: string;
 	readonly defaultAgent?: string;
+	/** MCP server configs to pass to ACP agents during session creation. */
+	readonly mcpServers?: readonly import('../ai/acp/types.js').ACPMCPServerConfig[];
 }
 
 export const validateACPConfig = (

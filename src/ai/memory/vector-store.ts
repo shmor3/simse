@@ -114,6 +114,13 @@ export interface VectorStoreOptions {
 
 	/** Inject a custom logger. */
 	readonly logger?: Logger;
+
+	/**
+	 * Optional text cache for RAM optimization.
+	 * When provided, entry texts are cached in the LRU cache and
+	 * populated on add/load for faster search result hydration.
+	 */
+	readonly textCache?: import('./text-cache.js').TextCache;
 }
 
 // ---------------------------------------------------------------------------
@@ -193,6 +200,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	const duplicateThreshold = options.duplicateThreshold ?? 0;
 	const duplicateBehavior = options.duplicateBehavior ?? 'warn';
 	const recencyOpts = options.recency;
+	const textCache = options.textCache;
 	const learningEnabled = options.learning?.enabled ?? true;
 	const learningEngine: LearningEngine | undefined = learningEnabled
 		? createLearningEngine(options.learning)
@@ -344,6 +352,13 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		}
 		rebuildIndexes();
 
+		// Populate text cache with loaded entries
+		if (textCache) {
+			for (const entry of entries) {
+				textCache.put(entry.id, entry.text);
+			}
+		}
+
 		// Restore learning state
 		if (learningEngine && deserialized.learningState) {
 			try {
@@ -467,6 +482,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 			};
 			entries.push(newEntry);
 			indexEntry(newEntry);
+			textCache?.put(id, text);
 			dirty = true;
 			dirtyIds.add(id);
 
@@ -561,6 +577,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 				};
 				entries.push(newEntry);
 				indexEntry(newEntry);
+				textCache?.put(id, entry.text);
 				dirtyIds.add(id);
 			}
 
@@ -593,6 +610,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 			entries.splice(idx, 1);
 			deindexEntry(existing);
 			accessStats.delete(id);
+			textCache?.remove(id);
 			dirtyIds.delete(id);
 			dirty = true;
 
@@ -620,6 +638,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 			for (const entry of toRemove) {
 				deindexEntry(entry);
 				accessStats.delete(entry.id);
+				textCache?.remove(entry.id);
 				dirtyIds.delete(entry.id);
 			}
 			entries = entries.filter((e) => !idSet.has(e.id));
@@ -649,6 +668,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 			magnitudeCache.clear();
 			invertedIdx.clear();
 			accessStats.clear();
+			textCache?.clear();
 			dirtyIds.clear();
 			if (learningEngine) learningEngine.clear();
 			dirty = true;

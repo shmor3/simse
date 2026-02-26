@@ -98,6 +98,19 @@ export interface MemoryFileConfig {
 	readonly autoSummarizeThreshold?: number;
 }
 
+export interface SummarizeFileConfig {
+	/** ACP server name to use for summarization. */
+	readonly server: string;
+	/** Command to start the summarization ACP server. */
+	readonly command: string;
+	/** Args for the summarization ACP server command. */
+	readonly args?: readonly string[];
+	/** Agent ID for the summarization ACP server. */
+	readonly agent?: string;
+	/** Environment variables for the summarization ACP server. */
+	readonly env?: Readonly<Record<string, string>>;
+}
+
 export interface UserConfig {
 	/** Default agent ID for generation. */
 	readonly defaultAgent?: string;
@@ -355,6 +368,8 @@ export interface CLIConfigResult {
 	readonly embedConfig: EmbedFileConfig;
 	/** Resolved memory file config (from memory.json). */
 	readonly memoryConfig: MemoryFileConfig;
+	/** Summarization ACP config (from summarize.json, undefined if not configured). */
+	readonly summarizeConfig: SummarizeFileConfig | undefined;
 	/** MCP servers that were skipped due to missing API keys / env vars. */
 	readonly skippedServers: readonly SkippedServer[];
 	/** Workspace settings from .simse/settings.json in cwd. */
@@ -433,6 +448,11 @@ export function createCLIConfig(options?: CLIConfigOptions): CLIConfigResult {
 
 	const memoryConfig = readJsonFile<MemoryFileConfig>(memoryPath) ?? {};
 
+	// -- Load summarize.json (optional) ---------------------------------------
+
+	const summarizePath = join(dataDir, 'summarize.json');
+	const summarizeConfig = readJsonFile<SummarizeFileConfig>(summarizePath);
+
 	// -- Detect missing API keys for MCP servers that require them ------------
 
 	const skippedServers: SkippedServer[] = [];
@@ -466,6 +486,13 @@ export function createCLIConfig(options?: CLIConfigOptions): CLIConfigResult {
 			})),
 			defaultServer: acpFileConfig.defaultServer,
 			defaultAgent: acpFileConfig.defaultAgent ?? defaultAgent,
+			// Pass MCP server configs to ACP so agents can discover tools
+			mcpServers: validMcpServers.map((s) => ({
+				name: s.name,
+				command: s.command,
+				args: s.args ? [...s.args] : undefined,
+				env: s.env,
+			})),
 		},
 		mcp: {
 			client: {
@@ -502,6 +529,7 @@ export function createCLIConfig(options?: CLIConfigOptions): CLIConfigResult {
 		logger,
 		embedConfig,
 		memoryConfig,
+		summarizeConfig,
 		skippedServers,
 		workspaceSettings,
 		prompts,

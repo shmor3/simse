@@ -8,7 +8,7 @@
  * Pattern: user input -> model reasons -> tool calls -> execute -> repeat
  */
 
-import type { ACPClient, Logger } from 'simse';
+import type { ACPClient, ACPToolCall, ACPToolCallUpdate, Logger } from 'simse';
 import { toError } from 'simse';
 import type { Conversation } from './conversation.js';
 import type {
@@ -31,6 +31,12 @@ export interface AgenticLoopOptions {
 	readonly agentId?: string;
 	readonly systemPrompt?: string;
 	readonly signal?: AbortSignal;
+	/**
+	 * When true, the ACP agent manages its own tool calling (e.g. Claude Code).
+	 * Skips injecting `<tool_use>` XML and skips parsing tool calls from responses.
+	 * Tool activity is reported via `onAgentToolCall`/`onAgentToolCallUpdate` callbacks.
+	 */
+	readonly agentManagesTools?: boolean;
 }
 
 export interface LoopTurn {
@@ -48,6 +54,10 @@ export interface LoopCallbacks {
 	readonly onToolCallEnd?: (result: ToolCallResult) => void;
 	readonly onTurnComplete?: (turn: LoopTurn) => void;
 	readonly onError?: (error: Error) => void;
+	/** Called when the ACP agent starts a tool call (agentManagesTools mode). */
+	readonly onAgentToolCall?: (toolCall: ACPToolCall) => void;
+	/** Called when the ACP agent updates a tool call (agentManagesTools mode). */
+	readonly onAgentToolCallUpdate?: (update: ACPToolCallUpdate) => void;
 }
 
 export interface AgenticLoopResult {
@@ -132,6 +142,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		agentId,
 		systemPrompt,
 		signal,
+		agentManagesTools = false,
 	} = options;
 
 	const run = async (
@@ -140,8 +151,12 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 	): Promise<AgenticLoopResult> => {
 		conversation.addUser(userInput);
 
-		// Build system prompt: tool definitions + user-provided system prompt
-		const toolPrompt = toolRegistry.formatForSystemPrompt();
+		// Build system prompt: tool definitions + user-provided system prompt.
+		// When agentManagesTools is true, skip injecting tool definitions —
+		// the ACP agent discovers tools via MCP servers.
+		const toolPrompt = agentManagesTools
+			? ''
+			: toolRegistry.formatForSystemPrompt();
 		const fullSystemPrompt = [toolPrompt, systemPrompt]
 			.filter(Boolean)
 			.join('\n\n');
@@ -176,6 +191,12 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 				const stream = acpClient.generateStream(prompt, {
 					serverName,
 					agentId,
+					onToolCall: agentManagesTools
+						? (tc) => callbacks?.onAgentToolCall?.(tc)
+						: undefined,
+					onToolCallUpdate: agentManagesTools
+						? (update) => callbacks?.onAgentToolCallUpdate?.(update)
+						: undefined,
 				});
 
 				for await (const chunk of stream) {
@@ -211,8 +232,14 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 				fullResponse = emptyMsg;
 			}
 
-			// Parse response for tool calls
-			const parsed = parseToolCalls(fullResponse);
+			// When agent manages tools, skip parsing — the response is always
+			// final text. The agent already executed its tools internally.
+			const parsed = agentManagesTools
+				? {
+						text: fullResponse.trim(),
+						toolCalls: [] as readonly ToolCallRequest[],
+					}
+				: parseToolCalls(fullResponse);
 			conversation.addAssistant(fullResponse);
 
 			if (parsed.toolCalls.length === 0) {

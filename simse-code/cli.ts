@@ -409,7 +409,20 @@ async function handleBareTextInput(
 	const abortController = new AbortController();
 	session.abortController = abortController;
 
-	// 4. Create and run the agentic loop
+	// 4. Determine if the ACP agent manages its own tools.
+	// Agents with permissionPolicy (Claude Code, Copilot) have native tools
+	// and don't need <tool_use> XML injection. Simple text generators (Ollama)
+	// need tools injected via the system prompt.
+	const resolvedServerName =
+		session.serverName ??
+		ctx.configResult.config.acp.defaultServer ??
+		ctx.configResult.config.acp.servers[0]?.name;
+	const serverEntry = ctx.configResult.config.acp.servers.find(
+		(s) => s.name === resolvedServerName,
+	);
+	const agentManagesTools = !!serverEntry?.permissionPolicy;
+
+	// 5. Create and run the agentic loop
 	const loop = createAgenticLoop({
 		acpClient: ctx.acpClient,
 		toolRegistry: ctx.toolRegistry,
@@ -418,6 +431,7 @@ async function handleBareTextInput(
 		serverName: session.serverName,
 		systemPrompt: systemPromptParts.join('\n\n') || undefined,
 		signal: abortController.signal,
+		agentManagesTools,
 	});
 
 	spinner.start();
@@ -453,6 +467,36 @@ async function handleBareTextInput(
 				renderToolResult(toolResult.output, toolResult.isError, colors),
 			);
 			spinner.start();
+		},
+		onAgentToolCall: (toolCall) => {
+			if (!firstChunk) {
+				process.stdout.write('\n\n');
+				firstChunk = true;
+			}
+			spinner.stop();
+			console.log(
+				renderToolCall(
+					toolCall.title || toolCall.toolCallId,
+					toolCall.kind,
+					colors,
+				),
+			);
+			spinner.start();
+		},
+		onAgentToolCallUpdate: (update) => {
+			if (update.status === 'completed' || update.status === 'failed') {
+				spinner.stop();
+				const output =
+					typeof update.content === 'string'
+						? update.content
+						: update.content
+							? JSON.stringify(update.content)
+							: update.status;
+				console.log(
+					renderToolResult(output, update.status === 'failed', colors),
+				);
+				spinner.start();
+			}
 		},
 		onError: (error) => {
 			spinner.stop();
@@ -544,7 +588,18 @@ async function handleSkillInvocation(
 	const abortController = new AbortController();
 	session.abortController = abortController;
 
-	// 5. Run the agentic loop
+	// 5. Determine if agent manages its own tools
+	const skillServerName =
+		skill.serverName ??
+		session.serverName ??
+		ctx.configResult.config.acp.defaultServer ??
+		ctx.configResult.config.acp.servers[0]?.name;
+	const skillServerEntry = ctx.configResult.config.acp.servers.find(
+		(s) => s.name === skillServerName,
+	);
+	const skillAgentManagesTools = !!skillServerEntry?.permissionPolicy;
+
+	// 6. Run the agentic loop
 	const loop = createAgenticLoop({
 		acpClient: ctx.acpClient,
 		toolRegistry: ctx.toolRegistry,
@@ -553,6 +608,7 @@ async function handleSkillInvocation(
 		serverName: skill.serverName ?? session.serverName,
 		systemPrompt: systemPromptParts.join('\n\n'),
 		signal: abortController.signal,
+		agentManagesTools: skillAgentManagesTools,
 	});
 
 	spinner.start();
@@ -2903,13 +2959,10 @@ async function main(): Promise<void> {
 	const acpClient = createACPClient(config.acp, {
 		logger,
 		onPermissionRequest: async (info: ACPPermissionRequestInfo) => {
-			const desc = info.description ?? info.title ?? 'Agent requests permission';
-			const allowOption = info.options.find(
-				(o) => o.kind === 'allow_once',
-			);
-			const rejectOption = info.options.find(
-				(o) => o.kind === 'reject_once',
-			);
+			const desc =
+				info.description ?? info.title ?? 'Agent requests permission';
+			const allowOption = info.options.find((o) => o.kind === 'allow_once');
+			const rejectOption = info.options.find((o) => o.kind === 'reject_once');
 
 			// Show the permission request to the user
 			console.log(
@@ -2923,10 +2976,7 @@ async function main(): Promise<void> {
 			});
 
 			const answer = await new Promise<string>((resolve) => {
-				permRl.question(
-					`  ${colors.dim('[a]llow / [d]eny?')} `,
-					resolve,
-				);
+				permRl.question(`  ${colors.dim('[a]llow / [d]eny?')} `, resolve);
 			});
 			permRl.close();
 

@@ -212,6 +212,16 @@ export interface ACPConfig {
 	readonly defaultServer?: string;
 	/** Default agent ID used when neither the step nor the server specifies one. */
 	readonly defaultAgent?: string;
+	/** MCP server configs to pass to ACP agents during session creation. */
+	readonly mcpServers?: readonly ACPMCPServerConfig[];
+}
+
+/** MCP server config passed to ACP agents so they can discover tools. */
+export interface ACPMCPServerConfig {
+	readonly name: string;
+	readonly command: string;
+	readonly args?: readonly string[];
+	readonly env?: Readonly<Record<string, string>>;
 }
 
 // ---------------------------------------------------------------------------

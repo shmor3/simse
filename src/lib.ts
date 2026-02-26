@@ -49,6 +49,7 @@ export type {
 	ACPGenerateOptions,
 	ACPGenerateResult,
 	ACPInitializeResult,
+	ACPMCPServerConfig,
 	ACPModeInfo,
 	ACPModelInfo,
 	ACPModelsInfo,
@@ -174,10 +175,20 @@ export type {
 } from './ai/memory/memory.js';
 // ---- Memory / Vector Store ------------------------------------------------
 export { createMemoryManager } from './ai/memory/memory.js';
+export type {
+	MemoryMiddleware,
+	MemoryMiddlewareOptions,
+	MiddlewareContext,
+} from './ai/memory/middleware.js';
+export { createMemoryMiddleware } from './ai/memory/middleware.js';
+export type { PromptInjectionOptions } from './ai/memory/prompt-injection.js';
+export { formatMemoryContext } from './ai/memory/prompt-injection.js';
 export type { ParsedQuery } from './ai/memory/query-dsl.js';
 export { parseQuery } from './ai/memory/query-dsl.js';
 export type { RecencyOptions } from './ai/memory/recommendation.js';
 export type { StorageBackend } from './ai/memory/storage.js';
+export type { TextCache, TextCacheOptions } from './ai/memory/text-cache.js';
+export { createTextCache } from './ai/memory/text-cache.js';
 export type {
 	AdvancedSearchResult,
 	DateRange,

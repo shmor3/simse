@@ -5,7 +5,9 @@
 import type { EventBus } from '../../events/types.js';
 import type { Logger } from '../../logger.js';
 import type { ACPClient } from '../acp/acp-client.js';
+import type { ACPToolCall, ACPToolCallUpdate } from '../acp/types.js';
 import type { Conversation } from '../conversation/types.js';
+import type { MemoryMiddleware } from '../memory/middleware.js';
 import type { TextGenerationProvider } from '../memory/types.js';
 import type {
 	ToolCallRequest,
@@ -43,6 +45,16 @@ export interface AgenticLoopOptions {
 	};
 	/** Optional event bus for publishing loop lifecycle events. */
 	readonly eventBus?: EventBus;
+	/** Optional memory middleware for per-turn context enrichment and response storage. */
+	readonly memoryMiddleware?: MemoryMiddleware;
+	/**
+	 * When true, the ACP agent manages its own tool calling (e.g. Claude Code).
+	 * Skips injecting `<tool_use>` XML into the system prompt and skips
+	 * parsing `<tool_use>` tags from responses. Instead, tool activity is
+	 * reported via `onToolCall`/`onToolCallUpdate` callbacks from ACP
+	 * `session/update` notifications.
+	 */
+	readonly agentManagesTools?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +98,10 @@ export interface LoopCallbacks {
 	readonly onTurnComplete?: (turn: LoopTurn) => void;
 	readonly onCompaction?: (summary: string) => void;
 	readonly onError?: (error: Error) => void;
+	/** Called when the ACP agent starts a tool call (agentManagesTools mode). */
+	readonly onAgentToolCall?: (toolCall: ACPToolCall) => void;
+	/** Called when the ACP agent updates a tool call (agentManagesTools mode). */
+	readonly onAgentToolCallUpdate?: (update: ACPToolCallUpdate) => void;
 	readonly onSubagentStart?: (info: SubagentInfo) => void;
 	readonly onSubagentStreamDelta?: (id: string, text: string) => void;
 	readonly onSubagentToolCallStart?: (

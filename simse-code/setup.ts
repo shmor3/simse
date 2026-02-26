@@ -4,13 +4,14 @@
  * Global setup: asks the bare minimum to get running (one ACP server).
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Interface as ReadlineInterface } from 'node:readline';
 import type {
 	ACPFileConfig,
 	ACPServerConfig,
 	EmbedFileConfig,
+	SummarizeFileConfig,
 } from './config.js';
 
 // ---------------------------------------------------------------------------
@@ -196,6 +197,85 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
 		writeFileSync(acpPath, `${JSON.stringify(config, null, '\t')}\n`, 'utf-8');
 		filesCreated.push('acp.json');
 		console.log(`\n  Wrote ${acpPath}`);
+	}
+
+	// -- Capture ACP config for reuse in summarization -------------------------
+
+	let acpFileConfig: ACPFileConfig | undefined;
+	try {
+		const rawAcp = readFileSync(acpPath, 'utf-8');
+		acpFileConfig = JSON.parse(rawAcp) as ACPFileConfig;
+	} catch {
+		// Ignore — preset may not have been written if acp.json already existed
+	}
+
+	// -- Summarization ACP config (interactive) --------------------------------
+
+	const summarizePath = join(dataDir, 'summarize.json');
+
+	if (existsSync(summarizePath)) {
+		console.log('  summarize.json already exists, skipping.');
+	} else {
+		console.log(
+			'\n  Configure summarization? (uses a separate LLM for auto-summarizing notes)\n',
+		);
+		console.log('    1) Same as above  —  Reuse main ACP server');
+		console.log(
+			'    2) Different provider  —  Configure a separate ACP server',
+		);
+		console.log('    3) Skip  —  No auto-summarization');
+		console.log('');
+
+		let summarizeChoice = -1;
+		while (summarizeChoice < 1 || summarizeChoice > 3) {
+			const answer = (await ask(rl, '  Choice [1-3]: ')).trim();
+			const num = Number.parseInt(answer, 10);
+			if (!Number.isNaN(num) && num >= 1 && num <= 3) {
+				summarizeChoice = num;
+			}
+		}
+
+		if (summarizeChoice === 1 && acpFileConfig) {
+			// Reuse the first ACP server entry
+			const mainServer = acpFileConfig.servers[0];
+			const summarizeConfig: SummarizeFileConfig = {
+				server: mainServer.name,
+				command: mainServer.command,
+				...(mainServer.args && { args: mainServer.args }),
+			};
+			writeFileSync(
+				summarizePath,
+				`${JSON.stringify(summarizeConfig, null, '\t')}\n`,
+				'utf-8',
+			);
+			filesCreated.push('summarize.json');
+			console.log(`  Wrote ${summarizePath}`);
+		} else if (summarizeChoice === 2) {
+			const serverName = await askRequired(rl, '  Server name: ');
+			const command = await askRequired(rl, '  Command: ');
+			const argsStr = await askOptional(
+				rl,
+				'  Args (space-separated, enter to skip): ',
+			);
+			const args = argsStr ? argsStr.split(/\s+/) : undefined;
+			const agent = await askOptional(rl, '  Agent ID (enter to skip): ');
+
+			const summarizeConfig: SummarizeFileConfig = {
+				server: serverName,
+				command,
+				...(args && { args }),
+				...(agent && { agent }),
+			};
+			writeFileSync(
+				summarizePath,
+				`${JSON.stringify(summarizeConfig, null, '\t')}\n`,
+				'utf-8',
+			);
+			filesCreated.push('summarize.json');
+			console.log(`  Wrote ${summarizePath}`);
+		} else {
+			console.log('  Skipping summarization config.');
+		}
 	}
 
 	// -- Generate remaining config files with defaults (skip existing) ------

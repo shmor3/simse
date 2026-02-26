@@ -410,6 +410,11 @@ export const defineConfig = (
 			servers: Object.freeze(input.acp.servers.map(resolveACPServerEntry)),
 			defaultServer: input.acp.defaultServer,
 			defaultAgent: input.acp.defaultAgent,
+			mcpServers: input.acp.mcpServers
+				? Object.freeze(
+						input.acp.mcpServers.map((s) => Object.freeze({ ...s })),
+					)
+				: undefined,
 		}),
 		mcp: Object.freeze({
 			client: Object.freeze({

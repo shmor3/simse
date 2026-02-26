@@ -58,6 +58,8 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		streamRetry,
 		toolRetry,
 		eventBus,
+		memoryMiddleware,
+		agentManagesTools = false,
 	} = options;
 
 	const streamMaxAttempts = streamRetry?.maxAttempts ?? 2;
@@ -72,20 +74,38 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		const loopStart = Date.now();
 		conversation.addUser(userInput);
 
-		// Build system prompt: tool definitions + user-provided system prompt
-		const toolPrompt = toolRegistry.formatForSystemPrompt();
-		const fullSystemPrompt = [toolPrompt, systemPrompt]
+		// Build base system prompt: tool definitions + user-provided system prompt
+		// When agentManagesTools is true, skip injecting tool definitions — the
+		// ACP agent discovers tools via MCP servers passed during session/new.
+		const toolPrompt = agentManagesTools
+			? ''
+			: toolRegistry.formatForSystemPrompt();
+		const baseSystemPrompt = [toolPrompt, systemPrompt]
 			.filter(Boolean)
 			.join('\n\n');
-
-		if (fullSystemPrompt) {
-			conversation.setSystemPrompt(fullSystemPrompt);
-		}
 
 		const turns: LoopTurn[] = [];
 		let lastText = '';
 
 		for (let turn = 1; turn <= maxTurns; turn++) {
+			// Enrich system prompt with memory context each turn
+			let turnSystemPrompt = baseSystemPrompt;
+			if (memoryMiddleware) {
+				try {
+					turnSystemPrompt = await memoryMiddleware.enrichSystemPrompt({
+						userInput,
+						currentSystemPrompt: baseSystemPrompt,
+						conversationHistory: conversation.serialize(),
+						turn,
+					});
+				} catch {
+					// Graceful degradation: use base prompt
+				}
+			}
+
+			if (turnSystemPrompt) {
+				conversation.setSystemPrompt(turnSystemPrompt);
+			}
 			// Check for abort before each turn
 			if (signal?.aborted) {
 				return Object.freeze({
@@ -143,6 +163,12 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 					const stream = acpClient.generateStream(prompt, {
 						serverName,
 						agentId,
+						onToolCall: agentManagesTools
+							? (tc) => callbacks?.onAgentToolCall?.(tc)
+							: undefined,
+						onToolCallUpdate: agentManagesTools
+							? (update) => callbacks?.onAgentToolCallUpdate?.(update)
+							: undefined,
 					});
 
 					for await (const chunk of stream) {
@@ -185,8 +211,15 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 				fullResponse = emptyMsg;
 			}
 
-			// Parse response for tool calls
-			const parsed = toolRegistry.parseToolCalls(fullResponse);
+			// When agent manages tools, skip parsing — the response is always
+			// final text. The agent already executed its tools internally.
+			const parsed = agentManagesTools
+				? {
+						text: fullResponse.trim(),
+						toolCalls:
+							[] as readonly import('../tools/types.js').ToolCallRequest[],
+					}
+				: toolRegistry.parseToolCalls(fullResponse);
 			conversation.addAssistant(fullResponse);
 
 			if (parsed.toolCalls.length === 0) {
@@ -204,6 +237,15 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 					type: loopTurn.type,
 				});
 				lastText = parsed.text;
+
+				// Store response in memory after final text turn
+				if (memoryMiddleware && lastText) {
+					try {
+						await memoryMiddleware.afterResponse(userInput, lastText);
+					} catch {
+						// Graceful degradation
+					}
+				}
 
 				return Object.freeze({
 					finalText: lastText,
@@ -284,7 +326,15 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 			lastText = parsed.text;
 		}
 
-		// Hit turn limit
+		// Hit turn limit — store response in memory
+		if (memoryMiddleware && lastText) {
+			try {
+				await memoryMiddleware.afterResponse(userInput, lastText);
+			} catch {
+				// Graceful degradation
+			}
+		}
+
 		return Object.freeze({
 			finalText: lastText,
 			turns: Object.freeze(turns),

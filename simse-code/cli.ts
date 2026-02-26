@@ -3440,6 +3440,9 @@ async function main(): Promise<void> {
 			const alwaysOption = info.options.find((o) => o.kind === 'allow_always');
 			const rejectOption = info.options.find((o) => o.kind === 'reject_once');
 
+			// Stop the spinner so it doesn't overwrite the readline prompt
+			spinner.stop();
+
 			// Show the permission request to the user
 			console.log(
 				`\n  ${colors.yellow('⚠')} ${colors.bold('Permission requested:')} ${desc}`,
@@ -3495,6 +3498,9 @@ async function main(): Promise<void> {
 				permRl.question(`  ${colors.dim(choices.join(' / '))} `, resolve);
 			});
 			permRl.close();
+
+			// Restart the spinner now that the user has answered
+			spinner.start();
 
 			const choice = answer.trim().toLowerCase();
 			if (choice === 'a' || choice === 'always') {

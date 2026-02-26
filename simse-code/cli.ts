@@ -116,12 +116,14 @@ function embedConfigChanged(
 interface CLIArgs {
 	readonly dataDir: string;
 	readonly logLevel?: 'debug' | 'info' | 'warn' | 'error' | 'none';
+	readonly bypassPermissions: boolean;
 }
 
 function parseArgs(): CLIArgs {
 	const args = process.argv.slice(2);
 	let dataDir = join(homedir(), '.simse');
 	let logLevel: CLIArgs['logLevel'];
+	let bypassPermissions = false;
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i];
@@ -130,6 +132,11 @@ function parseArgs(): CLIArgs {
 		if (arg === '--data-dir' && next) dataDir = args[++i];
 		else if (arg === '--log-level' && next)
 			logLevel = args[++i] as CLIArgs['logLevel'];
+		else if (
+			arg === '--bypass-permissions' ||
+			arg === '--dangerously-skip-permissions'
+		)
+			bypassPermissions = true;
 		else if (arg === '--help' || arg === '-h') {
 			printUsage();
 			process.exit(0);
@@ -139,6 +146,7 @@ function parseArgs(): CLIArgs {
 	return {
 		dataDir,
 		logLevel,
+		bypassPermissions,
 	};
 }
 
@@ -3340,6 +3348,13 @@ async function main(): Promise<void> {
 			return rejectOption?.optionId;
 		},
 	});
+
+	// Apply bypass-permissions flag before initialization so auto-approve
+	// is active from the very first ACP interaction
+	if (cliArgs.bypassPermissions) {
+		acpClient.setPermissionPolicy('auto-approve');
+	}
+
 	const { embedConfig } = configResult;
 	const embedder = createLocalEmbedder({
 		model: embedConfig.embeddingModel,
@@ -3553,7 +3568,7 @@ async function main(): Promise<void> {
 		serverName: undefined,
 		agentName: undefined,
 		memoryEnabled: true,
-		bypassPermissions: false,
+		bypassPermissions: cliArgs.bypassPermissions,
 		maxTurns: 10,
 		totalTurns: 0,
 		abortController: undefined,

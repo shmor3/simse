@@ -90,6 +90,13 @@ export interface EventPayloadMap {
 		readonly turn: number;
 		readonly attempt: number;
 		readonly error: string;
+		readonly delayMs: number;
+		readonly nextAttemptAt: number;
+	};
+	'loop.doom_loop': {
+		readonly toolName: string;
+		readonly callCount: number;
+		readonly args: Record<string, unknown>;
 	};
 	'tool.timeout': {
 		readonly name: string;

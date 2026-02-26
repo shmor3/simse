@@ -31,6 +31,8 @@ export interface SessionManager {
 		id: string,
 		status: SessionStatus,
 	) => Session | undefined;
+	/** Fork a session — create a new session with cloned conversation state. */
+	readonly fork: (id: string) => Session | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,11 +85,35 @@ export function createSessionManager(): SessionManager {
 		return updated;
 	};
 
+	const fork = (id: string): Session | undefined => {
+		const existing = sessions.get(id);
+		if (!existing) return undefined;
+
+		const newId = generateId();
+		const now = Date.now();
+		const newConversation = createConversation();
+
+		// Clone conversation state via JSON serialization
+		newConversation.fromJSON(existing.conversation.toJSON());
+
+		const forked: Session = Object.freeze({
+			id: newId,
+			conversation: newConversation,
+			eventBus: createEventBus(),
+			status: 'active' as const,
+			createdAt: now,
+			updatedAt: now,
+		});
+		sessions.set(newId, forked);
+		return forked;
+	};
+
 	return Object.freeze({
 		create,
 		get,
 		delete: del,
 		list,
 		updateStatus,
+		fork,
 	});
 }

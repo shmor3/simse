@@ -45,6 +45,8 @@ export interface ToolDefinition {
 	readonly annotations?: ToolAnnotations;
 	/** Per-tool execution timeout in milliseconds. Overrides `defaultToolTimeoutMs`. */
 	readonly timeoutMs?: number;
+	/** Per-tool output character limit. Overrides `maxOutputChars` from registry options. */
+	readonly maxOutputChars?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -112,6 +114,8 @@ export interface ToolRegistryOptions {
 	readonly logger?: Logger;
 	/** Default timeout for tool execution in milliseconds. Per-tool `timeoutMs` overrides this. */
 	readonly defaultToolTimeoutMs?: number;
+	/** Maximum characters for tool output before truncation. Per-tool `maxOutputChars` overrides this. Default: 50_000. */
+	readonly maxOutputChars?: number;
 	/** Optional event bus for publishing tool lifecycle events. */
 	readonly eventBus?: EventBus;
 }

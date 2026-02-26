@@ -86,6 +86,7 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		vfs,
 		permissionResolver,
 		defaultToolTimeoutMs,
+		maxOutputChars: defaultMaxOutputChars = 50_000,
 		eventBus,
 	} = options;
 	const tools = new Map<string, RegisteredTool>();
@@ -247,13 +248,23 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		let isError = false;
 		try {
 			const timeoutMs = registered.definition.timeoutMs ?? defaultToolTimeoutMs;
-			const output = timeoutMs
+			let output = timeoutMs
 				? await withTimeout(
 						() => registered.handler(call.arguments),
 						timeoutMs,
 						{ operation: `tool:${call.name}` },
 					)
 				: await registered.handler(call.arguments);
+
+			// Truncate oversized output to prevent context window overflow
+			const charLimit =
+				registered.definition.maxOutputChars ?? defaultMaxOutputChars;
+			if (charLimit > 0 && output.length > charLimit) {
+				output =
+					output.slice(0, charLimit) +
+					`\n\n[OUTPUT TRUNCATED — ${output.length} chars total, showing first ${charLimit}]`;
+			}
+
 			return Object.freeze({
 				id: call.id,
 				name: call.name,

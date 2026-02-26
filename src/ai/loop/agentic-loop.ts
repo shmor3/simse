@@ -63,6 +63,8 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		agentManagesTools = false,
 		systemPromptBuilder,
 		contextPruner,
+		maxIdenticalToolCalls = 3,
+		compactionPrompt,
 	} = options;
 
 	const streamMaxAttempts = streamRetry?.maxAttempts ?? 2;
@@ -97,6 +99,9 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		const turns: LoopTurn[] = [];
 		let lastText = '';
 		let accumulatedUsage: ACPTokenUsage | undefined;
+
+		// Doom loop tracking — detect consecutive identical tool calls
+		const recentToolCalls: Array<{ name: string; argsHash: string }> = [];
 
 		const addUsage = (usage: ACPTokenUsage): void => {
 			if (!accumulatedUsage) {
@@ -171,8 +176,28 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 							messageCount: conversation.messageCount,
 							estimatedChars: conversation.estimatedChars,
 						});
+
+						let conversationText = conversation.serialize();
+
+						// Allow consumers to inject critical context before compaction
+						const extra = callbacks?.onPreCompaction?.(conversationText);
+						if (extra) {
+							conversationText += `\n\n${extra}`;
+						}
+
+						const defaultCompactionPrompt = `Summarize this conversation for continued operation. Include:
+1. **Goal**: The original user request
+2. **Progress**: What has been accomplished so far
+3. **Current State**: Where we are right now
+4. **Key Decisions**: Important choices made and their rationale
+5. **Relevant Files**: File paths referenced or modified
+6. **Next Steps**: What remains to be done
+
+Be concise but preserve all information needed to continue without re-reading the original conversation.`;
+
+						const prompt = compactionPrompt ?? defaultCompactionPrompt;
 						const summary = await compactionProvider.generate(
-							`Summarize this conversation concisely, preserving key context and decisions:\n\n${conversation.serialize()}`,
+							`${prompt}\n\n${conversationText}`,
 						);
 						conversation.compact(summary);
 						callbacks?.onCompaction?.(summary);
@@ -246,10 +271,13 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 					break; // success — exit retry loop
 				} catch (err) {
 					if (streamAttempt < streamMaxAttempts && isTransientError(err)) {
+						const delay = streamBaseDelayMs * 2 ** (streamAttempt - 1);
 						eventBus?.publish('stream.retry', {
 							turn,
 							attempt: streamAttempt + 1,
 							error: toError(err).message,
+							delayMs: delay,
+							nextAttemptAt: Date.now() + delay,
 						});
 						continue; // retry
 					}
@@ -363,6 +391,30 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 						await new Promise<void>((r) => setTimeout(r, delay));
 						result = await toolRegistry.execute(call);
 						if (!result.isError) break;
+					}
+				}
+
+				// Doom loop detection: track consecutive identical tool calls
+				const argsHash = JSON.stringify(call.arguments);
+				recentToolCalls.push({ name: call.name, argsHash });
+
+				// Check if last N calls are identical
+				if (recentToolCalls.length >= maxIdenticalToolCalls) {
+					const tail = recentToolCalls.slice(-maxIdenticalToolCalls);
+					const allSame = tail.every(
+						(c) => c.name === tail[0].name && c.argsHash === tail[0].argsHash,
+					);
+					if (allSame) {
+						callbacks?.onDoomLoop?.(call.name, maxIdenticalToolCalls);
+						eventBus?.publish('loop.doom_loop', {
+							toolName: call.name,
+							callCount: maxIdenticalToolCalls,
+							args: call.arguments,
+						});
+						// Inject warning into conversation
+						conversation.addUser(
+							`[System] Warning: You have called ${call.name} with identical arguments ${maxIdenticalToolCalls} times. Try a different approach.`,
+						);
 					}
 				}
 

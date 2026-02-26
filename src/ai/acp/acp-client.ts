@@ -357,6 +357,35 @@ export function createACPClient(
 						logger.debug(
 							`Retrying "${operation}" (attempt ${attempt}/${maxRetryAttempts})`,
 						);
+						// Check connection health before retry — stale connections
+						// can persist even after increasing timeout defaults
+						const conn = connections.get(sName);
+						if (conn && !conn.isHealthy) {
+							logger.warn(
+								`Connection to "${sName}" is unhealthy before retry, reconnecting`,
+							);
+							await conn.close();
+							connections.delete(sName);
+							const entry = config.servers.find((s) => s.name === sName);
+							if (entry) {
+								const fresh = createACPConnection({
+									command: entry.command,
+									args: entry.args,
+									cwd: entry.cwd,
+									env: entry.env,
+									timeoutMs: entry.timeoutMs,
+									permissionPolicy: entry.permissionPolicy,
+									clientName,
+									clientVersion,
+									stderrHandler: (text) => {
+										logger.debug(`ACP server "${entry.name}" stderr: ${text}`);
+									},
+									onPermissionRequest: options?.onPermissionRequest,
+								});
+								await fresh.initialize();
+								connections.set(sName, fresh);
+							}
+						}
 					}
 					return fn();
 				},

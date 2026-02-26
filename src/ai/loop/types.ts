@@ -71,6 +71,10 @@ export interface AgenticLoopOptions {
 	 * prunes old tool outputs before falling through to full summarization.
 	 */
 	readonly contextPruner?: ContextPruner;
+	/** Max consecutive identical tool calls before doom loop fires. Default: 3. */
+	readonly maxIdenticalToolCalls?: number;
+	/** Custom compaction prompt override. */
+	readonly compactionPrompt?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +135,10 @@ export interface LoopCallbacks {
 	readonly onSubagentError?: (id: string, error: Error) => void;
 	/** Called after each turn with the accumulated token usage across all turns. */
 	readonly onUsageUpdate?: (accumulated: ACPTokenUsage) => void;
+	/** Called when a doom loop is detected (same tool + args called N times consecutively). */
+	readonly onDoomLoop?: (toolName: string, callCount: number) => void;
+	/** Called before compaction — return a string to append to conversation for context preservation. */
+	readonly onPreCompaction?: (conversation: string) => string | undefined;
 }
 
 // ---------------------------------------------------------------------------

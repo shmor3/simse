@@ -76,4 +76,54 @@ describe('session manager', () => {
 		const updated = mgr.updateStatus(session.id, 'completed');
 		expect(Object.isFrozen(updated)).toBe(true);
 	});
+
+	it('forks a session with cloned conversation', () => {
+		const mgr = createSessionManager();
+		const session = mgr.create();
+		session.conversation.addUser('Hello');
+		session.conversation.addAssistant('Hi there');
+
+		const forked = mgr.fork(session.id);
+		expect(forked).toBeDefined();
+		expect(forked!.id).not.toBe(session.id);
+		expect(forked!.status).toBe('active');
+		// Conversation content is cloned
+		const cloned = forked!.conversation.serialize();
+		expect(cloned).toContain('Hello');
+		expect(cloned).toContain('Hi there');
+		// But it's a different conversation object
+		expect(forked!.conversation).not.toBe(session.conversation);
+	});
+
+	it('forked session has independent conversation', () => {
+		const mgr = createSessionManager();
+		const session = mgr.create();
+		session.conversation.addUser('Initial');
+
+		const forked = mgr.fork(session.id)!;
+		forked.conversation.addUser('Forked message');
+
+		// Original should not have the new message
+		expect(session.conversation.serialize()).not.toContain('Forked message');
+		expect(forked.conversation.serialize()).toContain('Forked message');
+	});
+
+	it('fork returns undefined for unknown id', () => {
+		const mgr = createSessionManager();
+		expect(mgr.fork('unknown')).toBeUndefined();
+	});
+
+	it('forked session is frozen', () => {
+		const mgr = createSessionManager();
+		const session = mgr.create();
+		const forked = mgr.fork(session.id);
+		expect(Object.isFrozen(forked)).toBe(true);
+	});
+
+	it('forked session is retrievable by id', () => {
+		const mgr = createSessionManager();
+		const session = mgr.create();
+		const forked = mgr.fork(session.id)!;
+		expect(mgr.get(forked.id)).toBe(forked);
+	});
 });

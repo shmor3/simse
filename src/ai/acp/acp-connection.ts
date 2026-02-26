@@ -102,6 +102,8 @@ export interface ACPConnection {
 	readonly close: () => Promise<void>;
 	readonly setPermissionPolicy: (policy: ACPPermissionPolicy) => void;
 	readonly isConnected: boolean;
+	/** True when the child process is still running and the connection is open. */
+	readonly isHealthy: boolean;
 	readonly serverInfo: ACPInitializeResult | undefined;
 	readonly permissionPolicy: ACPPermissionPolicy;
 }
@@ -125,8 +127,8 @@ interface PendingRequest {
 export function createACPConnection(
 	options: ACPConnectionOptions,
 ): ACPConnection {
-	const timeoutMs = options.timeoutMs ?? 30_000;
-	const initTimeoutMs = options.initTimeoutMs ?? 10_000;
+	const timeoutMs = options.timeoutMs ?? 60_000;
+	const initTimeoutMs = options.initTimeoutMs ?? 30_000;
 	let permissionPolicy: ACPPermissionPolicy =
 		options.permissionPolicy ?? 'prompt';
 	const clientName = options.clientName ?? 'simse';
@@ -621,6 +623,9 @@ export function createACPConnection(
 		},
 		get isConnected() {
 			return connected;
+		},
+		get isHealthy() {
+			return connected && !!child && !child.killed && child.exitCode === null;
 		},
 		get serverInfo() {
 			return serverInfo;

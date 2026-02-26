@@ -128,6 +128,69 @@ describe('tool execution metrics', () => {
 	});
 });
 
+describe('tool output truncation', () => {
+	it('truncates output exceeding default maxOutputChars', async () => {
+		const registry = createToolRegistry({
+			maxOutputChars: 100,
+		});
+		registry.register(
+			{ name: 'big_tool', description: 'returns big output', parameters: {} },
+			async () => 'x'.repeat(200),
+		);
+
+		const result = await registry.execute({
+			id: 'c1',
+			name: 'big_tool',
+			arguments: {},
+		});
+		expect(result.isError).toBe(false);
+		expect(result.output.length).toBeLessThan(200);
+		expect(result.output).toContain('[OUTPUT TRUNCATED');
+		expect(result.output).toContain('200 chars total');
+		expect(result.output).toContain('showing first 100');
+	});
+
+	it('does not truncate output under the limit', async () => {
+		const registry = createToolRegistry({
+			maxOutputChars: 1000,
+		});
+		registry.register(
+			{ name: 'small_tool', description: 'small output', parameters: {} },
+			async () => 'hello',
+		);
+
+		const result = await registry.execute({
+			id: 'c1',
+			name: 'small_tool',
+			arguments: {},
+		});
+		expect(result.output).toBe('hello');
+	});
+
+	it('per-tool maxOutputChars overrides registry default', async () => {
+		const registry = createToolRegistry({
+			maxOutputChars: 1000,
+		});
+		registry.register(
+			{
+				name: 'limited_tool',
+				description: 'limited',
+				parameters: {},
+				maxOutputChars: 50,
+			},
+			async () => 'y'.repeat(200),
+		);
+
+		const result = await registry.execute({
+			id: 'c1',
+			name: 'limited_tool',
+			arguments: {},
+		});
+		expect(result.output).toContain('[OUTPUT TRUNCATED');
+		expect(result.output).toContain('showing first 50');
+	});
+});
+
 describe('tool getToolDefinition', () => {
 	it('returns definition for registered tool', () => {
 		const registry = createToolRegistry({});

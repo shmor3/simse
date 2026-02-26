@@ -50,6 +50,7 @@ src/
                              # Permission handling with ACP option selection
                              # AbortSignal support for request cancellation
                              # Stderr routing to logger
+                             # Connection health check: isHealthy (child process liveness)
       acp-results.ts        # Response parsing: extractContentText, extractTokenUsage
                              # Tool call extraction: extractToolCall, extractToolCallUpdate
       acp-adapters.ts       # EmbeddingProvider + TextGenerationProvider adapters for ACP
@@ -88,6 +89,8 @@ src/
     loop/
       agentic-loop.ts       # createAgenticLoop: conversation → ACP stream → tool exec → repeat
                              # maxTurns, AbortSignal, auto-compaction, streaming retry
+                             # Doom loop detection: maxIdenticalToolCalls, onDoomLoop callback
+                             # Structured compaction: compactionPrompt override, onPreCompaction hook
       types.ts              # AgenticLoopOptions, LoopTurn, AgenticLoopResult, LoopCallbacks
       index.ts              # Barrel re-export
     memory/
@@ -109,6 +112,7 @@ src/
       index.ts              # Barrel re-export
     tools/
       tool-registry.ts      # createToolRegistry: register, discover, execute, parse
+                             # Tool output truncation: maxOutputChars (registry + per-tool)
       builtin-tools.ts      # registerMemoryTools, registerVFSTools, registerTaskTools
       subagent-tools.ts     # registerSubagentTools: spawn sub-loops as tool calls
       types.ts              # ToolDefinition, ToolHandler, ToolRegistry, ToolCallRequest
@@ -137,6 +141,11 @@ src/
 - **In-flight promise deduplication**: `load()`, `initialize()`, MCP `start()`, and MCP `connect()` use a stored promise to deduplicate concurrent callers. The pattern is: check for existing promise → create if missing → clear in `.finally()`.
 - **Crash-safe persistence**: The vector store writes `.md` content files before the index file, so the index never references non-existent files.
 - **Compressed v2 format**: On-disk embeddings use Float32 base64 (not JSON arrays). The index file is gzipped. Loading auto-detects v1 (plain JSON array) vs v2 (gzipped `{ version: 2, entries }`).
+- **Doom loop detection**: The agentic loop tracks consecutive identical tool calls (same name + JSON-stringified args). After `maxIdenticalToolCalls` (default 3), it fires `onDoomLoop` callback, publishes `loop.doom_loop` event, and injects a system warning into the conversation.
+- **Tool output truncation**: `ToolRegistryOptions.maxOutputChars` (default 50,000) caps tool output to prevent context overflow. Per-tool `ToolDefinition.maxOutputChars` overrides the registry default. Truncated output gets an `[OUTPUT TRUNCATED]` suffix.
+- **Session forking**: `SessionManager.fork(id)` creates a new session with cloned conversation state via `toJSON()`/`fromJSON()`, a fresh event bus, and new ID/timestamp.
+- **Structured compaction**: When auto-compaction fires, the prompt requests 6 sections (Goal, Progress, Current State, Key Decisions, Relevant Files, Next Steps). `AgenticLoopOptions.compactionPrompt` overrides the default. `LoopCallbacks.onPreCompaction` can inject extra context before summarization.
+- **Connection health check**: `ACPConnection.isHealthy` verifies the child process is still running. `withResilience` auto-reconnects unhealthy connections before retry attempts.
 
 ### ACP Protocol
 
@@ -150,6 +159,9 @@ The ACP client implements the [Agent Client Protocol](https://agentclientprotoco
 - **Tool call lifecycle**: `tool_call` → `tool_call_update` (in_progress) → `tool_call_update` (completed) — all via `session/update` notifications
 - **Sampling params**: `temperature`, `maxTokens`, `topP`, `topK`, `stopSequences` passed in prompt metadata
 - **Agent fallback**: When no agentId is configured, falls back to server name
+- **Timeout defaults**: `timeoutMs` = 60s (per-request), `initTimeoutMs` = 30s (initialize handshake). Both overridable via `ACPConnectionOptions`.
+- **Connection health**: `isHealthy` checks child process liveness (not killed, no exit code). `withResilience` auto-reconnects before retrying failed operations.
+- **Retry events**: `stream.retry` includes `delayMs` and `nextAttemptAt` timestamp for UI countdown display
 
 ### MCP Protocol
 

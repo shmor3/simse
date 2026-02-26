@@ -8,16 +8,16 @@
  * 3. VFSDisk commit writes to the filesystem
  */
 
+import { afterEach, describe, expect, it, mock } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, mock } from 'bun:test';
+import { createToolRegistry as createLibToolRegistry } from '../src/ai/tools/index.js';
 import {
 	createDefaultValidators,
 	createVFSDisk,
 	createVirtualFS,
 } from '../src/ai/vfs/index.js';
-import { createToolRegistry as createLibToolRegistry } from '../src/ai/tools/index.js';
 
 // ---------------------------------------------------------------------------
 // Inline tool-call helpers (matching the CLI's simse-code/loop.ts parseToolCalls)

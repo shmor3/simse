@@ -10,47 +10,71 @@ import { join } from 'node:path';
 import type { Interface as ReadlineInterface } from 'node:readline';
 import { createInterface } from 'node:readline';
 import {
-	type ACPClient,
 	type ACPPermissionRequestInfo,
 	createACPClient,
 	createDefaultValidators,
 	createLocalEmbedder,
 	createVFSDisk,
 	createVirtualFS,
-	type VFSDisk,
 	type VFSWriteEvent,
-	type VirtualFS,
 	validateSnapshot,
 } from 'simse';
 import type { KnowledgeBaseApp } from './app.js';
 import { createApp } from './app.js';
-import type { CLIConfigResult, EmbedFileConfig } from './config.js';
+import type { AppContext, Command, SessionState } from './app-context.js';
+import {
+	createBackgroundManager,
+	renderBackgroundTasks,
+} from './background.js';
+import { createCheckpointManager } from './checkpoints.js';
+import type { EmbedFileConfig } from './config.js';
 import { createCLIConfig } from './config.js';
-import { type Conversation, createConversation } from './conversation.js';
+import { createConversation } from './conversation.js';
+import { renderChangeCount } from './diff-display.js';
+import {
+	formatMentionsAsContext,
+	resolveFileMentions,
+} from './file-mentions.js';
+import { createFileTracker } from './file-tracker.js';
+import { createHooksManager, renderHooksList } from './hooks-config.js';
+import { detectImages, formatImageIndicator } from './image-input.js';
+import { createKeybindingManager } from './keybindings.js';
 import { createAgenticLoop } from './loop.js';
+import { createPermissionManager } from './permission-manager.js';
+import { showPicker } from './picker.js';
+import { createPlanMode } from './plan-mode.js';
 import { createACPGenerator } from './providers.js';
+import {
+	createSessionStore,
+	formatSessionSummary,
+} from './session-persistence.js';
 import { runSetup } from './setup.js';
-import { createSkillRegistry, type SkillRegistry } from './skills.js';
+import { createSkillRegistry } from './skills.js';
+import { createStatusLine } from './status-line.js';
 import { createFileStorageBackend } from './storage.js';
-import { createToolRegistry, type ToolRegistry } from './tool-registry.js';
+import { createThemeManager } from './themes.js';
+import { parseTodoCommand, renderTodoList } from './todo-ui.js';
+import { createToolRegistry } from './tool-registry.js';
 import {
 	createColors,
 	createMarkdownRenderer,
 	createSpinner,
 	createThinkingSpinner,
-	type MarkdownRenderer,
 	renderAssistantMessage,
 	renderBanner,
+	renderContextGrid,
 	renderDetailLine,
 	renderError,
 	renderHelp,
+	renderModeBadge,
 	renderServiceStatus,
 	renderSkillLoading,
 	renderToolCall,
 	renderToolResult,
-	type Spinner,
 	type TermColors,
 } from './ui.js';
+import { createUsageTracker, renderUsageChart } from './usage-tracker.js';
+import { createVerboseState } from './verbose.js';
 
 // ---------------------------------------------------------------------------
 // Embed state — tracks which provider was used for current embeddings
@@ -121,53 +145,20 @@ function parseArgs(): CLIArgs {
 // Command registry
 // ---------------------------------------------------------------------------
 
-/** Return string to print, undefined for no output, null to signal exit. */
-type CommandHandler = (
-	ctx: AppContext,
-	rest: string,
-) => Promise<string | null | undefined> | string | null | undefined;
-
-interface Command {
-	readonly name: string;
-	readonly aliases?: readonly string[];
-	readonly usage: string;
-	readonly description: string;
-	readonly category: 'notes' | 'ai' | 'tools' | 'info' | 'session';
-	readonly handler: CommandHandler;
-}
-
-interface SessionState {
-	serverName: string | undefined;
-	agentName: string | undefined;
-	memoryEnabled: boolean;
-	bypassPermissions: boolean;
-	maxTurns: number;
-	totalTurns: number;
-	abortController: AbortController | undefined;
-	startedAt: number;
-	lastUserInput: string | undefined;
-}
-
-interface AppContext {
-	readonly app: KnowledgeBaseApp;
-	readonly acpClient: ACPClient;
-	readonly configResult: CLIConfigResult;
-	readonly dataDir: string;
-	readonly vfs: VirtualFS;
-	readonly disk: VFSDisk;
-	readonly rl: ReadlineInterface;
-	readonly colors: TermColors;
-	readonly spinner: Spinner;
-	readonly md: MarkdownRenderer;
-	readonly session: SessionState;
-	readonly toolRegistry: ToolRegistry;
-	readonly conversation: Conversation;
-	readonly skillRegistry: SkillRegistry;
-}
+// Types imported from app-context.ts: AppContext, SessionState, Command, PermissionMode
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function formatUptime(ms: number): string {
+	const secs = Math.floor(ms / 1000);
+	if (secs < 60) return `${secs}s`;
+	const mins = Math.floor(secs / 60);
+	if (mins < 60) return `${mins}m ${secs % 60}s`;
+	const hours = Math.floor(mins / 60);
+	return `${hours}h ${mins % 60}m`;
+}
 
 function formatNote(
 	note: { id: string; topic: string; text: string; timestamp: number },
@@ -364,8 +355,35 @@ async function handleBareTextInput(
 
 	session.lastUserInput = input;
 
+	// 0a. Resolve @-file mentions
+	const mentionResult = resolveFileMentions(input);
+	let processedInput = mentionResult.cleanInput || input;
+	if (mentionResult.mentions.length > 0) {
+		const mentionContext = formatMentionsAsContext(mentionResult.mentions);
+		processedInput = `${mentionContext}\n\n${processedInput}`;
+		for (const mention of mentionResult.mentions) {
+			console.log(
+				renderDetailLine(`@${mention.path} (${mention.size} bytes)`, colors),
+			);
+		}
+	}
+
+	// 0b. Detect image attachments
+	const imageResult = detectImages(processedInput);
+	if (imageResult.images.length > 0) {
+		processedInput = imageResult.cleanInput;
+		for (const img of imageResult.images) {
+			console.log(formatImageIndicator(img, colors));
+		}
+	}
+
+	// 0c. Auto-checkpoint before AI prompt
+	if (ctx.checkpointManager) {
+		ctx.checkpointManager.save('pre-prompt');
+	}
+
 	// 1. Pre-loop memory context injection
-	let enrichedInput = input;
+	let enrichedInput = processedInput;
 	if (session.memoryEnabled && ctx.app.noteCount > 0) {
 		try {
 			const results = await ctx.app.search(input, 5);
@@ -1464,14 +1482,34 @@ const statsCommand: Command = {
 	handler: (ctx) => {
 		const { colors } = ctx;
 		const profile = ctx.app.getLearningProfile();
-		return [
+		const lines = [
 			`  ${colors.bold('Notes:')}     ${ctx.app.noteCount}`,
 			`  ${colors.bold('Topics:')}    ${ctx.app.getTopics().length}`,
 			`  ${colors.bold('Queries:')}   ${profile?.totalQueries ?? 0}`,
 			`  ${colors.bold('MCP:')}       ${ctx.app.tools.mcpClient.connectionCount} connections`,
 			`  ${colors.bold('ACP:')}       ${ctx.app.agents.client.serverCount} servers`,
 			`  ${colors.bold('Data:')}      ${colors.dim(ctx.dataDir)}`,
-		].join('\n');
+		];
+
+		// Usage tracking stats
+		if (ctx.usageTracker) {
+			const totals = ctx.usageTracker.getTotals();
+			lines.push('');
+			lines.push(colors.bold(colors.cyan('Usage (all time):')));
+			lines.push(`  ${colors.bold('Sessions:')}  ${totals.totalSessions}`);
+			lines.push(`  ${colors.bold('Messages:')}  ${totals.totalMessages}`);
+			lines.push(`  ${colors.bold('Tools:')}     ${totals.totalToolCalls}`);
+
+			// 7-day chart
+			const history = ctx.usageTracker.getHistory(7);
+			if (history.some((d) => d.messages > 0)) {
+				lines.push('');
+				lines.push(colors.bold(colors.cyan('Last 7 days:')));
+				lines.push(renderUsageChart(history, colors));
+			}
+		}
+
+		return lines.join('\n');
 	},
 };
 
@@ -2255,29 +2293,20 @@ const clearCommand: Command = {
 const contextCommand: Command = {
 	name: 'context',
 	usage: '/context',
-	description: 'Show context window usage',
+	description: 'Show context window usage with visual grid',
 	category: 'info',
 	handler: (ctx) => {
 		const { colors, conversation } = ctx;
 		const chars = conversation.estimatedChars;
 		const maxChars = 100_000; // approximate budget
-		const pct = Math.min(Math.round((chars / maxChars) * 100), 100);
+
+		// Use the 40x2 grid visualization
+		const grid = renderContextGrid(chars, maxChars, colors);
+		const lines: string[] = [grid];
+
+		lines.push('');
 		const approxTokens = Math.round(chars / 4);
 		const maxTokens = Math.round(maxChars / 4);
-
-		// Visual bar (40 chars wide)
-		const barWidth = 40;
-		const filled = Math.round((pct / 100) * barWidth);
-		const empty = barWidth - filled;
-		const barColor =
-			pct > 80 ? colors.red : pct > 50 ? colors.yellow : colors.green;
-		const bar = `${barColor('█'.repeat(filled))}${colors.dim('░'.repeat(empty))}`;
-
-		const lines: string[] = [];
-		lines.push(`  ${colors.bold('Context Usage')}`);
-		lines.push('');
-		lines.push(`  ${bar} ${pct}%`);
-		lines.push('');
 		lines.push(`  ${colors.dim('Tokens:')}   ~${approxTokens} / ~${maxTokens}`);
 		lines.push(`  ${colors.dim('Messages:')} ${conversation.messageCount}`);
 
@@ -2743,6 +2772,307 @@ const discardCommand: Command = {
 };
 
 // ---------------------------------------------------------------------------
+// New feature commands
+// ---------------------------------------------------------------------------
+
+const themeCommand: Command = {
+	name: 'theme',
+	usage: '/theme [name]',
+	description: 'Switch color theme',
+	category: 'info',
+	handler: async (ctx, rest) => {
+		const { colors } = ctx;
+		if (!ctx.themeManager) return colors.dim('Theme system not available.');
+		if (rest) {
+			if (ctx.themeManager.setActive(rest)) {
+				return `${colors.green('✓')} Theme set to ${colors.cyan(rest)}`;
+			}
+			return `${colors.red('✗')} Unknown theme "${rest}". Available: ${ctx.themeManager.list().join(', ')}`;
+		}
+		const idx = await showPicker(
+			ctx.themeManager.list().map((t) => ({ label: t })),
+			ctx.rl,
+			{ title: 'Select theme:', colors },
+		);
+		if (idx < 0) return colors.dim('Cancelled.');
+		const name = ctx.themeManager.list()[idx];
+		ctx.themeManager.setActive(name);
+		return `${colors.green('✓')} Theme set to ${colors.cyan(name)}`;
+	},
+};
+
+const resumeCommand: Command = {
+	name: 'resume',
+	usage: '/resume [id]',
+	description: 'Resume a previous session',
+	category: 'session',
+	handler: async (ctx, rest) => {
+		const { colors } = ctx;
+		if (!ctx.sessionStore)
+			return colors.dim('Session persistence not available.');
+		const sessions = ctx.sessionStore.list();
+		if (sessions.length === 0) return colors.dim('No saved sessions.');
+		if (rest) {
+			const session = ctx.sessionStore.load(rest);
+			if (!session) return `${colors.red('✗')} Session "${rest}" not found.`;
+			return `${colors.green('✓')} Session ${colors.cyan(rest)} loaded (${session.messages.length} messages)`;
+		}
+		const items = sessions.slice(0, 10).map((s) => ({
+			label: formatSessionSummary(s, colors),
+		}));
+		const idx = await showPicker(items, ctx.rl, {
+			title: 'Resume session:',
+			colors,
+		});
+		if (idx < 0) return colors.dim('Cancelled.');
+		const selected = sessions[idx];
+		const session = ctx.sessionStore.load(selected.id);
+		if (!session) return `${colors.red('✗')} Failed to load session.`;
+		return `${colors.green('✓')} Session ${colors.cyan(selected.id)} loaded (${session.messages.length} messages)`;
+	},
+};
+
+const planCommand: Command = {
+	name: 'plan',
+	usage: '/plan',
+	description: 'Toggle plan mode (read-only)',
+	category: 'session',
+	handler: (ctx) => {
+		const { colors } = ctx;
+		if (!ctx.planMode) return colors.dim('Plan mode not available.');
+		ctx.planMode.toggle();
+		const badge = ctx.planMode.isActive
+			? renderModeBadge('plan', colors)
+			: colors.dim('off');
+		return `  Plan mode: ${badge}`;
+	},
+};
+
+const rewindCommand: Command = {
+	name: 'rewind',
+	usage: '/rewind [id]',
+	description: 'Rewind to a checkpoint',
+	category: 'session',
+	handler: async (ctx, rest) => {
+		const { colors } = ctx;
+		if (!ctx.checkpointManager) return colors.dim('Checkpoints not available.');
+		const checkpoints = ctx.checkpointManager.list();
+		if (checkpoints.length === 0) return colors.dim('No checkpoints.');
+		if (rest) {
+			if (ctx.checkpointManager.rewind(rest)) {
+				return `${colors.green('✓')} Rewound to checkpoint ${colors.cyan(rest)}`;
+			}
+			return `${colors.red('✗')} Checkpoint "${rest}" not found.`;
+		}
+		const items = checkpoints.map((cp) => ({
+			label: `${cp.id} ${cp.label ?? ''} (${cp.messageCount} msgs)`,
+			detail: new Date(cp.timestamp).toLocaleTimeString(),
+		}));
+		const idx = await showPicker(items, ctx.rl, {
+			title: 'Rewind to:',
+			colors,
+		});
+		if (idx < 0) return colors.dim('Cancelled.');
+		const selected = checkpoints[idx];
+		ctx.checkpointManager.rewind(selected.id);
+		return `${colors.green('✓')} Rewound to ${colors.cyan(selected.id)}`;
+	},
+};
+
+const statusCommand: Command = {
+	name: 'status',
+	usage: '/status',
+	description: 'Show comprehensive status',
+	category: 'info',
+	handler: (ctx) => {
+		const { colors, session, conversation } = ctx;
+		const lines: string[] = [];
+
+		lines.push(colors.bold(colors.cyan('Status')));
+		lines.push('');
+		lines.push(`  ${colors.bold('Version:'.padEnd(14))}1.0.0`);
+		lines.push(
+			`  ${colors.bold('Uptime:'.padEnd(14))}${formatUptime(Date.now() - session.startedAt)}`,
+		);
+		lines.push(
+			`  ${colors.bold('Server:'.padEnd(14))}${session.serverName ?? colors.dim('default')}`,
+		);
+		lines.push(
+			`  ${colors.bold('Agent:'.padEnd(14))}${session.agentName ?? colors.dim('default')}`,
+		);
+		lines.push(`  ${colors.bold('Turns:'.padEnd(14))}${session.totalTurns}`);
+		lines.push(
+			`  ${colors.bold('Messages:'.padEnd(14))}${conversation.messageCount}`,
+		);
+
+		// Context usage
+		const chars = conversation.estimatedChars;
+		const maxChars = 100_000;
+		const pct = Math.min(Math.round((chars / maxChars) * 100), 100);
+		const ctxColor =
+			pct > 80 ? colors.red : pct > 50 ? colors.yellow : colors.green;
+		lines.push(`  ${colors.bold('Context:'.padEnd(14))}${ctxColor(`${pct}%`)}`);
+
+		// Memory
+		lines.push(
+			`  ${colors.bold('Memory:'.padEnd(14))}${session.memoryEnabled ? `${ctx.app.noteCount} notes` : colors.dim('disabled')}`,
+		);
+
+		// VFS
+		lines.push(
+			`  ${colors.bold('Sandbox:'.padEnd(14))}${ctx.vfs.fileCount} files`,
+		);
+
+		// Permission mode
+		if (ctx.permissionMode) {
+			lines.push(`  ${colors.bold('Mode:'.padEnd(14))}${ctx.permissionMode}`);
+		}
+
+		// MCP
+		const mcpCount = ctx.app.tools.mcpClient.connectionCount;
+		lines.push(`  ${colors.bold('MCP:'.padEnd(14))}${mcpCount} connections`);
+
+		// ACP
+		lines.push(
+			`  ${colors.bold('ACP:'.padEnd(14))}${ctx.app.agents.client.serverCount} servers`,
+		);
+
+		return lines.join('\n');
+	},
+};
+
+const todosCommand: Command = {
+	name: 'todos',
+	aliases: ['todo'],
+	usage: '/todos [add|done|rm] [args]',
+	description: 'Manage task list',
+	category: 'session',
+	handler: async (ctx, rest) => {
+		const { colors } = ctx;
+		if (!rest) {
+			// List all todos
+			const tasks = ctx.app.tasks.list();
+			const items = tasks.map((t) => ({
+				id: t.id,
+				subject: t.subject,
+				status: t.status,
+				blockedBy: t.blockedBy?.filter((bid) => {
+					const blocker = ctx.app.tasks.get(bid);
+					return blocker && blocker.status !== 'completed';
+				}),
+			}));
+			return renderTodoList(items, colors);
+		}
+		const parsed = parseTodoCommand(rest);
+		if (!parsed)
+			return `${colors.yellow('Usage:')} /todos [add|done|rm] <args>`;
+		switch (parsed.action) {
+			case 'add': {
+				if (!parsed.args)
+					return `${colors.yellow('Usage:')} /todos add <subject>`;
+				const task = ctx.app.tasks.create({
+					subject: parsed.args,
+				});
+				return `${colors.green('✓')} Added task ${colors.dim(`#${task.id}`)} ${task.subject}`;
+			}
+			case 'done': {
+				if (!parsed.args) return `${colors.yellow('Usage:')} /todos done <id>`;
+				const updated = ctx.app.tasks.update(parsed.args, {
+					status: 'completed',
+				});
+				if (!updated)
+					return `${colors.red('✗')} Task "${parsed.args}" not found.`;
+				return `${colors.green('✓')} Completed ${colors.dim(`#${parsed.args}`)}`;
+			}
+			case 'rm': {
+				if (!parsed.args) return `${colors.yellow('Usage:')} /todos rm <id>`;
+				const deleted = ctx.app.tasks.update(parsed.args, {
+					status: 'completed',
+				});
+				if (!deleted)
+					return `${colors.red('✗')} Task "${parsed.args}" not found.`;
+				return `${colors.green('✓')} Removed ${colors.dim(`#${parsed.args}`)}`;
+			}
+			default:
+				return `${colors.yellow('Usage:')} /todos [add|done|rm] <args>`;
+		}
+	},
+};
+
+const diffCommand: Command = {
+	name: 'diff',
+	usage: '/diff',
+	description: 'Show VFS file changes as unified diff',
+	category: 'session',
+	handler: (ctx) => {
+		const { colors, vfs } = ctx;
+		if (vfs.fileCount === 0) return colors.dim('No files in sandbox.');
+		const files = vfs.listAll();
+		const lines: string[] = [colors.bold(colors.cyan('File changes:')), ''];
+		for (const entry of files) {
+			if (entry.type === 'file') {
+				const content = vfs.readFile(entry.path);
+				const lineCount = content.text.split('\n').length;
+				lines.push(
+					`  ${colors.green('+')} ${entry.path} ${colors.dim(`(${lineCount} lines)`)}`,
+				);
+			}
+		}
+		if (ctx.fileTracker) {
+			const totals = ctx.fileTracker.getTotals();
+			if (totals.additions > 0 || totals.deletions > 0) {
+				lines.push('');
+				lines.push(
+					`  ${renderChangeCount(totals.additions, totals.deletions, colors)}`,
+				);
+			}
+		}
+		return lines.join('\n');
+	},
+};
+
+const verboseCommand: Command = {
+	name: 'verbose',
+	usage: '/verbose',
+	description: 'Toggle verbose mode',
+	category: 'info',
+	handler: (ctx) => {
+		const { colors } = ctx;
+		if (!ctx.verbose) return colors.dim('Verbose mode not available.');
+		ctx.verbose.toggle();
+		const badge = ctx.verbose.isVerbose
+			? renderModeBadge('verbose', colors)
+			: colors.dim('off');
+		return `  Verbose: ${badge}`;
+	},
+};
+
+const hooksCommand: Command = {
+	name: 'hooks',
+	usage: '/hooks',
+	description: 'List configured hooks',
+	category: 'tools',
+	handler: (ctx) => {
+		const { colors, dataDir } = ctx;
+		const manager = createHooksManager({ dataDir });
+		return renderHooksList(manager.list(), colors);
+	},
+};
+
+const bgTasksCommand: Command = {
+	name: 'tasks',
+	usage: '/tasks',
+	description: 'List background tasks',
+	category: 'session',
+	handler: (ctx) => {
+		const { colors } = ctx;
+		if (!ctx.backgroundManager)
+			return colors.dim('Background tasks not available.');
+		return renderBackgroundTasks(ctx.backgroundManager.list(), colors);
+	},
+};
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -2788,6 +3118,17 @@ const commands: readonly Command[] = [
 	helpCommand,
 	doctorCommand,
 	exitCommand,
+	// New feature commands
+	themeCommand,
+	resumeCommand,
+	planCommand,
+	rewindCommand,
+	statusCommand,
+	todosCommand,
+	diffCommand,
+	verboseCommand,
+	hooksCommand,
+	bgTasksCommand,
 ];
 
 const commandMap = new Map<string, Command>();
@@ -2891,6 +3232,12 @@ Usage:
 Options:
   --data-dir <path>           Data directory (default: ~/.simse)
   --log-level <level>         Log level: debug|info|warn|error|none
+  -p, --prompt <text>         Non-interactive mode: run prompt and exit
+  --format text|json          Output format for non-interactive mode
+  --server <name>             ACP server name
+  --agent <name>              Agent ID
+  --continue                  Resume the most recent session
+  --resume <id>               Resume a specific session
   -h, --help                  Show this help
 
 Global config (in data directory):
@@ -3210,6 +3557,70 @@ async function main(): Promise<void> {
 		skills: configResult.skills,
 	});
 
+	// -- Feature initialization -----------------------------------------------
+
+	const keybindings = createKeybindingManager();
+	const fileTracker = createFileTracker();
+	const verbose = createVerboseState({
+		onChange: (v) => {
+			console.log(
+				`  ${colors.dim('Verbose:')} ${v ? renderModeBadge('verbose', colors) : colors.dim('off')}`,
+			);
+		},
+	});
+	const planMode = createPlanMode({
+		onChange: (active) => {
+			console.log(
+				`  ${colors.dim('Plan mode:')} ${active ? renderModeBadge('plan', colors) : colors.dim('off')}`,
+			);
+		},
+	});
+	const themeManager = createThemeManager({ dataDir: cliArgs.dataDir });
+	const sessionStore = createSessionStore({ dataDir: cliArgs.dataDir });
+	const permissionManager = createPermissionManager({
+		dataDir: cliArgs.dataDir,
+	});
+	const checkpointManager = createCheckpointManager({
+		vfs,
+		conversation,
+	});
+	const backgroundManager = createBackgroundManager({
+		onComplete: (id, label) => {
+			console.log(
+				`\n  ${colors.green('●')} Background task completed: ${label} ${colors.dim(`(${id})`)}`,
+			);
+		},
+		onError: (_id, label, error) => {
+			console.log(
+				`\n  ${colors.red('●')} Background task failed: ${label} — ${error.message}`,
+			);
+		},
+	});
+	const usageTracker = createUsageTracker({ dataDir: cliArgs.dataDir });
+	const statusLine = createStatusLine({ colors });
+
+	// Record session start
+	usageTracker.record({ type: 'message', model: modelLabel });
+
+	// Register keybindings
+	keybindings.register({ name: 'o', ctrl: true }, 'Toggle verbose', () =>
+		verbose.toggle(),
+	);
+	keybindings.register(
+		{ name: 'tab', shift: true },
+		'Cycle permission mode',
+		() => {
+			const _mode = permissionManager.cycleMode();
+			console.log(
+				`\n  ${colors.dim('Mode:')} ${permissionManager.formatMode()}`,
+			);
+		},
+	);
+
+	if (process.stdin.isTTY) {
+		keybindings.attach(process.stdin);
+	}
+
 	const ctx: AppContext = {
 		app,
 		acpClient,
@@ -3225,6 +3636,18 @@ async function main(): Promise<void> {
 		toolRegistry,
 		conversation,
 		skillRegistry,
+		// Feature extensions
+		keybindings,
+		fileTracker,
+		verbose,
+		planMode,
+		themeManager,
+		sessionStore,
+		checkpointManager,
+		backgroundManager,
+		usageTracker,
+		statusLine,
+		permissionMode: permissionManager.getMode(),
 	};
 	let shuttingDown = false;
 	let pendingInput = '';

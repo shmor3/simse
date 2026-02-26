@@ -562,17 +562,70 @@ export function renderHelp(
 // Conversation Formatters — Claude Code style
 // ---------------------------------------------------------------------------
 
-/** Render a tool call: ● ToolName(args) */
+// ---------------------------------------------------------------------------
+// Tool category icons — Claude Code style
+// ---------------------------------------------------------------------------
+
+const TOOL_ICONS: Readonly<Record<string, string>> = {
+	bash: '$',
+	shell: '$',
+	exec: '$',
+	execute: '$',
+	run_command: '$',
+	vfs_write: '>',
+	vfs_read: '<',
+	vfs_delete: 'x',
+	vfs_rename: '~',
+	vfs_list: '#',
+	vfs_stat: '#',
+	vfs_search: '?',
+	vfs_diff: '±',
+	vfs_mkdir: '+',
+	file_write: '>',
+	file_read: '<',
+	file_edit: '>',
+	file_create: '+',
+	glob: '?',
+	grep: '?',
+	memory_search: '◈',
+	memory_add: '◈',
+	memory_list: '◈',
+	task_list: '☐',
+	task_create: '☐',
+	task_update: '☐',
+	task_get: '☐',
+};
+
+function getToolIcon(name: string): string {
+	return TOOL_ICONS[name] ?? '●';
+}
+
+export interface RichToolCallOptions {
+	readonly verbose?: boolean;
+	readonly durationMs?: number;
+}
+
+/** Render a tool call: ● ToolName(args) with optional duration */
 export function renderToolCall(
 	name: string,
 	argsStr: string,
 	colors: TermColors,
+	options?: RichToolCallOptions,
 ): string {
+	const icon = getToolIcon(name);
+	const verbose = options?.verbose ?? false;
+	const maxLen = verbose ? 500 : 120;
+
 	let formattedArgs = '';
 	try {
 		const parsed = JSON.parse(argsStr) as Record<string, unknown>;
 		const parts = Object.entries(parsed).map(([k, v]) => {
-			const val = typeof v === 'string' ? `"${v}"` : String(v);
+			const val =
+				typeof v === 'string'
+					? verbose
+						? `"${v}"`
+						: `"${v.length > 80 ? `${v.slice(0, 77)}...` : v}"`
+					: String(v);
 			return `${k}: ${val}`;
 		});
 		if (parts.length > 0) {
@@ -585,8 +638,19 @@ export function renderToolCall(
 	}
 
 	const full = `${name}${formattedArgs}`;
-	const display = full.length > 120 ? `${full.slice(0, 117)}...` : full;
-	return `  ${colors.magenta('●')} ${colors.bold(display)}`;
+	const display =
+		full.length > maxLen ? `${full.slice(0, maxLen - 3)}...` : full;
+
+	let suffix = '';
+	if (options?.durationMs !== undefined) {
+		suffix = ` ${colors.dim(`(${formatDuration(options.durationMs)})`)}`;
+	}
+
+	return `  ${colors.magenta(icon)} ${colors.bold(display)}${suffix}`;
+}
+
+export interface RichToolResultOptions {
+	readonly verbose?: boolean;
 }
 
 /** Render a tool result: ⎿ result text */
@@ -594,9 +658,12 @@ export function renderToolResult(
 	output: string,
 	isError: boolean,
 	colors: TermColors,
+	options?: RichToolResultOptions,
 ): string {
+	const verbose = options?.verbose ?? false;
 	const lines = output.split('\n');
-	const maxLines = 8;
+	const maxLines = verbose ? 50 : 8;
+	const maxLineLen = verbose ? 500 : 200;
 	const displayLines = lines.slice(0, maxLines);
 	const remaining = lines.length - maxLines;
 
@@ -604,12 +671,15 @@ export function renderToolResult(
 
 	const firstLine = displayLines[0] ?? '';
 	const truncFirst =
-		firstLine.length > 200 ? `${firstLine.slice(0, 197)}...` : firstLine;
+		firstLine.length > maxLineLen
+			? `${firstLine.slice(0, maxLineLen - 3)}...`
+			: firstLine;
 	const result: string[] = [`    ${colors.dim('⎿')} ${colorFn(truncFirst)}`];
 
 	for (let i = 1; i < displayLines.length; i++) {
 		const line = displayLines[i];
-		const truncLine = line.length > 200 ? `${line.slice(0, 197)}...` : line;
+		const truncLine =
+			line.length > maxLineLen ? `${line.slice(0, maxLineLen - 3)}...` : line;
 		result.push(`      ${colorFn(truncLine)}`);
 	}
 
@@ -644,4 +714,136 @@ export function renderAssistantMessage(
 /** Render a skill loading indicator. */
 export function renderSkillLoading(name: string, colors: TermColors): string {
 	return `  ${colors.magenta('●')} ${colors.dim('Loading skill:')} ${colors.bold(name)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Thinking Display — dim italic text, suppressed in normal mode
+// ---------------------------------------------------------------------------
+
+/** Render thinking text (visible only in verbose mode). */
+export function renderThinking(text: string, colors: TermColors): string {
+	const lines = text.split('\n');
+	return lines.map((line) => `  ${colors.dim(colors.italic(line))}`).join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Context Visualization — 40x2 grid showing context usage
+// ---------------------------------------------------------------------------
+
+/**
+ * Render a 40x2 colored grid showing context window usage.
+ * Each cell = ~1.25% of context. Green = used, dim = free.
+ */
+export function renderContextGrid(
+	usedChars: number,
+	maxChars: number,
+	colors: TermColors,
+): string {
+	const totalCells = 80; // 40 columns x 2 rows
+	const usedPercent = Math.min(1, usedChars / maxChars);
+	const usedCells = Math.round(usedPercent * totalCells);
+
+	const lines: string[] = [];
+	lines.push(
+		`  ${colors.bold('Context usage:')} ${colors.cyan(`${Math.round(usedPercent * 100)}%`)} (${formatBytes(usedChars)} / ${formatBytes(maxChars)})`,
+	);
+	lines.push('');
+
+	for (let row = 0; row < 2; row++) {
+		let line = '  ';
+		for (let col = 0; col < 40; col++) {
+			const idx = row * 40 + col;
+			if (idx < usedCells) {
+				// Color based on fill level
+				if (usedPercent > 0.9) {
+					line += colors.red('█');
+				} else if (usedPercent > 0.7) {
+					line += colors.yellow('█');
+				} else {
+					line += colors.green('█');
+				}
+			} else {
+				line += colors.dim('░');
+			}
+		}
+		lines.push(line);
+	}
+
+	return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Permission Dialog — richer than simple allow/deny
+// ---------------------------------------------------------------------------
+
+export interface PermissionDialogOptions {
+	readonly description: string;
+	readonly toolName: string;
+	readonly args?: string;
+	readonly showDiff?: boolean;
+}
+
+/** Render a permission request dialog header. */
+export function renderPermissionDialog(
+	options: PermissionDialogOptions,
+	colors: TermColors,
+): string {
+	const lines: string[] = [];
+	lines.push(
+		`\n  ${colors.yellow('⚠')} ${colors.bold('Permission requested:')}`,
+	);
+	lines.push(`    ${options.description}`);
+	if (options.args) {
+		const truncArgs =
+			options.args.length > 200
+				? `${options.args.slice(0, 197)}...`
+				: options.args;
+		lines.push(`    ${colors.dim(truncArgs)}`);
+	}
+	lines.push('');
+
+	const choices = options.showDiff
+		? '[y]es / [n]o / [d]iff / [e]dit'
+		: '[y]es / [n]o';
+	lines.push(`  ${colors.dim(choices)}`);
+
+	return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Status Indicators — compact inline widgets
+// ---------------------------------------------------------------------------
+
+/** Render a mode indicator badge: [MODE] */
+export function renderModeBadge(mode: string, colors: TermColors): string {
+	switch (mode) {
+		case 'plan':
+			return colors.yellow(`[PLAN]`);
+		case 'acceptEdits':
+			return colors.green(`[AUTO-EDIT]`);
+		case 'dontAsk':
+			return colors.red(`[YOLO]`);
+		case 'verbose':
+			return colors.cyan(`[VERBOSE]`);
+		default:
+			return '';
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function formatDuration(ms: number): string {
+	if (ms < 1000) return `${ms}ms`;
+	if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+	const mins = Math.floor(ms / 60_000);
+	const secs = Math.round((ms % 60_000) / 1000);
+	return `${mins}m${secs}s`;
+}
+
+function formatBytes(bytes: number): string {
+	if (bytes < 1024) return `${bytes}B`;
+	if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+	return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }

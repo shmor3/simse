@@ -112,7 +112,8 @@ const presets: readonly Preset[] = [
 		build: async () => ({
 			server: {
 				name: 'claude',
-				command: 'claude-code-acp',
+				command: 'bunx',
+				args: ['claude-code-acp'],
 			},
 		}),
 	},

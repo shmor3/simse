@@ -51,7 +51,7 @@ describe('createVFSDisk', () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.writeFile('/hello.txt', 'Hello, world!');
+			vfs.writeFile('vfs:///hello.txt', 'Hello, world!');
 
 			const result = await disk.commit(tempDir);
 			expect(result.filesWritten).toBe(1);
@@ -66,7 +66,7 @@ describe('createVFSDisk', () => {
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
 			const data = new Uint8Array([1, 2, 3, 4, 5]);
-			vfs.writeFile('/bin.dat', data);
+			vfs.writeFile('vfs:///bin.dat', data);
 
 			const result = await disk.commit(tempDir);
 			expect(result.filesWritten).toBe(1);
@@ -80,8 +80,8 @@ describe('createVFSDisk', () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.mkdir('/src/components', { recursive: true });
-			vfs.writeFile('/src/components/App.ts', 'export default {};');
+			vfs.mkdir('vfs:///src/components', { recursive: true });
+			vfs.writeFile('vfs:///src/components/App.ts', 'export default {};');
 
 			const result = await disk.commit(tempDir);
 			expect(result.directoriesCreated).toBeGreaterThanOrEqual(1);
@@ -101,7 +101,7 @@ describe('createVFSDisk', () => {
 			// Pre-create file on disk
 			await writeFile(join(tempDir, 'existing.txt'), 'original');
 
-			vfs.writeFile('/existing.txt', 'new content');
+			vfs.writeFile('vfs:///existing.txt', 'new content');
 
 			const result = await disk.commit(tempDir);
 			expect(result.filesWritten).toBe(0);
@@ -120,7 +120,7 @@ describe('createVFSDisk', () => {
 
 			await writeFile(join(tempDir, 'existing.txt'), 'original');
 
-			vfs.writeFile('/existing.txt', 'new content');
+			vfs.writeFile('vfs:///existing.txt', 'new content');
 
 			const result = await disk.commit(tempDir, { overwrite: true });
 			expect(result.filesWritten).toBe(1);
@@ -133,7 +133,7 @@ describe('createVFSDisk', () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.writeFile('/f.txt', 'hello');
+			vfs.writeFile('vfs:///f.txt', 'hello');
 
 			const result = await disk.commit(tempDir, { dryRun: true });
 			expect(result.filesWritten).toBe(1);
@@ -147,9 +147,9 @@ describe('createVFSDisk', () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.mkdir('/src');
-			vfs.writeFile('/src/index.ts', 'code');
-			vfs.writeFile('/src/readme.md', 'docs');
+			vfs.mkdir('vfs:///src');
+			vfs.writeFile('vfs:///src/index.ts', 'code');
+			vfs.writeFile('vfs:///src/readme.md', 'docs');
 
 			const result = await disk.commit(tempDir, {
 				filter: (path) => path.endsWith('.ts'),
@@ -174,7 +174,7 @@ describe('createVFSDisk', () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.writeFile('/f.txt', 'data');
+			vfs.writeFile('vfs:///f.txt', 'data');
 			const result = await disk.commit(tempDir);
 
 			expect(Object.isFrozen(result)).toBe(true);
@@ -185,12 +185,12 @@ describe('createVFSDisk', () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.writeFile('/f.txt', 'data');
+			vfs.writeFile('vfs:///f.txt', 'data');
 			const result = await disk.commit(tempDir);
 
 			const writeOp = result.operations.find((op) => op.type === 'write');
 			expect(writeOp).toBeDefined();
-			expect(writeOp?.path).toBe('/f.txt');
+			expect(writeOp?.path).toBe('vfs:///f.txt');
 			expect(writeOp?.diskPath).toContain('f.txt');
 			expect(writeOp?.size).toBe(4);
 		});
@@ -210,7 +210,7 @@ describe('createVFSDisk', () => {
 			const result = await disk.load(tempDir);
 			expect(result.filesWritten).toBe(1);
 
-			expect(vfs.readFile('/hello.txt').text).toBe('Hello from disk!');
+			expect(vfs.readFile('vfs:///hello.txt').text).toBe('Hello from disk!');
 		});
 
 		it('loads binary files from disk', async () => {
@@ -223,7 +223,7 @@ describe('createVFSDisk', () => {
 			const result = await disk.load(tempDir);
 			expect(result.filesWritten).toBe(1);
 
-			const read = vfs.readFile('/image.png');
+			const read = vfs.readFile('vfs:///image.png');
 			expect(read.contentType).toBe('binary');
 			expect(read.data).toEqual(new Uint8Array([1, 2, 3, 4, 5]));
 		});
@@ -240,35 +240,35 @@ describe('createVFSDisk', () => {
 			expect(result.filesWritten).toBe(2);
 			expect(result.directoriesCreated).toBeGreaterThanOrEqual(1);
 
-			expect(vfs.readFile('/src/index.ts').text).toBe('main');
-			expect(vfs.readFile('/src/utils/helpers.ts').text).toBe('utils');
+			expect(vfs.readFile('vfs:///src/index.ts').text).toBe('main');
+			expect(vfs.readFile('vfs:///src/utils/helpers.ts').text).toBe('utils');
 		});
 
 		it('skips existing VFS files without overwrite', async () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.writeFile('/existing.txt', 'vfs content');
+			vfs.writeFile('vfs:///existing.txt', 'vfs content');
 			await writeFile(join(tempDir, 'existing.txt'), 'disk content');
 
 			const result = await disk.load(tempDir);
 			expect(result.filesWritten).toBe(0);
 
 			// VFS content unchanged
-			expect(vfs.readFile('/existing.txt').text).toBe('vfs content');
+			expect(vfs.readFile('vfs:///existing.txt').text).toBe('vfs content');
 		});
 
 		it('overwrites VFS files with overwrite: true', async () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.writeFile('/existing.txt', 'vfs content');
+			vfs.writeFile('vfs:///existing.txt', 'vfs content');
 			await writeFile(join(tempDir, 'existing.txt'), 'disk content');
 
 			const result = await disk.load(tempDir, { overwrite: true });
 			expect(result.filesWritten).toBe(1);
 
-			expect(vfs.readFile('/existing.txt').text).toBe('disk content');
+			expect(vfs.readFile('vfs:///existing.txt').text).toBe('disk content');
 		});
 
 		it('respects maxFileSize option', async () => {
@@ -281,8 +281,8 @@ describe('createVFSDisk', () => {
 			const result = await disk.load(tempDir, { maxFileSize: 100 });
 			expect(result.filesWritten).toBe(1);
 
-			expect(vfs.exists('/small.txt')).toBe(true);
-			expect(vfs.exists('/big.txt')).toBe(false);
+			expect(vfs.exists('vfs:///small.txt')).toBe(true);
+			expect(vfs.exists('vfs:///big.txt')).toBe(false);
 
 			const skipped = result.operations.filter((op) => op.type === 'skip');
 			expect(skipped.length).toBe(1);
@@ -301,8 +301,8 @@ describe('createVFSDisk', () => {
 			});
 			expect(result.filesWritten).toBe(1);
 
-			expect(vfs.exists('/code.ts')).toBe(true);
-			expect(vfs.exists('/notes.md')).toBe(false);
+			expect(vfs.exists('vfs:///code.ts')).toBe(true);
+			expect(vfs.exists('vfs:///notes.md')).toBe(false);
 		});
 
 		it('throws VFS_NOT_FOUND for non-existent source', async () => {
@@ -360,10 +360,10 @@ describe('createVFSDisk', () => {
 			const vfs1 = createVirtualFS({ logger: createSilentLogger() });
 			const disk1 = createVFSDisk(vfs1, { logger: createSilentLogger() });
 
-			vfs1.mkdir('/src');
-			vfs1.writeFile('/src/index.ts', 'const x = 1;');
-			vfs1.writeFile('/src/data.bin', new Uint8Array([10, 20, 30]));
-			vfs1.writeFile('/readme.txt', 'Hello');
+			vfs1.mkdir('vfs:///src');
+			vfs1.writeFile('vfs:///src/index.ts', 'const x = 1;');
+			vfs1.writeFile('vfs:///src/data.bin', new Uint8Array([10, 20, 30]));
+			vfs1.writeFile('vfs:///readme.txt', 'Hello');
 
 			await disk1.commit(tempDir);
 
@@ -372,8 +372,8 @@ describe('createVFSDisk', () => {
 
 			await disk2.load(tempDir);
 
-			expect(vfs2.readFile('/src/index.ts').text).toBe('const x = 1;');
-			expect(vfs2.readFile('/readme.txt').text).toBe('Hello');
+			expect(vfs2.readFile('vfs:///src/index.ts').text).toBe('const x = 1;');
+			expect(vfs2.readFile('vfs:///readme.txt').text).toBe('Hello');
 			// data.bin has a non-binary extension so will be loaded as text
 			// but the bytes should still be present
 		});
@@ -382,8 +382,8 @@ describe('createVFSDisk', () => {
 			const vfs1 = createVirtualFS({ logger: createSilentLogger() });
 			const disk1 = createVFSDisk(vfs1, { logger: createSilentLogger() });
 
-			vfs1.mkdir('/a/b/c', { recursive: true });
-			vfs1.writeFile('/a/b/c/deep.txt', 'deep file');
+			vfs1.mkdir('vfs:///a/b/c', { recursive: true });
+			vfs1.writeFile('vfs:///a/b/c/deep.txt', 'deep file');
 
 			await disk1.commit(tempDir);
 
@@ -392,8 +392,8 @@ describe('createVFSDisk', () => {
 
 			await disk2.load(tempDir);
 
-			expect(vfs2.readFile('/a/b/c/deep.txt').text).toBe('deep file');
-			expect(vfs2.exists('/a/b/c')).toBe(true);
+			expect(vfs2.readFile('vfs:///a/b/c/deep.txt').text).toBe('deep file');
+			expect(vfs2.exists('vfs:///a/b/c')).toBe(true);
 		});
 	});
 
@@ -406,8 +406,8 @@ describe('createVFSDisk', () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.writeFile('/index.ts', 'const x = 1;\n');
-			vfs.writeFile('/data.json', '{"key": "value"}\n');
+			vfs.writeFile('vfs:///index.ts', 'const x = 1;\n');
+			vfs.writeFile('vfs:///data.json', '{"key": "value"}\n');
 
 			const result = await disk.commit(tempDir, { validate: true });
 			expect(result.filesWritten).toBe(2);
@@ -419,7 +419,7 @@ describe('createVFSDisk', () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.writeFile('/bad.json', '{not valid}');
+			vfs.writeFile('vfs:///bad.json', '{not valid}');
 
 			await expectGuardedThrow(
 				() => disk.commit(tempDir, { validate: true }),
@@ -433,7 +433,7 @@ describe('createVFSDisk', () => {
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
 			// Trailing whitespace is a warning, not an error
-			vfs.writeFile('/code.ts', 'const x = 1;  \n');
+			vfs.writeFile('vfs:///code.ts', 'const x = 1;  \n');
 
 			const result = await disk.commit(tempDir, { validate: true });
 			expect(result.filesWritten).toBe(1);
@@ -445,7 +445,7 @@ describe('createVFSDisk', () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.writeFile('/file.txt', 'content\n');
+			vfs.writeFile('vfs:///file.txt', 'content\n');
 
 			const noopValidator = {
 				name: 'noop',
@@ -461,7 +461,7 @@ describe('createVFSDisk', () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.writeFile('/bad.json', '{invalid}');
+			vfs.writeFile('vfs:///bad.json', '{invalid}');
 
 			try {
 				await disk.commit(tempDir, { validate: true });
@@ -476,7 +476,7 @@ describe('createVFSDisk', () => {
 			const vfs = createVirtualFS({ logger: createSilentLogger() });
 			const disk = createVFSDisk(vfs, { logger: createSilentLogger() });
 
-			vfs.writeFile('/bad.json', '{invalid}');
+			vfs.writeFile('vfs:///bad.json', '{invalid}');
 
 			// Without validate, commit should succeed
 			const result = await disk.commit(tempDir);
@@ -497,7 +497,7 @@ describe('createVFSDisk', () => {
 				baseDir: tempDir,
 			});
 
-			vfs.writeFile('/hello.txt', 'from baseDir');
+			vfs.writeFile('vfs:///hello.txt', 'from baseDir');
 
 			const result = await disk.commit();
 			expect(result.filesWritten).toBe(1);
@@ -516,7 +516,7 @@ describe('createVFSDisk', () => {
 				baseDir: tempDir,
 			});
 
-			vfs.writeFile('/file.txt', 'override content');
+			vfs.writeFile('vfs:///file.txt', 'override content');
 
 			const result = await disk.commit(overrideDir);
 			expect(result.filesWritten).toBe(1);
@@ -536,7 +536,7 @@ describe('createVFSDisk', () => {
 
 			const result = await disk.load();
 			expect(result.filesWritten).toBe(1);
-			expect(vfs.readFile('/disk.txt').text).toBe('disk data');
+			expect(vfs.readFile('vfs:///disk.txt').text).toBe('disk data');
 		});
 
 		it('load sourceDir overrides baseDir', async () => {
@@ -552,7 +552,7 @@ describe('createVFSDisk', () => {
 
 			const result = await disk.load(subDir);
 			expect(result.filesWritten).toBe(1);
-			expect(vfs.readFile('/nested.txt').text).toBe('nested');
+			expect(vfs.readFile('vfs:///nested.txt').text).toBe('nested');
 		});
 
 		it('defaults baseDir to process.cwd()', () => {

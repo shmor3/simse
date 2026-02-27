@@ -109,7 +109,7 @@ describe('VFS tool → disk commit e2e', () => {
 		const mockResponse = `I'll create that file for you.
 
 <tool_use>
-{"id": "call_1", "name": "vfs_write", "arguments": {"path": "/hello.txt", "content": "Hello from VFS!"}}
+{"id": "call_1", "name": "vfs_write", "arguments": {"path": "vfs:///hello.txt", "content": "Hello from VFS!"}}
 </tool_use>
 
 The file has been created.`;
@@ -129,14 +129,14 @@ The file has been created.`;
 
 		expect(result.isError).toBe(false);
 		expect(result.output).toContain('Wrote');
-		expect(result.output).toContain('/hello.txt');
+		expect(result.output).toContain('vfs:///hello.txt');
 
 		// 6. Verify VFS has the file
-		expect(vfs.exists('/hello.txt')).toBe(true);
-		const vfsContent = vfs.readFile('/hello.txt');
+		expect(vfs.exists('vfs:///hello.txt')).toBe(true);
+		const vfsContent = vfs.readFile('vfs:///hello.txt');
 		expect(vfsContent.text).toBe('Hello from VFS!');
 		expect(writeEvents).toHaveLength(1);
-		expect(writeEvents[0].path).toBe('/hello.txt');
+		expect(writeEvents[0].path).toBe('vfs:///hello.txt');
 		expect(writeEvents[0].isNew).toBe(true);
 
 		// 7. Commit to disk
@@ -179,7 +179,7 @@ The file has been created.`;
 
 		// Simulate writing to a nested path
 		const mockResponse = `<tool_use>
-{"id": "call_1", "name": "vfs_write", "arguments": {"path": "/src/components/Button.tsx", "content": "export const Button = () => <button>Click</button>;"}}
+{"id": "call_1", "name": "vfs_write", "arguments": {"path": "vfs:///src/components/Button.tsx", "content": "export const Button = () => <button>Click</button>;"}}
 </tool_use>`;
 
 		const parsed = parseToolCalls(mockResponse);
@@ -193,7 +193,7 @@ The file has been created.`;
 		expect(result.isError).toBe(false);
 
 		// Verify VFS
-		expect(vfs.exists('/src/components/Button.tsx')).toBe(true);
+		expect(vfs.exists('vfs:///src/components/Button.tsx')).toBe(true);
 
 		// Commit and verify disk
 		const commitResult = await disk.commit(undefined, { overwrite: true });
@@ -278,8 +278,8 @@ Both files created.`;
 		const vfs = createVirtualFS();
 		const disk = createVFSDisk(vfs, { baseDir: tempDir });
 
-		vfs.writeFile('/readme.md', '# Hello', { createParents: true });
-		vfs.writeFile('/src/index.ts', 'console.log("hi")', {
+		vfs.writeFile('vfs:///readme.md', '# Hello', { createParents: true });
+		vfs.writeFile('vfs:///src/index.ts', 'console.log("hi")', {
 			createParents: true,
 		});
 

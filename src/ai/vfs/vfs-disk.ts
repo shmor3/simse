@@ -7,6 +7,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import { createVFSError } from '../../errors/vfs.js';
 import type { Logger } from '../../logger.js';
 import { getDefaultLogger } from '../../logger.js';
+import { VFS_SCHEME, toLocalPath } from './path-utils.js';
 import type {
 	VFSCommitOperation,
 	VFSCommitOptions,
@@ -163,7 +164,7 @@ export function createVFSDisk(
 
 			const diskPath = join(
 				resolvedTarget,
-				...dir.path.split('/').filter(Boolean),
+				...toLocalPath(dir.path).split('/').filter(Boolean),
 			);
 
 			if (!dryRun) {
@@ -186,7 +187,7 @@ export function createVFSDisk(
 
 			const diskPath = join(
 				resolvedTarget,
-				...file.path.split('/').filter(Boolean),
+				...toLocalPath(file.path).split('/').filter(Boolean),
 			);
 
 			// Check if file exists on disk
@@ -302,7 +303,7 @@ export function createVFSDisk(
 			for (const entry of entries) {
 				const entryDiskPath = join(dirPath, entry.name);
 				const entryVfsPath = `${vfsBase}/${entry.name}`;
-				const relativePath = `/${relative(resolvedSource, entryDiskPath).split(sep).join('/')}`;
+				const relativePath = `${VFS_SCHEME}/${relative(resolvedSource, entryDiskPath).split(sep).join('/')}`;
 
 				if (filter && !filter(relativePath)) continue;
 
@@ -386,10 +387,7 @@ export function createVFSDisk(
 			}
 		};
 
-		await scanDir(resolvedSource, '');
-
-		// Fix up paths — scanDir uses '' base, so paths start with /
-		// which is correct for VFS paths
+		await scanDir(resolvedSource, 'vfs://');
 
 		logger.debug(
 			`Loaded ${filesWritten} files, ${directoriesCreated} directories (${bytesWritten} bytes) from "${resolvedSource}"`,

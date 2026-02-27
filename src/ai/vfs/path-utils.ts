@@ -12,8 +12,23 @@ const hasForbiddenChars = (segment: string): boolean => {
 	return false;
 };
 
+export const VFS_SCHEME = 'vfs://';
+
+export const VFS_ROOT = `${VFS_SCHEME}/`;
+
+export const toLocalPath = (vfsPath: string): string => {
+	if (!vfsPath.startsWith(VFS_SCHEME)) {
+		throw new Error(`Path must start with ${VFS_SCHEME}: ${vfsPath}`);
+	}
+	return vfsPath.slice(VFS_SCHEME.length) || '/';
+};
+
 export const normalizePath = (input: string): string => {
-	let p = input.replace(/\\/g, '/');
+	if (!input.startsWith(VFS_SCHEME)) {
+		throw new Error(`Path must start with ${VFS_SCHEME}: ${input}`);
+	}
+
+	let p = input.slice(VFS_SCHEME.length).replace(/\\/g, '/');
 	if (!p.startsWith('/')) p = `/${p}`;
 
 	const segments = p.split('/');
@@ -28,33 +43,40 @@ export const normalizePath = (input: string): string => {
 		}
 	}
 
-	return resolved.length === 0 ? '/' : `/${resolved.join('/')}`;
+	return resolved.length === 0
+		? `${VFS_SCHEME}/`
+		: `${VFS_SCHEME}/${resolved.join('/')}`;
 };
 
 export const parentPath = (normalizedPath: string): string | undefined => {
-	if (normalizedPath === '/') return undefined;
-	const lastSlash = normalizedPath.lastIndexOf('/');
-	return lastSlash === 0 ? '/' : normalizedPath.slice(0, lastSlash);
+	if (normalizedPath === VFS_ROOT) return undefined;
+	const localPart = normalizedPath.slice(VFS_SCHEME.length);
+	const lastSlash = localPart.lastIndexOf('/');
+	if (lastSlash === 0) return VFS_ROOT;
+	return `${VFS_SCHEME}${localPart.slice(0, lastSlash)}`;
 };
 
 export const baseName = (normalizedPath: string): string => {
-	if (normalizedPath === '/') return '';
-	const lastSlash = normalizedPath.lastIndexOf('/');
-	return normalizedPath.slice(lastSlash + 1);
+	if (normalizedPath === VFS_ROOT) return '';
+	const localPart = normalizedPath.slice(VFS_SCHEME.length);
+	const lastSlash = localPart.lastIndexOf('/');
+	return localPart.slice(lastSlash + 1);
 };
 
 export const ancestorPaths = (normalizedPath: string): string[] => {
-	const result: string[] = ['/'];
-	const segments = normalizedPath.split('/').filter(Boolean);
+	const result: string[] = [VFS_ROOT];
+	const localPart = normalizedPath.slice(VFS_SCHEME.length);
+	const segments = localPart.split('/').filter(Boolean);
 	for (let i = 0; i < segments.length - 1; i++) {
-		result.push(`/${segments.slice(0, i + 1).join('/')}`);
+		result.push(`${VFS_SCHEME}/${segments.slice(0, i + 1).join('/')}`);
 	}
 	return result;
 };
 
 export const pathDepth = (normalizedPath: string): number => {
-	if (normalizedPath === '/') return 0;
-	return normalizedPath.split('/').filter(Boolean).length;
+	if (normalizedPath === VFS_ROOT) return 0;
+	const localPart = normalizedPath.slice(VFS_SCHEME.length);
+	return localPart.split('/').filter(Boolean).length;
 };
 
 export const validateSegment = (
@@ -75,14 +97,15 @@ export const validatePath = (
 	normalizedPath: string,
 	limits: Required<VFSLimits>,
 ): string | undefined => {
-	if (normalizedPath.length > limits.maxPathLength) {
+	const localPart = normalizedPath.slice(VFS_SCHEME.length);
+	if (localPart.length > limits.maxPathLength) {
 		return `Path exceeds max length (${limits.maxPathLength})`;
 	}
 	const depth = pathDepth(normalizedPath);
 	if (depth > limits.maxPathDepth) {
 		return `Path exceeds max depth (${limits.maxPathDepth})`;
 	}
-	const segments = normalizedPath.split('/').filter(Boolean);
+	const segments = localPart.split('/').filter(Boolean);
 	for (const seg of segments) {
 		const segError = validateSegment(seg, limits);
 		if (segError) return segError;

@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import {
+	VFS_ROOT,
+	VFS_SCHEME,
 	ancestorPaths,
 	baseName,
 	normalizePath,
 	parentPath,
 	pathDepth,
+	toLocalPath,
+	validatePath,
 } from '../src/ai/vfs/path-utils.js';
 import type { VirtualFS } from '../src/ai/vfs/vfs.js';
 import { createVirtualFS } from '../src/ai/vfs/vfs.js';
@@ -34,90 +38,188 @@ function createFS(
 // ---------------------------------------------------------------------------
 
 describe('path-utils', () => {
-	describe('normalizePath', () => {
-		it('returns / for empty or root input', () => {
-			expect(normalizePath('/')).toBe('/');
-			expect(normalizePath('')).toBe('/');
+	describe('VFS_SCHEME', () => {
+		it('equals vfs://', () => {
+			expect(VFS_SCHEME).toBe('vfs://');
+		});
+	});
+
+	describe('VFS_ROOT', () => {
+		it('equals vfs:///', () => {
+			expect(VFS_ROOT).toBe('vfs:///');
+		});
+	});
+
+	describe('toLocalPath', () => {
+		it('strips vfs:// prefix', () => {
+			expect(toLocalPath('vfs:///foo/bar')).toBe('/foo/bar');
 		});
 
-		it('prepends leading slash', () => {
-			expect(normalizePath('foo/bar')).toBe('/foo/bar');
+		it('returns / for vfs://', () => {
+			expect(toLocalPath('vfs://')).toBe('/');
+		});
+
+		it('returns / for vfs:///', () => {
+			expect(toLocalPath('vfs:///')).toBe('/');
+		});
+
+		it('throws on bare path', () => {
+			expect(() => toLocalPath('/foo/bar')).toThrow(
+				'Path must start with vfs://',
+			);
+		});
+
+		it('throws on empty string', () => {
+			expect(() => toLocalPath('')).toThrow('Path must start with vfs://');
+		});
+	});
+
+	describe('normalizePath', () => {
+		it('returns vfs:/// for vfs:///', () => {
+			expect(normalizePath('vfs:///')).toBe('vfs:///');
+		});
+
+		it('returns vfs:/// for vfs://', () => {
+			expect(normalizePath('vfs://')).toBe('vfs:///');
+		});
+
+		it('preserves absolute path', () => {
+			expect(normalizePath('vfs:///foo/bar')).toBe('vfs:///foo/bar');
 		});
 
 		it('resolves . segments', () => {
-			expect(normalizePath('/foo/./bar')).toBe('/foo/bar');
+			expect(normalizePath('vfs:///foo/./bar')).toBe('vfs:///foo/bar');
 		});
 
 		it('resolves .. segments', () => {
-			expect(normalizePath('/foo/bar/../baz')).toBe('/foo/baz');
+			expect(normalizePath('vfs:///foo/bar/../baz')).toBe('vfs:///foo/baz');
 		});
 
 		it('does not go above root with ..', () => {
-			expect(normalizePath('/../../foo')).toBe('/foo');
+			expect(normalizePath('vfs:///../../foo')).toBe('vfs:///foo');
 		});
 
 		it('converts backslashes', () => {
-			expect(normalizePath('\\foo\\bar')).toBe('/foo/bar');
+			expect(normalizePath('vfs:///foo\\bar')).toBe('vfs:///foo/bar');
 		});
 
 		it('collapses multiple slashes', () => {
-			expect(normalizePath('///foo///bar///')).toBe('/foo/bar');
+			expect(normalizePath('vfs:////foo///bar///')).toBe('vfs:///foo/bar');
 		});
 
-		it('removes trailing slashes', () => {
-			expect(normalizePath('/foo/bar/')).toBe('/foo/bar');
+		it('throws on /foo/bar', () => {
+			expect(() => normalizePath('/foo/bar')).toThrow(
+				'Path must start with vfs://',
+			);
+		});
+
+		it('throws on foo/bar', () => {
+			expect(() => normalizePath('foo/bar')).toThrow(
+				'Path must start with vfs://',
+			);
+		});
+
+		it('throws on empty string', () => {
+			expect(() => normalizePath('')).toThrow(
+				'Path must start with vfs://',
+			);
 		});
 	});
 
 	describe('parentPath', () => {
 		it('returns undefined for root', () => {
-			expect(parentPath('/')).toBeUndefined();
+			expect(parentPath('vfs:///')).toBeUndefined();
 		});
 
-		it('returns / for direct child of root', () => {
-			expect(parentPath('/foo')).toBe('/');
+		it('returns vfs:/// for direct child of root', () => {
+			expect(parentPath('vfs:///foo')).toBe('vfs:///');
 		});
 
 		it('returns parent for nested path', () => {
-			expect(parentPath('/foo/bar/baz')).toBe('/foo/bar');
+			expect(parentPath('vfs:///foo/bar/baz')).toBe('vfs:///foo/bar');
 		});
 	});
 
 	describe('baseName', () => {
 		it('returns empty string for root', () => {
-			expect(baseName('/')).toBe('');
+			expect(baseName('vfs:///')).toBe('');
 		});
 
 		it('returns last segment', () => {
-			expect(baseName('/foo/bar')).toBe('bar');
+			expect(baseName('vfs:///foo/bar')).toBe('bar');
 		});
 	});
 
 	describe('ancestorPaths', () => {
-		it('returns [/] for root', () => {
-			expect(ancestorPaths('/')).toEqual(['/']);
+		it('returns [vfs:///] for root', () => {
+			expect(ancestorPaths('vfs:///')).toEqual(['vfs:///']);
 		});
 
-		it('returns [/] for direct child of root', () => {
-			expect(ancestorPaths('/foo')).toEqual(['/']);
+		it('returns [vfs:///] for direct child of root', () => {
+			expect(ancestorPaths('vfs:///foo')).toEqual(['vfs:///']);
 		});
 
 		it('returns all ancestors for nested path', () => {
-			expect(ancestorPaths('/a/b/c')).toEqual(['/', '/a', '/a/b']);
+			expect(ancestorPaths('vfs:///a/b/c')).toEqual([
+				'vfs:///',
+				'vfs:///a',
+				'vfs:///a/b',
+			]);
 		});
 	});
 
 	describe('pathDepth', () => {
 		it('returns 0 for root', () => {
-			expect(pathDepth('/')).toBe(0);
+			expect(pathDepth('vfs:///')).toBe(0);
 		});
 
-		it('returns 1 for /foo', () => {
-			expect(pathDepth('/foo')).toBe(1);
+		it('returns 1 for vfs:///foo', () => {
+			expect(pathDepth('vfs:///foo')).toBe(1);
 		});
 
-		it('returns 3 for /a/b/c', () => {
-			expect(pathDepth('/a/b/c')).toBe(3);
+		it('returns 3 for vfs:///a/b/c', () => {
+			expect(pathDepth('vfs:///a/b/c')).toBe(3);
+		});
+	});
+
+	describe('validatePath', () => {
+		const limits = {
+			maxFiles: 100,
+			maxTotalSize: 10_000_000,
+			maxFileSize: 1_000_000,
+			maxPathLength: 20,
+			maxPathDepth: 3,
+			maxNameLength: 10,
+		};
+
+		it('returns undefined for a valid path', () => {
+			expect(validatePath('vfs:///foo/bar', limits)).toBeUndefined();
+		});
+
+		it('returns error when local part exceeds maxPathLength', () => {
+			const longPath = `vfs:///${'a'.repeat(25)}`;
+			expect(validatePath(longPath, limits)).toBe(
+				'Path exceeds max length (20)',
+			);
+		});
+
+		it('returns error when depth exceeds maxPathDepth', () => {
+			expect(validatePath('vfs:///a/b/c/d', limits)).toBe(
+				'Path exceeds max depth (3)',
+			);
+		});
+
+		it('returns error for segment exceeding maxNameLength', () => {
+			const longName = 'a'.repeat(11);
+			expect(validatePath(`vfs:///${longName}`, limits)).toBe(
+				'Path segment exceeds max name length (10)',
+			);
+		});
+
+		it('returns error for segment with forbidden characters', () => {
+			expect(validatePath('vfs:///foo\x01bar', limits)).toBe(
+				'Path segment contains forbidden characters',
+			);
 		});
 	});
 });

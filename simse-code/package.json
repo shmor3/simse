@@ -13,7 +13,12 @@
     "build:engine": "cd ../simse-engine && cargo build --release",
     "build:engine:wasm": "cd ../simse-engine && cargo build --release --target wasm32-wasip1",
     "typecheck": "bun x tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "test:e2e": "bun test ./e2e/startup.e2e.ts ./e2e/commands/*.e2e.ts ./e2e/ui/*.e2e.ts",
+    "test:e2e:commands": "bun test ./e2e/commands/*.e2e.ts",
+    "test:e2e:ui": "bun test ./e2e/ui/*.e2e.ts",
+    "test:e2e:claude": "ACP_BACKEND=claude bun test ./e2e/startup.e2e.ts ./e2e/commands/*.e2e.ts ./e2e/ui/*.e2e.ts ./e2e/flows/*.e2e.ts",
+    "test:e2e:ollama": "ACP_BACKEND=ollama bun test ./e2e/startup.e2e.ts ./e2e/commands/*.e2e.ts ./e2e/ui/*.e2e.ts ./e2e/flows/*.e2e.ts"
   },
   "dependencies": {
     "ink": "^6.8.0",

@@ -7,6 +7,7 @@
 
 import { toError } from '../../errors/base.js';
 import type { ACPClient } from '../acp/acp-client.js';
+import type { Library } from '../library/library.js';
 import { createConversation } from '../conversation/conversation.js';
 import { createAgenticLoop } from '../loop/agentic-loop.js';
 import type { SubagentInfo, SubagentResult } from '../loop/types.js';
@@ -44,6 +45,7 @@ export interface SubagentToolsOptions {
 	readonly serverName?: string;
 	readonly agentId?: string;
 	readonly systemPrompt?: string;
+	readonly library?: Library;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +180,115 @@ export function registerSubagentTools(
 					options,
 					depth + 1,
 				);
+
+				if (options.library) {
+					const shelfName = desc.replace(/\s+/g, '-').toLowerCase();
+					const shelf = options.library.shelf(shelfName);
+
+					// Override library tools with shelf-scoped versions
+					childRegistry.register(
+						{
+							name: 'library_search',
+							description:
+								"Search the library for relevant volumes. Results are scoped to this agent's shelf.",
+							parameters: {
+								query: {
+									type: 'string',
+									description: 'The search query',
+									required: true,
+								},
+								maxResults: {
+									type: 'number',
+									description: 'Max results (default: 5)',
+								},
+							},
+							category: 'library',
+							annotations: { readOnly: true },
+						},
+						async (args) => {
+							const query = String(args.query ?? '');
+							const maxResults =
+								typeof args.maxResults === 'number'
+									? args.maxResults
+									: 5;
+							const results = await shelf.search(query, maxResults);
+							if (results.length === 0)
+								return 'No matching volumes found.';
+							return results
+								.map(
+									(r, i) =>
+										`${i + 1}. [${r.volume.metadata.topic ?? 'uncategorized'}] (score: ${r.score.toFixed(2)})\n   ${r.volume.text}`,
+								)
+								.join('\n\n');
+						},
+					);
+
+					childRegistry.register(
+						{
+							name: 'library_shelve',
+							description: "Shelve a volume in this agent's shelf.",
+							parameters: {
+								text: {
+									type: 'string',
+									description: 'The text content to shelve',
+									required: true,
+								},
+								topic: {
+									type: 'string',
+									description: 'Topic category',
+									required: true,
+								},
+							},
+							category: 'library',
+						},
+						async (args) => {
+							const text = String(args.text ?? '');
+							const topic = String(args.topic ?? 'general');
+							const id = await shelf.add(text, { topic });
+							return `Shelved volume with ID: ${id}`;
+						},
+					);
+
+					childRegistry.register(
+						{
+							name: 'library_search_global',
+							description:
+								'Search the entire library across all shelves.',
+							parameters: {
+								query: {
+									type: 'string',
+									description: 'The search query',
+									required: true,
+								},
+								maxResults: {
+									type: 'number',
+									description: 'Max results (default: 5)',
+								},
+							},
+							category: 'library',
+							annotations: { readOnly: true },
+						},
+						async (args) => {
+							const query = String(args.query ?? '');
+							const maxResults =
+								typeof args.maxResults === 'number'
+									? args.maxResults
+									: 5;
+							const results = await shelf.searchGlobal(
+								query,
+								maxResults,
+							);
+							if (results.length === 0)
+								return 'No matching volumes found.';
+							return results
+								.map(
+									(r, i) =>
+										`${i + 1}. [${r.volume.metadata.topic ?? 'uncategorized'}] (score: ${r.score.toFixed(2)})\n   ${r.volume.text}`,
+								)
+								.join('\n\n');
+						},
+					);
+				}
 
 				const childConversation = createConversation();
 				const childLoop = createAgenticLoop({

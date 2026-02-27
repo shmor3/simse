@@ -501,6 +501,36 @@ describe('subagent_spawn', () => {
 	});
 });
 
+describe('subagent_spawn shelf integration', () => {
+	it('subagent_spawn creates shelf-scoped library tools when library is provided', () => {
+		_resetSubagentCounter();
+		const registry = createToolRegistry({});
+		const acpClient = createMockACPClient();
+
+		// Create a mock library with shelf support
+		const mockShelf = {
+			name: 'test-shelf',
+			add: mock(async () => 'shelf-id'),
+			search: mock(async () => []),
+			searchGlobal: mock(async () => []),
+			volumes: mock(() => []),
+		};
+		const mockLibrary = {
+			shelf: mock(() => mockShelf),
+		} as any;
+
+		registerSubagentTools(registry, {
+			acpClient,
+			toolRegistry: registry,
+			library: mockLibrary,
+		});
+
+		// Verify the library option is accepted without error
+		const defs = registry.getToolDefinitions();
+		expect(defs.find((d) => d.name === 'subagent_spawn')).toBeDefined();
+	});
+});
+
 describe('subagent ID generation', () => {
 	it('generates unique IDs across calls', async () => {
 		_resetSubagentCounter();

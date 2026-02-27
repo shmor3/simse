@@ -7,10 +7,12 @@ import {
 import type { EventBus } from '../../events/types.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
 import { parseQuery } from './query-dsl.js';
-import type { StorageBackend } from './storage.js';
 import { createShelf } from './shelf.js';
+import { createStacks, type StacksOptions } from './stacks.js';
+import type { StorageBackend } from './storage.js';
 import type {
 	AdvancedLookup,
+	CirculationDeskThresholds,
 	CompendiumOptions,
 	CompendiumResult,
 	DateRange,
@@ -18,20 +20,19 @@ import type {
 	DuplicateVolumes,
 	EmbeddingProvider,
 	LibraryConfig,
+	Lookup,
 	MetadataFilter,
 	PatronProfile,
 	Recommendation,
 	RecommendOptions,
 	SearchOptions,
 	Shelf,
-	Lookup,
 	TextGenerationProvider,
-	TextSearchOptions,
 	TextLookup,
+	TextSearchOptions,
 	TopicInfo,
 	Volume,
 } from './types.js';
-import { createStacks, type StacksOptions } from './stacks.js';
 
 // ---------------------------------------------------------------------------
 // Options
@@ -51,6 +52,8 @@ export interface LibraryOptions {
 	textGenerator?: TextGenerationProvider;
 	/** Optional event bus for publishing library lifecycle events. */
 	eventBus?: EventBus;
+	/** Thresholds for automatic compendium and reorganization via CirculationDesk. */
+	readonly circulationDeskThresholds?: CirculationDeskThresholds;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,7 +92,9 @@ export interface Library {
 	) => Promise<Recommendation[]>;
 	readonly findDuplicates: (threshold?: number) => DuplicateVolumes[];
 	readonly checkDuplicate: (text: string) => Promise<DuplicateCheckResult>;
-	readonly compendium: (options: CompendiumOptions) => Promise<CompendiumResult>;
+	readonly compendium: (
+		options: CompendiumOptions,
+	) => Promise<CompendiumResult>;
 	readonly setTextGenerator: (provider: TextGenerationProvider) => void;
 	/** Record explicit user feedback on whether a volume was relevant. */
 	readonly recordFeedback: (entryId: string, relevant: boolean) => void;
@@ -391,9 +396,7 @@ export function createLibrary(
 
 		const results = store.filterByMetadata(filters);
 
-		logger.debug(
-			`Metadata filter returned ${results.length} matching volumes`,
-		);
+		logger.debug(`Metadata filter returned ${results.length} matching volumes`);
 		return results;
 	};
 
@@ -607,12 +610,9 @@ export function createLibrary(
 		}
 
 		if (compendiumOptions.ids.length < 2) {
-			throw createLibraryError(
-				'Compendium requires at least 2 volume IDs',
-				{
-					code: 'MEMORY_SUMMARIZE_TOO_FEW',
-				},
-			);
+			throw createLibraryError('Compendium requires at least 2 volume IDs', {
+				code: 'MEMORY_SUMMARIZE_TOO_FEW',
+			});
 		}
 
 		// Gather volume texts
@@ -620,12 +620,9 @@ export function createLibrary(
 		for (const id of compendiumOptions.ids) {
 			const vol = store.getById(id);
 			if (!vol) {
-				throw createLibraryError(
-					`Volume "${id}" not found for compendium`,
-					{
-						code: 'MEMORY_ENTRY_NOT_FOUND',
-					},
-				);
+				throw createLibraryError(`Volume "${id}" not found for compendium`, {
+					code: 'MEMORY_ENTRY_NOT_FOUND',
+				});
 			}
 			sourceVolumes.push(vol);
 		}
@@ -817,4 +814,3 @@ export function createLibrary(
 	});
 	return manager;
 }
-

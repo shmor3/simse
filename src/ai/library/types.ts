@@ -389,6 +389,29 @@ export interface LearningOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Shelf (agent-scoped library partition)
+// ---------------------------------------------------------------------------
+
+export interface Shelf {
+	readonly name: string;
+	readonly add: (
+		text: string,
+		metadata?: Record<string, string>,
+	) => Promise<string>;
+	readonly search: (
+		query: string,
+		maxResults?: number,
+		threshold?: number,
+	) => Promise<Lookup[]>;
+	readonly searchGlobal: (
+		query: string,
+		maxResults?: number,
+		threshold?: number,
+	) => Promise<Lookup[]>;
+	readonly volumes: () => Volume[];
+}
+
+// ---------------------------------------------------------------------------
 // Library Config (was MemoryConfig)
 // ---------------------------------------------------------------------------
 

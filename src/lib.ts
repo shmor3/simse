@@ -197,6 +197,7 @@ export type { RecencyOptions } from './ai/library/recommendation.js';
 export type { StorageBackend } from './ai/library/storage.js';
 export type { TextCache, TextCacheOptions } from './ai/library/text-cache.js';
 export { createTextCache } from './ai/library/text-cache.js';
+export { createShelf } from './ai/library/shelf.js';
 export type {
 	AdvancedLookup,
 	CompendiumOptions,
@@ -217,6 +218,7 @@ export type {
 	RelatedTopic,
 	RelevanceFeedback,
 	SearchOptions,
+	Shelf,
 	TextGenerationProvider,
 	TextLookup,
 	TextSearchMode,

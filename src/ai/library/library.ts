@@ -8,6 +8,7 @@ import type { EventBus } from '../../events/types.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
 import { parseQuery } from './query-dsl.js';
 import type { StorageBackend } from './storage.js';
+import { createShelf } from './shelf.js';
 import type {
 	AdvancedLookup,
 	CompendiumOptions,
@@ -22,6 +23,7 @@ import type {
 	Recommendation,
 	RecommendOptions,
 	SearchOptions,
+	Shelf,
 	Lookup,
 	TextGenerationProvider,
 	TextSearchOptions,
@@ -100,6 +102,8 @@ export interface Library {
 	readonly isInitialized: boolean;
 	readonly isDirty: boolean;
 	readonly embeddingAgent: string | undefined;
+	readonly shelf: (name: string) => Shelf;
+	readonly shelves: () => string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -737,10 +741,37 @@ export function createLibrary(
 	};
 
 	// -----------------------------------------------------------------------
+	// Shelf (agent-scoped partitions)
+	// -----------------------------------------------------------------------
+
+	const shelfCache = new Map<string, Shelf>();
+
+	const shelf = (name: string): Shelf => {
+		ensureInitialized();
+		let s = shelfCache.get(name);
+		if (!s) {
+			s = createShelf(name, manager);
+			shelfCache.set(name, s);
+		}
+		return s;
+	};
+
+	const shelves = (): string[] => {
+		ensureInitialized();
+		const names = new Set<string>();
+		for (const vol of store.getAll()) {
+			if (vol.metadata.shelf) {
+				names.add(vol.metadata.shelf);
+			}
+		}
+		return [...names];
+	};
+
+	// -----------------------------------------------------------------------
 	// Return the record
 	// -----------------------------------------------------------------------
 
-	return Object.freeze({
+	const manager: Library = Object.freeze({
 		initialize,
 		dispose,
 		add,
@@ -764,6 +795,8 @@ export function createLibrary(
 		delete: deleteEntry,
 		deleteBatch,
 		clear,
+		shelf,
+		shelves,
 		get patronProfile() {
 			return store.learningProfile;
 		},
@@ -780,5 +813,6 @@ export function createLibrary(
 			return config.embeddingAgent;
 		},
 	});
+	return manager;
 }
 

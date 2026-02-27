@@ -44,7 +44,7 @@ describe('Banner', () => {
 				model="llama3"
 			/>,
 		);
-		expect(lastFrame()).toContain('ollama: llama3');
+		expect(lastFrame()).toContain('ollama \u00b7 llama3');
 	});
 
 	test('renders working directory', () => {

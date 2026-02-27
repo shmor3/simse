@@ -1,32 +1,38 @@
 import { Box } from 'ink';
-import React, { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
-import { createACPClient, toError } from 'simse';
+import React, {
+	type ReactNode,
+	useCallback,
+	useMemo,
+	useRef,
+	useState,
+} from 'react';
 import type { ACPClient, ACPPermissionRequestInfo } from 'simse';
+import { createACPClient, toError } from 'simse';
 import { createCommandRegistry } from './command-registry.js';
 import { Markdown } from './components/chat/markdown.js';
 import { MessageList } from './components/chat/message-list.js';
 import { ToolCallBox } from './components/chat/tool-call-box.js';
+import { PromptInput } from './components/input/prompt-input.js';
 import { Banner } from './components/layout/banner.js';
 import { MainLayout } from './components/layout/main-layout.js';
 import { StatusBar } from './components/layout/status-bar.js';
 import { ThinkingSpinner } from './components/shared/spinner.js';
-import { PromptInput } from './components/input/prompt-input.js';
-import { useCommandDispatch } from './hooks/use-command-dispatch.js';
-import { useAgenticLoop } from './hooks/use-agentic-loop.js';
-import { createMetaCommands } from './features/meta/index.js';
-import { libraryCommands } from './features/library/index.js';
-import { toolsCommands } from './features/tools/index.js';
-import { sessionCommands } from './features/session/index.js';
-import { filesCommands } from './features/files/index.js';
+import { createCLIConfig } from './config.js';
+import type { Conversation } from './conversation.js';
+import { createConversation } from './conversation.js';
+import { aiCommands } from './features/ai/index.js';
 import { configCommands } from './features/config/index.js';
 import { createSetupCommands } from './features/config/setup.js';
-import { aiCommands } from './features/ai/index.js';
-import { createCLIConfig } from './config.js';
-import { createConversation } from './conversation.js';
-import type { Conversation } from './conversation.js';
-import { createToolRegistry } from './tool-registry.js';
-import type { ToolRegistry } from './tool-registry.js';
+import { filesCommands } from './features/files/index.js';
+import { libraryCommands } from './features/library/index.js';
+import { createMetaCommands } from './features/meta/index.js';
+import { sessionCommands } from './features/session/index.js';
+import { toolsCommands } from './features/tools/index.js';
+import { useAgenticLoop } from './hooks/use-agentic-loop.js';
+import { useCommandDispatch } from './hooks/use-command-dispatch.js';
 import type { OutputItem } from './ink-types.js';
+import type { ToolRegistry } from './tool-registry.js';
+import { createToolRegistry } from './tool-registry.js';
 
 interface AppProps {
 	readonly dataDir: string;
@@ -87,9 +93,7 @@ export function App({
 				onPermissionRequest: async (
 					info: ACPPermissionRequestInfo,
 				): Promise<string | undefined> => {
-					const allowOption = info.options.find(
-						(o) => o.kind === 'allow_once',
-					);
+					const allowOption = info.options.find((o) => o.kind === 'allow_once');
 					return allowOption?.optionId;
 				},
 			});
@@ -100,8 +104,7 @@ export function App({
 			let newModelName: string | undefined;
 			if (newServerName) {
 				try {
-					const modelInfo =
-						await newClient.getServerModelInfo(newServerName);
+					const modelInfo = await newClient.getServerModelInfo(newServerName);
 					newModelName = modelInfo?.currentModelId;
 				} catch {
 					// optional
@@ -177,10 +180,7 @@ export function App({
 			if (isCommand(input)) {
 				const result = await dispatch(input);
 				if (result?.text) {
-					setItems((prev) => [
-						...prev,
-						{ kind: 'info', text: result.text! },
-					]);
+					setItems((prev) => [...prev, { kind: 'info', text: result.text! }]);
 				} else if (result?.element) {
 					setItems((prev) => [
 						...prev,
@@ -239,7 +239,7 @@ export function App({
 					onSubmit={handleSubmit}
 					disabled={isProcessing}
 					planMode={planMode}
-					verbose={verbose}
+					commands={registry.getAll()}
 				/>
 			</Box>
 			<StatusBar

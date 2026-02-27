@@ -1,9 +1,9 @@
 import { Box, Text, useStdout } from 'ink';
 import { useMemo } from 'react';
 
-const MASCOT_LINES = ['╭──╮', '╰─╮│', '  ╰╯'];
+const MASCOT_LINES = ['\u256D\u2500\u2500\u256E', '\u2570\u2500\u256E\u2502', '  \u2570\u256F'];
 const MASCOT_COLOR = '#00afd7';
-const DIVIDER = '─';
+const DIVIDER = '\u2500';
 
 const DEFAULT_TIPS: readonly string[] = [
 	'Run /help for all commands',
@@ -40,24 +40,39 @@ export function Banner({
 	const cols = stdout?.columns ?? 80;
 
 	const layout = useMemo(() => {
-		const boxWidth = Math.min(cols - 2, 72);
-		const leftColWidth = Math.floor(boxWidth * 0.45);
-		const rightColWidth = boxWidth - leftColWidth - 3; // 3 for " │ "
+		// 1-char left margin like Claude Code, content fills rest
+		const contentWidth = cols - 1;
+		const leftColWidth = Math.floor(contentWidth * 0.35);
+		const gapWidth = 3; // " \u2502 "
+		const rightColWidth = contentWidth - leftColWidth - gapWidth;
 
-		// Title bar: ── simse-code v1.0.0 ──────────
-		const titleText = ` simse-code v${version} `;
-		const titlePadding = Math.max(0, boxWidth - titleText.length);
-		const titleLine = `${DIVIDER.repeat(2)}${titleText}${DIVIDER.repeat(titlePadding)}`;
+		// Title: " \u2500\u2500 simse-code v1.0.0 \u2500\u2500...\u2500\u2500"
+		const titleLabel = `simse-code v${version}`;
+		const titleTrailerLen = Math.max(
+			0,
+			contentWidth - 2 - 1 - titleLabel.length - 1,
+		);
 
-		// Bottom border
-		const bottomLine = DIVIDER.repeat(boxWidth + 2);
+		// Bottom border: fills contentWidth
+		const bottomLine = DIVIDER.repeat(contentWidth);
 
 		// Build left column lines
 		const leftLines: ColumnLine[] = [];
-		leftLines.push({ text: '', isMascot: false, isBold: false, isDim: false });
 
+		// Empty line at top for spacing
+		leftLines.push({
+			text: '',
+			isMascot: false,
+			isBold: false,
+			isDim: false,
+		});
+
+		// Mascot centered
 		for (const ml of MASCOT_LINES) {
-			const pad = Math.max(0, Math.floor((leftColWidth - ml.length) / 2));
+			const pad = Math.max(
+				0,
+				Math.floor((leftColWidth - ml.length) / 2),
+			);
 			leftLines.push({
 				text: ' '.repeat(pad) + ml,
 				isMascot: true,
@@ -65,11 +80,19 @@ export function Banner({
 				isDim: false,
 			});
 		}
-		leftLines.push({ text: '', isMascot: false, isBold: false, isDim: false });
 
+		// Empty line after mascot
+		leftLines.push({
+			text: '',
+			isMascot: false,
+			isBold: false,
+			isDim: false,
+		});
+
+		// Model label centered (e.g. "Opus 4.6 \u00b7 Claude Max")
 		const modelLabel = server
 			? model
-				? `${server}: ${model}`
+				? `${server} \u00b7 ${model}`
 				: server
 			: model;
 		if (modelLabel) {
@@ -85,6 +108,7 @@ export function Banner({
 			});
 		}
 
+		// Working dir centered, dim
 		const workDirTrunc =
 			workDir.length > leftColWidth
 				? `...${workDir.slice(-(leftColWidth - 3))}`
@@ -102,6 +126,8 @@ export function Banner({
 
 		// Build right column lines
 		const rightLines: ColumnLine[] = [];
+
+		// Empty line at top for spacing
 		rightLines.push({
 			text: '',
 			isMascot: false,
@@ -109,6 +135,7 @@ export function Banner({
 			isDim: false,
 		});
 
+		// Tips section
 		const tipList = tips ?? DEFAULT_TIPS;
 		rightLines.push({
 			text: 'Tips for getting started',
@@ -117,20 +144,27 @@ export function Banner({
 			isDim: false,
 		});
 		for (const tip of tipList) {
+			const truncated =
+				tip.length > rightColWidth
+					? `${tip.slice(0, rightColWidth - 3)}...`
+					: tip;
 			rightLines.push({
-				text: tip,
+				text: truncated,
 				isMascot: false,
 				isBold: false,
 				isDim: false,
 			});
 		}
+
+		// Section divider
 		rightLines.push({
-			text: DIVIDER.repeat(Math.min(rightColWidth, 28)),
+			text: DIVIDER.repeat(rightColWidth),
 			isMascot: false,
 			isBold: false,
 			isDim: true,
 		});
 
+		// Recent activity section
 		const activity = recentActivity ?? ['No recent activity'];
 		rightLines.push({
 			text: 'Recent activity',
@@ -162,33 +196,54 @@ export function Banner({
 			rightText: string;
 			rightStyle: ColumnLine;
 			leftPad: number;
+			rightPad: number;
 		}[] = [];
 
 		for (let i = 0; i < maxRows; i++) {
 			const left = leftLines[i] ?? emptyLine;
 			const right = rightLines[i] ?? emptyLine;
 			const leftPad = Math.max(0, leftColWidth - left.text.length);
+			const rightPad = Math.max(0, rightColWidth - right.text.length);
 			rows.push({
 				leftText: left.text,
 				leftStyle: left,
 				rightText: right.text,
 				rightStyle: right,
 				leftPad,
+				rightPad,
 			});
 		}
 
-		return { titleLine, bottomLine, rows };
+		return {
+			titleLabel,
+			titleTrailerLen,
+			bottomLine,
+			rows,
+		};
 	}, [version, workDir, server, model, tips, recentActivity, cols]);
 
 	return (
 		<Box flexDirection="column" marginBottom={1}>
-			<Text dimColor> {layout.titleLine}</Text>
+			{/* Title: " ── simse-code v1.0.0 ──────...──" */}
+			<Text>
+				{' '}
+				<Text dimColor>{DIVIDER.repeat(2)}</Text>{' '}
+				{layout.titleLabel}{' '}
+				<Text dimColor>
+					{DIVIDER.repeat(layout.titleTrailerLen)}
+				</Text>
+			</Text>
+
+			{/* Two-column content rows */}
 			{layout.rows.map((row, i) => (
+				// biome-ignore lint/suspicious/noArrayIndexKey: static layout
 				<Box key={i}>
 					<Text>
 						{' '}
 						{row.leftStyle.isMascot ? (
-							<Text color={MASCOT_COLOR}>{row.leftText}</Text>
+							<Text color={MASCOT_COLOR}>
+								{row.leftText}
+							</Text>
 						) : row.leftStyle.isDim ? (
 							<Text dimColor>{row.leftText}</Text>
 						) : (
@@ -196,7 +251,7 @@ export function Banner({
 						)}
 						{' '.repeat(row.leftPad)}
 					</Text>
-					<Text dimColor> │ </Text>
+					<Text dimColor> {'\u2502'} </Text>
 					<Text>
 						{row.rightStyle.isBold ? (
 							<Text bold>{row.rightText}</Text>
@@ -205,16 +260,26 @@ export function Banner({
 						) : (
 							row.rightText
 						)}
+						{' '.repeat(row.rightPad)}
 					</Text>
 				</Box>
 			))}
-			<Text dimColor> {layout.bottomLine}</Text>
+
+			{/* Bottom border */}
+			<Text>
+				{' '}
+				<Text dimColor>{layout.bottomLine}</Text>
+			</Text>
+
+			{/* Hint lines */}
 			<Text> </Text>
 			<Text>
 				{' '}
-				<Text dimColor>▢</Text> Try{' '}
-				<Text color="cyan">&quot;add {'<text>'}&quot;</Text> to save a
-				note
+				<Text dimColor>{'\u25A2'}</Text> Try{' '}
+				<Text color="cyan">
+					&quot;add {'<text>'}&quot;
+				</Text>{' '}
+				to save a note
 			</Text>
 			<Text> </Text>
 			<Text>

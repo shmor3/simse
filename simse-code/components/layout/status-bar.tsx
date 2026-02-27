@@ -30,13 +30,17 @@ export function StatusBar({
 	const parts: string[] = [];
 	if (server && model) parts.push(`${server}:${model}`);
 	else if (server) parts.push(server);
+	else if (model) parts.push(model);
 	if (tokens > 0) parts.push(formatTokens(tokens));
 	if (cost) parts.push(cost);
+
+	const info =
+		parts.length > 0 ? parts.join(' \u00b7 ') : 'no server configured';
 
 	return (
 		<Box paddingX={1}>
 			<Box flexGrow={1} gap={1}>
-				<Text dimColor>{parts.join(' · ')}</Text>
+				<Text dimColor>{info}</Text>
 			</Box>
 			<Box gap={1}>
 				{planMode && <Badge label="PLAN" />}

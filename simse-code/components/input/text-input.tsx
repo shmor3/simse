@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { Box, Text, useInput } from 'ink';
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 interface TextInputProps {
 	readonly value: string;
@@ -53,6 +53,15 @@ export function TextInput({
 	cursorRef.current = cursorOffset;
 	onChangeRef.current = onChange;
 	onSubmitRef.current = onSubmit;
+
+	// Clamp cursor when value changes externally (e.g., autocomplete fill)
+	useEffect(() => {
+		if (cursorOffset > value.length) {
+			const clamped = value.length;
+			setCursorOffset(clamped);
+			cursorRef.current = clamped;
+		}
+	}, [value, cursorOffset]);
 
 	const handleInput = useCallback(
 		(

@@ -127,11 +127,15 @@ export function App({
 				onPermissionRequest: async (
 					info: ACPPermissionRequestInfo,
 				): Promise<string | undefined> => {
-					const allowOption = info.options.find((o) => o.kind === 'allow_once');
-					return allowOption?.optionId;
+					const pick =
+						info.options.find((o) => o.kind === 'allow_always') ??
+						info.options.find((o) => o.kind === 'allow_once') ??
+						info.options[0];
+					return pick?.optionId;
 				},
 			});
 
+			newClient.setPermissionPolicy('auto-approve');
 			await newClient.initialize();
 
 			// Get model info

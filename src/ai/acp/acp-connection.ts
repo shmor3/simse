@@ -315,7 +315,9 @@ export function createACPConnection(
 
 		let msg: JsonRpcMessage;
 		try {
-			msg = JSON.parse(trimmed) as JsonRpcMessage;
+			const parsed: unknown = JSON.parse(trimmed);
+			if (typeof parsed !== 'object' || parsed === null) return;
+			msg = parsed as JsonRpcMessage;
 		} catch {
 			return; // Skip malformed lines
 		}

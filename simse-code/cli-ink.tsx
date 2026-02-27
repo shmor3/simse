@@ -69,16 +69,19 @@ async function bootstrap(): Promise<{
 		onPermissionRequest: async (
 			info: ACPPermissionRequestInfo,
 		): Promise<string | undefined> => {
-			// For now, auto-approve all permissions in the Ink CLI.
-			// A proper permission dialog component will be added later.
-			const allowOption = info.options.find((o) => o.kind === 'allow_once');
-			return allowOption?.optionId;
+			// Fallback handler — should rarely fire since policy is auto-approve.
+			// Try allow_always, then allow_once, then first option.
+			const pick =
+				info.options.find((o) => o.kind === 'allow_always') ??
+				info.options.find((o) => o.kind === 'allow_once') ??
+				info.options[0];
+			return pick?.optionId;
 		},
 	});
 
-	if (bypassPermissions) {
-		acpClient.setPermissionPolicy('auto-approve');
-	}
+	// Always auto-approve permissions — simse-code handles tool safety at
+	// the agentic loop level, not via ACP permission dialogs.
+	acpClient.setPermissionPolicy('auto-approve');
 
 	// Initialize ACP servers (skip if none configured)
 	if (hasServers) {

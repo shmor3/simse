@@ -159,91 +159,135 @@ export type {
 	MCPToolInfo,
 	MCPToolResult,
 } from './ai/mcp/types.js';
-export type { CompressionOptions } from './ai/memory/compression.js';
-export { cosineSimilarity } from './ai/memory/cosine.js';
-export type { TopicIndexOptions } from './ai/memory/indexing.js';
+// ---- Library (was Memory / Vector Store) -----------------------------------
+export type { CompressionOptions } from './ai/library/preservation.js';
+export { cosineSimilarity } from './ai/library/cosine.js';
+export type { TopicIndexOptions } from './ai/library/cataloging.js';
 export type {
 	BM25Options,
 	BM25Result,
 	InvertedIndex,
-} from './ai/memory/inverted-index.js';
+} from './ai/library/inverted-index.js';
 export {
 	createInvertedIndex,
 	tokenizeForIndex,
-} from './ai/memory/inverted-index.js';
-export type { LearningEngine } from './ai/memory/learning.js';
-export { createLearningEngine } from './ai/memory/learning.js';
+} from './ai/library/inverted-index.js';
+export type { LearningEngine } from './ai/library/patron-learning.js';
+export { createLearningEngine } from './ai/library/patron-learning.js';
 export type {
+	Library,
+	LibraryOptions,
+	// Backward-compat aliases
 	MemoryManager,
 	MemoryManagerOptions,
-} from './ai/memory/memory.js';
-// ---- Memory / Vector Store ------------------------------------------------
-export { createMemoryManager } from './ai/memory/memory.js';
+} from './ai/library/library.js';
+export {
+	createLibrary,
+	// Backward-compat alias
+	createMemoryManager,
+} from './ai/library/library.js';
 export type {
+	LibraryContext,
+	LibraryServices,
+	LibraryServicesOptions,
+	// Backward-compat aliases
 	MemoryMiddleware,
 	MemoryMiddlewareOptions,
 	MiddlewareContext,
-} from './ai/memory/middleware.js';
-export { createMemoryMiddleware } from './ai/memory/middleware.js';
-export type { PromptInjectionOptions } from './ai/memory/prompt-injection.js';
-export { formatMemoryContext } from './ai/memory/prompt-injection.js';
-export type { ParsedQuery } from './ai/memory/query-dsl.js';
-export { parseQuery } from './ai/memory/query-dsl.js';
-export type { RecencyOptions } from './ai/memory/recommendation.js';
-export type { StorageBackend } from './ai/memory/storage.js';
-export type { TextCache, TextCacheOptions } from './ai/memory/text-cache.js';
-export { createTextCache } from './ai/memory/text-cache.js';
+} from './ai/library/library-services.js';
+export {
+	createLibraryServices,
+	// Backward-compat alias
+	createMemoryMiddleware,
+} from './ai/library/library-services.js';
+export type { PromptInjectionOptions } from './ai/library/prompt-injection.js';
+export { formatMemoryContext } from './ai/library/prompt-injection.js';
+export type { ParsedQuery } from './ai/library/query-dsl.js';
+export { parseQuery } from './ai/library/query-dsl.js';
+export type { RecencyOptions } from './ai/library/recommendation.js';
+export type { StorageBackend } from './ai/library/storage.js';
+export type { TextCache, TextCacheOptions } from './ai/library/text-cache.js';
+export { createTextCache } from './ai/library/text-cache.js';
 export type {
-	AdvancedSearchResult,
+	// New names
+	AdvancedLookup,
+	CompendiumOptions,
+	CompendiumResult,
 	DateRange,
 	DuplicateCheckResult,
-	DuplicateGroup,
+	DuplicateVolumes,
 	EmbeddingProvider,
 	LearningOptions,
-	LearningProfile,
-	MemoryConfig,
+	LibraryConfig,
+	Lookup,
 	MetadataFilter,
 	MetadataMatchMode,
+	PatronProfile,
 	QueryRecord,
-	RecommendationResult,
+	Recommendation,
 	RecommendOptions,
 	RelatedTopic,
 	RelevanceFeedback,
 	SearchOptions,
+	TextGenerationProvider,
+	TextLookup,
+	TextSearchMode,
+	TextSearchOptions,
+	TopicInfo,
+	Volume,
+	WeightProfile,
+	// Backward-compat aliases
+	AdvancedSearchResult,
+	DuplicateGroup,
+	LearningProfile,
+	MemoryConfig,
+	RecommendationResult,
 	SearchResult,
 	SummarizeOptions,
 	SummarizeResult,
-	TextGenerationProvider,
-	TextSearchMode,
-	TextSearchOptions,
 	TextSearchResult,
-	TopicInfo,
 	VectorEntry,
-	WeightProfile,
-} from './ai/memory/types.js';
-export { computeRecommendations } from './ai/memory/vector-recommend.js';
-export type { VectorSearchConfig } from './ai/memory/vector-search.js';
+} from './ai/library/types.js';
+export { computeRecommendations } from './ai/library/stacks-recommend.js';
+export type {
+	StacksSearchConfig,
+	// Backward-compat alias
+	VectorSearchConfig,
+} from './ai/library/stacks-search.js';
 export {
+	advancedStacksSearch,
+	filterVolumesByDateRange,
+	filterVolumesByMetadata,
+	stacksSearch,
+	textSearchVolumes,
+	// Backward-compat aliases
 	advancedVectorSearch,
 	filterEntriesByDateRange,
 	filterEntriesByMetadata,
 	textSearchEntries,
 	vectorSearch,
-} from './ai/memory/vector-search.js';
+} from './ai/library/stacks-search.js';
 export type {
 	AccessStats,
 	DeserializedData,
 	SerializedData,
-} from './ai/memory/vector-serialize.js';
+} from './ai/library/stacks-serialize.js';
 export {
 	deserializeFromStorage,
 	serializeToStorage,
-} from './ai/memory/vector-serialize.js';
+} from './ai/library/stacks-serialize.js';
 export type {
+	Stacks,
+	StacksOptions,
+	// Backward-compat aliases
 	VectorStore,
 	VectorStoreOptions,
-} from './ai/memory/vector-store.js';
-export { createVectorStore } from './ai/memory/vector-store.js';
+} from './ai/library/stacks.js';
+export {
+	createStacks,
+	// Backward-compat alias
+	createVectorStore,
+} from './ai/library/stacks.js';
 // ---- Provider Prompts & System Prompt Builder -----------------------------
 export type {
 	AgentMode,
@@ -396,6 +440,8 @@ export {
 	createConfigParseError,
 	createConfigValidationError,
 	createEmbeddingError,
+	// Library (was Memory)
+	createLibraryError,
 	// Loop
 	createLoopAbortedError,
 	createLoopError,
@@ -406,7 +452,7 @@ export {
 	createMCPServerNotConnectedError,
 	createMCPToolError,
 	createMCPTransportConfigError,
-	// Memory
+	// Backward-compat alias
 	createMemoryError,
 	// Provider
 	createProviderError,
@@ -428,6 +474,11 @@ export {
 	createToolError,
 	createToolExecutionError,
 	createToolNotFoundError,
+	// Stacks errors
+	createStacksCorruptionError,
+	createStacksError,
+	createStacksIOError,
+	// Backward-compat aliases
 	createVectorStoreCorruptionError,
 	createVectorStoreIOError,
 	// VFS
@@ -449,6 +500,8 @@ export {
 	isMCPServerNotConnectedError,
 	isMCPToolError,
 	isMCPTransportConfigError,
+	isLibraryError,
+	// Backward-compat alias
 	isMemoryError,
 	isProviderError,
 	isProviderGenerationError,
@@ -465,6 +518,10 @@ export {
 	isToolError,
 	isToolExecutionError,
 	isToolNotFoundError,
+	isStacksCorruptionError,
+	isStacksError,
+	isStacksIOError,
+	// Backward-compat aliases
 	isVectorStoreCorruptionError,
 	isVectorStoreIOError,
 	isVFSError,

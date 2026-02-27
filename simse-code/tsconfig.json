@@ -18,7 +18,9 @@
 		"esModuleInterop": true,
 		"forceConsistentCasingInFileNames": true,
 		"resolveJsonModule": true,
-		"types": ["bun-types"],
+		"jsx": "react-jsx",
+		"jsxImportSource": "react",
+		"types": ["bun-types", "@types/react"],
 		"paths": {
 			"simse": ["../src/lib.ts"]
 		}

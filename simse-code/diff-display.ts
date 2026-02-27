@@ -52,6 +52,184 @@ export interface DiffDisplayOptions {
 }
 
 // ---------------------------------------------------------------------------
+// VFS type adapter
+// ---------------------------------------------------------------------------
+
+interface VFSDiffInput {
+	readonly oldPath: string;
+	readonly newPath: string;
+	readonly hunks: readonly {
+		readonly oldStart: number;
+		readonly oldCount: number;
+		readonly newStart: number;
+		readonly newCount: number;
+		readonly lines: readonly {
+			readonly type: 'add' | 'remove' | 'equal';
+			readonly text: string;
+			readonly oldLine?: number;
+			readonly newLine?: number;
+		}[];
+	}[];
+	readonly additions: number;
+	readonly deletions: number;
+}
+
+export function convertVFSDiff(vfs: VFSDiffInput): DiffResult {
+	return {
+		oldPath: vfs.oldPath,
+		newPath: vfs.newPath,
+		additions: vfs.additions,
+		deletions: vfs.deletions,
+		hunks: vfs.hunks.map((hunk) => ({
+			oldStart: hunk.oldStart,
+			oldCount: hunk.oldCount,
+			newStart: hunk.newStart,
+			newCount: hunk.newCount,
+			lines: hunk.lines.map((line) => ({
+				type: line.type === 'equal' ? ('context' as const) : line.type,
+				content: line.text,
+				oldLineNumber: line.oldLine,
+				newLineNumber: line.newLine,
+			})),
+		})),
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Word-level inline diff
+// ---------------------------------------------------------------------------
+
+export interface InlineSegment {
+	readonly text: string;
+	readonly changed: boolean;
+}
+
+export interface InlineDiffResult {
+	readonly old: readonly InlineSegment[];
+	readonly new: readonly InlineSegment[];
+}
+
+/**
+ * Compute character-level diff between two lines.
+ * Uses common prefix/suffix trimming for the changed region.
+ */
+export function computeInlineDiff(
+	oldText: string,
+	newText: string,
+): InlineDiffResult {
+	if (oldText === newText) {
+		return {
+			old: oldText.length > 0 ? [{ text: oldText, changed: false }] : [],
+			new: newText.length > 0 ? [{ text: newText, changed: false }] : [],
+		};
+	}
+
+	// Find common prefix
+	let prefixLen = 0;
+	const minLen = Math.min(oldText.length, newText.length);
+	while (prefixLen < minLen && oldText[prefixLen] === newText[prefixLen]) {
+		prefixLen++;
+	}
+
+	// Find common suffix (don't overlap with prefix)
+	let suffixLen = 0;
+	while (
+		suffixLen < minLen - prefixLen &&
+		oldText[oldText.length - 1 - suffixLen] ===
+			newText[newText.length - 1 - suffixLen]
+	) {
+		suffixLen++;
+	}
+
+	const prefix = oldText.slice(0, prefixLen);
+	const oldMiddle = oldText.slice(prefixLen, oldText.length - suffixLen);
+	const newMiddle = newText.slice(prefixLen, newText.length - suffixLen);
+	const suffix = oldText.slice(oldText.length - suffixLen);
+
+	const oldSegments: InlineSegment[] = [];
+	const newSegments: InlineSegment[] = [];
+
+	if (prefix.length > 0) {
+		oldSegments.push({ text: prefix, changed: false });
+		newSegments.push({ text: prefix, changed: false });
+	}
+	if (oldMiddle.length > 0) {
+		oldSegments.push({ text: oldMiddle, changed: true });
+	}
+	if (newMiddle.length > 0) {
+		newSegments.push({ text: newMiddle, changed: true });
+	}
+	if (suffix.length > 0) {
+		oldSegments.push({ text: suffix, changed: false });
+		newSegments.push({ text: suffix, changed: false });
+	}
+
+	return { old: oldSegments, new: newSegments };
+}
+
+// ---------------------------------------------------------------------------
+// Line pairing for word-level diff
+// ---------------------------------------------------------------------------
+
+export interface PairedDiffLine {
+	readonly type: 'add' | 'remove' | 'context';
+	readonly content: string;
+	readonly oldLineNumber?: number;
+	readonly newLineNumber?: number;
+	/** For remove lines: the paired add line (for word-level diff). */
+	readonly pair?: DiffLine;
+	/** For add lines: true if already consumed as a pair. */
+	readonly isPaired?: boolean;
+}
+
+/**
+ * Walk hunk lines and pair contiguous remove+add blocks for word-level diff.
+ * When N removes are immediately followed by M adds, pair 1:1 up to min(N, M).
+ */
+export function pairDiffLines(lines: readonly DiffLine[]): PairedDiffLine[] {
+	const result: PairedDiffLine[] = [];
+	let i = 0;
+
+	while (i < lines.length) {
+		// Collect contiguous removes
+		const removeStart = i;
+		while (i < lines.length && lines[i].type === 'remove') i++;
+		const removes = lines.slice(removeStart, i);
+
+		// Collect contiguous adds immediately after
+		const addStart = i;
+		while (i < lines.length && lines[i].type === 'add') i++;
+		const adds = lines.slice(addStart, i);
+
+		if (removes.length > 0 || adds.length > 0) {
+			const pairCount = Math.min(removes.length, adds.length);
+
+			for (let j = 0; j < removes.length; j++) {
+				result.push({
+					...removes[j],
+					pair: j < pairCount ? adds[j] : undefined,
+				});
+			}
+
+			for (let j = 0; j < adds.length; j++) {
+				result.push({
+					...adds[j],
+					isPaired: j < pairCount ? true : undefined,
+				});
+			}
+		} else {
+			// Context line — pass through
+			if (i < lines.length) {
+				result.push({ ...lines[i] });
+				i++;
+			}
+		}
+	}
+
+	return result;
+}
+
+// ---------------------------------------------------------------------------
 // Render
 // ---------------------------------------------------------------------------
 

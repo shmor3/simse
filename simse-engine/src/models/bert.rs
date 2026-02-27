@@ -5,6 +5,7 @@ use candle_core::{Device, Tensor, DType};
 use candle_nn::VarBuilder;
 use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 
+use super::nomic_bert::{NomicBertConfig, NomicBertModel};
 use super::{EmbedResult, Embedder};
 
 /// Pooling strategy for extracting a single embedding from token-level outputs.
@@ -16,7 +17,8 @@ pub enum PoolingStrategy {
     Cls,
 }
 
-/// BERT/NomicBERT embedding model via Candle.
+/// BERT-family embedding model via Candle.
+/// Supports standard BERT and NomicBERT architectures.
 pub struct BertEmbedder {
     model: BertModelVariant,
     tokenizer: Tokenizer,
@@ -25,9 +27,24 @@ pub struct BertEmbedder {
     pooling: PoolingStrategy,
 }
 
-/// Wraps both standard BERT and NomicBERT model variants.
+/// Wraps supported model variants.
 enum BertModelVariant {
     Bert(candle_transformers::models::bert::BertModel),
+    NomicBert(NomicBertModel),
+}
+
+/// Detect model type from config JSON.
+fn detect_model_type(config_str: &str) -> Result<ModelType> {
+    let raw: serde_json::Value = serde_json::from_str(config_str)?;
+    match raw.get("model_type").and_then(|v| v.as_str()) {
+        Some("nomic_bert") => Ok(ModelType::NomicBert),
+        _ => Ok(ModelType::Bert),
+    }
+}
+
+enum ModelType {
+    Bert,
+    NomicBert,
 }
 
 impl BertEmbedder {
@@ -66,24 +83,22 @@ impl BertEmbedder {
         tracing::info!(
             config = %config_path.display(),
             weights = %weights_path.display(),
-            "Loading BERT embedding model"
+            "Loading embedding model"
         );
 
-        // Load config
         let config_str = std::fs::read_to_string(config_path)?;
-        let config: candle_transformers::models::bert::Config = serde_json::from_str(&config_str)?;
+        let model_type = detect_model_type(&config_str)?;
 
         // Load tokenizer with padding enabled
         let mut tokenizer = Tokenizer::from_file(tokenizer_path)
             .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
 
-        // Enable padding for batch processing
         tokenizer.with_padding(Some(PaddingParams {
             strategy: PaddingStrategy::BatchLongest,
             ..Default::default()
         }));
         tokenizer.with_truncation(Some(TruncationParams {
-            max_length: 512,
+            max_length: 2048,
             ..Default::default()
         })).map_err(|e| anyhow::anyhow!("Failed to set truncation: {}", e))?;
 
@@ -91,10 +106,25 @@ impl BertEmbedder {
         let vb = unsafe {
             VarBuilder::from_mmaped_safetensors(&[weights_path.to_path_buf()], DType::F32, device)?
         };
-        let model = candle_transformers::models::bert::BertModel::load(vb, &config)?;
+
+        let model = match model_type {
+            ModelType::NomicBert => {
+                tracing::info!("Detected NomicBERT architecture");
+                let config: NomicBertConfig = serde_json::from_str(&config_str)?;
+                let model = NomicBertModel::load(vb, &config)?;
+                BertModelVariant::NomicBert(model)
+            }
+            ModelType::Bert => {
+                tracing::info!("Detected standard BERT architecture");
+                let config: candle_transformers::models::bert::Config =
+                    serde_json::from_str(&config_str)?;
+                let model = candle_transformers::models::bert::BertModel::load(vb, &config)?;
+                BertModelVariant::Bert(model)
+            }
+        };
 
         Ok(Self {
-            model: BertModelVariant::Bert(model),
+            model,
             tokenizer,
             device: device.clone(),
             normalize: true,
@@ -178,9 +208,12 @@ impl Embedder for BertEmbedder {
         let type_ids = Tensor::from_vec(flat_type_ids, (batch_size, seq_len), &self.device)?;
         let attention_mask = Tensor::from_vec(flat_attention_mask, (batch_size, seq_len), &self.device)?;
 
-        // Forward pass
+        // Forward pass — dispatch to the correct model variant
         let output = match &self.model {
             BertModelVariant::Bert(model) => {
+                model.forward(&token_ids, &type_ids, Some(&attention_mask))?
+            }
+            BertModelVariant::NomicBert(model) => {
                 model.forward(&token_ids, &type_ids, Some(&attention_mask))?
             }
         };

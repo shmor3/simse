@@ -268,24 +268,36 @@ pub fn resolve_tokenizer(model_id: &str, tokenizer_source: Option<&str>) -> Resu
 
     // 4. Infer base model repo from GGUF repo naming conventions
     //    e.g., "bartowski/Llama-3.2-3B-Instruct-GGUF" → "meta-llama/Llama-3.2-3B-Instruct"
-    if let Some(base_repo) = infer_base_model_repo(model_id) {
-        tracing::info!(base_repo = %base_repo, "Trying inferred base model for tokenizer");
-        let repo = api.model(base_repo.clone());
+    let candidates = infer_tokenizer_repos(model_id);
+    for candidate in &candidates {
+        tracing::info!(repo = %candidate, "Trying inferred repo for tokenizer");
+        let repo = api.model(candidate.clone());
         match repo.get("tokenizer.json") {
             Ok(path) => {
-                tracing::info!(base_repo, "Tokenizer found in base model repo");
+                tracing::info!(repo = %candidate, "Tokenizer found");
                 return Ok(path);
             }
-            Err(_) => {
-                tracing::debug!("No tokenizer.json in inferred base repo {}", base_repo);
+            Err(e) => {
+                tracing::debug!("Could not get tokenizer from {}: {}", candidate, e);
             }
         }
     }
 
-    anyhow::bail!(
-        "Could not find tokenizer for model '{}'. Use --tokenizer <repo-or-path> to specify one.",
+    // Build a helpful error message
+    let mut msg = format!(
+        "Could not find tokenizer for model '{}'.\n\nTry one of:\n  \
+         --tokenizer <hf-repo-id>   (e.g., --tokenizer unsloth/Llama-3.2-3B-Instruct)\n  \
+         --tokenizer /path/to/tokenizer.json\n",
         model_id
-    )
+    );
+    if !candidates.is_empty() {
+        msg.push_str(&format!(
+            "\nThe base model '{}' may be gated. Set HF_TOKEN env var to authenticate:\n  \
+             export HF_TOKEN=hf_...\n",
+            candidates[0]
+        ));
+    }
+    anyhow::bail!(msg)
 }
 
 #[cfg(target_family = "wasm")]
@@ -323,17 +335,17 @@ pub fn resolve_tokenizer(model_id: &str, tokenizer_source: Option<&str>) -> Resu
     )
 }
 
-/// Infer the base (non-GGUF) model repo from a GGUF repo name.
+/// Infer candidate repos for the tokenizer from a GGUF repo name.
 ///
-/// Common patterns:
-///   - `bartowski/Llama-3.2-3B-Instruct-GGUF` → try `meta-llama/Llama-3.2-3B-Instruct`
-///   - `TheBloke/Llama-2-7B-Chat-GGUF` → try `meta-llama/Llama-2-7b-chat-hf`
-///   - `user/ModelName-GGUF` → try `user/ModelName` first, then known orgs
+/// Returns a list of repos to try, ordered by likelihood of success:
+///   1. Community mirrors (unsloth, etc.) — often ungated
+///   2. Same org without -GGUF suffix
+///   3. Official orgs (meta-llama, mistralai, etc.) — may be gated
 #[cfg(not(target_family = "wasm"))]
-fn infer_base_model_repo(model_id: &str) -> Option<String> {
+fn infer_tokenizer_repos(model_id: &str) -> Vec<String> {
     let parts: Vec<&str> = model_id.splitn(2, '/').collect();
     if parts.len() != 2 {
-        return None;
+        return vec![];
     }
 
     let model_name = parts[1];
@@ -342,11 +354,17 @@ fn infer_base_model_repo(model_id: &str) -> Option<String> {
     let base_name = if model_name.ends_with("-GGUF") || model_name.ends_with("-gguf") {
         &model_name[..model_name.len() - 5]
     } else {
-        return None; // Not a GGUF repo name
+        return vec![];
     };
 
-    // Known org mappings for common model families
-    let known_orgs = [
+    // Community mirrors that are typically ungated (try first)
+    let community_orgs = [
+        "unsloth",
+        "NousResearch",
+    ];
+
+    // Official orgs (may be gated, try after community mirrors)
+    let official_orgs = [
         "meta-llama",
         "mistralai",
         "google",
@@ -358,24 +376,24 @@ fn infer_base_model_repo(model_id: &str) -> Option<String> {
         "01-ai",
     ];
 
-    // Try the same org first (e.g., user uploaded both base and GGUF)
-    let same_org = format!("{}/{}", parts[0], base_name);
+    let mut candidates = Vec::new();
 
-    // Then try known orgs
-    let api = hf_hub::api::sync::Api::new().ok()?;
-
-    // Try same org
-    if api.model(same_org.clone()).info().is_ok() {
-        return Some(same_org);
+    // Community mirrors first (often ungated)
+    for org in &community_orgs {
+        candidates.push(format!("{}/{}", org, base_name));
     }
 
-    // Try known orgs
-    for org in &known_orgs {
-        let candidate = format!("{}/{}", org, base_name);
-        if api.model(candidate.clone()).info().is_ok() {
-            return Some(candidate);
-        }
+    // Same org without -GGUF
+    candidates.push(format!("{}/{}", parts[0], base_name));
+
+    // Official orgs
+    for org in &official_orgs {
+        candidates.push(format!("{}/{}", org, base_name));
     }
 
-    None
+    // Deduplicate while preserving order
+    let mut seen = std::collections::HashSet::new();
+    candidates.retain(|c| seen.insert(c.clone()));
+
+    candidates
 }

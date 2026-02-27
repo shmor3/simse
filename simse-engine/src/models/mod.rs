@@ -1,5 +1,6 @@
 pub mod bert;
 pub mod llama;
+pub mod nomic_bert;
 pub mod sampling;
 pub mod tokenizer;
 pub mod weights;

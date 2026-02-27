@@ -1,0 +1,54 @@
+[package]
+name = "simse-engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "ACP-compatible ML inference server using Candle"
+
+[lib]
+name = "simse_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "simse-engine"
+path = "src/main.rs"
+
+[features]
+default = []
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
+mkl = ["candle-core/mkl", "candle-nn/mkl", "candle-transformers/mkl"]
+accelerate = [
+    "candle-core/accelerate",
+    "candle-nn/accelerate",
+    "candle-transformers/accelerate",
+]
+embed-weights = []
+
+[dependencies]
+# Candle ML framework
+candle-core = "0.8"
+candle-nn = "0.8"
+candle-transformers = "0.8"
+
+# HuggingFace model hub
+hf-hub = { version = "0.4", features = ["tokio"] }
+tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Unique session IDs
+uuid = { version = "1", features = ["v4"] }
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive", "env"] }
+
+# Logging to stderr
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"

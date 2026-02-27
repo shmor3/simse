@@ -4,10 +4,11 @@
 	"private": true,
 	"type": "module",
 	"bin": {
-		"simse": "./cli.ts"
+		"simse": "./cli-ink.tsx"
 	},
 	"scripts": {
-		"start": "bun run cli.ts",
+		"start": "bun run cli-ink.tsx",
+		"start:legacy": "bun run cli.ts",
 		"bridge": "bun run acp-ollama-bridge.ts",
 		"build:engine": "cd ../simse-engine && cargo build --release",
 		"build:engine:wasm": "cd ../simse-engine && cargo build --release --target wasm32-wasip1",

@@ -18,46 +18,33 @@ describe('formatTokens', () => {
 });
 
 describe('StatusBar', () => {
-	test('renders server and model with colon separator', () => {
-		const { lastFrame } = render(
-			<StatusBar server="claude" model="opus-4" tokens={1234} cost="$0.03" />,
-		);
-		const frame = lastFrame()!;
-		expect(frame).toContain('claude:opus-4');
-	});
-
-	test('renders token count with k suffix', () => {
-		const { lastFrame } = render(
-			<StatusBar server="claude" model="opus-4" tokens={12345} cost="$0.03" />,
-		);
-		expect(lastFrame()).toContain('12.3k tokens');
-	});
-
-	test('renders cost', () => {
-		const { lastFrame } = render(
-			<StatusBar server="claude" model="opus-4" tokens={1234} cost="$0.03" />,
-		);
-		expect(lastFrame()).toContain('$0.03');
-	});
-
-	test('shows fallback text when no server or model', () => {
+	test('renders default hints', () => {
 		const { lastFrame } = render(<StatusBar />);
-		expect(lastFrame()).toContain('no server configured');
+		const frame = lastFrame()!;
+		expect(frame).toContain('esc to interrupt');
+		expect(frame).toContain('? for shortcuts');
 	});
 
-	test('renders mode badges on the right', () => {
-		const { lastFrame } = render(
-			<StatusBar
-				server="claude"
-				model="opus-4"
-				tokens={0}
-				cost="$0.00"
-				planMode
-				verbose
-			/>,
-		);
+	test('shows bypass permissions hint when enabled', () => {
+		const { lastFrame } = render(<StatusBar bypassPermissions />);
 		const frame = lastFrame()!;
-		expect(frame).toContain('PLAN');
-		expect(frame).toContain('VERBOSE');
+		expect(frame).toContain('bypass permissions on');
+		expect(frame).toContain('shift+tab to cycle');
+	});
+
+	test('shows plan mode hint', () => {
+		const { lastFrame } = render(<StatusBar planMode />);
+		expect(lastFrame()).toContain('plan mode');
+	});
+
+	test('shows verbose hint', () => {
+		const { lastFrame } = render(<StatusBar verbose />);
+		expect(lastFrame()).toContain('verbose on');
+	});
+
+	test('joins hints with middot separator', () => {
+		const { lastFrame } = render(<StatusBar planMode verbose />);
+		const frame = lastFrame()!;
+		expect(frame).toContain('\u00b7');
 	});
 });

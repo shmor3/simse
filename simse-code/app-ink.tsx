@@ -242,12 +242,7 @@ export function App({
 					commands={registry.getAll()}
 				/>
 			</Box>
-			<StatusBar
-				server={currentServerName}
-				model={currentModelName}
-				planMode={planMode}
-				verbose={verbose}
-			/>
+			<StatusBar planMode={planMode} verbose={verbose} />
 		</MainLayout>
 	);
 }

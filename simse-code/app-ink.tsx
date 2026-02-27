@@ -1,7 +1,8 @@
 import { Box, Text } from 'ink';
 import InkSpinner from 'ink-spinner';
-import React, { useCallback, useMemo, useState } from 'react';
-import type { ACPClient } from 'simse';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { createACPClient, toError } from 'simse';
+import type { ACPClient, ACPPermissionRequestInfo } from 'simse';
 import { createCommandRegistry } from './command-registry.js';
 import { Banner } from './components/layout/banner.js';
 import { MainLayout } from './components/layout/main-layout.js';
@@ -19,7 +20,10 @@ import { filesCommands } from './features/files/index.js';
 import { configCommands } from './features/config/index.js';
 import { createSetupCommands } from './features/config/setup.js';
 import { aiCommands } from './features/ai/index.js';
+import { createCLIConfig } from './config.js';
+import { createConversation } from './conversation.js';
 import type { Conversation } from './conversation.js';
+import { createToolRegistry } from './tool-registry.js';
 import type { ToolRegistry } from './tool-registry.js';
 import type { OutputItem } from './ink-types.js';
 
@@ -35,17 +39,88 @@ interface AppProps {
 
 export function App({
 	dataDir,
-	serverName,
-	modelName,
-	acpClient,
-	conversation,
-	toolRegistry,
-	hasACP = true,
+	serverName: initialServerName,
+	modelName: initialModelName,
+	acpClient: initialAcpClient,
+	conversation: initialConversation,
+	toolRegistry: initialToolRegistry,
+	hasACP: initialHasACP = true,
 }: AppProps) {
 	const [items, setItems] = useState<OutputItem[]>([]);
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [planMode, setPlanMode] = useState(false);
 	const [verbose, setVerbose] = useState(false);
+
+	// Mutable service refs — swapped on /setup reload
+	const [hasACP, setHasACP] = useState(initialHasACP);
+	const [currentServerName, setCurrentServerName] = useState(initialServerName);
+	const [currentModelName, setCurrentModelName] = useState(initialModelName);
+	const acpClientRef = useRef(initialAcpClient);
+	const conversationRef = useRef(initialConversation);
+	const toolRegistryRef = useRef(initialToolRegistry);
+
+	// Re-bootstrap services after /setup writes new config files
+	const handleSetupComplete = useCallback(async () => {
+		try {
+			const configResult = createCLIConfig({ dataDir });
+			const { config, logger } = configResult;
+
+			if (config.acp.servers.length === 0) return;
+
+			const newServerName =
+				config.acp.defaultServer ?? config.acp.servers[0]?.name;
+
+			const newClient = createACPClient(config.acp, {
+				logger,
+				onPermissionRequest: async (
+					info: ACPPermissionRequestInfo,
+				): Promise<string | undefined> => {
+					const allowOption = info.options.find(
+						(o) => o.kind === 'allow_once',
+					);
+					return allowOption?.optionId;
+				},
+			});
+
+			await newClient.initialize();
+
+			// Get model info
+			let newModelName: string | undefined;
+			if (newServerName) {
+				try {
+					const modelInfo =
+						await newClient.getServerModelInfo(newServerName);
+					newModelName = modelInfo?.currentModelId;
+				} catch {
+					// optional
+				}
+			}
+
+			const newConversation = createConversation();
+			if (configResult.workspacePrompt) {
+				newConversation.setSystemPrompt(configResult.workspacePrompt);
+			}
+
+			const newToolRegistry = createToolRegistry({ logger });
+			await newToolRegistry.discover();
+
+			// Swap refs and update state
+			acpClientRef.current = newClient;
+			conversationRef.current = newConversation;
+			toolRegistryRef.current = newToolRegistry;
+			setHasACP(true);
+			setCurrentServerName(newServerName);
+			setCurrentModelName(newModelName);
+		} catch (err) {
+			setItems((prev) => [
+				...prev,
+				{
+					kind: 'error',
+					message: `Failed to connect: ${toError(err).message}. Check your config and restart.`,
+				},
+			]);
+		}
+	}, [dataDir]);
 
 	const registry = useMemo(() => {
 		const reg = createCommandRegistry();
@@ -56,21 +131,23 @@ export function App({
 		reg.registerAll(sessionCommands);
 		reg.registerAll(filesCommands);
 		reg.registerAll(configCommands);
-		reg.registerAll(createSetupCommands(dataDir));
+		reg.registerAll(createSetupCommands(dataDir, handleSetupComplete));
 		reg.registerAll(aiCommands);
 		return reg;
-	}, [dataDir]);
+	}, [dataDir, handleSetupComplete]);
 
 	const { dispatch, isCommand } = useCommandDispatch(registry);
 
 	const loopOptions = useMemo(
 		() => ({
-			acpClient,
-			conversation,
-			toolRegistry,
-			serverName,
+			acpClient: acpClientRef.current,
+			conversation: conversationRef.current,
+			toolRegistry: toolRegistryRef.current,
+			serverName: currentServerName,
 		}),
-		[acpClient, conversation, toolRegistry, serverName],
+		// Re-create when hasACP changes (services were swapped)
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+		[hasACP, currentServerName],
 	);
 
 	const { state: loopState, submit: submitToLoop } =
@@ -116,7 +193,7 @@ export function App({
 
 			setIsProcessing(false);
 		},
-		[dispatch, isCommand, submitToLoop],
+		[dispatch, isCommand, submitToLoop, hasACP],
 	);
 
 	return (
@@ -125,8 +202,8 @@ export function App({
 				version="1.0.0"
 				workDir={process.cwd()}
 				dataDir={dataDir}
-				server={serverName}
-				model={modelName}
+				server={currentServerName}
+				model={currentModelName}
 			/>
 			<MessageList items={items} />
 
@@ -169,8 +246,8 @@ export function App({
 				/>
 			</Box>
 			<StatusBar
-				server={serverName}
-				model={modelName}
+				server={currentServerName}
+				model={currentModelName}
 				planMode={planMode}
 				verbose={verbose}
 			/>

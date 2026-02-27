@@ -141,6 +141,7 @@ function writeSetupFiles(
 
 export function createSetupCommands(
 	dataDir: string,
+	onComplete?: () => Promise<void>,
 ): readonly CommandDefinition[] {
 	return [
 		{
@@ -148,7 +149,7 @@ export function createSetupCommands(
 			usage: '/setup [preset] [options]',
 			description: 'Configure ACP server and default settings',
 			category: 'config',
-			execute: (args) => {
+			execute: async (args) => {
 				const trimmed = args.trim();
 
 				// No args — show available presets
@@ -188,6 +189,11 @@ export function createSetupCommands(
 					const server = preset.build(presetArgs);
 					const created = writeSetupFiles(dataDir, server);
 
+					// Hot-reload services after writing config
+					if (onComplete) {
+						await onComplete();
+					}
+
 					const lines = [
 						`Configured ACP server: ${server.name}`,
 						`  Command: ${server.command}${server.args ? ' ' + server.args.join(' ') : ''}`,
@@ -195,7 +201,9 @@ export function createSetupCommands(
 						`Files written to ${dataDir}:`,
 						...created.map((f) => `  ${f}`),
 						'',
-						'Restart simse to connect to the new server.',
+						onComplete
+							? 'Connected to the new server.'
+							: 'Restart simse to connect to the new server.',
 					];
 					return { text: lines.join('\n') };
 				} catch (err) {

@@ -6,3 +6,4 @@ bun.lock
 .claude/
 .simse-example/
 .simse-app-example/
+.worktrees/

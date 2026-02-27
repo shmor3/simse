@@ -1,5 +1,14 @@
 import { useCallback, useRef, useState } from 'react';
+import type { ACPClient, ACPToolCall, ACPToolCallUpdate } from 'simse';
+import { toError } from 'simse';
+import type { Conversation } from '../conversation.js';
 import type { OutputItem, ToolCallState } from '../ink-types.js';
+import {
+	createAgenticLoop,
+	type AgenticLoopResult,
+	type LoopCallbacks,
+} from '../loop.js';
+import type { ToolRegistry } from '../tool-registry.js';
 
 export function deriveToolSummary(
 	name: string,
@@ -12,59 +21,248 @@ export function deriveToolSummary(
 	return undefined;
 }
 
+// ---------------------------------------------------------------------------
+// Options
+// ---------------------------------------------------------------------------
+
+export interface UseAgenticLoopOptions {
+	readonly acpClient: ACPClient;
+	readonly conversation: Conversation;
+	readonly toolRegistry: ToolRegistry;
+	readonly serverName?: string;
+	readonly maxTurns?: number;
+}
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
 interface AgenticLoopState {
 	readonly status: 'idle' | 'streaming' | 'tool-executing';
 	readonly streamText: string;
 	readonly activeToolCalls: readonly ToolCallState[];
-	readonly completedItems: readonly OutputItem[];
 }
 
-interface UseAgenticLoopResult {
+export interface UseAgenticLoopResult {
 	readonly state: AgenticLoopState;
-	readonly submit: (input: string) => Promise<void>;
+	readonly submit: (input: string) => Promise<readonly OutputItem[]>;
 	readonly abort: () => void;
 }
 
-/**
- * Hook for managing the agentic loop lifecycle.
- *
- * Full integration with createAgenticLoop will be wired in a follow-up
- * once providers are connected. For now, exports the state shape and helpers.
- */
-export function useAgenticLoop(): UseAgenticLoopResult {
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
+
+export function useAgenticLoop(
+	options: UseAgenticLoopOptions,
+): UseAgenticLoopResult {
 	const [state, setState] = useState<AgenticLoopState>({
 		status: 'idle',
 		streamText: '',
 		activeToolCalls: [],
-		completedItems: [],
 	});
 
 	const abortRef = useRef<AbortController | undefined>(undefined);
+	const optionsRef = useRef(options);
+	optionsRef.current = options;
 
-	const submit = useCallback(async (_input: string) => {
-		const ctrl = new AbortController();
-		abortRef.current = ctrl;
+	const submit = useCallback(
+		async (input: string): Promise<readonly OutputItem[]> => {
+			const ctrl = new AbortController();
+			abortRef.current = ctrl;
 
-		setState((prev) => ({
-			...prev,
-			status: 'streaming',
-			streamText: '',
-			activeToolCalls: [],
-		}));
+			const {
+				acpClient,
+				conversation,
+				toolRegistry,
+				serverName,
+				maxTurns,
+			} = optionsRef.current;
 
-		// TODO: Wire createAgenticLoop here with callbacks that
-		// update streamText, activeToolCalls, and completedItems
-		// via setState calls
+			setState({
+				status: 'streaming',
+				streamText: '',
+				activeToolCalls: [],
+			});
 
-		setState((prev) => ({
-			...prev,
-			status: 'idle',
-		}));
-	}, []);
+			const completedItems: OutputItem[] = [];
+			const toolTimings = new Map<string, number>();
+			const toolArgsMap = new Map<string, string>();
+
+			const loop = createAgenticLoop({
+				acpClient,
+				toolRegistry,
+				conversation,
+				maxTurns: maxTurns ?? 10,
+				serverName,
+				signal: ctrl.signal,
+				agentManagesTools: false,
+			});
+
+			let currentStreamText = '';
+
+			const callbacks: LoopCallbacks = {
+				onStreamStart: () => {
+					setState((prev) => ({
+						...prev,
+						status: 'streaming',
+						streamText: '',
+					}));
+					currentStreamText = '';
+				},
+				onStreamDelta: (text: string) => {
+					currentStreamText += text;
+					setState((prev) => ({
+						...prev,
+						status: 'streaming',
+						streamText: currentStreamText,
+					}));
+				},
+				onToolCallStart: (call) => {
+					// Flush any accumulated stream text as a message
+					if (currentStreamText.trim()) {
+						completedItems.push({
+							kind: 'message',
+							role: 'assistant',
+							text: currentStreamText.trim(),
+						});
+						currentStreamText = '';
+					}
+
+					const argsStr = JSON.stringify(call.arguments);
+					toolTimings.set(call.id, Date.now());
+					toolArgsMap.set(call.id, argsStr);
+					const toolState: ToolCallState = {
+						id: call.id,
+						name: call.name,
+						args: argsStr,
+						status: 'active',
+						startedAt: Date.now(),
+					};
+					setState((prev) => ({
+						...prev,
+						status: 'tool-executing',
+						streamText: '',
+						activeToolCalls: [...prev.activeToolCalls, toolState],
+					}));
+				},
+				onToolCallEnd: (result) => {
+					const startTime = toolTimings.get(result.id);
+					const durationMs =
+						startTime !== undefined
+							? Date.now() - startTime
+							: undefined;
+					const summary = result.isError
+						? undefined
+						: deriveToolSummary(result.name, result.output);
+
+					completedItems.push({
+						kind: 'tool-call',
+						name: result.name,
+						args: toolArgsMap.get(result.id) ?? '{}',
+						status: result.isError ? 'failed' : 'completed',
+						duration: durationMs,
+						summary,
+						error: result.isError ? result.output : undefined,
+					});
+
+					setState((prev) => ({
+						...prev,
+						activeToolCalls: prev.activeToolCalls.filter(
+							(tc) => tc.id !== result.id,
+						),
+					}));
+				},
+				onAgentToolCall: (toolCall: ACPToolCall) => {
+					const toolState: ToolCallState = {
+						id: toolCall.toolCallId,
+						name: toolCall.title,
+						args: '{}',
+						status: 'active',
+						startedAt: Date.now(),
+					};
+					toolTimings.set(toolCall.toolCallId, Date.now());
+					setState((prev) => ({
+						...prev,
+						status: 'tool-executing',
+						activeToolCalls: [...prev.activeToolCalls, toolState],
+					}));
+				},
+				onAgentToolCallUpdate: (update: ACPToolCallUpdate) => {
+					if (
+						update.status === 'completed' ||
+						update.status === 'failed'
+					) {
+						const startTime = toolTimings.get(update.toolCallId);
+						const durationMs =
+							startTime !== undefined
+								? Date.now() - startTime
+								: undefined;
+
+						completedItems.push({
+							kind: 'tool-call',
+							name: update.toolCallId,
+							args: '{}',
+							status:
+								update.status === 'failed'
+									? 'failed'
+									: 'completed',
+							duration: durationMs,
+						});
+
+						setState((prev) => ({
+							...prev,
+							activeToolCalls: prev.activeToolCalls.filter(
+								(tc) => tc.id !== update.toolCallId,
+							),
+						}));
+					}
+				},
+				onError: (error: Error) => {
+					completedItems.push({
+						kind: 'error',
+						message: error.message,
+					});
+				},
+			};
+
+			try {
+				const result: AgenticLoopResult = await loop.run(
+					input,
+					callbacks,
+				);
+
+				// Flush final stream text as assistant message
+				const finalText = currentStreamText.trim() || result.finalText;
+				if (finalText) {
+					completedItems.push({
+						kind: 'message',
+						role: 'assistant',
+						text: finalText,
+					});
+				}
+			} catch (err) {
+				const error = toError(err);
+				completedItems.push({
+					kind: 'error',
+					message: error.message,
+				});
+			} finally {
+				setState({
+					status: 'idle',
+					streamText: '',
+					activeToolCalls: [],
+				});
+			}
+
+			return completedItems;
+		},
+		[],
+	);
 
 	const abort = useCallback(() => {
 		abortRef.current?.abort();
-		setState((prev) => ({ ...prev, status: 'idle' }));
+		setState({ status: 'idle', streamText: '', activeToolCalls: [] });
 	}, []);
 
 	return { state, submit, abort };

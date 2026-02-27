@@ -13,12 +13,14 @@ import {
 	createChain,
 	createMemoryManager,
 	createPromptTemplate,
+	createTaskList,
 	type EmbeddingProvider,
 	type LearningProfile,
 	type Logger,
 	type MemoryManager,
 	type RetryOptions,
 	type StorageBackend,
+	type TaskList,
 	type TextGenerationProvider,
 } from 'simse';
 import { type AgentService, createAgentService } from './agents.js';
@@ -214,6 +216,7 @@ export interface KnowledgeBaseApp {
 	readonly agents: AgentService;
 	readonly tools: ToolService;
 	readonly memory: MemoryManager;
+	readonly tasks: TaskList;
 
 	// Stats
 	readonly noteCount: number;
@@ -259,6 +262,8 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		acpClient: agents.client,
 		logger,
 	});
+
+	const tasks = createTaskList();
 
 	const memory = createMemoryManager(embedder, config.memory, {
 		storage: appOptions.storage,
@@ -720,6 +725,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		agents,
 		tools,
 		memory,
+		tasks,
 		get noteCount() {
 			return memory.size;
 		},

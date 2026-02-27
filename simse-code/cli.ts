@@ -993,11 +993,11 @@ const agentsCommand: Command = {
 		}
 
 		// ACP servers (multi-server delegation)
-		if (acpClient.serverCount > 1) {
+		if (ctx.acpClient.serverCount > 1) {
 			if (lines.length > 0) lines.push('');
 			lines.push(colors.bold(colors.cyan('ACP servers:')));
-			for (const name of acpClient.serverNames) {
-				const isPrimary = name === acpClient.defaultServerName;
+			for (const name of ctx.acpClient.serverNames) {
+				const isPrimary = name === ctx.acpClient.defaultServerName;
 				const safeName = name.replace(/[^a-zA-Z0-9]/g, '_');
 				const delegateTool = isPrimary
 					? ''
@@ -3140,6 +3140,7 @@ const todosCommand: Command = {
 					return `${colors.yellow('Usage:')} /todos add <subject>`;
 				const task = ctx.app.tasks.create({
 					subject: parsed.args,
+					description: '',
 				});
 				return `${colors.green('✓')} Added task ${colors.dim(`#${task.id}`)} ${task.subject}`;
 			}
@@ -3154,10 +3155,8 @@ const todosCommand: Command = {
 			}
 			case 'rm': {
 				if (!parsed.args) return `${colors.yellow('Usage:')} /todos rm <id>`;
-				const deleted = ctx.app.tasks.update(parsed.args, {
-					status: 'completed',
-				});
-				if (!deleted)
+				const removed = ctx.app.tasks.delete(parsed.args);
+				if (!removed)
 					return `${colors.red('✗')} Task "${parsed.args}" not found.`;
 				return `${colors.green('✓')} Removed ${colors.dim(`#${parsed.args}`)}`;
 			}
@@ -3656,7 +3655,7 @@ async function main(): Promise<void> {
 		);
 	} catch (err) {
 		serviceSpinner.fail(
-			renderServiceStatus('ACP', 'error', toError(err).message, colors),
+			renderServiceStatus('ACP', 'fail', toError(err).message, colors),
 		);
 	}
 
@@ -3765,7 +3764,6 @@ async function main(): Promise<void> {
 	if (acpClient.serverCount > 1) {
 		registerDelegationTools(toolRegistry, {
 			acpClient,
-			toolRegistry,
 			primaryServer: acpClient.defaultServerName,
 		});
 	}
@@ -3940,10 +3938,10 @@ async function main(): Promise<void> {
 
 	const buildPrompt = (): string => {
 		const parts: string[] = [];
-		if (ctx.planModeState.isActive) {
+		if (ctx.planMode?.isActive) {
 			parts.push(colors.yellow('[plan]'));
 		}
-		if (ctx.verboseState.isVerbose) {
+		if (ctx.verbose?.isVerbose) {
 			parts.push(colors.cyan('[verbose]'));
 		}
 		const prefix = parts.length > 0 ? `${parts.join(' ')} ` : '';

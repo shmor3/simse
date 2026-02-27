@@ -57,6 +57,8 @@ function createMockACPClient(): ACPClient {
 		getServerHealth: mock(() => undefined),
 		getServerModelInfo: mock(() => Promise.resolve(undefined)),
 		getServerStatuses: mock(() => Promise.resolve([])),
+		getSessionModels: mock(() => Promise.resolve(undefined)),
+		getSessionModes: mock(() => Promise.resolve(undefined)),
 		serverNames: ['test'],
 		serverCount: 1,
 		defaultServerName: 'test',

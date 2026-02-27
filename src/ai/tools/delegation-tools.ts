@@ -7,7 +7,7 @@
 
 import { toError } from '../../errors/base.js';
 import type { ACPClient } from '../acp/acp-client.js';
-import type { ToolDefinition, ToolHandler, ToolRegistry } from './types.js';
+import type { ToolRegistry } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,9 +36,7 @@ export interface DelegationResult {
 
 export interface DelegationToolsOptions {
 	readonly acpClient: ACPClient;
-	readonly toolRegistry: ToolRegistry;
 	readonly primaryServer?: string;
-	readonly delegationMaxTurns?: number;
 	readonly callbacks?: DelegationCallbacks;
 }
 
@@ -53,14 +51,6 @@ const nextDelegationId = (): string => `del_${++delegationCounter}`;
 /** Reset counter — exposed for tests only. */
 export const _resetDelegationCounter = (): void => {
 	delegationCounter = 0;
-};
-
-const registerTool = (
-	registry: ToolRegistry,
-	definition: ToolDefinition,
-	handler: ToolHandler,
-): void => {
-	registry.register(definition, handler);
 };
 
 // ---------------------------------------------------------------------------
@@ -83,8 +73,7 @@ export function registerDelegationTools(
 		// Sanitize server name to valid tool name (alphanumeric + underscore)
 		const safeName = serverName.replace(/[^a-zA-Z0-9]/g, '_');
 
-		registerTool(
-			registry,
+		registry.register(
 			{
 				name: `delegate_${safeName}`,
 				description: `Delegate a task to the "${serverName}" ACP server for a single-shot response. Use this to get a response from a different AI model/server.`,

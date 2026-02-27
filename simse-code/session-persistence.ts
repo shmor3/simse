@@ -119,9 +119,14 @@ export function createSessionStore(options: SessionStoreOptions): SessionStore {
 	const list = (): readonly SessionSummary[] => {
 		if (!existsSync(sessionsDir)) return [];
 
-		const files = readdirSync(sessionsDir).filter(
-			(f) => f.endsWith('.json.gz') || f.endsWith('.json'),
-		);
+		const files = readdirSync(sessionsDir)
+			.filter((f) => f.endsWith('.json.gz') || f.endsWith('.json'))
+			.sort((a, b) => {
+				// Sort .json.gz before .json so first-seen-wins picks the newer format
+				if (a.endsWith('.json.gz') && b.endsWith('.json')) return -1;
+				if (a.endsWith('.json') && b.endsWith('.json.gz')) return 1;
+				return a.localeCompare(b);
+			});
 
 		// Deduplicate: prefer .json.gz over .json for the same ID
 		const seen = new Set<string>();

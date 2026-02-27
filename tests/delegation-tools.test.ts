@@ -77,7 +77,7 @@ describe('registerDelegationTools', () => {
 
 		registerDelegationTools(registry, {
 			acpClient,
-			toolRegistry: registry,
+
 			primaryServer: 'main',
 		});
 
@@ -93,7 +93,7 @@ describe('registerDelegationTools', () => {
 
 		registerDelegationTools(registry, {
 			acpClient,
-			toolRegistry: registry,
+
 			primaryServer: 'main',
 		});
 
@@ -110,7 +110,7 @@ describe('registerDelegationTools', () => {
 
 		registerDelegationTools(registry, {
 			acpClient,
-			toolRegistry: registry,
+
 			primaryServer: 'main',
 		});
 
@@ -124,7 +124,7 @@ describe('registerDelegationTools', () => {
 
 		registerDelegationTools(registry, {
 			acpClient,
-			toolRegistry: registry,
+
 			primaryServer: 'main',
 		});
 
@@ -149,7 +149,7 @@ describe('registerDelegationTools', () => {
 
 		registerDelegationTools(registry, {
 			acpClient,
-			toolRegistry: registry,
+
 			primaryServer: 'main',
 		});
 
@@ -175,7 +175,7 @@ describe('registerDelegationTools', () => {
 
 		registerDelegationTools(registry, {
 			acpClient,
-			toolRegistry: registry,
+
 			primaryServer: 'main',
 			callbacks: {
 				onDelegationStart: (info) => startCalls.push(info.id),
@@ -206,7 +206,7 @@ describe('registerDelegationTools', () => {
 
 		registerDelegationTools(registry, {
 			acpClient,
-			toolRegistry: registry,
+
 			primaryServer: 'main',
 			callbacks: {
 				onDelegationError: (id) => errorCalls.push(id),
@@ -230,7 +230,7 @@ describe('registerDelegationTools', () => {
 
 		registerDelegationTools(registry, {
 			acpClient,
-			toolRegistry: registry,
+
 			// No primaryServer — all servers get delegation tools
 		});
 

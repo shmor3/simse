@@ -5,7 +5,7 @@
  * All config files are written atomically after the full setup flow completes.
  */
 
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Interface as ReadlineInterface } from 'node:readline';
 import type {
@@ -246,14 +246,28 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
 			}
 		}
 
-		if (summarizeChoice === 1 && acpConfig) {
-			const mainServer = acpConfig.servers[0];
-			const summarizeConfig: SummarizeFileConfig = {
-				server: mainServer.name,
-				command: mainServer.command,
-				...(mainServer.args && { args: mainServer.args }),
-			};
-			pendingFiles.push({ file: 'summarize.json', content: summarizeConfig });
+		if (summarizeChoice === 1) {
+			// Load existing acp.json if it wasn't created this run
+			const resolvedAcpConfig =
+				acpConfig ??
+				(existsSync(acpPath)
+					? (JSON.parse(readFileSync(acpPath, 'utf-8')) as ACPFileConfig)
+					: undefined);
+
+			if (resolvedAcpConfig) {
+				const mainServer = resolvedAcpConfig.servers[0];
+				const summarizeConfig: SummarizeFileConfig = {
+					server: mainServer.name,
+					command: mainServer.command,
+					...(mainServer.args && { args: mainServer.args }),
+				};
+				pendingFiles.push({
+					file: 'summarize.json',
+					content: summarizeConfig,
+				});
+			} else {
+				console.log('  Could not load ACP config — skipping summarization.');
+			}
 		} else if (summarizeChoice === 2) {
 			const server = await pickPreset(rl, 'Select summarization provider:');
 			const summarizeConfig: SummarizeFileConfig = {

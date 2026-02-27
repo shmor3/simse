@@ -87,39 +87,41 @@ describe('createColors', () => {
 describe('renderToolCall', () => {
 	const colors = noColors();
 
-	it('should format a tool call with JSON args', () => {
+	it('should format a tool call with JSON args (verbose)', () => {
 		const result = renderToolCall(
 			'memory_search',
 			'{"query": "auth flow"}',
 			colors,
+			{ verbose: true },
 		);
 		expect(result).toContain('●');
-		expect(result).toContain('memory_search');
+		expect(result).toContain('Search');
 		expect(result).toContain('query: "auth flow"');
 	});
 
 	it('should format with empty args (no parens)', () => {
 		const result = renderToolCall('vfs_tree', '{}', colors);
 		expect(result).toContain('●');
-		expect(result).toContain('vfs_tree');
 		expect(result).not.toContain('()');
 	});
 
-	it('should format multiple parameters', () => {
+	it('should format multiple parameters (verbose)', () => {
 		const result = renderToolCall(
 			'vfs_write',
 			'{"path": "/app.py", "content": "print()"}',
 			colors,
+			{ verbose: true },
 		);
 		expect(result).toContain('path: "/app.py"');
 		expect(result).toContain('content: "print()"');
 	});
 
-	it('should handle non-string values', () => {
+	it('should handle non-string values (verbose)', () => {
 		const result = renderToolCall(
 			'memory_search',
 			'{"query": "test", "maxResults": 10}',
 			colors,
+			{ verbose: true },
 		);
 		expect(result).toContain('maxResults: 10');
 	});
@@ -268,10 +270,10 @@ describe('renderBanner', () => {
 			},
 			colors,
 		);
-		// Mascot uses Unicode box-drawing + block elements
-		expect(result).toContain('╭◉─◉╮');
-		expect(result).toContain('│▓▓▓│');
-		expect(result).toContain('╰─┬─╯');
+		// Mascot uses Unicode box-drawing characters
+		expect(result).toContain('╭──╮');
+		expect(result).toContain('╰─╮│');
+		expect(result).toContain('╰╯');
 	});
 
 	it('should handle all optional fields omitted', () => {
@@ -302,7 +304,7 @@ describe('renderBanner', () => {
 		// Should have at least 3 lines (mascot is 3 lines, text is 3 lines)
 		expect(lines.length).toBeGreaterThanOrEqual(3);
 		// First line should contain both mascot and version
-		expect(lines[0]).toContain('╭◉─◉╮');
+		expect(lines[0]).toContain('╭──╮');
 		expect(lines[0]).toContain('simse-code');
 	});
 });

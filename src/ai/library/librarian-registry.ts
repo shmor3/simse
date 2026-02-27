@@ -68,7 +68,7 @@ const DEFAULT_DEFINITION: LibrarianDefinition = Object.freeze({
 	name: 'default',
 	description: 'General-purpose head librarian that manages all topics.',
 	purpose: 'General-purpose head librarian for routing, arbitration, and fallback.',
-	topics: ['*'],
+	topics: ['**'],
 	permissions: { add: true, delete: true, reorganize: true },
 	thresholds: { topicComplexity: 100, escalateAt: 500 },
 });
@@ -338,7 +338,14 @@ ${volumes.slice(0, 5).map((v) => `- ${v.text.slice(0, 100)}`).join('\n')}
 Return ONLY valid JSON: {"shouldSpawn": true/false, "reason": "brief explanation"}`;
 
 		const assessResponse = await defaultProvider.generate(assessPrompt);
-		const assessParsed = JSON.parse(assessResponse);
+		let assessParsed: { shouldSpawn?: boolean; reason?: string };
+		try {
+			assessParsed = JSON.parse(assessResponse);
+		} catch {
+			throw new Error(
+				`Failed to parse spawn assessment for topic "${topic}": invalid JSON response`,
+			);
+		}
 
 		if (!assessParsed.shouldSpawn) {
 			throw new Error(
@@ -347,12 +354,14 @@ Return ONLY valid JSON: {"shouldSpawn": true/false, "reason": "brief explanation
 		}
 
 		// Step 2: Generate a LibrarianDefinition
+		const existingNames = [...librarians.keys()];
 		const generatePrompt = `Generate a librarian definition JSON for a specialist that will manage the topic "${topic}".
 
 The librarian should:
 - Have a descriptive kebab-case name related to the topic
 - Cover the topic and its subtopics
 - Have appropriate permissions
+- NOT use any of these existing names: ${existingNames.join(', ')}
 
 Return ONLY valid JSON matching this schema:
 {
@@ -365,7 +374,14 @@ Return ONLY valid JSON matching this schema:
 }`;
 
 		const genResponse = await defaultProvider.generate(generatePrompt);
-		const genParsed = JSON.parse(genResponse) as LibrarianDefinition;
+		let genParsed: LibrarianDefinition;
+		try {
+			genParsed = JSON.parse(genResponse) as LibrarianDefinition;
+		} catch {
+			throw new Error(
+				`Failed to parse generated definition for topic "${topic}": invalid JSON response`,
+			);
+		}
 
 		// Validate the generated definition
 		const validation = validateDefinition(genParsed);

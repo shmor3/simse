@@ -391,7 +391,7 @@ describe('CirculationDesk with registry', () => {
 
 		expect(addFn).toHaveBeenCalled();
 		const addCall = (addFn as any).mock.calls[0];
-		expect(addCall[1].librarian).toBe('specialist');
+		expect(addCall[1].librarian).toBe('code-specialist');
 	});
 
 	it('routes compendium job through resolved librarian', async () => {

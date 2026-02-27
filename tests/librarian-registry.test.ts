@@ -344,10 +344,12 @@ describe('LibrarianRegistry', () => {
 			const result = await registry.resolveLibrarian('data/analytics', 'Analytics pipeline');
 
 			expect(result.reason).toContain('Self-resolved');
-			expect(result.bids).toHaveLength(2);
+			// 3 bids: 2 specialists + default (which matches ** on all topics)
+			expect(result.bids).toHaveLength(3);
 			// Winner should be the one with 0.95 confidence
-			expect(result.bids[0].confidence).toBe(0.95);
-			expect(result.winner).toBe(result.bids[0].librarianName);
+			const sorted = [...result.bids].sort((a, b) => b.confidence - a.confidence);
+			expect(sorted[0].confidence).toBe(0.95);
+			expect(result.winner).toBe(sorted[0].librarianName);
 		});
 
 		it('arbitration by default librarian when bids are close', async () => {
@@ -355,13 +357,11 @@ describe('LibrarianRegistry', () => {
 			const provider: TextGenerationProvider = {
 				generate: mock(async () => {
 					bidCall++;
-					if (bidCall === 1) {
-						return JSON.stringify({ argument: 'Good at this', confidence: 0.75 });
+					if (bidCall <= 3) {
+						// 3 bids: specialist-a, specialist-b, default (all close)
+						return JSON.stringify({ argument: 'Good at this', confidence: 0.7 });
 					}
-					if (bidCall === 2) {
-						return JSON.stringify({ argument: 'Also good', confidence: 0.65 });
-					}
-					// Arbitration call (bidCall === 3)
+					// Arbitration call (bidCall === 4)
 					return JSON.stringify({ winner: 'specialist-b', reason: 'Better expertise match' });
 				}),
 			};
@@ -391,7 +391,47 @@ describe('LibrarianRegistry', () => {
 			// Gap is 0.10 < 0.3 → arbitration runs
 			expect(result.winner).toBe('specialist-b');
 			expect(result.reason).toBe('Better expertise match');
-			expect(result.bids).toHaveLength(2);
+			// 3 bids: 2 specialists + default (which matches ** on all topics)
+			expect(result.bids).toHaveLength(3);
+		});
+		it('falls back to default when arbitration returns unknown winner', async () => {
+			let bidCall = 0;
+			const provider: TextGenerationProvider = {
+				generate: mock(async () => {
+					bidCall++;
+					if (bidCall <= 3) {
+						// 3 bids: specialist-x, specialist-y, default
+						return JSON.stringify({ argument: 'Bid response', confidence: 0.7 });
+					}
+					// Arbitration returns an unknown winner name
+					return JSON.stringify({ winner: 'nonexistent-librarian', reason: 'oops' });
+				}),
+			};
+
+			const registry = createLibrarianRegistry(
+				makeOptions({ defaultProvider: provider, selfResolutionGap: 0.3 }),
+			);
+			await registry.initialize();
+
+			const spec1: LibrarianDefinition = {
+				...VALID_DEF,
+				name: 'specialist-x',
+				topics: ['infra/**'],
+			};
+			const spec2: LibrarianDefinition = {
+				...VALID_DEF,
+				name: 'specialist-y',
+				description: 'Another specialist',
+				purpose: 'Also infra',
+				topics: ['infra/**'],
+			};
+			await registry.register(spec1);
+			await registry.register(spec2);
+
+			const result = await registry.resolveLibrarian('infra/k8s', 'Kubernetes deployment');
+
+			// Unknown winner → falls back to default
+			expect(result.winner).toBe('default');
 		});
 	});
 

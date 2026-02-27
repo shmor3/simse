@@ -498,3 +498,29 @@ export interface Librarian {
 		volumes: readonly Volume[],
 	) => Promise<ReorganizationPlan>;
 }
+
+// ---------------------------------------------------------------------------
+// CirculationDesk (async background queue processing)
+// ---------------------------------------------------------------------------
+
+export interface CirculationDeskThresholds {
+	readonly compendium?: {
+		readonly minEntries?: number;
+		readonly minAgeMs?: number;
+		readonly deleteOriginals?: boolean;
+	};
+	readonly reorganization?: {
+		readonly maxVolumesPerTopic?: number;
+	};
+}
+
+export interface CirculationDesk {
+	readonly enqueueExtraction: (turn: TurnContext) => void;
+	readonly enqueueCompendium: (topic: string) => void;
+	readonly enqueueReorganization: (topic: string) => void;
+	readonly drain: () => Promise<void>;
+	readonly flush: () => Promise<void>;
+	readonly dispose: () => void;
+	readonly pending: number;
+	readonly processing: boolean;
+}

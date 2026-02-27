@@ -12,7 +12,7 @@ import { createCommandRegistry } from './command-registry.js';
 import { Markdown } from './components/chat/markdown.js';
 import { MessageList } from './components/chat/message-list.js';
 import { ToolCallBox } from './components/chat/tool-call-box.js';
-import { PromptInput } from './components/input/prompt-input.js';
+import { PromptInput, type PromptMode } from './components/input/prompt-input.js';
 import { Banner } from './components/layout/banner.js';
 import { MainLayout } from './components/layout/main-layout.js';
 import { StatusBar } from './components/layout/status-bar.js';
@@ -68,6 +68,7 @@ export function App({
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [planMode, setPlanMode] = useState(false);
 	const [verbose, setVerbose] = useState(false);
+	const [promptMode, setPromptMode] = useState<PromptMode>('normal');
 
 	// Mutable service refs — swapped on /setup reload
 	const [hasACP, setHasACP] = useState(initialHasACP);
@@ -255,9 +256,12 @@ export function App({
 					disabled={isProcessing}
 					planMode={planMode}
 					commands={registry.getAll()}
+					onModeChange={setPromptMode}
 				/>
 			</Box>
-			<StatusBar isProcessing={isProcessing} planMode={planMode} verbose={verbose} />
+			{promptMode === 'normal' && (
+				<StatusBar isProcessing={isProcessing} planMode={planMode} verbose={verbose} />
+			)}
 		</MainLayout>
 	);
 }

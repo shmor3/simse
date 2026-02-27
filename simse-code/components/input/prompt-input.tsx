@@ -28,11 +28,14 @@ const SHORTCUTS: readonly { key: string; desc: string }[] = [
 	{ key: 'ctrl+l', desc: 'clear' },
 ];
 
+export type PromptMode = 'normal' | 'shortcuts' | 'autocomplete';
+
 interface PromptInputProps {
 	readonly onSubmit: (value: string) => void;
 	readonly disabled?: boolean;
 	readonly planMode?: boolean;
 	readonly commands?: readonly CommandDefinition[];
+	readonly onModeChange?: (mode: PromptMode) => void;
 }
 
 export function PromptInput({
@@ -40,11 +43,15 @@ export function PromptInput({
 	disabled = false,
 	planMode,
 	commands = [],
+	onModeChange,
 }: PromptInputProps) {
 	const [value, setValue] = useState('');
-	const [mode, setMode] = useState<'normal' | 'shortcuts' | 'autocomplete'>(
-		'normal',
-	);
+	const [mode, _setMode] = useState<PromptMode>('normal');
+
+	const setMode = (next: PromptMode) => {
+		_setMode(next);
+		onModeChange?.(next);
+	};
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const [placeholder] = useState(
 		() =>

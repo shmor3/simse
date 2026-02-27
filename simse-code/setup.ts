@@ -69,6 +69,39 @@ interface Preset {
 
 const presets: readonly Preset[] = [
 	{
+		label: 'simse-engine',
+		description: 'Local AI via Candle (Rust) — no external server needed',
+		build: async (rl) => {
+			const model =
+				(await askOptional(
+					rl,
+					'  Model [bartowski/Llama-3.2-3B-Instruct-GGUF]: ',
+				)) ?? 'bartowski/Llama-3.2-3B-Instruct-GGUF';
+			const modelFile =
+				(await askOptional(
+					rl,
+					'  Model file [Llama-3.2-3B-Instruct-Q4_K_M.gguf]: ',
+				)) ?? 'Llama-3.2-3B-Instruct-Q4_K_M.gguf';
+			const device =
+				(await askOptional(rl, '  Device [cpu]: ')) ?? 'cpu';
+
+			const args = [
+				'--model',
+				model,
+				'--model-file',
+				modelFile,
+				'--device',
+				device,
+			];
+
+			return {
+				name: 'simse-engine',
+				command: 'simse-engine',
+				args,
+			};
+		},
+	},
+	{
 		label: 'Ollama',
 		description: 'Local AI via Ollama + bundled ACP bridge',
 		build: async (rl) => {

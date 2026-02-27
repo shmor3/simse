@@ -1,7 +1,8 @@
 import { Box, Static, Text } from 'ink';
-import React, { useRef } from 'react';
+import { useRef } from 'react';
 import type { OutputItem } from '../../ink-types.js';
 import { ErrorBox } from '../shared/error-box.js';
+import { Markdown } from './markdown.js';
 import { ToolCallBox } from './tool-call-box.js';
 
 interface MessageListProps {
@@ -15,7 +16,7 @@ function OutputItemView({ item }: { item: OutputItem }) {
 				return (
 					<Box>
 						<Text color="cyan" bold>
-							{'> '}
+							{'\u276F '}
 						</Text>
 						<Text bold>{item.text}</Text>
 					</Box>
@@ -23,10 +24,7 @@ function OutputItemView({ item }: { item: OutputItem }) {
 			}
 			return (
 				<Box paddingLeft={2}>
-					<Text>
-						<Text color="magenta">{'● '}</Text>
-						{item.text}
-					</Text>
+					<Markdown text={item.text} />
 				</Box>
 			);
 		case 'tool-call':

@@ -4,6 +4,7 @@ import {
 	computeInlineDiff,
 	convertVFSDiff,
 	pairDiffLines,
+	renderUnifiedDiff,
 } from '../simse-code/diff-display.js';
 
 describe('convertVFSDiff', () => {
@@ -172,5 +173,110 @@ describe('pairDiffLines', () => {
 		expect(paired[1].isPaired).toBe(true);
 		expect(paired[2].isPaired).toBeUndefined();
 		expect(paired[3].isPaired).toBeUndefined();
+	});
+});
+
+const noColors = {
+	bold: (s: string) => s,
+	dim: (s: string) => s,
+	italic: (s: string) => s,
+	underline: (s: string) => s,
+	red: (s: string) => s,
+	green: (s: string) => s,
+	yellow: (s: string) => s,
+	blue: (s: string) => s,
+	magenta: (s: string) => s,
+	cyan: (s: string) => s,
+	gray: (s: string) => s,
+	white: (s: string) => s,
+	enabled: false,
+} as const;
+
+describe('renderUnifiedDiff', () => {
+	test('renders gutter with line numbers and separator', () => {
+		const diff = {
+			oldPath: '/a.txt',
+			newPath: '/a.txt',
+			hunks: [
+				{
+					oldStart: 1,
+					oldCount: 2,
+					newStart: 1,
+					newCount: 2,
+					lines: [
+						{ type: 'remove' as const, content: 'old', oldLineNumber: 1 },
+						{ type: 'add' as const, content: 'new', newLineNumber: 1 },
+						{
+							type: 'context' as const,
+							content: 'same',
+							oldLineNumber: 2,
+							newLineNumber: 2,
+						},
+					],
+				},
+			],
+			additions: 1,
+			deletions: 1,
+		};
+
+		const output = renderUnifiedDiff(diff, noColors);
+		expect(output).toContain('│');
+		expect(output).toContain('-old');
+		expect(output).toContain('+new');
+		expect(output).toContain(' same');
+	});
+
+	test('truncates with helpful message', () => {
+		const manyLines = Array.from({ length: 60 }, (_, i) => ({
+			type: 'add' as const,
+			content: `line ${i}`,
+			newLineNumber: i + 1,
+		}));
+		const diff = {
+			oldPath: '/big.txt',
+			newPath: '/big.txt',
+			hunks: [
+				{
+					oldStart: 1,
+					oldCount: 0,
+					newStart: 1,
+					newCount: 60,
+					lines: manyLines,
+				},
+			],
+			additions: 60,
+			deletions: 0,
+		};
+
+		const output = renderUnifiedDiff(diff, noColors, { maxLines: 10 });
+		expect(output).toContain('more changes');
+	});
+
+	test('shows hunk headers', () => {
+		const diff = {
+			oldPath: '/a.txt',
+			newPath: '/a.txt',
+			hunks: [
+				{
+					oldStart: 5,
+					oldCount: 3,
+					newStart: 5,
+					newCount: 4,
+					lines: [
+						{
+							type: 'context' as const,
+							content: 'ctx',
+							oldLineNumber: 5,
+							newLineNumber: 5,
+						},
+					],
+				},
+			],
+			additions: 0,
+			deletions: 0,
+		};
+
+		const output = renderUnifiedDiff(diff, noColors);
+		expect(output).toContain('@@ -5,3 +5,4 @@');
 	});
 });

@@ -36,7 +36,7 @@ export interface DiffResult {
 }
 
 export interface DiffDisplayOptions {
-	/** Maximum lines to show per file. Default: 100 */
+	/** Maximum lines to show per file. Default: 50 */
 	readonly maxLines?: number;
 	/** Show line numbers. Default: true */
 	readonly lineNumbers?: boolean;
@@ -236,6 +236,7 @@ export function pairDiffLines(lines: readonly DiffLine[]): PairedDiffLine[] {
 // ANSI background colors — defaults (standard 16-color)
 const DEFAULT_RED_BG = '\x1b[41m';
 const DEFAULT_GREEN_BG = '\x1b[42m';
+const BOLD = '\x1b[1m';
 const RESET = '\x1b[0m';
 
 /** Build ANSI 256-color background escape sequence. */
@@ -243,80 +244,161 @@ function bg256(code: number): string {
 	return `\x1b[48;5;${code}m`;
 }
 
+/** Format gutter with line number and separator. */
+function formatGutter(oldLine?: number, newLine?: number): string {
+	const lineNum = oldLine ?? newLine;
+	const numStr = lineNum !== undefined ? String(lineNum).padStart(4) : '    ';
+	return `${numStr} │`;
+}
+
+/** Render inline segments with highlight for changed parts. */
+function renderSegments(
+	segments: readonly InlineSegment[],
+	normalBg: string,
+	highlightBg: string,
+	reset: string,
+): string {
+	return segments
+		.map((seg) =>
+			seg.changed
+				? `${reset}${highlightBg}${seg.text}${reset}${normalBg}`
+				: seg.text,
+		)
+		.join('');
+}
+
 /**
- * Render a unified diff with ANSI colors — Claude Code style.
- * Uses background colors for full-line highlighting.
- * Supports theme colors via options.themeColors.
+ * Render a unified diff with ANSI colors, two-column gutter, and word-level highlights.
  */
 export function renderUnifiedDiff(
 	diff: DiffResult,
 	colors: TermColors,
 	options?: DiffDisplayOptions,
 ): string {
-	const maxLines = options?.maxLines ?? 100;
-	const showLineNumbers = options?.lineNumbers ?? true;
+	const maxLines = options?.maxLines ?? 50;
 	const theme = options?.themeColors;
 	const lines: string[] = [];
 
 	// Use theme 256-color backgrounds if provided, else standard 16-color
 	const addBg = theme ? bg256(theme.add) : DEFAULT_GREEN_BG;
 	const removeBg = theme ? bg256(theme.remove) : DEFAULT_RED_BG;
+	const addHighlight = theme
+		? `${bg256(theme.add)}${BOLD}`
+		: `${DEFAULT_GREEN_BG}${BOLD}`;
+	const removeHighlight = theme
+		? `${bg256(theme.remove)}${BOLD}`
+		: `${DEFAULT_RED_BG}${BOLD}`;
 
 	let lineCount = 0;
+	let truncated = false;
 
-	for (const hunk of diff.hunks) {
-		// Hunk header (only if multiple hunks or non-contiguous)
-		if (diff.hunks.length > 1) {
-			const header = `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`;
-			if (theme) {
-				lines.push(`    \x1b[38;5;${theme.hunkHeader}m${header}${RESET}`);
-			} else {
-				lines.push(`    ${colors.cyan(header)}`);
-			}
-			lineCount++;
+	for (let hunkIdx = 0; hunkIdx < diff.hunks.length; hunkIdx++) {
+		const hunk = diff.hunks[hunkIdx];
+
+		// Blank line between hunks (except before the first)
+		if (hunkIdx > 0) {
+			lines.push('');
 		}
 
-		for (const line of hunk.lines) {
+		// Always show hunk header
+		const header = `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`;
+		if (theme) {
+			lines.push(`     │ \x1b[38;5;${theme.hunkHeader}m${header}${RESET}`);
+		} else {
+			lines.push(`     │ ${colors.cyan(header)}`);
+		}
+		lineCount++;
+
+		// Pre-compute inline diffs for paired lines
+		const paired = pairDiffLines([...hunk.lines]);
+		const inlineDiffs = new Map<number, InlineDiffResult>();
+		for (let idx = 0; idx < paired.length; idx++) {
+			const line = paired[idx];
+			if (line.type === 'remove' && line.pair) {
+				// Find the paired add's index
+				for (let addIdx = idx + 1; addIdx < paired.length; addIdx++) {
+					if (
+						paired[addIdx].type === 'add' &&
+						paired[addIdx].isPaired &&
+						paired[addIdx].content === line.pair.content
+					) {
+						const diffResult = computeInlineDiff(
+							line.content,
+							line.pair.content,
+						);
+						inlineDiffs.set(idx, diffResult);
+						inlineDiffs.set(addIdx, diffResult);
+						break;
+					}
+				}
+			}
+		}
+
+		for (let idx = 0; idx < paired.length; idx++) {
 			if (lineCount >= maxLines) {
-				lines.push(
-					colors.dim(
-						`    ... (${diff.additions + diff.deletions - lineCount} more changes)`,
-					),
-				);
+				const remaining = diff.additions + diff.deletions - lineCount;
+				if (remaining > 0) {
+					lines.push(colors.dim(`     │ ... ${remaining} more changes`));
+				}
+				truncated = true;
 				break;
 			}
 
-			const lineNum = showLineNumbers ? formatLineNumber(line) : '';
+			const line = paired[idx];
+			const gutter = formatGutter(
+				line.type === 'remove' ? line.oldLineNumber : undefined,
+				line.type !== 'remove' ? line.newLineNumber : undefined,
+			);
 
 			switch (line.type) {
-				case 'add':
-					if (colors.enabled) {
-						lines.push(`    ${lineNum}${addBg}+${line.content}${RESET}`);
+				case 'remove': {
+					const inlineDiff = inlineDiffs.get(idx);
+					if (colors.enabled && inlineDiff) {
+						const rendered = renderSegments(
+							inlineDiff.old,
+							removeBg,
+							removeHighlight,
+							RESET,
+						);
+						lines.push(`${gutter} ${removeBg}-${rendered}${RESET}`);
+					} else if (colors.enabled) {
+						lines.push(`${gutter} ${removeBg}-${line.content}${RESET}`);
 					} else {
-						lines.push(`    ${lineNum}+${line.content}`);
+						lines.push(`${gutter} -${line.content}`);
 					}
 					break;
-				case 'remove':
-					if (colors.enabled) {
-						lines.push(`    ${lineNum}${removeBg}-${line.content}${RESET}`);
+				}
+				case 'add': {
+					const inlineDiff = inlineDiffs.get(idx);
+					if (colors.enabled && inlineDiff) {
+						const rendered = renderSegments(
+							inlineDiff.new,
+							addBg,
+							addHighlight,
+							RESET,
+						);
+						lines.push(`${gutter} ${addBg}+${rendered}${RESET}`);
+					} else if (colors.enabled) {
+						lines.push(`${gutter} ${addBg}+${line.content}${RESET}`);
 					} else {
-						lines.push(`    ${lineNum}-${line.content}`);
+						lines.push(`${gutter} +${line.content}`);
 					}
 					break;
+				}
 				case 'context':
 					if (theme) {
 						lines.push(
-							`    ${lineNum}\x1b[38;5;${theme.context}m ${line.content}${RESET}`,
+							`${gutter} \x1b[38;5;${theme.context}m ${line.content}${RESET}`,
 						);
 					} else {
-						lines.push(`    ${lineNum}${colors.dim(` ${line.content}`)}`);
+						lines.push(`${gutter} ${colors.dim(` ${line.content}`)}`);
 					}
 					break;
 			}
 			lineCount++;
 		}
 
-		if (lineCount >= maxLines) break;
+		if (truncated) break;
 	}
 
 	return lines.join('\n');
@@ -367,19 +449,4 @@ export function renderChangeCount(
 	if (additions > 0) parts.push(colors.green(`+${additions}`));
 	if (deletions > 0) parts.push(colors.red(`-${deletions}`));
 	return parts.join(' ');
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatLineNumber(line: DiffLine): string {
-	switch (line.type) {
-		case 'add':
-			return `${String(line.newLineNumber ?? '').padStart(4)} `;
-		case 'remove':
-			return `${String(line.oldLineNumber ?? '').padStart(4)} `;
-		case 'context':
-			return `${String(line.newLineNumber ?? '').padStart(4)} `;
-	}
 }

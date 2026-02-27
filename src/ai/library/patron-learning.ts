@@ -22,7 +22,7 @@ import { decodeEmbedding, encodeEmbedding } from './preservation.js';
 import { cosineSimilarity } from './cosine.js';
 import type {
 	LearningOptions,
-	LearningProfile,
+	PatronProfile,
 	QueryRecord,
 	RelevanceFeedback,
 	WeightProfile,
@@ -79,7 +79,7 @@ export interface LearningEngine {
 	/** Remove feedback for entries that no longer exist. */
 	readonly pruneEntries: (validIds: ReadonlySet<string>) => void;
 	/** Get the full learning profile snapshot. */
-	readonly getProfile: () => LearningProfile;
+	readonly getProfile: () => PatronProfile;
 	/** Total number of queries recorded. */
 	readonly totalQueries: number;
 	/** Whether any learning state exists. */
@@ -779,7 +779,7 @@ export function createLearningEngine(
 		}
 	};
 
-	const getProfile = (): LearningProfile => ({
+	const getProfile = (): PatronProfile => ({
 		queryHistory: queryHistory.map((r) => ({
 			embedding: [...r.embedding],
 			timestamp: r.timestamp,

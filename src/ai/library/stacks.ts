@@ -6,7 +6,7 @@ import {
 import { getDefaultLogger, type Logger } from '../../logger.js';
 import {
 	checkDuplicate as checkDuplicateImpl,
-	findDuplicateGroups,
+	findDuplicateVolumes,
 } from './deduplication.js';
 import {
 	createMagnitudeCache,
@@ -845,7 +845,7 @@ export function createStacks(options: StacksOptions): Stacks {
 			);
 			return [];
 		}
-		return findDuplicateGroups(volumes, t);
+		return findDuplicateVolumes(volumes, t);
 	};
 
 	const checkDuplicate = (
@@ -918,14 +918,3 @@ export function createStacks(options: StacksOptions): Stacks {
 		},
 	});
 }
-
-// ---------------------------------------------------------------------------
-// Backward-compatibility aliases (temporary — removed after migration)
-// ---------------------------------------------------------------------------
-
-/** @deprecated Use StacksOptions */
-export type VectorStoreOptions = StacksOptions;
-/** @deprecated Use Stacks */
-export type VectorStore = Stacks;
-/** @deprecated Use createStacks */
-export const createVectorStore = createStacks;

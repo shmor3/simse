@@ -399,28 +399,3 @@ export interface LibraryConfig {
 	readonly similarityThreshold: number;
 	readonly maxResults: number;
 }
-
-// ---------------------------------------------------------------------------
-// Backward-compatibility type aliases (temporary — removed after migration)
-// ---------------------------------------------------------------------------
-
-/** @deprecated Use Volume */
-export type VectorEntry = Volume;
-/** @deprecated Use Lookup */
-export type SearchResult = Lookup;
-/** @deprecated Use TextLookup */
-export type TextSearchResult = TextLookup;
-/** @deprecated Use AdvancedLookup */
-export type AdvancedSearchResult = AdvancedLookup;
-/** @deprecated Use DuplicateVolumes */
-export type DuplicateGroup = DuplicateVolumes;
-/** @deprecated Use CompendiumOptions */
-export type SummarizeOptions = CompendiumOptions;
-/** @deprecated Use CompendiumResult */
-export type SummarizeResult = CompendiumResult;
-/** @deprecated Use PatronProfile */
-export type LearningProfile = PatronProfile;
-/** @deprecated Use LibraryConfig */
-export type MemoryConfig = LibraryConfig;
-/** @deprecated Use Recommendation */
-export type RecommendationResult = Recommendation;

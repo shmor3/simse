@@ -177,28 +177,17 @@ export { createLearningEngine } from './ai/library/patron-learning.js';
 export type {
 	Library,
 	LibraryOptions,
-	// Backward-compat aliases
-	MemoryManager,
-	MemoryManagerOptions,
 } from './ai/library/library.js';
 export {
 	createLibrary,
-	// Backward-compat alias
-	createMemoryManager,
 } from './ai/library/library.js';
 export type {
 	LibraryContext,
 	LibraryServices,
 	LibraryServicesOptions,
-	// Backward-compat aliases
-	MemoryMiddleware,
-	MemoryMiddlewareOptions,
-	MiddlewareContext,
 } from './ai/library/library-services.js';
 export {
 	createLibraryServices,
-	// Backward-compat alias
-	createMemoryMiddleware,
 } from './ai/library/library-services.js';
 export type { PromptInjectionOptions } from './ai/library/prompt-injection.js';
 export { formatMemoryContext } from './ai/library/prompt-injection.js';
@@ -209,7 +198,6 @@ export type { StorageBackend } from './ai/library/storage.js';
 export type { TextCache, TextCacheOptions } from './ai/library/text-cache.js';
 export { createTextCache } from './ai/library/text-cache.js';
 export type {
-	// New names
 	AdvancedLookup,
 	CompendiumOptions,
 	CompendiumResult,
@@ -236,23 +224,10 @@ export type {
 	TopicInfo,
 	Volume,
 	WeightProfile,
-	// Backward-compat aliases
-	AdvancedSearchResult,
-	DuplicateGroup,
-	LearningProfile,
-	MemoryConfig,
-	RecommendationResult,
-	SearchResult,
-	SummarizeOptions,
-	SummarizeResult,
-	TextSearchResult,
-	VectorEntry,
 } from './ai/library/types.js';
 export { computeRecommendations } from './ai/library/stacks-recommend.js';
 export type {
 	StacksSearchConfig,
-	// Backward-compat alias
-	VectorSearchConfig,
 } from './ai/library/stacks-search.js';
 export {
 	advancedStacksSearch,
@@ -260,12 +235,6 @@ export {
 	filterVolumesByMetadata,
 	stacksSearch,
 	textSearchVolumes,
-	// Backward-compat aliases
-	advancedVectorSearch,
-	filterEntriesByDateRange,
-	filterEntriesByMetadata,
-	textSearchEntries,
-	vectorSearch,
 } from './ai/library/stacks-search.js';
 export type {
 	AccessStats,
@@ -279,14 +248,9 @@ export {
 export type {
 	Stacks,
 	StacksOptions,
-	// Backward-compat aliases
-	VectorStore,
-	VectorStoreOptions,
 } from './ai/library/stacks.js';
 export {
 	createStacks,
-	// Backward-compat alias
-	createVectorStore,
 } from './ai/library/stacks.js';
 // ---- Provider Prompts & System Prompt Builder -----------------------------
 export type {
@@ -353,7 +317,6 @@ export {
 	registerBuiltinSubagents,
 	registerDelegationTools,
 	registerLibraryTools,
-	registerMemoryTools,
 	registerSubagentTools,
 	registerTaskTools,
 	registerVFSTools,
@@ -453,8 +416,6 @@ export {
 	createMCPServerNotConnectedError,
 	createMCPToolError,
 	createMCPTransportConfigError,
-	// Backward-compat alias
-	createMemoryError,
 	// Provider
 	createProviderError,
 	createProviderGenerationError,
@@ -479,9 +440,6 @@ export {
 	createStacksCorruptionError,
 	createStacksError,
 	createStacksIOError,
-	// Backward-compat aliases
-	createVectorStoreCorruptionError,
-	createVectorStoreIOError,
 	// VFS
 	createVFSError,
 	isChainError,
@@ -502,8 +460,6 @@ export {
 	isMCPToolError,
 	isMCPTransportConfigError,
 	isLibraryError,
-	// Backward-compat alias
-	isMemoryError,
 	isProviderError,
 	isProviderGenerationError,
 	isProviderHTTPError,
@@ -522,9 +478,6 @@ export {
 	isStacksCorruptionError,
 	isStacksError,
 	isStacksIOError,
-	// Backward-compat aliases
-	isVectorStoreCorruptionError,
-	isVectorStoreIOError,
 	isVFSError,
 	toError,
 	wrapError,

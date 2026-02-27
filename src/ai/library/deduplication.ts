@@ -118,10 +118,3 @@ export function findDuplicateVolumes(
 				g.duplicates.length > 0 ? g.totalSimilarity / g.duplicates.length : 0,
 		}));
 }
-
-// ---------------------------------------------------------------------------
-// Backward-compatibility aliases (temporary — removed after migration)
-// ---------------------------------------------------------------------------
-
-/** @deprecated Use findDuplicateVolumes */
-export const findDuplicateGroups = findDuplicateVolumes;

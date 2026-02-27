@@ -124,20 +124,3 @@ export const isStacksIOError = (
 	value: unknown,
 ): value is SimseError & { readonly storePath: string } =>
 	isSimseError(value) && value.code === 'STACKS_IO';
-
-// ---------------------------------------------------------------------------
-// Backward-compat aliases (to be removed after full migration)
-// ---------------------------------------------------------------------------
-
-/** @deprecated Use createLibraryError */
-export const createMemoryError = createLibraryError;
-/** @deprecated Use isLibraryError */
-export const isMemoryError = isLibraryError;
-/** @deprecated Use createStacksCorruptionError */
-export const createVectorStoreCorruptionError = createStacksCorruptionError;
-/** @deprecated Use isStacksCorruptionError */
-export const isVectorStoreCorruptionError = isStacksCorruptionError;
-/** @deprecated Use createStacksIOError */
-export const createVectorStoreIOError = createStacksIOError;
-/** @deprecated Use isStacksIOError */
-export const isVectorStoreIOError = isStacksIOError;

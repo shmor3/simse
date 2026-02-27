@@ -7,7 +7,7 @@
 // No external dependencies.
 // ---------------------------------------------------------------------------
 
-import type { RelatedTopic, TopicInfo, VectorEntry } from './types.js';
+import type { RelatedTopic, TopicInfo, Volume } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -32,7 +32,7 @@ export interface TopicIndex {
 	/** Get topics for a specific entry. */
 	readonly getTopics: (id: string) => readonly string[];
 	/** Add an entry to the index, extracting topics from text and metadata. */
-	readonly addEntry: (entry: VectorEntry) => void;
+	readonly addEntry: (entry: Volume) => void;
 	/** Remove an entry from the index. */
 	readonly removeEntry: (id: string) => void;
 	/** Remove all entries from the index. */
@@ -297,7 +297,7 @@ export function createTopicIndex(options?: TopicIndexOptions): TopicIndex {
 		return [...result];
 	};
 
-	const addEntry = (entry: VectorEntry): void => {
+	const addEntry = (entry: Volume): void => {
 		const { id, text, metadata } = entry;
 		// Remove existing mapping if re-indexing
 		removeEntry(id);

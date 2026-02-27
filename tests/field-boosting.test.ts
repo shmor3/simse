@@ -6,8 +6,8 @@ import {
 import { createInvertedIndex } from '../src/ai/library/inverted-index.js';
 import type { Volume } from '../src/ai/library/types.js';
 import {
-	advancedVectorSearch,
-	type VectorSearchConfig,
+	advancedStacksSearch,
+	type StacksSearchConfig,
 } from '../src/ai/library/stacks-search.js';
 
 function makeEntry(
@@ -19,7 +19,7 @@ function makeEntry(
 	return { id, text, embedding, metadata, timestamp: Date.now() };
 }
 
-const searchConfig: VectorSearchConfig = {
+const searchConfig: StacksSearchConfig = {
 	maxRegexPatternLength: 256,
 	warn: () => {},
 };
@@ -41,7 +41,7 @@ describe('field boosting', () => {
 		invIdx.addEntry(e2);
 
 		// Without boost
-		const normalResults = advancedVectorSearch(
+		const normalResults = advancedStacksSearch(
 			entries,
 			{
 				queryEmbedding: [1, 0, 0],
@@ -55,7 +55,7 @@ describe('field boosting', () => {
 		);
 
 		// With high text boost
-		const boostedResults = advancedVectorSearch(
+		const boostedResults = advancedStacksSearch(
 			entries,
 			{
 				queryEmbedding: [1, 0, 0],
@@ -95,7 +95,7 @@ describe('field boosting', () => {
 		invIdx.addEntry(e2);
 
 		// Without metadata boost
-		const normalResults = advancedVectorSearch(
+		const normalResults = advancedStacksSearch(
 			entries,
 			{
 				queryEmbedding: [1, 0, 0],
@@ -109,7 +109,7 @@ describe('field boosting', () => {
 		);
 
 		// With metadata boost
-		const boostedResults = advancedVectorSearch(
+		const boostedResults = advancedStacksSearch(
 			entries,
 			{
 				queryEmbedding: [1, 0, 0],
@@ -149,7 +149,7 @@ describe('field boosting', () => {
 		invIdx.addEntry(e2);
 
 		// Without topic boost
-		const normalResults = advancedVectorSearch(
+		const normalResults = advancedStacksSearch(
 			entries,
 			{
 				queryEmbedding: [1, 0, 0],
@@ -162,7 +162,7 @@ describe('field boosting', () => {
 		);
 
 		// With topic boost — entry with 'programming' topic gets boosted
-		const boostedResults = advancedVectorSearch(
+		const boostedResults = advancedStacksSearch(
 			entries,
 			{
 				queryEmbedding: [1, 0, 0],
@@ -200,7 +200,7 @@ describe('weighted ranking mode', () => {
 		invIdx.addEntry(e1);
 		invIdx.addEntry(e2);
 
-		const results = advancedVectorSearch(
+		const results = advancedStacksSearch(
 			entries,
 			{
 				queryEmbedding: [1, 0, 0],
@@ -236,7 +236,7 @@ describe('weighted ranking mode', () => {
 		invIdx.addEntry(e1);
 		invIdx.addEntry(e2);
 
-		const results = advancedVectorSearch(
+		const results = advancedStacksSearch(
 			entries,
 			{
 				queryEmbedding: [1, 0, 0],
@@ -285,7 +285,7 @@ describe('weighted ranking mode', () => {
 		invIdx.addEntry(e2);
 
 		// Heavy recency weight should prefer the recent entry
-		const results = advancedVectorSearch(
+		const results = advancedStacksSearch(
 			entries,
 			{
 				queryEmbedding: [1, 0, 0],
@@ -313,7 +313,7 @@ describe('weighted ranking mode', () => {
 		metaIdx.addEntry(e1.id, e1.metadata);
 		invIdx.addEntry(e1);
 
-		const results = advancedVectorSearch(
+		const results = advancedStacksSearch(
 			entries,
 			{
 				queryEmbedding: [1, 0, 0],

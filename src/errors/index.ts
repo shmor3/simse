@@ -59,13 +59,6 @@ export {
 	isStacksCorruptionError,
 	isStacksError,
 	isStacksIOError,
-	// Backward-compat aliases
-	createMemoryError,
-	createVectorStoreCorruptionError,
-	createVectorStoreIOError,
-	isMemoryError,
-	isVectorStoreCorruptionError,
-	isVectorStoreIOError,
 } from './library.js';
 export {
 	createProviderError,

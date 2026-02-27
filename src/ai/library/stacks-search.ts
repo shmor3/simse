@@ -488,20 +488,3 @@ export function advancedStacksSearch(
 	results.sort((a, b) => b.score - a.score);
 	return results.slice(0, maxResults);
 }
-
-// ---------------------------------------------------------------------------
-// Backward-compatibility aliases (temporary — removed after migration)
-// ---------------------------------------------------------------------------
-
-/** @deprecated Use StacksSearchConfig */
-export type VectorSearchConfig = StacksSearchConfig;
-/** @deprecated Use stacksSearch */
-export const vectorSearch = stacksSearch;
-/** @deprecated Use textSearchVolumes */
-export const textSearchEntries = textSearchVolumes;
-/** @deprecated Use filterVolumesByMetadata */
-export const filterEntriesByMetadata = filterVolumesByMetadata;
-/** @deprecated Use filterVolumesByDateRange */
-export const filterEntriesByDateRange = filterVolumesByDateRange;
-/** @deprecated Use advancedStacksSearch */
-export const advancedVectorSearch = advancedStacksSearch;

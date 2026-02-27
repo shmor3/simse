@@ -10,7 +10,7 @@
 
 import { Buffer } from 'node:buffer';
 import { decodeEmbedding, encodeEmbedding } from './preservation.js';
-import type { VectorEntry } from './types.js';
+import type { Volume } from './types.js';
 import type { LearningState } from './stacks-persistence.js';
 import { isValidLearningState } from './stacks-persistence.js';
 
@@ -24,7 +24,7 @@ export interface AccessStats {
 }
 
 export interface DeserializedData {
-	readonly entries: VectorEntry[];
+	readonly entries: Volume[];
 	readonly accessStats: Map<string, AccessStats>;
 	readonly learningState?: LearningState;
 	readonly skipped: number;
@@ -45,7 +45,7 @@ export const LEARNING_KEY = '__learning';
 // ---------------------------------------------------------------------------
 
 export function serializeEntry(
-	entry: VectorEntry,
+	entry: Volume,
 	stats?: { readonly accessCount: number; readonly lastAccessed: number },
 ): Buffer {
 	const textBuf = Buffer.from(entry.text, 'utf-8');
@@ -95,7 +95,7 @@ export function deserializeEntry(
 	id: string,
 	buf: Buffer,
 ): {
-	entry: VectorEntry;
+	entry: Volume;
 	accessCount: number;
 	lastAccessed: number;
 } | null {
@@ -153,7 +153,7 @@ export function deserializeFromStorage(
 		warn: (msg: string, metadata?: Readonly<Record<string, unknown>>) => void;
 	},
 ): DeserializedData {
-	const entries: VectorEntry[] = [];
+	const entries: Volume[] = [];
 	const accessStats = new Map<string, AccessStats>();
 	let skipped = 0;
 	let learningState: LearningState | undefined;
@@ -200,7 +200,7 @@ export function deserializeFromStorage(
 // ---------------------------------------------------------------------------
 
 export function serializeToStorage(
-	entries: readonly VectorEntry[],
+	entries: readonly Volume[],
 	accessStats: ReadonlyMap<
 		string,
 		{ readonly accessCount: number; readonly lastAccessed: number }

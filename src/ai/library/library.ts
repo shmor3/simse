@@ -29,7 +29,7 @@ import type {
 	TopicInfo,
 	Volume,
 } from './types.js';
-import { createVectorStore, type VectorStoreOptions } from './stacks.js';
+import { createStacks, type StacksOptions } from './stacks.js';
 
 // ---------------------------------------------------------------------------
 // Options
@@ -41,7 +41,7 @@ export interface LibraryOptions {
 	/** Inject a custom logger. */
 	logger?: Logger;
 	/** Override stacks options (except storage and logger, which are set at this level). */
-	stacksOptions?: Omit<VectorStoreOptions, 'logger' | 'storage'>;
+	stacksOptions?: Omit<StacksOptions, 'logger' | 'storage'>;
 	/**
 	 * Optional text generation provider used for compendium.
 	 * Can also be set later via `setTextGenerator()`.
@@ -124,7 +124,7 @@ export function createLibrary(
 ): Library {
 	const logger = (options.logger ?? getDefaultLogger()).child('library');
 	const eventBus = options.eventBus;
-	const store = createVectorStore({
+	const store = createStacks({
 		storage: options.storage,
 		logger,
 		...(options.stacksOptions ?? {}),
@@ -782,13 +782,3 @@ export function createLibrary(
 	});
 }
 
-// ---------------------------------------------------------------------------
-// Backward-compatibility aliases (temporary — removed after migration)
-// ---------------------------------------------------------------------------
-
-/** @deprecated Use LibraryOptions */
-export type MemoryManagerOptions = LibraryOptions;
-/** @deprecated Use Library */
-export type MemoryManager = Library;
-/** @deprecated Use createLibrary */
-export const createMemoryManager = createLibrary;

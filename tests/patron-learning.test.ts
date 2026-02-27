@@ -216,7 +216,7 @@ describe('createLearningEngine', () => {
 });
 
 // ---------------------------------------------------------------------------
-// VectorStore Learning Integration Tests
+// Stacks Learning Integration Tests
 // ---------------------------------------------------------------------------
 
 describe('Stacks learning integration', () => {

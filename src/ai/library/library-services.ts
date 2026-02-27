@@ -137,15 +137,3 @@ export function createLibraryServices(
 	return Object.freeze({ enrichSystemPrompt, afterResponse });
 }
 
-// ---------------------------------------------------------------------------
-// Backward-compatibility aliases (temporary — removed after migration)
-// ---------------------------------------------------------------------------
-
-/** @deprecated Use LibraryContext */
-export type MiddlewareContext = LibraryContext;
-/** @deprecated Use LibraryServices */
-export type MemoryMiddleware = LibraryServices;
-/** @deprecated Use LibraryServicesOptions */
-export type MemoryMiddlewareOptions = LibraryServicesOptions;
-/** @deprecated Use createLibraryServices */
-export const createMemoryMiddleware = createLibraryServices;

@@ -7,7 +7,7 @@
 // No external dependencies.
 // ---------------------------------------------------------------------------
 
-import type { VectorEntry } from './types.js';
+import type { Volume } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Result / Option types
@@ -31,9 +31,9 @@ export interface BM25Options {
 
 export interface InvertedIndex {
 	/** Add a single entry to the index. */
-	readonly addEntry: (entry: VectorEntry) => void;
+	readonly addEntry: (entry: Volume) => void;
 	/** Batch-add multiple entries. */
-	readonly addEntries: (entries: readonly VectorEntry[]) => void;
+	readonly addEntries: (entries: readonly Volume[]) => void;
 	/** Remove an entry from the index by ID and its original text. */
 	readonly removeEntry: (id: string, text: string) => void;
 	/** Get all entry IDs that contain the given term. */
@@ -92,7 +92,7 @@ export function createInvertedIndex(): InvertedIndex {
 	// Internal helpers
 	// -----------------------------------------------------------------------
 
-	function addSingleEntry(entry: VectorEntry): void {
+	function addSingleEntry(entry: Volume): void {
 		const tokens = tokenizeForIndex(entry.text);
 		docLengths.set(entry.id, tokens.length);
 		totalDocLength += tokens.length;
@@ -120,11 +120,11 @@ export function createInvertedIndex(): InvertedIndex {
 	// Public API
 	// -----------------------------------------------------------------------
 
-	function addEntry(entry: VectorEntry): void {
+	function addEntry(entry: Volume): void {
 		addSingleEntry(entry);
 	}
 
-	function addEntries(entries: readonly VectorEntry[]): void {
+	function addEntries(entries: readonly Volume[]): void {
 		for (const entry of entries) {
 			addSingleEntry(entry);
 		}

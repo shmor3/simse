@@ -130,9 +130,6 @@ export function registerLibraryTools(
 	);
 }
 
-/** @deprecated Use registerLibraryTools */
-export const registerMemoryTools = registerLibraryTools;
-
 // ---------------------------------------------------------------------------
 // VFS tools
 // ---------------------------------------------------------------------------

@@ -178,3 +178,46 @@ describe('createACPGenerator', () => {
 		});
 	});
 });
+
+describe('createACPGenerator generateWithModel', () => {
+	it('returns a provider with generateWithModel', () => {
+		const client = createMockACPClient();
+		const generator = createACPGenerator({ client });
+		expect(typeof generator.generateWithModel).toBe('function');
+	});
+
+	it('delegates to client.generate with modelId option', async () => {
+		const client = createMockACPClient();
+		const generator = createACPGenerator({ client });
+		const result = await generator.generateWithModel!(
+			'optimize this',
+			'claude-opus-4-6',
+		);
+		expect(result).toBe('generated text');
+		expect(client.generate).toHaveBeenCalledWith('optimize this', {
+			agentId: undefined,
+			serverName: undefined,
+			systemPrompt: undefined,
+			modelId: 'claude-opus-4-6',
+		});
+	});
+
+	it('passes systemPrompt through generateWithModel', async () => {
+		const client = createMockACPClient();
+		const generator = createACPGenerator({
+			client,
+			systemPromptPrefix: 'prefix',
+		});
+		await generator.generateWithModel!(
+			'prompt',
+			'model-id',
+			'system',
+		);
+		expect(client.generate).toHaveBeenCalledWith('prompt', {
+			agentId: undefined,
+			serverName: undefined,
+			systemPrompt: 'prefix\n\nsystem',
+			modelId: 'model-id',
+		});
+	});
+});

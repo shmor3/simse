@@ -98,5 +98,31 @@ export function createACPGenerator(
 				);
 			}
 		},
+		generateWithModel: async (
+			prompt: string,
+			modelId: string,
+			systemPrompt?: string,
+		) => {
+			try {
+				const fullSystemPrompt =
+					[systemPromptPrefix, systemPrompt].filter(Boolean).join('\n\n') ||
+					undefined;
+
+				const result = await client.generate(prompt, {
+					agentId,
+					serverName,
+					systemPrompt: fullSystemPrompt,
+					modelId,
+				});
+				return result.content;
+			} catch (err) {
+				const error = toError(err);
+				throw createProviderGenerationError(
+					agentId ?? 'default',
+					`Generation with model ${modelId} failed: ${error.message}`,
+					{ cause: err },
+				);
+			}
+		},
 	});
 }

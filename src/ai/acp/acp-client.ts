@@ -113,6 +113,7 @@ export interface ACPClient {
 			systemPrompt?: string;
 			config?: Record<string, unknown>;
 			sampling?: ACPSamplingParams;
+			modelId?: string;
 		},
 	) => Promise<ACPGenerateResult>;
 	readonly chat: (
@@ -565,6 +566,7 @@ export function createACPClient(
 			systemPrompt?: string;
 			config?: Record<string, unknown>;
 			sampling?: ACPSamplingParams;
+			modelId?: string;
 		},
 	): Promise<ACPGenerateResult> => {
 		const { connection, entry, name } = resolveConnection(
@@ -581,6 +583,9 @@ export function createACPClient(
 
 		return withResilience(name, 'generate', async () => {
 			const sessionId = await createSession(connection);
+			if (generateOptions?.modelId) {
+				await setSessionModel(sessionId, generateOptions.modelId, name);
+			}
 			const content = buildTextContent(prompt, generateOptions?.systemPrompt);
 			const result = await sendPrompt(
 				connection,

@@ -431,14 +431,11 @@ export function createCLIConfig(options?: CLIConfigOptions): CLIConfigResult {
 		workspaceSettings.defaultAgent ??
 		userConfig.defaultAgent;
 
-	// -- Load acp.json (required) ---------------------------------------------
+	// -- Load acp.json (optional — app starts in degraded mode without it) ----
 
-	const acpFileConfig = readJsonFile<ACPFileConfig>(acpPath);
-	if (!acpFileConfig) {
-		throw new Error(
-			`No ACP config found at "${acpPath}". Create it with your server definitions or run 'simse init'.`,
-		);
-	}
+	const acpFileConfig = readJsonFile<ACPFileConfig>(acpPath) ?? {
+		servers: [],
+	};
 
 	// -- Load mcp.json (optional) ---------------------------------------------
 
@@ -483,45 +480,81 @@ export function createCLIConfig(options?: CLIConfigOptions): CLIConfigResult {
 
 	// -- Build final config ---------------------------------------------------
 
-	const config = defineConfig({
-		acp: {
-			servers: acpFileConfig.servers.map((s) => ({
-				...s,
-				args: s.args ? [...s.args] : undefined,
-			})),
-			defaultServer: acpFileConfig.defaultServer,
-			defaultAgent: acpFileConfig.defaultAgent ?? defaultAgent,
-			// Pass MCP server configs to ACP so agents can discover tools
-			mcpServers: validMcpServers.map((s) => ({
-				name: s.name,
-				command: s.command,
-				args: s.args ? [...s.args] : undefined,
-				env: s.env,
-			})),
-		},
-		mcp: {
-			client: {
-				servers: validMcpServers.map((s) => ({
-					...s,
-					args: s.args ? [...s.args] : undefined,
-				})),
-				clientName: options?.clientName,
-				clientVersion: options?.clientVersion,
-			},
-			server: {
-				name: options?.serverName,
-				version: options?.serverVersion,
-			},
-		},
-		memory: {
-			enabled: libraryConfig.enabled ?? true,
-			embeddingAgent:
-				embedConfig.embeddingModel ?? 'nomic-ai/nomic-embed-text-v1.5',
-			similarityThreshold: libraryConfig.similarityThreshold ?? 0.7,
-			maxResults: libraryConfig.maxResults ?? 10,
-		},
-		chains: {},
-	});
+	// When no ACP servers are configured, build a minimal config without
+	// calling defineConfig (which requires at least one server).
+	const hasACPServers = acpFileConfig.servers.length > 0;
+
+	const config: AppConfig = hasACPServers
+		? defineConfig({
+				acp: {
+					servers: acpFileConfig.servers.map((s) => ({
+						...s,
+						args: s.args ? [...s.args] : undefined,
+					})),
+					defaultServer: acpFileConfig.defaultServer,
+					defaultAgent: acpFileConfig.defaultAgent ?? defaultAgent,
+					mcpServers: validMcpServers.map((s) => ({
+						name: s.name,
+						command: s.command,
+						args: s.args ? [...s.args] : undefined,
+						env: s.env,
+					})),
+				},
+				mcp: {
+					client: {
+						servers: validMcpServers.map((s) => ({
+							...s,
+							args: s.args ? [...s.args] : undefined,
+						})),
+						clientName: options?.clientName,
+						clientVersion: options?.clientVersion,
+					},
+					server: {
+						name: options?.serverName,
+						version: options?.serverVersion,
+					},
+				},
+				memory: {
+					enabled: libraryConfig.enabled ?? true,
+					embeddingAgent:
+						embedConfig.embeddingModel ??
+						'nomic-ai/nomic-embed-text-v1.5',
+					similarityThreshold:
+						libraryConfig.similarityThreshold ?? 0.7,
+					maxResults: libraryConfig.maxResults ?? 10,
+				},
+				chains: {},
+			})
+		: Object.freeze({
+				acp: Object.freeze({
+					servers: Object.freeze([]),
+					defaultServer: undefined,
+					defaultAgent: undefined,
+				}),
+				mcp: Object.freeze({
+					client: Object.freeze({
+						servers: Object.freeze([]),
+						clientName: options?.clientName,
+						clientVersion: options?.clientVersion,
+					}),
+					server: Object.freeze({
+						enabled: false,
+						transport: 'stdio' as const,
+						name: options?.serverName as string,
+						version: options?.serverVersion as string,
+					}),
+				}),
+				memory: Object.freeze({
+					enabled: libraryConfig.enabled ?? true,
+					embeddingAgent:
+						embedConfig.embeddingModel ??
+						'nomic-ai/nomic-embed-text-v1.5',
+					similarityThreshold:
+						libraryConfig.similarityThreshold ?? 0.7,
+					maxResults: libraryConfig.maxResults ?? 10,
+				}),
+				chains: Object.freeze({}),
+			});
 
 	const logger = createLogger({
 		context: 'simse-code',

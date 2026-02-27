@@ -54,13 +54,15 @@ async function bootstrap(): Promise<{
 	toolRegistry: ToolRegistry;
 	serverName?: string;
 	modelName?: string;
+	hasACP: boolean;
 }> {
 	const configResult = createCLIConfig({ dataDir });
 	const { config, logger } = configResult;
 
-	// Determine if the agent manages tools (has permissionPolicy)
-	const defaultServerName =
-		config.acp.defaultServer ?? config.acp.servers[0]?.name;
+	const hasServers = config.acp.servers.length > 0;
+	const defaultServerName = hasServers
+		? (config.acp.defaultServer ?? config.acp.servers[0]?.name)
+		: undefined;
 
 	const acpClient = createACPClient(config.acp, {
 		logger,
@@ -78,11 +80,13 @@ async function bootstrap(): Promise<{
 		acpClient.setPermissionPolicy('auto-approve');
 	}
 
-	// Initialize ACP servers
-	try {
-		await acpClient.initialize();
-	} catch (err) {
-		console.error(`ACP initialization failed: ${toError(err).message}`);
+	// Initialize ACP servers (skip if none configured)
+	if (hasServers) {
+		try {
+			await acpClient.initialize();
+		} catch (err) {
+			console.error(`ACP initialization failed: ${toError(err).message}`);
+		}
 	}
 
 	// Get model info for banner
@@ -122,12 +126,13 @@ async function bootstrap(): Promise<{
 		toolRegistry,
 		serverName: defaultServerName,
 		modelName,
+		hasACP: hasServers,
 	};
 }
 
 // Bootstrap services then render
 bootstrap()
-	.then(({ acpClient, conversation, toolRegistry, serverName, modelName }) => {
+	.then(({ acpClient, conversation, toolRegistry, serverName, modelName, hasACP }) => {
 		render(
 			<App
 				dataDir={dataDir}
@@ -136,6 +141,7 @@ bootstrap()
 				acpClient={acpClient}
 				conversation={conversation}
 				toolRegistry={toolRegistry}
+				hasACP={hasACP}
 			/>,
 		);
 	})

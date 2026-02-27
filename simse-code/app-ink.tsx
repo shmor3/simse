@@ -17,6 +17,7 @@ import { toolsCommands } from './features/tools/index.js';
 import { sessionCommands } from './features/session/index.js';
 import { filesCommands } from './features/files/index.js';
 import { configCommands } from './features/config/index.js';
+import { createSetupCommands } from './features/config/setup.js';
 import { aiCommands } from './features/ai/index.js';
 import type { Conversation } from './conversation.js';
 import type { ToolRegistry } from './tool-registry.js';
@@ -29,6 +30,7 @@ interface AppProps {
 	readonly acpClient: ACPClient;
 	readonly conversation: Conversation;
 	readonly toolRegistry: ToolRegistry;
+	readonly hasACP?: boolean;
 }
 
 export function App({
@@ -38,6 +40,7 @@ export function App({
 	acpClient,
 	conversation,
 	toolRegistry,
+	hasACP = true,
 }: AppProps) {
 	const [items, setItems] = useState<OutputItem[]>([]);
 	const [isProcessing, setIsProcessing] = useState(false);
@@ -53,9 +56,10 @@ export function App({
 		reg.registerAll(sessionCommands);
 		reg.registerAll(filesCommands);
 		reg.registerAll(configCommands);
+		reg.registerAll(createSetupCommands(dataDir));
 		reg.registerAll(aiCommands);
 		return reg;
-	}, []);
+	}, [dataDir]);
 
 	const { dispatch, isCommand } = useCommandDispatch(registry);
 
@@ -94,6 +98,16 @@ export function App({
 						{ kind: 'command-result', element: result.element },
 					]);
 				}
+			} else if (!hasACP) {
+				setItems((prev) => [
+					...prev,
+					{
+						kind: 'error',
+						message:
+							'No ACP server configured. Run /setup to configure one.\n' +
+							'  Examples: /setup claude-code, /setup ollama, /setup copilot',
+					},
+				]);
 			} else {
 				// Send to agentic loop
 				const completedItems = await submitToLoop(input);

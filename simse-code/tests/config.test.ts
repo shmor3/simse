@@ -81,10 +81,9 @@ describe('createCLIConfig', () => {
 		expect(result.logger).toBeDefined();
 	});
 
-	it('should throw when acp.json is missing', () => {
-		expect(() => createCLIConfig({ dataDir: testDir })).toThrow(
-			/No ACP config found/,
-		);
+	it('should return empty servers when acp.json is missing', () => {
+		const result = createCLIConfig({ dataDir: testDir });
+		expect(result.config.acp.servers).toHaveLength(0);
 	});
 
 	it('should work with minimal acp.json', () => {

@@ -21,9 +21,12 @@ export const configCommands: readonly CommandDefinition[] = [
 	},
 	{
 		name: 'init',
+		aliases: ['initialize'],
 		usage: '/init',
-		description: 'Initialize a new simse project',
+		description: 'Initialize a new simse project (alias for /setup)',
 		category: 'config',
-		execute: () => ({ text: 'Initializing project...' }),
+		execute: () => ({
+			text: 'Use /setup to configure simse.\n  Examples: /setup claude-code, /setup ollama, /setup copilot\n  Run /setup with no args to see all options.',
+		}),
 	},
 ];

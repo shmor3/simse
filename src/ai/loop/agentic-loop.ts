@@ -59,7 +59,7 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		streamRetry,
 		toolRetry,
 		eventBus,
-		memoryMiddleware,
+		libraryServices,
 		agentManagesTools = false,
 		systemPromptBuilder,
 		contextPruner,
@@ -122,9 +122,9 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		for (let turn = 1; turn <= maxTurns; turn++) {
 			// Enrich system prompt with memory context each turn
 			let turnSystemPrompt = baseSystemPrompt;
-			if (memoryMiddleware) {
+			if (libraryServices) {
 				try {
-					turnSystemPrompt = await memoryMiddleware.enrichSystemPrompt({
+					turnSystemPrompt = await libraryServices.enrichSystemPrompt({
 						userInput,
 						currentSystemPrompt: baseSystemPrompt,
 						conversationHistory: conversation.serialize(),
@@ -329,9 +329,9 @@ Be concise but preserve all information needed to continue without re-reading th
 				lastText = parsed.text;
 
 				// Store response in memory after final text turn
-				if (memoryMiddleware && lastText) {
+				if (libraryServices && lastText) {
 					try {
-						await memoryMiddleware.afterResponse(userInput, lastText);
+						await libraryServices.afterResponse(userInput, lastText);
 					} catch {
 						// Graceful degradation
 					}
@@ -454,9 +454,9 @@ Be concise but preserve all information needed to continue without re-reading th
 		}
 
 		// Hit turn limit — store response in memory
-		if (memoryMiddleware && lastText) {
+		if (libraryServices && lastText) {
 			try {
-				await memoryMiddleware.afterResponse(userInput, lastText);
+				await libraryServices.afterResponse(userInput, lastText);
 			} catch {
 				// Graceful degradation
 			}

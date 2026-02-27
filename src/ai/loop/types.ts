@@ -12,8 +12,8 @@ import type {
 } from '../acp/types.js';
 import type { ContextPruner } from '../conversation/context-pruner.js';
 import type { Conversation } from '../conversation/types.js';
-import type { MemoryMiddleware } from '../memory/middleware.js';
-import type { TextGenerationProvider } from '../memory/types.js';
+import type { LibraryServices } from '../library/library-services.js';
+import type { TextGenerationProvider } from '../library/types.js';
 import type { SystemPromptBuilder } from '../prompts/types.js';
 import type {
 	ToolCallRequest,
@@ -51,8 +51,8 @@ export interface AgenticLoopOptions {
 	};
 	/** Optional event bus for publishing loop lifecycle events. */
 	readonly eventBus?: EventBus;
-	/** Optional memory middleware for per-turn context enrichment and response storage. */
-	readonly memoryMiddleware?: MemoryMiddleware;
+	/** Optional library services for per-turn context enrichment and response storage. */
+	readonly libraryServices?: LibraryServices;
 	/**
 	 * When true, the ACP agent manages its own tool calling (e.g. Claude Code).
 	 * Skips injecting `<tool_use>` XML into the system prompt and skips

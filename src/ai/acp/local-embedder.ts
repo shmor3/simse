@@ -10,7 +10,7 @@
 
 import { toError } from '../../errors/base.js';
 import { createEmbeddingError } from '../../errors/index.js';
-import type { EmbeddingProvider } from '../memory/types.js';
+import type { EmbeddingProvider } from '../library/types.js';
 
 // ---------------------------------------------------------------------------
 // Options

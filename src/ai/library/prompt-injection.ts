@@ -66,7 +66,7 @@ export function formatMemoryContext(
 	const now = Date.now();
 
 	if (format === 'natural') {
-		const lines = ['Relevant context from memory:'];
+		const lines = ['Relevant context from library:'];
 		let chars = lines[0].length;
 		for (const r of filtered) {
 			const topic = r.volume.metadata.topic ?? 'uncategorized';

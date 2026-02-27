@@ -19,7 +19,7 @@ import { createAgentExecutor } from '../agent/agent-executor.js';
 import type { ParallelSubResult } from '../agent/types.js';
 import type { MCPClient } from '../mcp/mcp-client.js';
 import type { MCPToolCallMetrics } from '../mcp/types.js';
-import type { MemoryManager } from '../memory/memory.js';
+import type { Library } from '../library/library.js';
 import { createPromptTemplate } from './prompt-template.js';
 import type {
 	ChainCallbacks,
@@ -35,7 +35,7 @@ import type {
 export interface ChainOptions {
 	readonly acpClient: ACPClient;
 	readonly mcpClient?: MCPClient;
-	readonly memoryManager?: MemoryManager;
+	readonly library?: Library;
 	readonly logger?: Logger;
 	readonly callbacks?: ChainCallbacks;
 	readonly chainName?: string;
@@ -79,7 +79,7 @@ export function createChain(options: ChainOptions): Chain {
 	const {
 		acpClient,
 		mcpClient,
-		memoryManager,
+		library,
 		callbacks: initialCallbacks,
 		chainName,
 	} = options;
@@ -92,7 +92,7 @@ export function createChain(options: ChainOptions): Chain {
 	const executor = createAgentExecutor({
 		acpClient,
 		mcpClient,
-		memoryManager,
+		library,
 		logger,
 		name: chainName,
 	});
@@ -593,9 +593,9 @@ export function createChain(options: ChainOptions): Chain {
 					}
 
 					// Optionally store output to memory
-					if (step.storeToMemory && memoryManager) {
+					if (step.storeToMemory && library) {
 						try {
-							await memoryManager.add(output, step.memoryMetadata ?? {});
+							await library.add(output, step.memoryMetadata ?? {});
 							logger.debug(`Stored step "${step.name}" output to memory`);
 						} catch (error) {
 							// Non-fatal: log but don't fail the chain
@@ -702,7 +702,7 @@ export function createChain(options: ChainOptions): Chain {
 			const singleChain = createChain({
 				acpClient,
 				mcpClient,
-				memoryManager,
+				library,
 				logger,
 				callbacks,
 			});

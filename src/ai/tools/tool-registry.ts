@@ -12,7 +12,7 @@ import {
 	createToolNotFoundError,
 } from '../../errors/tools.js';
 import { withTimeout } from '../../utils/timeout.js';
-import { registerMemoryTools, registerVFSTools } from './builtin-tools.js';
+import { registerLibraryTools, registerVFSTools } from './builtin-tools.js';
 import type {
 	RegisteredTool,
 	ToolCallRequest,
@@ -82,7 +82,7 @@ function parseToolCallsFromResponse(response: string): ParsedResponse {
 export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 	const {
 		mcpClient,
-		memoryManager,
+		library,
 		vfs,
 		permissionResolver,
 		defaultToolTimeoutMs,
@@ -402,8 +402,8 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 
 	// Register built-ins through the public registry interface
 	const registerBuiltins = (): void => {
-		if (memoryManager) {
-			registerMemoryTools(registry, memoryManager);
+		if (library) {
+			registerLibraryTools(registry, library);
 		}
 		if (vfs) {
 			registerVFSTools(registry, vfs);

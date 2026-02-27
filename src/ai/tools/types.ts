@@ -5,7 +5,7 @@
 import type { EventBus } from '../../events/types.js';
 import type { Logger } from '../../logger.js';
 import type { MCPClient } from '../mcp/mcp-client.js';
-import type { MemoryManager } from '../memory/memory.js';
+import type { Library } from '../library/library.js';
 import type { VirtualFS } from '../vfs/index.js';
 
 // ---------------------------------------------------------------------------
@@ -17,7 +17,7 @@ export type ToolCategory =
 	| 'edit'
 	| 'search'
 	| 'execute'
-	| 'memory'
+	| 'library'
 	| 'vfs'
 	| 'task'
 	| 'subagent'
@@ -108,7 +108,7 @@ export interface ToolPermissionResolver {
 
 export interface ToolRegistryOptions {
 	readonly mcpClient?: MCPClient;
-	readonly memoryManager?: MemoryManager;
+	readonly library?: Library;
 	readonly vfs?: VirtualFS;
 	readonly permissionResolver?: ToolPermissionResolver;
 	readonly logger?: Logger;

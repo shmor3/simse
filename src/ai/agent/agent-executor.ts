@@ -9,7 +9,7 @@ import type { ACPGenerateResult } from '../acp/types.js';
 import { formatSearchResults } from '../chain/format.js';
 import type { Provider } from '../chain/types.js';
 import type { MCPClient } from '../mcp/mcp-client.js';
-import type { MemoryManager } from '../memory/memory.js';
+import type { Library } from '../library/library.js';
 import type { AgentResult, AgentStepConfig } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -19,7 +19,7 @@ import type { AgentResult, AgentStepConfig } from './types.js';
 export interface AgentExecutorOptions {
 	readonly acpClient: ACPClient;
 	readonly mcpClient?: MCPClient;
-	readonly memoryManager?: MemoryManager;
+	readonly library?: Library;
 	readonly logger?: Logger;
 	readonly name?: string;
 }
@@ -41,7 +41,7 @@ export interface AgentExecutor {
 export function createAgentExecutor(
 	options: AgentExecutorOptions,
 ): AgentExecutor {
-	const { acpClient, mcpClient, memoryManager } = options;
+	const { acpClient, mcpClient, library } = options;
 	const logger = (options.logger ?? getDefaultLogger()).child('agent-executor');
 
 	async function executeACPStep(
@@ -116,17 +116,17 @@ export function createAgentExecutor(
 		prompt: string,
 		chainName?: string,
 	): Promise<AgentResult> {
-		if (!memoryManager) {
+		if (!library) {
 			throw createChainError(
-				`Memory manager is not configured but step "${step.name}" requires it`,
+				`Library is not configured but step "${step.name}" requires it`,
 				{ code: 'CHAIN_MEMORY_NOT_CONFIGURED', chainName },
 			);
 		}
 
-		const results = await memoryManager.search(prompt);
+		const results = await library.search(prompt);
 		return {
 			output: formatSearchResults(results),
-			model: 'memory:vector-search',
+			model: 'library:search',
 		};
 	}
 

@@ -2,7 +2,7 @@
 // Format search results for chain injection
 // ---------------------------------------------------------------------------
 
-import type { SearchResult } from '../memory/types.js';
+import type { Lookup } from '../library/types.js';
 
 export interface FormatSearchResultsOptions {
 	/** Message returned when there are no results. Defaults to `'(no relevant memories found)'`. */
@@ -15,17 +15,17 @@ export interface FormatSearchResultsOptions {
  * Format search results as a readable string for chain injection.
  */
 export function formatSearchResults(
-	results: SearchResult[],
+	results: Lookup[],
 	options?: FormatSearchResultsOptions,
 ): string {
 	if (results.length === 0) {
-		return options?.emptyMessage ?? '(no relevant memories found)';
+		return options?.emptyMessage ?? '(no relevant volumes found)';
 	}
 	const precision = options?.scorePrecision ?? 3;
 	return results
 		.map(
 			(r, i) =>
-				`[${i + 1}] (score: ${r.score.toFixed(precision)})\n${r.entry.text}`,
+				`[${i + 1}] (score: ${r.score.toFixed(precision)})\n${r.volume.text}`,
 		)
 		.join('\n\n');
 }

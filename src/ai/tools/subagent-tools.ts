@@ -2,7 +2,7 @@
 // Subagent Tool Registration
 //
 // Registers subagent_spawn and subagent_delegate tools with a ToolRegistry.
-// Follows the same pattern as registerMemoryTools / registerTaskTools.
+// Follows the same pattern as registerLibraryTools / registerTaskTools.
 // ---------------------------------------------------------------------------
 
 import { toError } from '../../errors/base.js';

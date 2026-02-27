@@ -1,12 +1,12 @@
 // ---------------------------------------------------------------------------
 // Built-in Tool Registration
 //
-// Registers memory, VFS, and task tools with a ToolRegistry.
+// Registers library, VFS, and task tools with a ToolRegistry.
 // Each function is idempotent and safe to call multiple times.
 // ---------------------------------------------------------------------------
 
 import { toError } from '../../errors/base.js';
-import type { MemoryManager } from '../memory/memory.js';
+import type { Library } from '../library/library.js';
 import type { TaskList } from '../tasks/types.js';
 import type { VirtualFS } from '../vfs/index.js';
 import type { ToolDefinition, ToolHandler, ToolRegistry } from './types.js';
@@ -24,19 +24,19 @@ const registerTool = (
 };
 
 // ---------------------------------------------------------------------------
-// Memory tools
+// Library tools
 // ---------------------------------------------------------------------------
 
-export function registerMemoryTools(
+export function registerLibraryTools(
 	registry: ToolRegistry,
-	memoryManager: MemoryManager,
+	library: Library,
 ): void {
 	registerTool(
 		registry,
 		{
-			name: 'memory_search',
+			name: 'library_search',
 			description:
-				'Search memory for relevant notes and context. Returns matching entries ranked by relevance.',
+				'Search the library for relevant volumes and context. Returns matching volumes ranked by relevance.',
 			parameters: {
 				query: {
 					type: 'string',
@@ -48,7 +48,7 @@ export function registerMemoryTools(
 					description: 'Maximum number of results to return (default: 5)',
 				},
 			},
-			category: 'memory',
+			category: 'library',
 			annotations: { readOnly: true },
 		},
 		async (args) => {
@@ -56,12 +56,12 @@ export function registerMemoryTools(
 				const query = String(args.query ?? '');
 				const maxResults =
 					typeof args.maxResults === 'number' ? args.maxResults : 5;
-				const results = await memoryManager.search(query, maxResults);
-				if (results.length === 0) return 'No matching entries found.';
+				const results = await library.search(query, maxResults);
+				if (results.length === 0) return 'No matching volumes found.';
 				return results
 					.map(
 						(r, i) =>
-							`${i + 1}. [${r.entry.metadata.topic ?? 'uncategorized'}] (score: ${r.score.toFixed(2)})\n   ${r.entry.text}`,
+							`${i + 1}. [${r.volume.metadata.topic ?? 'uncategorized'}] (score: ${r.score.toFixed(2)})\n   ${r.volume.text}`,
 					)
 					.join('\n\n');
 			} catch (err) {
@@ -73,28 +73,28 @@ export function registerMemoryTools(
 	registerTool(
 		registry,
 		{
-			name: 'memory_add',
-			description: 'Store a note in long-term memory.',
+			name: 'library_shelve',
+			description: 'Shelve a volume in the library for long-term storage.',
 			parameters: {
 				text: {
 					type: 'string',
-					description: 'The text content to store',
+					description: 'The text content to shelve',
 					required: true,
 				},
 				topic: {
 					type: 'string',
-					description: 'Topic category for the note',
+					description: 'Topic category for the volume',
 					required: true,
 				},
 			},
-			category: 'memory',
+			category: 'library',
 		},
 		async (args) => {
 			try {
 				const text = String(args.text ?? '');
 				const topic = String(args.topic ?? 'general');
-				const id = await memoryManager.add(text, { topic });
-				return `Stored note with ID: ${id}`;
+				const id = await library.add(text, { topic });
+				return `Shelved volume with ID: ${id}`;
 			} catch (err) {
 				throw toError(err);
 			}
@@ -104,31 +104,34 @@ export function registerMemoryTools(
 	registerTool(
 		registry,
 		{
-			name: 'memory_delete',
-			description: 'Delete a memory entry by ID.',
+			name: 'library_withdraw',
+			description: 'Withdraw a volume from the library by ID.',
 			parameters: {
 				id: {
 					type: 'string',
-					description: 'The memory entry ID to delete',
+					description: 'The volume ID to withdraw',
 					required: true,
 				},
 			},
-			category: 'memory',
+			category: 'library',
 			annotations: { destructive: true },
 		},
 		async (args) => {
 			try {
 				const id = String(args.id ?? '');
-				const deleted = await memoryManager.delete(id);
+				const deleted = await library.delete(id);
 				return deleted
-					? `Deleted memory entry: ${id}`
-					: `Memory entry not found: ${id}`;
+					? `Withdrew volume: ${id}`
+					: `Volume not found: ${id}`;
 			} catch (err) {
 				throw toError(err);
 			}
 		},
 	);
 }
+
+/** @deprecated Use registerLibraryTools */
+export const registerMemoryTools = registerLibraryTools;
 
 // ---------------------------------------------------------------------------
 // VFS tools

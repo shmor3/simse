@@ -14,7 +14,7 @@ import {
 import type {
 	EmbeddingProvider,
 	TextGenerationProvider,
-} from '../memory/types.js';
+} from '../library/types.js';
 import type { ACPClient } from './acp-client.js';
 
 // ---------------------------------------------------------------------------

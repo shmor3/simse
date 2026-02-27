@@ -4,6 +4,7 @@ export type {
 } from './builtin-subagents.js';
 export { registerBuiltinSubagents } from './builtin-subagents.js';
 export {
+	registerLibraryTools,
 	registerMemoryTools,
 	registerTaskTools,
 	registerVFSTools,

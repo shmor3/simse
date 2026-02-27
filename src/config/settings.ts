@@ -13,7 +13,7 @@ import type {
 	MCPServerConfig,
 	MCPServerConnection,
 } from '../ai/mcp/types.js';
-import type { MemoryConfig } from '../ai/memory/types.js';
+import type { LibraryConfig } from '../ai/library/types.js';
 import { createConfigValidationError } from '../errors/index.js';
 import {
 	type ACPConfigInput,
@@ -106,7 +106,7 @@ export interface AppConfig {
 		readonly client: Readonly<MCPClientConfig>;
 		readonly server: Readonly<MCPServerConfig>;
 	};
-	readonly memory: Readonly<MemoryConfig>;
+	readonly memory: Readonly<LibraryConfig>;
 	readonly chains: Readonly<Record<string, ChainDefinition>>;
 }
 

@@ -352,6 +352,7 @@ export {
 	createToolRegistry,
 	registerBuiltinSubagents,
 	registerDelegationTools,
+	registerLibraryTools,
 	registerMemoryTools,
 	registerSubagentTools,
 	registerTaskTools,

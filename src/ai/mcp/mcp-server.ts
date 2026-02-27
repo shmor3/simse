@@ -6,7 +6,7 @@ import type { ACPClient } from '../acp/acp-client.js';
 import { createChain } from '../chain/chain.js';
 import { createPromptTemplate } from '../chain/prompt-template.js';
 import type { Conversation } from '../conversation/types.js';
-import type { MemoryManager } from '../memory/memory.js';
+import type { Library } from '../library/library.js';
 import type { TaskList } from '../tasks/types.js';
 import type { ToolRegistry } from '../tools/types.js';
 import type { VirtualFS } from '../vfs/index.js';
@@ -19,8 +19,8 @@ import type { MCPServerConfig } from './types.js';
 export interface MCPServerOptions {
 	/** ACP client used for generate, run-chain, and list-agents tools. */
 	readonly acpClient: ACPClient;
-	/** Optional memory manager for memory-search and memory-add tools. */
-	readonly memoryManager?: MemoryManager;
+	/** Optional library for library-search and library-shelve tools. */
+	readonly library?: Library;
 	/** Optional VFS for vfs-read, vfs-write, vfs-list, vfs-tree tools. */
 	readonly vfs?: VirtualFS;
 	/** Optional task list for task-create, task-get, task-update, task-list tools. */
@@ -49,10 +49,10 @@ export interface SimseMCPServer {
 
 /**
  * Create an MCP server that exposes simse capabilities (generate, run-chain,
- * list-agents, memory, VFS, and task tools) over the Model Context Protocol.
+ * list-agents, library, VFS, and task tools) over the Model Context Protocol.
  *
  * @param config - Server name and version.
- * @param options - ACP client (required), plus optional memory manager, VFS, task list.
+ * @param options - ACP client (required), plus optional library, VFS, task list.
  * @returns A frozen {@link SimseMCPServer}. Call `start()` to begin serving over stdio.
  */
 export function createMCPServer(
@@ -60,7 +60,7 @@ export function createMCPServer(
 	options: MCPServerOptions,
 ): SimseMCPServer {
 	const acpClient = options.acpClient;
-	const memoryManager = options.memoryManager;
+	const library = options.library;
 	const vfs = options.vfs;
 	const taskList = options.taskList;
 	// options.toolRegistry and options.conversation are reserved for future use
@@ -381,13 +381,13 @@ export function createMCPServer(
 			},
 		);
 
-		// Tool: memory-search — search the vector memory store
-		if (memoryManager) {
+		// Tool: library-search — search the library
+		if (library) {
 			server.registerTool(
-				'memory-search',
+				'library-search',
 				{
-					title: 'Memory Search',
-					description: 'Search the vector memory store',
+					title: 'Library Search',
+					description: 'Search the library for relevant volumes',
 					inputSchema: {
 						query: z.string().describe('Search query'),
 						maxResults: z
@@ -398,8 +398,8 @@ export function createMCPServer(
 				},
 				async ({ query, maxResults }) => {
 					try {
-						sendLog('info', `Searching memory for: ${query}`, 'memory-search');
-						const results = await memoryManager.search(
+						sendLog('info', `Searching library for: ${query}`, 'library-search');
+						const results = await library.search(
 							query as string,
 							(maxResults as number | undefined) ?? 10,
 						);
@@ -415,8 +415,8 @@ export function createMCPServer(
 						const message = toError(error).message;
 						sendLog(
 							'error',
-							`Memory search failed: ${message}`,
-							'memory-search',
+							`Library search failed: ${message}`,
+							'library-search',
 						);
 						return {
 							content: [{ type: 'text' as const, text: `Error: ${message}` }],
@@ -426,14 +426,14 @@ export function createMCPServer(
 				},
 			);
 
-			// Tool: memory-add — add an entry to the vector memory store
+			// Tool: library-shelve — shelve a volume in the library
 			server.registerTool(
-				'memory-add',
+				'library-shelve',
 				{
-					title: 'Memory Add',
-					description: 'Add an entry to the vector memory store',
+					title: 'Library Shelve',
+					description: 'Shelve a volume in the library',
 					inputSchema: {
-						text: z.string().describe('Text to store'),
+						text: z.string().describe('Text to shelve'),
 						metadata: z.string().optional().describe('Optional JSON metadata'),
 					},
 				},
@@ -442,16 +442,16 @@ export function createMCPServer(
 						const meta = metadata ? JSON.parse(metadata as string) : undefined;
 						sendLog(
 							'info',
-							`Adding memory entry (${(text as string).length} chars)`,
-							'memory-add',
+							`Shelving volume (${(text as string).length} chars)`,
+							'library-shelve',
 						);
-						const id = await memoryManager.add(text as string, meta);
+						const id = await library.add(text as string, meta);
 						return {
-							content: [{ type: 'text' as const, text: `Added entry: ${id}` }],
+							content: [{ type: 'text' as const, text: `Shelved volume: ${id}` }],
 						};
 					} catch (error) {
 						const message = toError(error).message;
-						sendLog('error', `Memory add failed: ${message}`, 'memory-add');
+						sendLog('error', `Library shelve failed: ${message}`, 'library-shelve');
 						return {
 							content: [{ type: 'text' as const, text: `Error: ${message}` }],
 							isError: true,
@@ -459,25 +459,25 @@ export function createMCPServer(
 					}
 				},
 			);
-			// Tool: memory-delete — remove an entry from the vector memory store
+			// Tool: library-withdraw — withdraw a volume from the library
 			server.registerTool(
-				'memory-delete',
+				'library-withdraw',
 				{
-					title: 'Memory Delete',
-					description: 'Delete an entry from the vector memory store',
+					title: 'Library Withdraw',
+					description: 'Withdraw a volume from the library',
 					inputSchema: {
-						id: z.string().describe('The memory entry ID to delete'),
+						id: z.string().describe('The volume ID to withdraw'),
 					},
 				},
 				async ({ id }) => {
 					try {
-						const deleted = await memoryManager.delete(id as string);
+						const deleted = await library.delete(id as string);
 						if (!deleted) {
 							return {
 								content: [
 									{
 										type: 'text' as const,
-										text: `Memory entry not found: ${id}`,
+										text: `Volume not found: ${id}`,
 									},
 								],
 								isError: true,
@@ -487,7 +487,7 @@ export function createMCPServer(
 							content: [
 								{
 									type: 'text' as const,
-									text: `Deleted memory entry: ${id}`,
+									text: `Withdrew volume: ${id}`,
 								},
 							],
 						};
@@ -495,8 +495,8 @@ export function createMCPServer(
 						const message = toError(error).message;
 						sendLog(
 							'error',
-							`Memory delete failed: ${message}`,
-							'memory-delete',
+							`Library withdraw failed: ${message}`,
+							'library-withdraw',
 						);
 						return {
 							content: [{ type: 'text' as const, text: `Error: ${message}` }],

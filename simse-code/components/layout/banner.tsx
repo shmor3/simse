@@ -50,8 +50,9 @@ export function Banner({
 	const cols = stdout?.columns ?? 80;
 
 	const layout = useMemo(() => {
-		// 1-char left margin like Claude Code, content fills rest
-		const contentWidth = cols - 1;
+		// Row structure: margin(1) + │(1) + leftCol + " │ "(3) + rightCol + │(1)
+		// So inner content width = cols - 1 (margin) - 1 (left │) - 1 (right │)
+		const contentWidth = cols - 3;
 		const leftColWidth = Math.floor(contentWidth * 0.27);
 		const gapWidth = 3; // " │ "
 		const rightColWidth = contentWidth - leftColWidth - gapWidth;
@@ -62,17 +63,17 @@ export function Banner({
 		};
 
 		// Title: " ╭── simse-code v1.0.0 ──────...──╮"
+		// Title row = margin(1) + ╭(1) + ── + space + title + space + trailer + ╮(1)
+		// Inner width between ╭ and ╮ = cols - 1 (margin) - 2 (╭ and ╮)
 		const titleLabel = `simse-code v${version}`;
-		// Inside border: ╭ + ── + space + title + space + trailer + ╮
-		// The inside width = contentWidth - 2 (for ╭ and ╮)
-		const insideWidth = contentWidth - 2;
+		const titleInner = cols - 3;
 		const titleTrailerLen = Math.max(
 			0,
-			insideWidth - 2 - 1 - titleLabel.length - 1,
+			titleInner - 2 - 1 - titleLabel.length - 1,
 		);
 
 		// Bottom border inner width (between ╰ and ╯)
-		const bottomInner = contentWidth - 2;
+		const bottomInner = cols - 3;
 
 		// Build left column content (raw, no padding yet)
 		const leftContent: ColumnLine[] = [];
@@ -279,7 +280,7 @@ export function Banner({
 			{/* Two-column content rows with left/right borders */}
 			{layout.rows.map((row, i) => {
 				if (row.isSeparator) {
-					// Separator row: │ <left content> │ ────── │
+					// Separator row: │ <left content> │ ──────── │
 					return (
 						// biome-ignore lint/suspicious/noArrayIndexKey: static layout
 						<Box key={i}>
@@ -290,6 +291,8 @@ export function Banner({
 									<Text color={PRIMARY}>{row.leftText}</Text>
 								) : row.leftStyle.isDim ? (
 									<Text dimColor>{row.leftText}</Text>
+								) : row.leftStyle.isBold ? (
+									<Text bold>{row.leftText}</Text>
 								) : (
 									row.leftText
 								)}
@@ -297,9 +300,12 @@ export function Banner({
 							</Text>
 							<Text color={PRIMARY}> {'\u2502'} </Text>
 							<Text color={PRIMARY}>
-								{DIVIDER.repeat(layout.rightColWidth)}
+								{DIVIDER.repeat(Math.max(0, layout.rightColWidth - 1))}
 							</Text>
-							<Text color={PRIMARY}>{'\u2502'}</Text>
+							<Text>
+								{' '}
+								<Text color={PRIMARY}>{'\u2502'}</Text>
+							</Text>
 						</Box>
 					);
 				}
@@ -314,6 +320,8 @@ export function Banner({
 								<Text color={PRIMARY}>{row.leftText}</Text>
 							) : row.leftStyle.isDim ? (
 								<Text dimColor>{row.leftText}</Text>
+							) : row.leftStyle.isBold ? (
+								<Text bold>{row.leftText}</Text>
 							) : (
 								row.leftText
 							)}

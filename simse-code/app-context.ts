@@ -22,7 +22,7 @@ import type { MarkdownRenderer, Spinner, TermColors } from './ui.js';
 export interface SessionState {
 	serverName: string | undefined;
 	agentName: string | undefined;
-	memoryEnabled: boolean;
+	libraryEnabled: boolean;
 	bypassPermissions: boolean;
 	maxTurns: number;
 	totalTurns: number;

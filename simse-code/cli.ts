@@ -323,7 +323,7 @@ const searchCommand: Command = {
 	handler: async (ctx, rest) => {
 		const { colors, spinner } = ctx;
 		if (!rest) return `${colors.yellow('Usage:')} /search <query>`;
-		spinner.start('Searching memory...');
+		spinner.start('Searching library...');
 		const results = await ctx.app.search(rest);
 		if (results.length === 0) {
 			spinner.succeed('No results found.');
@@ -442,7 +442,7 @@ async function maybeAutoCompact(ctx: AppContext): Promise<void> {
 	try {
 		const conversationText = conversation.serialize();
 		const prompt = `Summarize the following conversation concisely, preserving key decisions, code changes, and context needed for future turns:\n\n${conversationText}`;
-		const result = await ctx.app.generate(prompt, { skipMemory: true });
+		const result = await ctx.app.generate(prompt, { skipLibrary: true });
 		const prevCount = conversation.messageCount;
 		conversation.compact(result.content);
 		spinner.succeed(
@@ -494,9 +494,9 @@ async function handleBareTextInput(
 		ctx.checkpointManager.save('pre-prompt');
 	}
 
-	// 1. Pre-loop memory context injection
+	// 1. Pre-loop library context injection
 	let enrichedInput = processedInput;
-	if (session.memoryEnabled && ctx.app.noteCount > 0) {
+	if (session.libraryEnabled && ctx.app.noteCount > 0) {
 		try {
 			const results = await ctx.app.search(input, 5);
 			if (results.length > 0) {
@@ -506,16 +506,16 @@ async function handleBareTextInput(
 							`[${r.note.topic}] (relevance: ${r.score.toFixed(2)}) ${r.note.text}`,
 					)
 					.join('\n');
-				enrichedInput = `Relevant context from memory:\n${contextBlock}\n\nUser query: ${input}`;
+				enrichedInput = `Relevant context from library:\n${contextBlock}\n\nUser query: ${input}`;
 				console.log(
 					renderDetailLine(
-						`${results.length} memory entries used as context`,
+						`${results.length} library volumes used as context`,
 						colors,
 					),
 				);
 			}
 		} catch {
-			// Memory search failed — proceed without context
+			// Library search failed — proceed without context
 		}
 	}
 
@@ -766,14 +766,14 @@ async function handleBareTextInput(
 		);
 	}
 
-	// 5. Store in memory — but only meaningful responses
+	// 5. Store in library — but only meaningful responses
 	const isError =
 		hadError ||
 		!result.finalText ||
 		result.finalText.startsWith('Error communicating') ||
 		result.finalText.startsWith('No response received');
 
-	if (session.memoryEnabled && result.finalText && !isError) {
+	if (session.libraryEnabled && result.finalText && !isError) {
 		try {
 			const id = await ctx.app.addNote(
 				`Q: ${input}\nA: ${result.finalText}`,
@@ -992,14 +992,14 @@ async function handleSkillInvocation(
 		);
 	}
 
-	// 6. Store in memory — but only meaningful responses
+	// 6. Store in library — but only meaningful responses
 	const isError =
 		hadError ||
 		!result.finalText ||
 		result.finalText.startsWith('Error communicating') ||
 		result.finalText.startsWith('No response received');
 
-	if (session.memoryEnabled && result.finalText && !isError) {
+	if (session.libraryEnabled && result.finalText && !isError) {
 		try {
 			const id = await ctx.app.addNote(
 				`Q: /${skill.name} ${args}\nA: ${result.finalText}`,
@@ -1033,7 +1033,7 @@ const chainCommand: Command = {
 		if (!rest)
 			return `${colors.yellow('Usage:')} /chain <name|template> [key=value ...]`;
 
-		const skipMemory = !ctx.session.memoryEnabled;
+		const skipLibrary = !ctx.session.libraryEnabled;
 		const parts = rest.split(/\s+/);
 		const firstPart = parts[0];
 
@@ -1052,7 +1052,7 @@ const chainCommand: Command = {
 				firstPart,
 				namedPrompt,
 				values,
-				{ skipMemory },
+				{ skipLibrary },
 			);
 			spinner.stop();
 			return renderAssistantMessage(output, md, colors);
@@ -1073,7 +1073,7 @@ const chainCommand: Command = {
 
 		const template = templateParts.join(' ');
 		spinner.start('Running chain...');
-		const output = await ctx.app.runChain(template, values, { skipMemory });
+		const output = await ctx.app.runChain(template, values, { skipLibrary });
 		spinner.stop();
 		return renderAssistantMessage(output, md, colors);
 	},
@@ -1926,7 +1926,7 @@ const configCommand: Command = {
 		}
 
 		lines.push('');
-		lines.push(colors.bold(colors.cyan('Memory:')));
+		lines.push(colors.bold(colors.cyan('Library:')));
 		lines.push(`  ${colors.bold('Enabled:')}     ${config.memory.enabled}`);
 		lines.push(
 			`  ${colors.bold('Threshold:')}   ${config.memory.similarityThreshold}`,
@@ -1983,7 +1983,7 @@ async function settingsMenu(ctx: AppContext): Promise<string | undefined> {
 
 	const sections = [
 		{ key: '1', label: 'Embedding', file: 'embed.json' },
-		{ key: '2', label: 'Memory', file: 'memory.json' },
+		{ key: '2', label: 'Library', file: 'memory.json' },
 		{ key: '3', label: 'MCP servers', file: 'mcp.json' },
 		{ key: '4', label: 'General config', file: 'config.json' },
 		{ key: '5', label: 'ACP servers', file: 'acp.json' },
@@ -2016,7 +2016,7 @@ async function settingsMenu(ctx: AppContext): Promise<string | undefined> {
 		case '1':
 			return editEmbedSettings(ctx);
 		case '2':
-			return editMemorySettings(ctx);
+			return editLibrarySettings(ctx);
 		case '3':
 			return editMCPSettings(ctx);
 		case '4':
@@ -2055,14 +2055,14 @@ async function editEmbedSettings(ctx: AppContext): Promise<string> {
 	return editFields(rl, colors, filePath, config, fields);
 }
 
-async function editMemorySettings(ctx: AppContext): Promise<string> {
+async function editLibrarySettings(ctx: AppContext): Promise<string> {
 	const { colors, rl, dataDir } = ctx;
 	const filePath = join(dataDir, 'memory.json');
 
 	type MemConfig = Record<string, unknown>;
 	const config: MemConfig = readJsonSafe<MemConfig>(filePath) ?? {};
 
-	console.log(`\n${colors.bold('Memory settings')} ${colors.dim(filePath)}\n`);
+	console.log(`\n${colors.bold('Library settings')} ${colors.dim(filePath)}\n`);
 
 	const fields = [
 		{ key: 'enabled', label: 'Enabled', type: 'bool' as const },
@@ -2371,7 +2371,7 @@ const settingsCommand: Command = {
 	name: 'settings',
 	aliases: ['set'],
 	usage: '/settings',
-	description: 'Edit configuration (memory, MCP, ACP, project)',
+	description: 'Edit configuration (library, MCP, ACP, project)',
 	category: 'session',
 	handler: async (ctx) => {
 		return settingsMenu(ctx);
@@ -2428,27 +2428,28 @@ const agentCommand: Command = {
 	},
 };
 
-const memoryCommand: Command = {
-	name: 'memory',
-	usage: '/memory [on|off]',
-	description: 'Show or toggle memory for AI responses',
+const libraryCommand: Command = {
+	name: 'library',
+	aliases: ['memory'],
+	usage: '/library [on|off]',
+	description: 'Show or toggle library for AI responses',
 	category: 'session',
 	handler: (ctx, rest) => {
 		const { colors } = ctx;
 		const arg = rest.trim().toLowerCase();
 		if (!arg) {
-			const status = ctx.session.memoryEnabled ? 'on' : 'off';
-			return `${colors.bold('Memory:')} ${status}`;
+			const status = ctx.session.libraryEnabled ? 'on' : 'off';
+			return `${colors.bold('Library:')} ${status}`;
 		}
 		if (arg === 'on' || arg === 'enable') {
-			ctx.session.memoryEnabled = true;
-			return `${colors.green('✓')} Memory enabled`;
+			ctx.session.libraryEnabled = true;
+			return `${colors.green('✓')} Library enabled`;
 		}
 		if (arg === 'off' || arg === 'disable') {
-			ctx.session.memoryEnabled = false;
-			return `${colors.green('✓')} Memory disabled`;
+			ctx.session.libraryEnabled = false;
+			return `${colors.green('✓')} Library disabled`;
 		}
-		return `${colors.yellow('Usage:')} /memory [on|off]`;
+		return `${colors.yellow('Usage:')} /library [on|off]`;
 	},
 };
 
@@ -2512,7 +2513,7 @@ const compactCommand: Command = {
 		try {
 			const conversationText = conversation.serialize();
 			const prompt = `${focus}Summarize the following conversation concisely, preserving key decisions, code changes, and context needed for future turns:\n\n${conversationText}`;
-			const result = await ctx.app.generate(prompt, { skipMemory: true });
+			const result = await ctx.app.generate(prompt, { skipLibrary: true });
 			const prevCount = conversation.messageCount;
 			conversation.compact(result.content);
 			spinner.succeed(`Compacted ${prevCount} messages into summary`);
@@ -2558,7 +2559,7 @@ const costCommand: Command = {
 			`  ${colors.bold('Context:'.padEnd(22))}~${approxTokens.toLocaleString()} tokens (${conversation.messageCount} messages)`,
 		);
 		lines.push(
-			`  ${colors.bold('Memory:'.padEnd(22))}${session.memoryEnabled ? 'enabled' : 'disabled'} (${ctx.app.noteCount} notes)`,
+			`  ${colors.bold('Library:'.padEnd(22))}${session.libraryEnabled ? 'enabled' : 'disabled'} (${ctx.app.noteCount} notes)`,
 		);
 		lines.push(`  ${colors.bold('Model:'.padEnd(22))}${agent} via ${server}`);
 		return lines.join('\n');
@@ -2771,10 +2772,10 @@ const doctorCommand: Command = {
 			);
 		}
 
-		// Memory
+		// Library
 		lines.push(
 			renderServiceStatusLine(
-				'Memory',
+				'Library',
 				'ok',
 				`${app.noteCount} notes stored`,
 				colors,
@@ -2875,7 +2876,7 @@ const permissionsCommand: Command = {
 			`  ${colors.bold('Auto-approve:'.padEnd(18))}${session.bypassPermissions ? colors.yellow('enabled') : 'disabled'}`,
 		);
 		lines.push(
-			`  ${colors.bold('Memory:'.padEnd(18))}${session.memoryEnabled ? 'enabled' : 'disabled'}`,
+			`  ${colors.bold('Library:'.padEnd(18))}${session.libraryEnabled ? 'enabled' : 'disabled'}`,
 		);
 		lines.push(`  ${colors.bold('Max turns:'.padEnd(18))}${session.maxTurns}`);
 
@@ -3244,9 +3245,9 @@ const statusCommand: Command = {
 			pct > 80 ? colors.red : pct > 50 ? colors.yellow : colors.green;
 		lines.push(`  ${colors.bold('Context:'.padEnd(14))}${ctxColor(`${pct}%`)}`);
 
-		// Memory
+		// Library
 		lines.push(
-			`  ${colors.bold('Memory:'.padEnd(14))}${session.memoryEnabled ? `${ctx.app.noteCount} notes` : colors.dim('disabled')}`,
+			`  ${colors.bold('Library:'.padEnd(14))}${session.libraryEnabled ? `${ctx.app.noteCount} notes` : colors.dim('disabled')}`,
 		);
 
 		// VFS
@@ -3505,7 +3506,7 @@ const commands: readonly Command[] = [
 	serverCommand,
 	agentCommand,
 	modelCommand,
-	memoryCommand,
+	libraryCommand,
 	bypassPermissionsCommand,
 	compactCommand,
 	exportCommand,
@@ -3643,7 +3644,7 @@ Global config (in data directory):
   acp.json                    ACP server configuration (required)
   mcp.json                    MCP server configuration (optional)
   embed.json                  Embedding provider config (agent, server, model)
-  memory.json                 Memory & vector store config
+  memory.json                 Library & stacks config
 
 Project config (in .simse/ relative to cwd):
   settings.json               Project-specific overrides (agent, system prompt)
@@ -3688,7 +3689,7 @@ async function main(): Promise<void> {
 		logLevel: cliArgs.logLevel,
 	});
 
-	const { config, logger, memoryConfig, skippedServers } = configResult;
+	const { config, logger, libraryConfig, skippedServers } = configResult;
 
 	// -- Create services ------------------------------------------------------
 
@@ -3701,9 +3702,9 @@ async function main(): Promise<void> {
 	let mainRl: ReadlineInterface | undefined;
 
 	const storage = createFileStorageBackend({
-		path: join(cliArgs.dataDir, memoryConfig.storageFilename ?? 'memory.simk'),
-		atomicWrite: memoryConfig.atomicWrite,
-		compressionLevel: memoryConfig.compressionLevel,
+		path: join(cliArgs.dataDir, libraryConfig.storageFilename ?? 'memory.simk'),
+		atomicWrite: libraryConfig.atomicWrite,
+		compressionLevel: libraryConfig.compressionLevel,
 	});
 
 	const acpClient = createACPClient(config.acp, {
@@ -3839,14 +3840,14 @@ async function main(): Promise<void> {
 		storage,
 		embedder,
 		textGenerator,
-		duplicateThreshold: memoryConfig.duplicateThreshold,
-		duplicateBehavior: memoryConfig.duplicateBehavior,
-		autoSave: memoryConfig.autoSave,
-		flushIntervalMs: memoryConfig.flushIntervalMs,
+		duplicateThreshold: libraryConfig.duplicateThreshold,
+		duplicateBehavior: libraryConfig.duplicateBehavior,
+		autoSave: libraryConfig.autoSave,
+		flushIntervalMs: libraryConfig.flushIntervalMs,
 		conversationTopic: workspaceSettings.conversationTopic,
 		chainTopic: workspaceSettings.chainTopic,
 		systemPrompt: composedSystemPrompt,
-		autoSummarizeThreshold: memoryConfig.autoSummarizeThreshold,
+		autoSummarizeThreshold: libraryConfig.autoSummarizeThreshold,
 	});
 
 	// -- VFS sandbox ----------------------------------------------------------
@@ -3865,12 +3866,12 @@ async function main(): Promise<void> {
 
 	const disk = createVFSDisk(vfs, { logger, baseDir: process.cwd() });
 
-	// -- Initialize (memory → ACP → MCP) -------------------------------------
+	// -- Initialize (library → ACP → MCP) -------------------------------------
 
-	serviceSpinner.start('Loading memory...');
+	serviceSpinner.start('Loading library...');
 	await app.initialize();
 	serviceSpinner.succeed(
-		renderServiceStatus('Memory', 'ok', `${app.noteCount} notes`, colors),
+		renderServiceStatus('Library', 'ok', `${app.noteCount} notes`, colors),
 	);
 
 	serviceSpinner.start('Starting ACP servers...');
@@ -3983,7 +3984,7 @@ async function main(): Promise<void> {
 
 	const toolRegistry = createToolRegistry({
 		mcpClient: app.tools.mcpClient,
-		memoryManager: app.memory,
+		library: app.library,
 		vfs,
 		logger,
 	});
@@ -4052,7 +4053,7 @@ async function main(): Promise<void> {
 	const session: SessionState = {
 		serverName: undefined,
 		agentName: undefined,
-		memoryEnabled: true,
+		libraryEnabled: true,
 		bypassPermissions: cliArgs.bypassPermissions,
 		maxTurns: 10,
 		totalTurns: 0,

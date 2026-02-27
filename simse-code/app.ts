@@ -11,13 +11,13 @@ import {
 	type ACPStreamChunk,
 	type AppConfig,
 	createChain,
-	createMemoryManager,
+	createLibrary,
 	createPromptTemplate,
 	createTaskList,
 	type EmbeddingProvider,
-	type LearningProfile,
+	type Library,
 	type Logger,
-	type MemoryManager,
+	type PatronProfile,
 	type RetryOptions,
 	type StorageBackend,
 	type TaskList,
@@ -54,12 +54,12 @@ export interface TopicView {
 // ---------------------------------------------------------------------------
 
 export interface GenerateOptions extends ACPGenerateOptions {
-	/** Skip memory context injection and result storage. Default: false. */
-	readonly skipMemory?: boolean;
-	/** Maximum memory results to inject as context. Default: 5. */
-	readonly memoryMaxResults?: number;
-	/** Minimum similarity score for memory results. Default: config threshold. */
-	readonly memoryThreshold?: number;
+	/** Skip library context injection and result storage. Default: false. */
+	readonly skipLibrary?: boolean;
+	/** Maximum library results to inject as context. Default: 5. */
+	readonly libraryMaxResults?: number;
+	/** Minimum similarity score for library results. Default: config threshold. */
+	readonly libraryThreshold?: number;
 }
 
 export interface GenerateResult {
@@ -69,9 +69,9 @@ export interface GenerateResult {
 	readonly agentId: string;
 	/** The server that handled the request. */
 	readonly serverName: string;
-	/** Memory entries injected as context (empty if skipMemory). */
-	readonly memoryContext: readonly SearchResultView[];
-	/** ID of the stored memory entry (undefined if skipMemory or storage failed). */
+	/** Library volumes injected as context (empty if skipLibrary). */
+	readonly libraryContext: readonly SearchResultView[];
+	/** ID of the stored volume (undefined if skipLibrary or storage failed). */
 	readonly storedNoteId?: string;
 	/** The full ACP result for advanced consumers. */
 	readonly raw: ACPGenerateResult;
@@ -81,12 +81,12 @@ export interface GenerateResult {
 // Stream result
 // ---------------------------------------------------------------------------
 
-export interface MemoryStreamResult {
-	/** Memory entries injected as context (empty if skipMemory). */
-	readonly memoryContext: readonly SearchResultView[];
+export interface LibraryStreamResult {
+	/** Library volumes injected as context (empty if skipLibrary). */
+	readonly libraryContext: readonly SearchResultView[];
 	/** The async generator of stream chunks. */
 	readonly stream: AsyncGenerator<ACPStreamChunk>;
-	/** Call after stream completes to store the full response in memory. */
+	/** Call after stream completes to store the full response in the library. */
 	readonly storeResult: (fullText: string) => Promise<string | undefined>;
 }
 
@@ -95,8 +95,8 @@ export interface MemoryStreamResult {
 // ---------------------------------------------------------------------------
 
 export interface ChainOptions {
-	/** Skip memory storage of the chain output. Default: false. */
-	readonly skipMemory?: boolean;
+	/** Skip library storage of the chain output. Default: false. */
+	readonly skipLibrary?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -108,9 +108,9 @@ export interface AppOptions {
 	readonly config: AppConfig;
 	/** Logger instance. */
 	readonly logger: Logger;
-	/** Storage backend for vector memory persistence. */
+	/** Storage backend for library persistence. */
 	readonly storage: StorageBackend;
-	/** Embedding provider — required for all memory operations. */
+	/** Embedding provider — required for all library operations. */
 	readonly embedder: EmbeddingProvider;
 	/** Text generation provider — required for summarization. */
 	readonly textGenerator?: TextGenerationProvider;
@@ -126,17 +126,17 @@ export interface AppOptions {
 	readonly defaultSearchResults?: number;
 	/** Default max results for recommend(). */
 	readonly defaultRecommendResults?: number;
-	/** Default max memory results injected into generate() context. */
-	readonly defaultMemoryResults?: number;
+	/** Default max library results injected into generate() context. */
+	readonly defaultLibraryResults?: number;
 	/** Retry options for ACP client. */
 	readonly retryOptions?: RetryOptions;
-	/** Topic name for conversation Q&A pairs stored in memory. */
+	/** Topic name for conversation Q&A pairs stored in the library. */
 	readonly conversationTopic?: string;
-	/** Topic name for chain results stored in memory. */
+	/** Topic name for chain results stored in the library. */
 	readonly chainTopic?: string;
 	/** System prompt prepended to all generate() calls. */
 	readonly systemPrompt?: string;
-	/** Max notes per topic before auto-summarizing oldest entries (0 = disabled). */
+	/** Max volumes per topic before auto-summarizing oldest entries (0 = disabled). */
 	readonly autoSummarizeThreshold?: number;
 }
 
@@ -171,23 +171,23 @@ export interface KnowledgeBaseApp {
 	readonly getTopics: () => readonly TopicView[];
 	readonly getNotesByTopic: (topic: string) => readonly NoteView[];
 
-	// Generation — memory-aware by default
+	// Generation — library-aware by default
 	readonly generate: (
 		prompt: string,
 		options?: GenerateOptions,
 	) => Promise<GenerateResult>;
 
-	// Streaming — passthrough (no memory middleware)
+	// Streaming — passthrough (no library services)
 	readonly generateStream: (
 		prompt: string,
 		options?: ACPGenerateOptions,
 	) => AsyncGenerator<ACPStreamChunk>;
 
-	// Streaming — memory-aware (search context, stream response, store after)
-	readonly generateMemoryStream: (
+	// Streaming — library-aware (search context, stream response, store after)
+	readonly generateLibraryStream: (
 		prompt: string,
 		options?: GenerateOptions,
-	) => Promise<MemoryStreamResult>;
+	) => Promise<LibraryStreamResult>;
 
 	// Chain — run a prompt through the ACP pipeline
 	readonly runChain: (
@@ -205,7 +205,7 @@ export interface KnowledgeBaseApp {
 	) => Promise<string>;
 
 	// Learning
-	readonly getLearningProfile: () => LearningProfile | undefined;
+	readonly getPatronProfile: () => PatronProfile | undefined;
 
 	// Re-embed — clear and re-add all entries with the current embedding provider
 	readonly reembed: (
@@ -215,7 +215,7 @@ export interface KnowledgeBaseApp {
 	// Services
 	readonly agents: AgentService;
 	readonly tools: ToolService;
-	readonly memory: MemoryManager;
+	readonly library: Library;
 	readonly tasks: TaskList;
 
 	// Stats
@@ -265,11 +265,11 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 
 	const tasks = createTaskList();
 
-	const memory = createMemoryManager(embedder, config.memory, {
+	const library = createLibrary(embedder, config.memory, {
 		storage: appOptions.storage,
 		logger,
 		textGenerator,
-		vectorStoreOptions: {
+		stacksOptions: {
 			autoSave: appOptions.autoSave,
 			flushIntervalMs: appOptions.flushIntervalMs,
 			duplicateThreshold: appOptions.duplicateThreshold,
@@ -280,13 +280,13 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 	// -- Lifecycle ------------------------------------------------------------
 
 	const initialize = async (): Promise<void> => {
-		await memory.initialize();
-		logger.info(`Knowledge base ready (${memory.size} existing notes)`);
+		await library.initialize();
+		logger.info(`Knowledge base ready (${library.size} existing notes)`);
 	};
 
 	const dispose = async (): Promise<void> => {
 		await tools.disconnect();
-		await memory.dispose();
+		await library.dispose();
 	};
 
 	// -- Notes ----------------------------------------------------------------
@@ -296,7 +296,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 	const autoSummarizeTopic = async (topic: string): Promise<void> => {
 		if (autoSummarizeThreshold <= 0 || !textGenerator) return;
 
-		const topicNotes = memory.filterByTopic([topic]);
+		const topicNotes = library.filterByTopic([topic]);
 		if (topicNotes.length <= autoSummarizeThreshold) return;
 
 		// Summarize the oldest half, keep the newest half fresh
@@ -307,7 +307,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		if (toSummarize.length < 2) return;
 
 		try {
-			await memory.summarize({
+			await library.compendium({
 				ids: toSummarize.map((e) => e.id),
 				deleteOriginals: true,
 				metadata: { topic },
@@ -328,20 +328,20 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		topic: string,
 		metadata?: Record<string, string>,
 	): Promise<string> => {
-		const id = await memory.add(text, { topic, ...metadata });
+		const id = await library.add(text, { topic, ...metadata });
 		await autoSummarizeTopic(topic);
 		return id;
 	};
 
-	const deleteNote = (id: string): Promise<boolean> => memory.delete(id);
+	const deleteNote = (id: string): Promise<boolean> => library.delete(id);
 
 	const getNote = (id: string): NoteView | undefined => {
-		const entry = memory.getById(id);
+		const entry = library.getById(id);
 		return entry ? toNoteView(entry) : undefined;
 	};
 
 	const getAllNotes = (): readonly NoteView[] =>
-		Object.freeze(memory.getAll().map(toNoteView));
+		Object.freeze(library.getAll().map(toNoteView));
 
 	// -- Search & discovery ---------------------------------------------------
 
@@ -349,13 +349,13 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		query: string,
 		maxResults?: number,
 	): Promise<readonly SearchResultView[]> => {
-		const results = await memory.search(
+		const results = await library.search(
 			query,
 			maxResults ?? appOptions.defaultSearchResults,
 		);
 		return Object.freeze(
 			results.map((r) =>
-				Object.freeze({ note: toNoteView(r.entry), score: r.score }),
+				Object.freeze({ note: toNoteView(r.volume), score: r.score }),
 			),
 		);
 	};
@@ -364,66 +364,66 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		query: string,
 		maxResults?: number,
 	): Promise<readonly SearchResultView[]> => {
-		const results = await memory.recommend(query, {
+		const results = await library.recommend(query, {
 			maxResults: maxResults ?? appOptions.defaultRecommendResults,
 		});
 		return Object.freeze(
 			results.map((r) =>
-				Object.freeze({ note: toNoteView(r.entry), score: r.score }),
+				Object.freeze({ note: toNoteView(r.volume), score: r.score }),
 			),
 		);
 	};
 
 	const getTopics = (): readonly TopicView[] => {
 		return Object.freeze(
-			memory
+			library
 				.getTopics()
 				.map((t) => Object.freeze({ topic: t.topic, noteCount: t.entryCount })),
 		);
 	};
 
 	const getNotesByTopic = (topic: string): readonly NoteView[] => {
-		return Object.freeze(memory.filterByTopic([topic]).map(toNoteView));
+		return Object.freeze(library.filterByTopic([topic]).map(toNoteView));
 	};
 
-	// -- Generate (memory-aware) ----------------------------------------------
+	// -- Generate (library-aware) ----------------------------------------------
 
 	const generate = async (
 		prompt: string,
 		options?: GenerateOptions,
 	): Promise<GenerateResult> => {
-		const useMemory = !options?.skipMemory && memory.size > 0;
-		let memoryContext: SearchResultView[] = [];
+		const useLibrary = !options?.skipLibrary && library.size > 0;
+		let libraryContext: SearchResultView[] = [];
 		let enrichedPrompt = prompt;
 
-		// 1. Search memory for relevant context
-		if (useMemory) {
+		// 1. Search library for relevant context
+		if (useLibrary) {
 			try {
 				const maxResults =
-					options?.memoryMaxResults ?? appOptions.defaultMemoryResults;
+					options?.libraryMaxResults ?? appOptions.defaultLibraryResults;
 				const threshold =
-					options?.memoryThreshold ?? config.memory.similarityThreshold;
-				const results = await memory.search(prompt, maxResults, threshold);
+					options?.libraryThreshold ?? config.memory.similarityThreshold;
+				const results = await library.search(prompt, maxResults, threshold);
 
-				memoryContext = results.map((r) =>
-					Object.freeze({ note: toNoteView(r.entry), score: r.score }),
+				libraryContext = results.map((r) =>
+					Object.freeze({ note: toNoteView(r.volume), score: r.score }),
 				);
 
-				if (memoryContext.length > 0) {
-					const contextBlock = memoryContext
+				if (libraryContext.length > 0) {
+					const contextBlock = libraryContext
 						.map(
 							(r) =>
 								`[${r.note.topic}] (relevance: ${r.score.toFixed(2)}) ${r.note.text}`,
 						)
 						.join('\n');
 
-					enrichedPrompt = `Relevant context from memory:\n${contextBlock}\n\nUser query: ${prompt}`;
+					enrichedPrompt = `Relevant context from library:\n${contextBlock}\n\nUser query: ${prompt}`;
 					logger.debug(
-						`Injected ${memoryContext.length} memory entries as context`,
+						`Injected ${libraryContext.length} library volumes as context`,
 					);
 				}
 			} catch (err) {
-				logger.warn('Memory search failed, generating without context', {
+				logger.warn('Library search failed, generating without context', {
 					error: err instanceof Error ? err.message : String(err),
 				});
 			}
@@ -431,9 +431,9 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 
 		// 2. Generate via ACP
 		const {
-			skipMemory: _,
-			memoryMaxResults: __,
-			memoryThreshold: ___,
+			skipLibrary: _,
+			libraryMaxResults: __,
+			libraryThreshold: ___,
 			...acpOpts
 		} = options ?? {};
 		const result = await agents.client.generate(enrichedPrompt, {
@@ -442,21 +442,21 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 				acpOpts.systemPrompt ?? appOptions.systemPrompt ?? undefined,
 		});
 
-		// 3. Store the Q&A pair in memory
+		// 3. Store the Q&A pair in the library
 		let storedNoteId: string | undefined;
-		if (!options?.skipMemory) {
+		if (!options?.skipLibrary) {
 			try {
 				const convTopic = appOptions.conversationTopic ?? 'conversation';
-				storedNoteId = await memory.add(`Q: ${prompt}\nA: ${result.content}`, {
+				storedNoteId = await library.add(`Q: ${prompt}\nA: ${result.content}`, {
 					topic: convTopic,
 					source: 'generate',
 				});
-				logger.debug('Stored generation result in memory', {
+				logger.debug('Stored generation result in library', {
 					noteId: storedNoteId,
 				});
 				await autoSummarizeTopic(convTopic);
 			} catch (err) {
-				logger.warn('Failed to store generation result in memory', {
+				logger.warn('Failed to store generation result in library', {
 					error: err instanceof Error ? err.message : String(err),
 				});
 			}
@@ -466,7 +466,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 			content: result.content,
 			agentId: result.agentId,
 			serverName: result.serverName,
-			memoryContext: Object.freeze(memoryContext),
+			libraryContext: Object.freeze(libraryContext),
 			storedNoteId,
 			raw: result,
 		});
@@ -481,44 +481,44 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		return agents.client.generateStream(prompt, options);
 	};
 
-	// -- Memory-aware stream --------------------------------------------------
+	// -- Library-aware stream -------------------------------------------------
 
-	const generateMemoryStream = async (
+	const generateLibraryStream = async (
 		prompt: string,
 		options?: GenerateOptions,
-	): Promise<MemoryStreamResult> => {
-		const useMemory = !options?.skipMemory && memory.size > 0;
-		let memoryContext: SearchResultView[] = [];
+	): Promise<LibraryStreamResult> => {
+		const useLibrary = !options?.skipLibrary && library.size > 0;
+		let libraryContext: SearchResultView[] = [];
 		let enrichedPrompt = prompt;
 
-		// 1. Search memory for relevant context
-		if (useMemory) {
+		// 1. Search library for relevant context
+		if (useLibrary) {
 			try {
 				const maxResults =
-					options?.memoryMaxResults ?? appOptions.defaultMemoryResults;
+					options?.libraryMaxResults ?? appOptions.defaultLibraryResults;
 				const threshold =
-					options?.memoryThreshold ?? config.memory.similarityThreshold;
-				const results = await memory.search(prompt, maxResults, threshold);
+					options?.libraryThreshold ?? config.memory.similarityThreshold;
+				const results = await library.search(prompt, maxResults, threshold);
 
-				memoryContext = results.map((r) =>
-					Object.freeze({ note: toNoteView(r.entry), score: r.score }),
+				libraryContext = results.map((r) =>
+					Object.freeze({ note: toNoteView(r.volume), score: r.score }),
 				);
 
-				if (memoryContext.length > 0) {
-					const contextBlock = memoryContext
+				if (libraryContext.length > 0) {
+					const contextBlock = libraryContext
 						.map(
 							(r) =>
 								`[${r.note.topic}] (relevance: ${r.score.toFixed(2)}) ${r.note.text}`,
 						)
 						.join('\n');
 
-					enrichedPrompt = `Relevant context from memory:\n${contextBlock}\n\nUser query: ${prompt}`;
+					enrichedPrompt = `Relevant context from library:\n${contextBlock}\n\nUser query: ${prompt}`;
 					logger.debug(
-						`Injected ${memoryContext.length} memory entries as context`,
+						`Injected ${libraryContext.length} library volumes as context`,
 					);
 				}
 			} catch (err) {
-				logger.warn('Memory search failed, streaming without context', {
+				logger.warn('Library search failed, streaming without context', {
 					error: err instanceof Error ? err.message : String(err),
 				});
 			}
@@ -526,9 +526,9 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 
 		// 2. Start stream
 		const {
-			skipMemory: _,
-			memoryMaxResults: __,
-			memoryThreshold: ___,
+			skipLibrary: _,
+			libraryMaxResults: __,
+			libraryThreshold: ___,
 			...acpOpts
 		} = options ?? {};
 		const stream = agents.client.generateStream(enrichedPrompt, {
@@ -541,18 +541,18 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		const storeResult = async (
 			fullText: string,
 		): Promise<string | undefined> => {
-			if (options?.skipMemory) return undefined;
+			if (options?.skipLibrary) return undefined;
 			try {
 				const convTopic = appOptions.conversationTopic ?? 'conversation';
-				const id = await memory.add(`Q: ${prompt}\nA: ${fullText}`, {
+				const id = await library.add(`Q: ${prompt}\nA: ${fullText}`, {
 					topic: convTopic,
 					source: 'generate',
 				});
-				logger.debug('Stored streamed result in memory', { noteId: id });
+				logger.debug('Stored streamed result in library', { noteId: id });
 				await autoSummarizeTopic(convTopic);
 				return id;
 			} catch (err) {
-				logger.warn('Failed to store streamed result in memory', {
+				logger.warn('Failed to store streamed result in library', {
 					error: err instanceof Error ? err.message : String(err),
 				});
 				return undefined;
@@ -560,7 +560,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		};
 
 		return Object.freeze({
-			memoryContext: Object.freeze(memoryContext),
+			libraryContext: Object.freeze(libraryContext),
 			stream,
 			storeResult,
 		});
@@ -576,7 +576,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		const chain = createChain({
 			acpClient: agents.client,
 			mcpClient: tools.mcpClient,
-			memoryManager: memory,
+			library,
 			logger,
 		});
 
@@ -591,19 +591,19 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		const results = await chain.run(values);
 		const output = results.at(-1)?.output ?? '';
 
-		// Auto-store chain output in memory
-		if (!options?.skipMemory && output) {
+		// Auto-store chain output in library
+		if (!options?.skipLibrary && output) {
 			try {
 				const chainTopic = appOptions.chainTopic ?? 'chain';
-				await memory.add(`Chain result: ${output}`, {
+				await library.add(`Chain result: ${output}`, {
 					topic: chainTopic,
 					source: 'chain',
 					template,
 				});
-				logger.debug('Stored chain result in memory');
+				logger.debug('Stored chain result in library');
 				await autoSummarizeTopic(chainTopic);
 			} catch (err) {
-				logger.warn('Failed to store chain result in memory', {
+				logger.warn('Failed to store chain result in library', {
 					error: err instanceof Error ? err.message : String(err),
 				});
 			}
@@ -623,7 +623,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		const chain = createChain({
 			acpClient: agents.client,
 			mcpClient: tools.mcpClient,
-			memoryManager: memory,
+			library,
 			logger,
 		});
 
@@ -646,18 +646,18 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		const results = await chain.run(values);
 		const output = results.at(-1)?.output ?? '';
 
-		if (!options?.skipMemory && output) {
+		if (!options?.skipLibrary && output) {
 			try {
 				const chainTopic = appOptions.chainTopic ?? 'chain';
-				await memory.add(`Prompt "${name}" result: ${output}`, {
+				await library.add(`Prompt "${name}" result: ${output}`, {
 					topic: chainTopic,
 					source: 'named-prompt',
 					promptName: name,
 				});
-				logger.debug('Stored named prompt result in memory', { name });
+				logger.debug('Stored named prompt result in library', { name });
 				await autoSummarizeTopic(chainTopic);
 			} catch (err) {
-				logger.warn('Failed to store named prompt result in memory', {
+				logger.warn('Failed to store named prompt result in library', {
 					error: err instanceof Error ? err.message : String(err),
 				});
 			}
@@ -668,8 +668,8 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 
 	// -- Learning -------------------------------------------------------------
 
-	const getLearningProfile = (): LearningProfile | undefined => {
-		return memory.learningProfile;
+	const getPatronProfile = (): PatronProfile | undefined => {
+		return library.patronProfile;
 	};
 
 	// -- Re-embed -------------------------------------------------------------
@@ -677,7 +677,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 	const reembed = async (
 		onProgress?: (done: number, total: number) => void,
 	): Promise<number> => {
-		const allEntries = memory.getAll();
+		const allEntries = library.getAll();
 		if (allEntries.length === 0) return 0;
 
 		// Snapshot text + metadata before clearing
@@ -689,13 +689,13 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		const total = snapshot.length;
 
 		// Clear all entries (drops old embeddings)
-		await memory.clear();
+		await library.clear();
 
 		// Re-add in batches (re-embeds with the current provider)
 		const batchSize = 50;
 		for (let i = 0; i < total; i += batchSize) {
 			const batch = snapshot.slice(i, i + batchSize);
-			await memory.addBatch(batch);
+			await library.addBatch(batch);
 			onProgress?.(Math.min(i + batchSize, total), total);
 		}
 
@@ -717,17 +717,17 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		getNotesByTopic,
 		generate,
 		generateStream,
-		generateMemoryStream,
+		generateLibraryStream,
 		runChain,
 		runNamedPrompt,
-		getLearningProfile,
+		getPatronProfile,
 		reembed,
 		agents,
 		tools,
-		memory,
+		library,
 		tasks,
 		get noteCount() {
-			return memory.size;
+			return library.size;
 		},
 	});
 }

@@ -8,7 +8,7 @@
  *   acp.json     — ACP server entries
  *   mcp.json     — MCP server entries
  *   embed.json   — Embedding provider config (agent, server, model)
- *   memory.json  — Memory, vector store & storage config
+ *   memory.json  — Library, stacks & storage config
  *
  * Project config (in .simse/ relative to cwd):
  *   settings.json — Project-specific overrides (agent, log level, system prompt)
@@ -75,12 +75,12 @@ export interface EmbedFileConfig {
 	readonly embeddingServer?: string;
 }
 
-export interface MemoryFileConfig {
-	/** Whether memory is enabled. */
+export interface LibraryFileConfig {
+	/** Whether the library is enabled. */
 	readonly enabled?: boolean;
-	/** Similarity threshold for memory search (0–1). */
+	/** Similarity threshold for library search (0–1). */
 	readonly similarityThreshold?: number;
-	/** Maximum memory search results. */
+	/** Maximum library search results. */
 	readonly maxResults?: number;
 	/** Storage filename within data directory. */
 	readonly storageFilename?: string;
@@ -142,9 +142,9 @@ export interface PromptStepConfig {
 	readonly serverName?: string;
 	/** Map previous step outputs to this step's template variables. */
 	readonly inputMapping?: Readonly<Record<string, string>>;
-	/** Store this step's output in memory. */
+	/** Store this step's output in the library. */
 	readonly storeToMemory?: boolean;
-	/** Metadata to attach when storing to memory. */
+	/** Metadata to attach when storing to the library. */
 	readonly memoryMetadata?: Readonly<Record<string, string>>;
 }
 
@@ -193,9 +193,9 @@ export interface WorkspaceSettings {
 	readonly systemPrompt?: string;
 	/** ACP server name override. */
 	readonly defaultServer?: string;
-	/** Topic name used when storing generate() results in memory. */
+	/** Topic name used when storing generate() results in the library. */
 	readonly conversationTopic?: string;
-	/** Topic name used when storing chain results in memory. */
+	/** Topic name used when storing chain results in the library. */
 	readonly chainTopic?: string;
 }
 
@@ -368,8 +368,8 @@ export interface CLIConfigResult {
 	readonly logger: Logger;
 	/** Embedding provider config (from embed.json). */
 	readonly embedConfig: EmbedFileConfig;
-	/** Resolved memory file config (from memory.json). */
-	readonly memoryConfig: MemoryFileConfig;
+	/** Resolved library file config (from memory.json). */
+	readonly libraryConfig: LibraryFileConfig;
 	/** Summarization ACP config (from summarize.json, undefined if not configured). */
 	readonly summarizeConfig: SummarizeFileConfig | undefined;
 	/** MCP servers that were skipped due to missing API keys / env vars. */
@@ -449,9 +449,9 @@ export function createCLIConfig(options?: CLIConfigOptions): CLIConfigResult {
 
 	const embedConfig = readJsonFile<EmbedFileConfig>(embedPath) ?? {};
 
-	// -- Load memory.json (optional) ------------------------------------------
+	// -- Load memory.json (library config, optional) -------------------------
 
-	const memoryConfig = readJsonFile<MemoryFileConfig>(memoryPath) ?? {};
+	const libraryConfig = readJsonFile<LibraryFileConfig>(memoryPath) ?? {};
 
 	// -- Load summarize.json (optional) ---------------------------------------
 
@@ -514,11 +514,11 @@ export function createCLIConfig(options?: CLIConfigOptions): CLIConfigResult {
 			},
 		},
 		memory: {
-			enabled: memoryConfig.enabled ?? true,
+			enabled: libraryConfig.enabled ?? true,
 			embeddingAgent:
 				embedConfig.embeddingModel ?? 'nomic-ai/nomic-embed-text-v1.5',
-			similarityThreshold: memoryConfig.similarityThreshold ?? 0.7,
-			maxResults: memoryConfig.maxResults ?? 10,
+			similarityThreshold: libraryConfig.similarityThreshold ?? 0.7,
+			maxResults: libraryConfig.maxResults ?? 10,
 		},
 		chains: {},
 	});
@@ -533,7 +533,7 @@ export function createCLIConfig(options?: CLIConfigOptions): CLIConfigResult {
 		config,
 		logger,
 		embedConfig,
-		memoryConfig,
+		libraryConfig,
 		summarizeConfig,
 		skippedServers,
 		workspaceSettings,

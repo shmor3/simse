@@ -5,7 +5,7 @@
  * system prompt, and executes tool calls from the agentic loop.
  */
 
-import type { Logger, MCPClient, MemoryManager, VirtualFS } from 'simse';
+import type { Library, Logger, MCPClient, VirtualFS } from 'simse';
 import { toError } from 'simse';
 
 // ---------------------------------------------------------------------------
@@ -50,7 +50,7 @@ interface RegisteredTool {
 
 export interface ToolRegistryOptions {
 	readonly mcpClient?: MCPClient;
-	readonly memoryManager?: MemoryManager;
+	readonly library?: Library;
 	readonly vfs?: VirtualFS;
 	readonly logger?: Logger;
 }
@@ -68,7 +68,7 @@ export interface ToolRegistry {
 // ---------------------------------------------------------------------------
 
 export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
-	const { mcpClient, memoryManager, vfs } = options;
+	const { mcpClient, library, vfs } = options;
 	const tools = new Map<string, RegisteredTool>();
 
 	// -----------------------------------------------------------------------
@@ -84,13 +84,13 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 	// -----------------------------------------------------------------------
 
 	const registerBuiltins = (): void => {
-		// -- Memory tools --
-		if (memoryManager) {
+		// -- Library tools --
+		if (library) {
 			register(
 				{
-					name: 'memory_search',
+					name: 'library_search',
 					description:
-						'Search memory for relevant notes and context. Returns matching entries ranked by relevance.',
+						'Search the library for relevant volumes and context. Returns matching volumes ranked by relevance.',
 					parameters: {
 						query: {
 							type: 'string',
@@ -107,12 +107,12 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 					const query = String(args.query ?? '');
 					const maxResults =
 						typeof args.maxResults === 'number' ? args.maxResults : 5;
-					const results = await memoryManager.search(query, maxResults);
-					if (results.length === 0) return 'No matching entries found.';
+					const results = await library.search(query, maxResults);
+					if (results.length === 0) return 'No matching volumes found.';
 					return results
 						.map(
 							(r, i) =>
-								`${i + 1}. [${r.entry.metadata.topic ?? 'uncategorized'}] (score: ${r.score.toFixed(2)})\n   ${r.entry.text}`,
+								`${i + 1}. [${r.volume.metadata.topic ?? 'uncategorized'}] (score: ${r.score.toFixed(2)})\n   ${r.volume.text}`,
 						)
 						.join('\n\n');
 				},
@@ -120,17 +120,17 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 
 			register(
 				{
-					name: 'memory_add',
-					description: 'Store a note in long-term memory.',
+					name: 'library_shelve',
+					description: 'Shelve a volume in the library for long-term storage.',
 					parameters: {
 						text: {
 							type: 'string',
-							description: 'The text content to store',
+							description: 'The text content to shelve',
 							required: true,
 						},
 						topic: {
 							type: 'string',
-							description: 'Topic category for the note',
+							description: 'Topic category for the volume',
 							required: true,
 						},
 					},
@@ -138,8 +138,8 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 				async (args) => {
 					const text = String(args.text ?? '');
 					const topic = String(args.topic ?? 'general');
-					const id = await memoryManager.add(text, { topic });
-					return `Stored note with ID: ${id}`;
+					const id = await library.add(text, { topic });
+					return `Shelved volume with ID: ${id}`;
 				},
 			);
 		}

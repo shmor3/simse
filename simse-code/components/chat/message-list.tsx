@@ -56,27 +56,34 @@ function OutputItemView({ item }: { item: OutputItem }) {
 
 interface KeyedItem {
 	readonly item: OutputItem;
-	readonly key: string;
+	readonly id: string;
 }
 
 export function MessageList({ items }: MessageListProps) {
 	const nextId = useRef(0);
+	const prevLen = useRef(0);
 	const cached = useRef<KeyedItem[]>([]);
 
-	// Assign stable keys to new items only
-	while (cached.current.length < items.length) {
-		const idx = cached.current.length;
-		cached.current.push({
-			item: items[idx]!,
-			key: `msg-${nextId.current++}`,
-		});
+	// Assign stable IDs to new items, creating a NEW array reference
+	// so Ink's <Static> detects changes via useMemo dependency check
+	if (items.length !== prevLen.current) {
+		while (cached.current.length < items.length) {
+			const idx = cached.current.length;
+			cached.current.push({
+				item: items[idx]!,
+				id: `msg-${nextId.current++}`,
+			});
+		}
+		// Create new array reference so <Static>'s useMemo sees a change
+		cached.current = [...cached.current];
+		prevLen.current = items.length;
 	}
 
 	return (
 		<Static items={cached.current}>
-			{({ item, key }) => (
-				<Box key={key}>
-					<OutputItemView item={item} />
+			{(entry: KeyedItem) => (
+				<Box key={entry.id}>
+					<OutputItemView item={entry.item} />
 				</Box>
 			)}
 		</Static>

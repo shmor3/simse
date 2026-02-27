@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { Text, useInput } from 'ink';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 
 interface TextInputProps {
 	readonly value: string;
@@ -19,25 +19,36 @@ export function TextInput({
 }: TextInputProps) {
 	const [cursorOffset, setCursorOffset] = useState(value.length);
 
-	// Keep refs to avoid stale closures in useInput callback
+	// Refs for stable callback access — synced from props during render
+	// AND eagerly updated inside the handler to avoid stale reads between renders
 	const valueRef = useRef(value);
 	const cursorRef = useRef(cursorOffset);
 	const onChangeRef = useRef(onChange);
 	const onSubmitRef = useRef(onSubmit);
 
+	// Sync from props each render
 	valueRef.current = value;
 	cursorRef.current = cursorOffset;
 	onChangeRef.current = onChange;
 	onSubmitRef.current = onSubmit;
 
-	useEffect(() => {
-		if (cursorOffset > value.length) {
-			setCursorOffset(value.length);
-		}
-	}, [value, cursorOffset]);
-
 	const handleInput = useCallback(
-		(input: string, key: { upArrow: boolean; downArrow: boolean; leftArrow: boolean; rightArrow: boolean; return: boolean; backspace: boolean; delete: boolean; ctrl: boolean; shift: boolean; tab: boolean; escape: boolean }) => {
+		(
+			input: string,
+			key: {
+				upArrow: boolean;
+				downArrow: boolean;
+				leftArrow: boolean;
+				rightArrow: boolean;
+				return: boolean;
+				backspace: boolean;
+				delete: boolean;
+				ctrl: boolean;
+				shift: boolean;
+				tab: boolean;
+				escape: boolean;
+			},
+		) => {
 			if (
 				key.upArrow ||
 				key.downArrow ||
@@ -54,10 +65,13 @@ export function TextInput({
 			}
 
 			if (key.backspace || key.delete) {
-				if (cursorRef.current > 0) {
+				const c = cursorRef.current;
+				if (c > 0) {
 					const v = valueRef.current;
-					const c = cursorRef.current;
 					const next = v.slice(0, c - 1) + v.slice(c);
+					// Eagerly update refs so next event in same batch sees correct state
+					valueRef.current = next;
+					cursorRef.current = c - 1;
 					setCursorOffset(c - 1);
 					onChangeRef.current(next);
 				}
@@ -65,14 +79,16 @@ export function TextInput({
 			}
 
 			if (key.leftArrow) {
-				setCursorOffset((c) => Math.max(0, c - 1));
+				const c = Math.max(0, cursorRef.current - 1);
+				cursorRef.current = c;
+				setCursorOffset(c);
 				return;
 			}
 
 			if (key.rightArrow) {
-				setCursorOffset((c) =>
-					Math.min(valueRef.current.length, c + 1),
-				);
+				const c = Math.min(valueRef.current.length, cursorRef.current + 1);
+				cursorRef.current = c;
+				setCursorOffset(c);
 				return;
 			}
 
@@ -80,7 +96,11 @@ export function TextInput({
 			const v = valueRef.current;
 			const c = cursorRef.current;
 			const next = v.slice(0, c) + input + v.slice(c);
-			setCursorOffset(c + input.length);
+			const newCursor = c + input.length;
+			// Eagerly update refs so next event in same batch sees correct state
+			valueRef.current = next;
+			cursorRef.current = newCursor;
+			setCursorOffset(newCursor);
 			onChangeRef.current(next);
 		},
 		[],

@@ -2,15 +2,15 @@
 // Deduplication — detect and group near-duplicate vector entries
 // ---------------------------------------------------------------------------
 //
-// Pure functions that operate on VectorEntry arrays. No side effects,
+// Pure functions that operate on Volume arrays. No side effects,
 // no external dependencies beyond cosine similarity.
 // ---------------------------------------------------------------------------
 
 import { cosineSimilarity } from './cosine.js';
 import type {
 	DuplicateCheckResult,
-	DuplicateGroup,
-	VectorEntry,
+	DuplicateVolumes,
+	Volume,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -25,10 +25,10 @@ import type {
  */
 export function checkDuplicate(
 	newEmbedding: readonly number[],
-	entries: readonly VectorEntry[],
+	entries: readonly Volume[],
 	threshold: number,
 ): DuplicateCheckResult {
-	let bestEntry: VectorEntry | undefined;
+	let bestEntry: Volume | undefined;
 	let bestSimilarity = -Infinity;
 
 	for (const entry of entries) {
@@ -44,7 +44,7 @@ export function checkDuplicate(
 	if (bestEntry) {
 		return {
 			isDuplicate: true,
-			existingEntry: bestEntry,
+			existingVolume: bestEntry,
 			similarity: bestSimilarity,
 		};
 	}
@@ -65,18 +65,18 @@ export function checkDuplicate(
  *
  * O(N^2) — intended for explicit user-triggered deduplication, not hot paths.
  */
-export function findDuplicateGroups(
-	entries: readonly VectorEntry[],
+export function findDuplicateVolumes(
+	entries: readonly Volume[],
 	threshold: number,
-): DuplicateGroup[] {
+): DuplicateVolumes[] {
 	if (entries.length < 2) return [];
 
 	// Sort by timestamp (oldest first) so the representative is the original
 	const sorted = [...entries].sort((a, b) => a.timestamp - b.timestamp);
 
 	const groups: Array<{
-		representative: VectorEntry;
-		duplicates: VectorEntry[];
+		representative: Volume;
+		duplicates: Volume[];
 		totalSimilarity: number;
 	}> = [];
 
@@ -118,3 +118,10 @@ export function findDuplicateGroups(
 				g.duplicates.length > 0 ? g.totalSimilarity / g.duplicates.length : 0,
 		}));
 }
+
+// ---------------------------------------------------------------------------
+// Backward-compatibility aliases (temporary — removed after migration)
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use findDuplicateVolumes */
+export const findDuplicateGroups = findDuplicateVolumes;

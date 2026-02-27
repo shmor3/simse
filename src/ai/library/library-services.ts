@@ -1,13 +1,13 @@
 // ---------------------------------------------------------------------------
-// Memory Middleware
+// Library Services (was Memory Middleware)
 // ---------------------------------------------------------------------------
 //
 // Automatically enriches every agentic-loop turn with relevant context
-// from memory, and stores responses back into memory after the loop.
+// from the library, and stores responses back into the library after the loop.
 // ---------------------------------------------------------------------------
 
 import type { Logger } from '../../logger.js';
-import type { MemoryManager } from './library.js';
+import type { Library } from './library.js';
 import {
 	formatMemoryContext,
 	type PromptInjectionOptions,
@@ -17,22 +17,22 @@ import {
 // Types
 // ---------------------------------------------------------------------------
 
-export interface MiddlewareContext {
+export interface LibraryContext {
 	readonly userInput: string;
 	readonly currentSystemPrompt: string;
 	readonly conversationHistory: string;
 	readonly turn: number;
 }
 
-export interface MemoryMiddleware {
-	readonly enrichSystemPrompt: (context: MiddlewareContext) => Promise<string>;
+export interface LibraryServices {
+	readonly enrichSystemPrompt: (context: LibraryContext) => Promise<string>;
 	readonly afterResponse: (
 		userInput: string,
 		response: string,
 	) => Promise<void>;
 }
 
-export interface MemoryMiddlewareOptions {
+export interface LibraryServicesOptions {
 	/** Maximum results to retrieve per turn. Defaults to `5`. */
 	readonly maxResults?: number;
 	/** Minimum relevance score for inclusion. */
@@ -41,7 +41,7 @@ export interface MemoryMiddlewareOptions {
 	readonly format?: PromptInjectionOptions;
 	/** Topic to tag stored Q&A pairs with. Defaults to `'conversation'`. */
 	readonly storeTopic?: string;
-	/** Whether to store Q&A pairs in memory. Defaults to `true`. */
+	/** Whether to store Q&A pairs in library. Defaults to `true`. */
 	readonly storeResponses?: boolean;
 	/** Optional logger for debug/warning output. */
 	readonly logger?: Logger;
@@ -64,10 +64,10 @@ function isErrorResponse(response: string): boolean {
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createMemoryMiddleware(
-	memoryManager: MemoryManager,
-	options?: MemoryMiddlewareOptions,
-): MemoryMiddleware {
+export function createLibraryServices(
+	library: Library,
+	options?: LibraryServicesOptions,
+): LibraryServices {
 	const maxResults = options?.maxResults ?? 5;
 	const minScore = options?.minScore;
 	const storeTopic = options?.storeTopic ?? 'conversation';
@@ -76,14 +76,14 @@ export function createMemoryMiddleware(
 	const logger = options?.logger;
 
 	const enrichSystemPrompt = async (
-		context: MiddlewareContext,
+		context: LibraryContext,
 	): Promise<string> => {
-		if (!memoryManager.isInitialized || memoryManager.size === 0) {
+		if (!library.isInitialized || library.size === 0) {
 			return context.currentSystemPrompt;
 		}
 
 		try {
-			const results = await memoryManager.search(
+			const results = await library.search(
 				context.userInput,
 				maxResults,
 				minScore,
@@ -106,7 +106,7 @@ export function createMemoryMiddleware(
 			return `${context.currentSystemPrompt}\n\n${memoryBlock}`;
 		} catch (err) {
 			logger?.warn(
-				'Memory middleware: search failed, continuing without context',
+				'Library services: search failed, continuing without context',
 				{
 					error: err instanceof Error ? err.message : String(err),
 				},
@@ -122,13 +122,13 @@ export function createMemoryMiddleware(
 		if (!storeResponses) return;
 		if (!response || response.trim().length === 0) return;
 		if (isErrorResponse(response)) return;
-		if (!memoryManager.isInitialized) return;
+		if (!library.isInitialized) return;
 
 		try {
 			const text = `Q: ${userInput}\nA: ${response}`;
-			await memoryManager.add(text, { topic: storeTopic });
+			await library.add(text, { topic: storeTopic });
 		} catch (err) {
-			logger?.warn('Memory middleware: failed to store response', {
+			logger?.warn('Library services: failed to store response', {
 				error: err instanceof Error ? err.message : String(err),
 			});
 		}
@@ -136,3 +136,16 @@ export function createMemoryMiddleware(
 
 	return Object.freeze({ enrichSystemPrompt, afterResponse });
 }
+
+// ---------------------------------------------------------------------------
+// Backward-compatibility aliases (temporary — removed after migration)
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use LibraryContext */
+export type MiddlewareContext = LibraryContext;
+/** @deprecated Use LibraryServices */
+export type MemoryMiddleware = LibraryServices;
+/** @deprecated Use LibraryServicesOptions */
+export type MemoryMiddlewareOptions = LibraryServicesOptions;
+/** @deprecated Use createLibraryServices */
+export const createMemoryMiddleware = createLibraryServices;

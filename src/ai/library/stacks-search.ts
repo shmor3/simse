@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
-// Vector Search — pure search functions extracted from vector-store.ts
+// Stacks Search — pure search functions extracted from stacks.ts
 // ---------------------------------------------------------------------------
 //
 // Standalone, side-effect-free search functions that operate on readonly
-// collections of VectorEntry data.  The vector store delegates to these
+// collections of Volume data. The stacks store delegates to these
 // functions and handles access tracking / learning engine recording itself.
 // ---------------------------------------------------------------------------
 
@@ -17,21 +17,21 @@ import {
 	tokenOverlapScore,
 } from './text-search.js';
 import type {
-	AdvancedSearchResult,
+	AdvancedLookup,
 	DateRange,
 	MetadataFilter,
 	SearchOptions,
-	SearchResult,
+	Lookup,
 	TextSearchOptions,
-	TextSearchResult,
-	VectorEntry,
+	TextLookup,
+	Volume,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Configuration passed from the store
 // ---------------------------------------------------------------------------
 
-export interface VectorSearchConfig {
+export interface StacksSearchConfig {
 	/** Maximum regex pattern length before rejection. */
 	readonly maxRegexPatternLength: number;
 	/** Logger warn function for diagnostics. */
@@ -49,16 +49,16 @@ export interface VectorSearchConfig {
 function fastCosine(
 	queryEmbedding: readonly number[],
 	queryMag: number,
-	entry: VectorEntry,
+	vol: Volume,
 	magnitudeCache: MagnitudeCache,
 ): number | undefined {
-	if (entry.embedding.length !== queryEmbedding.length) return undefined;
+	if (vol.embedding.length !== queryEmbedding.length) return undefined;
 	const entryMag =
-		magnitudeCache.get(entry.id) ?? computeMagnitude(entry.embedding);
+		magnitudeCache.get(vol.id) ?? computeMagnitude(vol.embedding);
 	if (entryMag === 0) return undefined;
 	let dot = 0;
 	for (let i = 0; i < queryEmbedding.length; i++) {
-		dot += queryEmbedding[i] * entry.embedding[i];
+		dot += queryEmbedding[i] * vol.embedding[i];
 	}
 	const raw = dot / (queryMag * entryMag);
 	// Clamp to [-1, 1] to guard against floating-point rounding
@@ -70,7 +70,7 @@ function scoreText(
 	query: string,
 	mode: string,
 	compiledRegex: RegExp | undefined,
-	config: VectorSearchConfig,
+	config: StacksSearchConfig,
 ): number {
 	switch (mode) {
 		case 'fuzzy':
@@ -146,26 +146,26 @@ function combineScores(
  * Does NOT track access or record queries — the caller is responsible
  * for those side effects.
  */
-export function vectorSearch(
-	entries: readonly VectorEntry[],
+export function stacksSearch(
+	volumes: readonly Volume[],
 	queryEmbedding: readonly number[],
 	maxResults: number,
 	threshold: number,
 	magnitudeCache: MagnitudeCache,
-): SearchResult[] {
+): Lookup[] {
 	if (queryEmbedding.length === 0) return [];
 
 	// Pre-compute query magnitude once
 	const queryMag = computeMagnitude(queryEmbedding);
 	if (queryMag === 0) return [];
 
-	const scored: SearchResult[] = [];
+	const scored: Lookup[] = [];
 
-	for (const entry of entries) {
-		const score = fastCosine(queryEmbedding, queryMag, entry, magnitudeCache);
+	for (const vol of volumes) {
+		const score = fastCosine(queryEmbedding, queryMag, vol, magnitudeCache);
 		if (score === undefined) continue;
 		if (score >= threshold) {
-			scored.push({ entry, score });
+			scored.push({ volume: vol, score });
 		}
 	}
 
@@ -182,12 +182,12 @@ export function vectorSearch(
  * lookup instead of a linear scan.  For all other modes the existing
  * linear-scan behaviour is preserved.
  */
-export function textSearchEntries(
-	entries: readonly VectorEntry[],
+export function textSearchVolumes(
+	volumes: readonly Volume[],
 	options: TextSearchOptions,
-	config: VectorSearchConfig,
+	config: StacksSearchConfig,
 	invertedIndex?: InvertedIndex,
-): TextSearchResult[] {
+): TextLookup[] {
 	const { query, mode = 'fuzzy', threshold = 0.3 } = options;
 
 	if (query.length === 0) return [];
@@ -197,22 +197,22 @@ export function textSearchEntries(
 		const bm25Results = invertedIndex.bm25Search(query);
 		if (bm25Results.length === 0) return [];
 
-		// Build a lookup map from entries for O(1) access
-		const entryMap = new Map<string, VectorEntry>();
-		for (const entry of entries) {
-			entryMap.set(entry.id, entry);
+		// Build a lookup map from volumes for O(1) access
+		const volumeMap = new Map<string, Volume>();
+		for (const vol of volumes) {
+			volumeMap.set(vol.id, vol);
 		}
 
 		// Normalize BM25 scores to [0, 1] range using the max score
 		const maxScore = bm25Results[0].score; // already sorted desc
-		const results: TextSearchResult[] = [];
+		const results: TextLookup[] = [];
 
 		for (const bm25 of bm25Results) {
-			const entry = entryMap.get(bm25.id);
-			if (!entry) continue;
+			const vol = volumeMap.get(bm25.id);
+			if (!vol) continue;
 			const normalizedScore = maxScore > 0 ? bm25.score / maxScore : 0;
 			if (normalizedScore >= threshold) {
-				results.push({ entry, score: normalizedScore });
+				results.push({ volume: vol, score: normalizedScore });
 			}
 		}
 
@@ -238,12 +238,12 @@ export function textSearchEntries(
 		}
 	}
 
-	const results: TextSearchResult[] = [];
+	const results: TextLookup[] = [];
 
-	for (const entry of entries) {
-		const score = scoreText(entry.text, query, mode, compiledRegex, config);
+	for (const vol of volumes) {
+		const score = scoreText(vol.text, query, mode, compiledRegex, config);
 		if (score >= threshold) {
-			results.push({ entry, score });
+			results.push({ volume: vol, score });
 		}
 	}
 
@@ -252,15 +252,15 @@ export function textSearchEntries(
 }
 
 /**
- * Filter entries by metadata using indexed lookups (for simple `eq` filters)
+ * Filter volumes by metadata using indexed lookups (for simple `eq` filters)
  * or a linear scan (for complex filter modes).
  */
-export function filterEntriesByMetadata(
-	entries: readonly VectorEntry[],
+export function filterVolumesByMetadata(
+	volumes: readonly Volume[],
 	filters: readonly MetadataFilter[],
 	metadataIndex: MetadataIndex,
-): VectorEntry[] {
-	if (filters.length === 0) return [...entries];
+): Volume[] {
+	if (filters.length === 0) return [...volumes];
 
 	// Optimization: if all filters are simple "eq" mode, use the metadata index
 	const allEq = filters.every(
@@ -281,21 +281,21 @@ export function filterEntriesByMetadata(
 			if (candidateIds.size === 0) return [];
 		}
 		if (!candidateIds) return [];
-		return entries.filter((e) => candidateIds.has(e.id));
+		return volumes.filter((e) => candidateIds.has(e.id));
 	}
 
 	// Fallback: linear scan for complex filter modes
-	return entries.filter((e) => matchesAllMetadataFilters(e.metadata, filters));
+	return volumes.filter((e) => matchesAllMetadataFilters(e.metadata, filters));
 }
 
 /**
- * Filter entries whose timestamp falls within the given date range.
+ * Filter volumes whose timestamp falls within the given date range.
  */
-export function filterEntriesByDateRange(
-	entries: readonly VectorEntry[],
+export function filterVolumesByDateRange(
+	volumes: readonly Volume[],
 	range: DateRange,
-): VectorEntry[] {
-	return entries.filter((e) => {
+): Volume[] {
+	return volumes.filter((e) => {
 		if (range.after !== undefined && e.timestamp < range.after) return false;
 		if (range.before !== undefined && e.timestamp > range.before) return false;
 		return true;
@@ -312,14 +312,14 @@ export function filterEntriesByDateRange(
  * Returns results sorted by descending combined score, limited to
  * `maxResults`.  Does NOT track access or record queries.
  */
-export function advancedVectorSearch(
-	entries: readonly VectorEntry[],
+export function advancedStacksSearch(
+	volumes: readonly Volume[],
 	options: SearchOptions,
-	config: VectorSearchConfig,
+	config: StacksSearchConfig,
 	magnitudeCache: MagnitudeCache,
 	_metadataIndex: MetadataIndex,
 	invertedIndex?: InvertedIndex,
-): AdvancedSearchResult[] {
+): AdvancedLookup[] {
 	const {
 		queryEmbedding,
 		similarityThreshold = 0,
@@ -335,7 +335,7 @@ export function advancedVectorSearch(
 
 	// ---- BM25 fast-path for text component ----
 	// When using BM25 mode we pre-compute text scores via the inverted index
-	// so we can look them up per entry in O(1) instead of re-scanning.
+	// so we can look them up per volume in O(1) instead of re-scanning.
 	let bm25ScoreMap: Map<string, number> | undefined;
 	if (text && (text.mode ?? 'fuzzy') === 'bm25' && invertedIndex) {
 		const bm25Results = invertedIndex.bm25Search(text.query);
@@ -355,7 +355,7 @@ export function advancedVectorSearch(
 			? new Set<string>(topicFilter)
 			: undefined;
 
-	const results: AdvancedSearchResult[] = [];
+	const results: AdvancedLookup[] = [];
 
 	// Pre-compute query magnitude for fast cosine
 	const queryMag =
@@ -379,24 +379,24 @@ export function advancedVectorSearch(
 		}
 	}
 
-	for (const entry of entries) {
+	for (const vol of volumes) {
 		if (dateRange) {
-			if (dateRange.after !== undefined && entry.timestamp < dateRange.after)
+			if (dateRange.after !== undefined && vol.timestamp < dateRange.after)
 				continue;
-			if (dateRange.before !== undefined && entry.timestamp > dateRange.before)
+			if (dateRange.before !== undefined && vol.timestamp > dateRange.before)
 				continue;
 		}
 
-		// Metadata filtering — entries that don't match are excluded
+		// Metadata filtering — volumes that don't match are excluded
 		const passedMetadata =
 			!metadata ||
 			metadata.length === 0 ||
-			matchesAllMetadataFilters(entry.metadata, metadata as MetadataFilter[]);
+			matchesAllMetadataFilters(vol.metadata, metadata as MetadataFilter[]);
 		if (!passedMetadata) continue;
 
 		let vectorScore: number | undefined;
 		if (queryEmbedding && queryEmbedding.length > 0 && queryMag > 0) {
-			vectorScore = fastCosine(queryEmbedding, queryMag, entry, magnitudeCache);
+			vectorScore = fastCosine(queryEmbedding, queryMag, vol, magnitudeCache);
 			if (vectorScore === undefined) continue;
 			if (vectorScore < similarityThreshold) continue;
 		}
@@ -408,7 +408,7 @@ export function advancedVectorSearch(
 
 			if (mode === 'bm25' && bm25ScoreMap) {
 				// Use pre-computed BM25 scores
-				textScoreVal = bm25ScoreMap.get(entry.id);
+				textScoreVal = bm25ScoreMap.get(vol.id);
 				if (textScoreVal === undefined) textScoreVal = 0;
 				if (textScoreVal < textThreshold) continue;
 			} else if (mode === 'bm25') {
@@ -416,7 +416,7 @@ export function advancedVectorSearch(
 				textScoreVal = undefined;
 			} else {
 				textScoreVal = scoreText(
-					entry.text,
+					vol.text,
 					text.query,
 					mode,
 					compiledRegex,
@@ -433,22 +433,22 @@ export function advancedVectorSearch(
 			boostedTextScore *= fieldBoosts.text;
 		}
 
-		// Metadata boost: bonus for entries that passed metadata filters
+		// Metadata boost: bonus for volumes that passed metadata filters
 		let metadataBoost = 0;
 		if (
 			fieldBoosts?.metadata !== undefined &&
 			metadata &&
 			metadata.length > 0
 		) {
-			// Entry passed metadata filters — apply the metadata boost
+			// Volume passed metadata filters — apply the metadata boost
 			metadataBoost = fieldBoosts.metadata;
 		}
 
-		// Topic boost: bonus for entries whose topic matches the topic filter
+		// Topic boost: bonus for volumes whose topic matches the topic filter
 		let topicBoost = 0;
 		if (fieldBoosts?.topic !== undefined && topicSet) {
-			const entryTopic = entry.metadata.topic;
-			if (entryTopic && topicSet.has(entryTopic)) {
+			const volTopic = vol.metadata.topic;
+			if (volTopic && topicSet.has(volTopic)) {
 				topicBoost = fieldBoosts.topic;
 			}
 		}
@@ -462,7 +462,7 @@ export function advancedVectorSearch(
 			const wMetadata = rankWeights?.metadata ?? 0.1;
 			const wRecency = rankWeights?.recency ?? 0.1;
 
-			const recencyVal = recencyScore(entry.timestamp);
+			const recencyVal = recencyScore(vol.timestamp);
 
 			finalScore =
 				(vectorScore ?? 0) * wVector +
@@ -476,7 +476,7 @@ export function advancedVectorSearch(
 		}
 
 		results.push({
-			entry,
+			volume: vol,
 			score: finalScore,
 			scores: {
 				vector: vectorScore,
@@ -488,3 +488,20 @@ export function advancedVectorSearch(
 	results.sort((a, b) => b.score - a.score);
 	return results.slice(0, maxResults);
 }
+
+// ---------------------------------------------------------------------------
+// Backward-compatibility aliases (temporary — removed after migration)
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use StacksSearchConfig */
+export type VectorSearchConfig = StacksSearchConfig;
+/** @deprecated Use stacksSearch */
+export const vectorSearch = stacksSearch;
+/** @deprecated Use textSearchVolumes */
+export const textSearchEntries = textSearchVolumes;
+/** @deprecated Use filterVolumesByMetadata */
+export const filterEntriesByMetadata = filterVolumesByMetadata;
+/** @deprecated Use filterVolumesByDateRange */
+export const filterEntriesByDateRange = filterVolumesByDateRange;
+/** @deprecated Use advancedStacksSearch */
+export const advancedVectorSearch = advancedStacksSearch;

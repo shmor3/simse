@@ -53,13 +53,23 @@ export interface EventPayloadMap {
 		readonly allowed: boolean;
 	};
 	abort: { readonly reason: string };
-	// Memory events
+	// Library events (was Memory events)
+	'library.shelve': { readonly id: string; readonly contentLength: number };
+	'library.search': {
+		readonly query: string;
+		readonly resultCount: number;
+		readonly durationMs: number;
+	};
+	'library.withdraw': { readonly id: string };
+	/** @deprecated Use 'library.shelve' */
 	'memory.add': { readonly id: string; readonly contentLength: number };
+	/** @deprecated Use 'library.search' */
 	'memory.search': {
 		readonly query: string;
 		readonly resultCount: number;
 		readonly durationMs: number;
 	};
+	/** @deprecated Use 'library.withdraw' */
 	'memory.delete': { readonly id: string };
 	// Subagent events
 	'subagent.start': {

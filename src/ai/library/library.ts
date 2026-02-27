@@ -9,25 +9,25 @@ import { getDefaultLogger, type Logger } from '../../logger.js';
 import { parseQuery } from './query-dsl.js';
 import type { StorageBackend } from './storage.js';
 import type {
-	AdvancedSearchResult,
+	AdvancedLookup,
+	CompendiumOptions,
+	CompendiumResult,
 	DateRange,
 	DuplicateCheckResult,
-	DuplicateGroup,
+	DuplicateVolumes,
 	EmbeddingProvider,
-	LearningProfile,
-	MemoryConfig,
+	LibraryConfig,
 	MetadataFilter,
-	RecommendationResult,
+	PatronProfile,
+	Recommendation,
 	RecommendOptions,
 	SearchOptions,
-	SearchResult,
-	SummarizeOptions,
-	SummarizeResult,
+	Lookup,
 	TextGenerationProvider,
 	TextSearchOptions,
-	TextSearchResult,
+	TextLookup,
 	TopicInfo,
-	VectorEntry,
+	Volume,
 } from './types.js';
 import { createVectorStore, type VectorStoreOptions } from './stacks.js';
 
@@ -35,27 +35,27 @@ import { createVectorStore, type VectorStoreOptions } from './stacks.js';
 // Options
 // ---------------------------------------------------------------------------
 
-export interface MemoryManagerOptions {
+export interface LibraryOptions {
 	/** Pluggable storage backend. Consumers must provide their own implementation. */
 	storage: StorageBackend;
 	/** Inject a custom logger. */
 	logger?: Logger;
-	/** Override vector store options (except storage and logger, which are set at this level). */
-	vectorStoreOptions?: Omit<VectorStoreOptions, 'logger' | 'storage'>;
+	/** Override stacks options (except storage and logger, which are set at this level). */
+	stacksOptions?: Omit<VectorStoreOptions, 'logger' | 'storage'>;
 	/**
-	 * Optional text generation provider used for summarization.
+	 * Optional text generation provider used for compendium.
 	 * Can also be set later via `setTextGenerator()`.
 	 */
 	textGenerator?: TextGenerationProvider;
-	/** Optional event bus for publishing memory lifecycle events. */
+	/** Optional event bus for publishing library lifecycle events. */
 	eventBus?: EventBus;
 }
 
 // ---------------------------------------------------------------------------
-// MemoryManager interface
+// Library interface (was MemoryManager)
 // ---------------------------------------------------------------------------
 
-export interface MemoryManager {
+export interface Library {
 	readonly initialize: () => Promise<void>;
 	readonly dispose: () => Promise<void>;
 	readonly add: (
@@ -69,33 +69,33 @@ export interface MemoryManager {
 		query: string,
 		maxResults?: number,
 		threshold?: number,
-	) => Promise<SearchResult[]>;
-	readonly textSearch: (options: TextSearchOptions) => TextSearchResult[];
-	readonly filterByMetadata: (filters: MetadataFilter[]) => VectorEntry[];
-	readonly filterByDateRange: (range: DateRange) => VectorEntry[];
+	) => Promise<Lookup[]>;
+	readonly textSearch: (options: TextSearchOptions) => TextLookup[];
+	readonly filterByMetadata: (filters: MetadataFilter[]) => Volume[];
+	readonly filterByDateRange: (range: DateRange) => Volume[];
 	readonly advancedSearch: (
 		options: SearchOptions,
-	) => Promise<AdvancedSearchResult[]>;
-	readonly query: (dsl: string) => Promise<AdvancedSearchResult[]>;
-	readonly getById: (id: string) => VectorEntry | undefined;
-	readonly getAll: () => VectorEntry[];
+	) => Promise<AdvancedLookup[]>;
+	readonly query: (dsl: string) => Promise<AdvancedLookup[]>;
+	readonly getById: (id: string) => Volume | undefined;
+	readonly getAll: () => Volume[];
 	readonly getTopics: () => TopicInfo[];
-	readonly filterByTopic: (topics: string[]) => VectorEntry[];
+	readonly filterByTopic: (topics: string[]) => Volume[];
 	readonly recommend: (
 		query: string,
 		options?: Omit<RecommendOptions, 'queryEmbedding'>,
-	) => Promise<RecommendationResult[]>;
-	readonly findDuplicates: (threshold?: number) => DuplicateGroup[];
+	) => Promise<Recommendation[]>;
+	readonly findDuplicates: (threshold?: number) => DuplicateVolumes[];
 	readonly checkDuplicate: (text: string) => Promise<DuplicateCheckResult>;
-	readonly summarize: (options: SummarizeOptions) => Promise<SummarizeResult>;
+	readonly compendium: (options: CompendiumOptions) => Promise<CompendiumResult>;
 	readonly setTextGenerator: (provider: TextGenerationProvider) => void;
-	/** Record explicit user feedback on whether an entry was relevant. */
+	/** Record explicit user feedback on whether a volume was relevant. */
 	readonly recordFeedback: (entryId: string, relevant: boolean) => void;
 	readonly delete: (id: string) => Promise<boolean>;
 	readonly deleteBatch: (ids: string[]) => Promise<number>;
 	readonly clear: () => Promise<void>;
-	/** Snapshot of the adaptive learning profile, or undefined if learning is disabled. */
-	readonly learningProfile: LearningProfile | undefined;
+	/** Snapshot of the patron learning profile, or undefined if learning is disabled. */
+	readonly patronProfile: PatronProfile | undefined;
 	readonly size: number;
 	readonly isInitialized: boolean;
 	readonly isDirty: boolean;
@@ -107,27 +107,27 @@ export interface MemoryManager {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a memory manager that wraps a vector store with automatic
- * embedding, search, deduplication, recommendation, and summarization.
+ * Create a library that wraps a stacks store with automatic
+ * embedding, search, deduplication, recommendation, and compendium.
  *
  * @param embedder - Provider that converts text into embedding vectors.
- * @param config - Memory settings (similarity threshold, max results, embedding agent).
- * @param options - Storage backend, logger, vector store options, optional text generator.
- * @returns A frozen {@link MemoryManager}. Call `initialize()` before use.
+ * @param config - Library settings (similarity threshold, max results, embedding agent).
+ * @param options - Storage backend, logger, stacks options, optional text generator.
+ * @returns A frozen {@link Library}. Call `initialize()` before use.
  * @throws {EmbeddingError} When the embedding provider fails during add/search.
- * @throws {MemoryError} When the store is not initialized or text is empty.
+ * @throws {LibraryError} When the store is not initialized or text is empty.
  */
-export function createMemoryManager(
+export function createLibrary(
 	embedder: EmbeddingProvider,
-	config: MemoryConfig,
-	options: MemoryManagerOptions,
-): MemoryManager {
-	const logger = (options.logger ?? getDefaultLogger()).child('memory');
+	config: LibraryConfig,
+	options: LibraryOptions,
+): Library {
+	const logger = (options.logger ?? getDefaultLogger()).child('library');
 	const eventBus = options.eventBus;
 	const store = createVectorStore({
 		storage: options.storage,
 		logger,
-		...(options.vectorStoreOptions ?? {}),
+		...(options.stacksOptions ?? {}),
 	});
 
 	let initialized = false;
@@ -141,7 +141,7 @@ export function createMemoryManager(
 	const ensureInitialized = (): void => {
 		if (!initialized) {
 			throw createMemoryError(
-				'MemoryManager has not been initialized. Call initialize() first.',
+				'Library has not been initialized. Call initialize() first.',
 				{ code: 'MEMORY_NOT_INITIALIZED' },
 			);
 		}
@@ -193,14 +193,14 @@ export function createMemoryManager(
 		if (initPromise) return initPromise;
 
 		initPromise = (async () => {
-			logger.debug('Initializing memory manager', {
+			logger.debug('Initializing library', {
 				embeddingAgent: config.embeddingAgent,
 			});
 
 			await store.load();
 			initialized = true;
 
-			logger.info(`Memory manager initialized (${store.size} entries loaded)`);
+			logger.info(`Library initialized (${store.size} volumes loaded)`);
 		})().finally(() => {
 			initPromise = null;
 		});
@@ -209,10 +209,10 @@ export function createMemoryManager(
 	};
 
 	const dispose = async (): Promise<void> => {
-		logger.debug('Disposing memory manager');
+		logger.debug('Disposing library');
 		await store.dispose();
 		initialized = false;
-		logger.debug('Memory manager disposed');
+		logger.debug('Library disposed');
 	};
 
 	// -----------------------------------------------------------------------
@@ -227,7 +227,7 @@ export function createMemoryManager(
 
 		if (text.trim().length === 0) {
 			throw createMemoryError(
-				'Cannot add empty or whitespace-only text to memory',
+				'Cannot add empty or whitespace-only text to library',
 				{
 					code: 'MEMORY_EMPTY_TEXT',
 				},
@@ -242,12 +242,12 @@ export function createMemoryManager(
 		const embedding = await getEmbedding(text);
 		const id = await store.add(text, embedding, metadata);
 
-		logger.debug(`Stored memory entry "${id}"`, {
+		logger.debug(`Stored volume "${id}"`, {
 			embeddingDim: embedding.length,
 			metadataKeys: Object.keys(metadata),
 		});
 
-		eventBus?.publish('memory.add', { id, contentLength: text.length });
+		eventBus?.publish('library.shelve', { id, contentLength: text.length });
 
 		return id;
 	};
@@ -265,7 +265,7 @@ export function createMemoryManager(
 		for (let i = 0; i < batchEntries.length; i++) {
 			if (batchEntries[i].text.trim().length === 0) {
 				throw createMemoryError(
-					`Cannot add empty or whitespace-only text to memory (batch index ${i})`,
+					`Cannot add empty or whitespace-only text to library (batch index ${i})`,
 					{ code: 'MEMORY_EMPTY_TEXT', metadata: { batchIndex: i } },
 				);
 			}
@@ -304,7 +304,7 @@ export function createMemoryManager(
 
 		const ids = await store.addBatch(storeBatch);
 
-		logger.debug(`Stored batch of ${ids.length} memory entries`);
+		logger.debug(`Stored batch of ${ids.length} volumes`);
 		return ids;
 	};
 
@@ -316,7 +316,7 @@ export function createMemoryManager(
 		query: string,
 		maxResults?: number,
 		threshold?: number,
-	): Promise<SearchResult[]> => {
+	): Promise<Lookup[]> => {
 		ensureInitialized();
 
 		if (query.trim().length === 0) {
@@ -324,7 +324,7 @@ export function createMemoryManager(
 			return [];
 		}
 
-		logger.debug('Searching memory', {
+		logger.debug('Searching library', {
 			queryLength: query.length,
 			maxResults: maxResults ?? config.maxResults,
 			threshold: threshold ?? config.similarityThreshold,
@@ -340,8 +340,8 @@ export function createMemoryManager(
 		);
 
 		const durationMs = Date.now() - start;
-		logger.debug(`Found ${results.length} matching memories`);
-		eventBus?.publish('memory.search', {
+		logger.debug(`Found ${results.length} matching volumes`);
+		eventBus?.publish('library.search', {
 			query,
 			resultCount: results.length,
 			durationMs,
@@ -353,7 +353,7 @@ export function createMemoryManager(
 	// Text Search (content-based, no embeddings)
 	// -----------------------------------------------------------------------
 
-	const textSearch = (searchOptions: TextSearchOptions): TextSearchResult[] => {
+	const textSearch = (searchOptions: TextSearchOptions): TextLookup[] => {
 		ensureInitialized();
 
 		if (searchOptions.query.trim().length === 0) {
@@ -361,7 +361,7 @@ export function createMemoryManager(
 			return [];
 		}
 
-		logger.debug('Text searching memory', {
+		logger.debug('Text searching library', {
 			query: searchOptions.query,
 			mode: searchOptions.mode ?? 'fuzzy',
 			threshold: searchOptions.threshold ?? 0.3,
@@ -369,7 +369,7 @@ export function createMemoryManager(
 
 		const results = store.textSearch(searchOptions);
 
-		logger.debug(`Text search found ${results.length} matching memories`);
+		logger.debug(`Text search found ${results.length} matching volumes`);
 		return results;
 	};
 
@@ -377,17 +377,17 @@ export function createMemoryManager(
 	// Metadata Filtering
 	// -----------------------------------------------------------------------
 
-	const filterByMetadata = (filters: MetadataFilter[]): VectorEntry[] => {
+	const filterByMetadata = (filters: MetadataFilter[]): Volume[] => {
 		ensureInitialized();
 
-		logger.debug('Filtering memory by metadata', {
+		logger.debug('Filtering library by metadata', {
 			filterCount: filters.length,
 		});
 
 		const results = store.filterByMetadata(filters);
 
 		logger.debug(
-			`Metadata filter returned ${results.length} matching memories`,
+			`Metadata filter returned ${results.length} matching volumes`,
 		);
 		return results;
 	};
@@ -396,10 +396,10 @@ export function createMemoryManager(
 	// Date Range Filtering
 	// -----------------------------------------------------------------------
 
-	const filterByDateRange = (range: DateRange): VectorEntry[] => {
+	const filterByDateRange = (range: DateRange): Volume[] => {
 		ensureInitialized();
 
-		logger.debug('Filtering memory by date range', {
+		logger.debug('Filtering library by date range', {
 			after: range.after,
 			before: range.before,
 		});
@@ -407,7 +407,7 @@ export function createMemoryManager(
 		const results = store.filterByDateRange(range);
 
 		logger.debug(
-			`Date range filter returned ${results.length} matching memories`,
+			`Date range filter returned ${results.length} matching volumes`,
 		);
 		return results;
 	};
@@ -418,7 +418,7 @@ export function createMemoryManager(
 
 	const advancedSearch = async (
 		searchOptions: SearchOptions,
-	): Promise<AdvancedSearchResult[]> => {
+	): Promise<AdvancedLookup[]> => {
 		ensureInitialized();
 
 		let resolvedOptions = searchOptions;
@@ -436,7 +436,7 @@ export function createMemoryManager(
 			}
 		}
 
-		logger.debug('Advanced search on memory', {
+		logger.debug('Advanced search on library', {
 			hasEmbedding: resolvedOptions.queryEmbedding !== undefined,
 			hasText: resolvedOptions.text !== undefined,
 			metadataFilterCount: resolvedOptions.metadata?.length ?? 0,
@@ -447,7 +447,7 @@ export function createMemoryManager(
 
 		const results = store.advancedSearch(resolvedOptions);
 
-		logger.debug(`Advanced search found ${results.length} matching memories`);
+		logger.debug(`Advanced search found ${results.length} matching volumes`);
 		return results;
 	};
 
@@ -455,7 +455,7 @@ export function createMemoryManager(
 	// Query DSL
 	// -----------------------------------------------------------------------
 
-	const queryDsl = async (dsl: string): Promise<AdvancedSearchResult[]> => {
+	const queryDsl = async (dsl: string): Promise<AdvancedLookup[]> => {
 		ensureInitialized();
 
 		const parsed = parseQuery(dsl);
@@ -496,9 +496,9 @@ export function createMemoryManager(
 
 		// Apply topic filter manually if present
 		if (parsed.topicFilter && parsed.topicFilter.length > 0) {
-			const topicEntries = store.filterByTopic([...parsed.topicFilter]);
-			const topicIds = new Set(topicEntries.map((e) => e.id));
-			results = results.filter((r) => topicIds.has(r.entry.id));
+			const topicVolumes = store.filterByTopic([...parsed.topicFilter]);
+			const topicIds = new Set(topicVolumes.map((e) => e.id));
+			results = results.filter((r) => topicIds.has(r.volume.id));
 		}
 
 		logger.debug(`DSL query returned ${results.length} results`);
@@ -509,12 +509,12 @@ export function createMemoryManager(
 	// Accessors
 	// -----------------------------------------------------------------------
 
-	const getById = (id: string): VectorEntry | undefined => {
+	const getById = (id: string): Volume | undefined => {
 		ensureInitialized();
 		return store.getById(id);
 	};
 
-	const getAll = (): VectorEntry[] => {
+	const getAll = (): Volume[] => {
 		ensureInitialized();
 		return store.getAll();
 	};
@@ -524,7 +524,7 @@ export function createMemoryManager(
 		return store.getTopics();
 	};
 
-	const filterByTopic = (topics: string[]): VectorEntry[] => {
+	const filterByTopic = (topics: string[]): Volume[] => {
 		ensureInitialized();
 		return store.filterByTopic(topics);
 	};
@@ -536,7 +536,7 @@ export function createMemoryManager(
 	const recommend = async (
 		query: string,
 		recommendOptions?: Omit<RecommendOptions, 'queryEmbedding'>,
-	): Promise<RecommendationResult[]> => {
+	): Promise<Recommendation[]> => {
 		ensureInitialized();
 
 		if (query.trim().length === 0) {
@@ -563,10 +563,10 @@ export function createMemoryManager(
 	// Deduplication
 	// -----------------------------------------------------------------------
 
-	const findDuplicates = (threshold?: number): DuplicateGroup[] => {
+	const findDuplicates = (threshold?: number): DuplicateVolumes[] => {
 		ensureInitialized();
 
-		logger.debug('Finding duplicate entries', { threshold });
+		logger.debug('Finding duplicate volumes', { threshold });
 		const groups = store.findDuplicates(threshold);
 		logger.debug(`Found ${groups.length} duplicate groups`);
 		return groups;
@@ -586,85 +586,91 @@ export function createMemoryManager(
 	};
 
 	// -----------------------------------------------------------------------
-	// Summarization
+	// Compendium (was Summarization)
 	// -----------------------------------------------------------------------
 
-	const summarize = async (
-		summarizeOptions: SummarizeOptions,
-	): Promise<SummarizeResult> => {
+	const compendium = async (
+		compendiumOptions: CompendiumOptions,
+	): Promise<CompendiumResult> => {
 		ensureInitialized();
 
 		if (!textGenerator) {
 			throw createMemoryError(
-				'Summarization requires a textGenerator. Pass it in MemoryManagerOptions or call setTextGenerator().',
+				'Compendium requires a textGenerator. Pass it in LibraryOptions or call setTextGenerator().',
 				{ code: 'MEMORY_NO_TEXT_GENERATOR' },
 			);
 		}
 
-		if (summarizeOptions.ids.length < 2) {
-			throw createMemoryError('Summarization requires at least 2 entry IDs', {
-				code: 'MEMORY_SUMMARIZE_TOO_FEW',
-			});
+		if (compendiumOptions.ids.length < 2) {
+			throw createMemoryError(
+				'Compendium requires at least 2 volume IDs',
+				{
+					code: 'MEMORY_SUMMARIZE_TOO_FEW',
+				},
+			);
 		}
 
-		// Gather entry texts
-		const sourceEntries: VectorEntry[] = [];
-		for (const id of summarizeOptions.ids) {
-			const entry = store.getById(id);
-			if (!entry) {
-				throw createMemoryError(`Entry "${id}" not found for summarization`, {
-					code: 'MEMORY_ENTRY_NOT_FOUND',
-				});
+		// Gather volume texts
+		const sourceVolumes: Volume[] = [];
+		for (const id of compendiumOptions.ids) {
+			const vol = store.getById(id);
+			if (!vol) {
+				throw createMemoryError(
+					`Volume "${id}" not found for compendium`,
+					{
+						code: 'MEMORY_ENTRY_NOT_FOUND',
+					},
+				);
 			}
-			sourceEntries.push(entry);
+			sourceVolumes.push(vol);
 		}
 
-		const combinedText = sourceEntries
-			.map((e, i) => `--- Entry ${i + 1} ---\n${e.text}`)
+		const combinedText = sourceVolumes
+			.map((e, i) => `--- Volume ${i + 1} ---\n${e.text}`)
 			.join('\n\n');
 
 		const instruction =
-			summarizeOptions.prompt ??
-			'Summarize the following entries into a single concise summary that captures all key information:';
+			compendiumOptions.prompt ??
+			'Summarize the following volumes into a single concise summary that captures all key information:';
 
 		const prompt = `${instruction}\n\n${combinedText}`;
 
-		logger.debug('Generating summary', {
-			entryCount: sourceEntries.length,
+		logger.debug('Generating compendium', {
+			volumeCount: sourceVolumes.length,
 			promptLength: prompt.length,
 		});
 
-		const summaryText = await textGenerator.generate(
+		const compendiumText = await textGenerator.generate(
 			prompt,
-			summarizeOptions.systemPrompt,
+			compendiumOptions.systemPrompt,
 		);
 
-		// Embed and store the summary
-		const summaryEmbedding = await getEmbedding(summaryText);
-		const summaryMetadata: Record<string, string> = {
-			...summarizeOptions.metadata,
-			summarizedFrom: summarizeOptions.ids.join(','),
+		// Embed and store the compendium
+		const compendiumEmbedding = await getEmbedding(compendiumText);
+		const compendiumMetadata: Record<string, string> = {
+			...compendiumOptions.metadata,
+			summarizedFrom: compendiumOptions.ids.join(','),
 		};
-		const summaryId = await store.add(
-			summaryText,
-			summaryEmbedding,
-			summaryMetadata,
+		const compendiumId = await store.add(
+			compendiumText,
+			compendiumEmbedding,
+			compendiumMetadata,
 		);
 
 		// Optionally delete originals
-		const deleteOriginals = summarizeOptions.deleteOriginals ?? false;
+		const deleteOriginals = compendiumOptions.deleteOriginals ?? false;
 		if (deleteOriginals) {
-			await store.deleteBatch([...summarizeOptions.ids]);
+			await store.deleteBatch([...compendiumOptions.ids]);
 		}
 
-		logger.debug(`Created summary entry "${summaryId}"`, {
+		logger.debug(`Created compendium volume "${compendiumId}"`, {
 			deletedOriginals: deleteOriginals,
 		});
 
 		return {
-			summaryId,
-			summaryText,
-			sourceIds: [...summarizeOptions.ids],
+			compendiumId,
+			text: compendiumText,
+			sourceIds: [...compendiumOptions.ids],
 			deletedOriginals: deleteOriginals,
 		};
 	};
@@ -708,10 +714,10 @@ export function createMemoryManager(
 		const deleted = await store.delete(id);
 
 		if (deleted) {
-			logger.debug(`Deleted memory entry "${id}"`);
-			eventBus?.publish('memory.delete', { id });
+			logger.debug(`Deleted volume "${id}"`);
+			eventBus?.publish('library.withdraw', { id });
 		} else {
-			logger.debug(`Memory entry "${id}" not found for deletion`);
+			logger.debug(`Volume "${id}" not found for deletion`);
 		}
 
 		return deleted;
@@ -720,14 +726,14 @@ export function createMemoryManager(
 	const deleteBatch = async (ids: string[]): Promise<number> => {
 		ensureInitialized();
 		const deleted = await store.deleteBatch(ids);
-		logger.debug(`Deleted ${deleted} of ${ids.length} requested entries`);
+		logger.debug(`Deleted ${deleted} of ${ids.length} requested volumes`);
 		return deleted;
 	};
 
 	const clear = async (): Promise<void> => {
 		ensureInitialized();
 		await store.clear();
-		logger.info('Memory store cleared');
+		logger.info('Library store cleared');
 	};
 
 	// -----------------------------------------------------------------------
@@ -752,13 +758,13 @@ export function createMemoryManager(
 		recommend,
 		findDuplicates,
 		checkDuplicate: checkDuplicateFn,
-		summarize,
+		compendium,
 		setTextGenerator,
 		recordFeedback,
 		delete: deleteEntry,
 		deleteBatch,
 		clear,
-		get learningProfile() {
+		get patronProfile() {
 			return store.learningProfile;
 		},
 		get size() {
@@ -775,3 +781,14 @@ export function createMemoryManager(
 		},
 	});
 }
+
+// ---------------------------------------------------------------------------
+// Backward-compatibility aliases (temporary — removed after migration)
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use LibraryOptions */
+export type MemoryManagerOptions = LibraryOptions;
+/** @deprecated Use Library */
+export type MemoryManager = Library;
+/** @deprecated Use createLibrary */
+export const createMemoryManager = createLibrary;

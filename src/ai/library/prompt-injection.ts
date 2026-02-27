@@ -7,7 +7,7 @@
 // context from past conversations without polluting the user's message.
 // ---------------------------------------------------------------------------
 
-import type { SearchResult } from './types.js';
+import type { Lookup } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Options
@@ -46,7 +46,7 @@ function formatAge(ms: number): string {
 // ---------------------------------------------------------------------------
 
 export function formatMemoryContext(
-	results: readonly SearchResult[],
+	results: readonly Lookup[],
 	options?: PromptInjectionOptions,
 ): string {
 	if (results.length === 0) return '';
@@ -69,8 +69,8 @@ export function formatMemoryContext(
 		const lines = ['Relevant context from memory:'];
 		let chars = lines[0].length;
 		for (const r of filtered) {
-			const topic = r.entry.metadata.topic ?? 'uncategorized';
-			const line = `- [${topic}] (relevance: ${r.score.toFixed(2)}) ${r.entry.text}`;
+			const topic = r.volume.metadata.topic ?? 'uncategorized';
+			const line = `- [${topic}] (relevance: ${r.score.toFixed(2)}) ${r.volume.text}`;
 			if (chars + line.length > maxChars) break;
 			lines.push(line);
 			chars += line.length;
@@ -81,9 +81,9 @@ export function formatMemoryContext(
 	const entries: string[] = [];
 	let chars = 0;
 	for (const r of filtered) {
-		const topic = r.entry.metadata.topic ?? 'uncategorized';
-		const age = formatAge(now - r.entry.timestamp);
-		const text = r.entry.text;
+		const topic = r.volume.metadata.topic ?? 'uncategorized';
+		const age = formatAge(now - r.volume.timestamp);
+		const text = r.volume.text;
 		const entry = `<entry topic="${topic}" relevance="${r.score.toFixed(2)}" age="${age}">\n${text}\n</entry>`;
 		if (chars + entry.length > maxChars) break;
 		entries.push(entry);

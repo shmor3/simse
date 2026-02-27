@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Recommendation — pure recommendation computation extracted from VectorStore
+// Recommendation — pure recommendation computation extracted from Stacks
 // ---------------------------------------------------------------------------
 //
 // Computes weighted recommendation scores combining vector similarity,
@@ -22,9 +22,9 @@ import {
 import { matchesAllMetadataFilters } from './text-search.js';
 import type {
 	MetadataFilter,
-	RecommendationResult,
+	Recommendation,
 	RecommendOptions,
-	VectorEntry,
+	Volume,
 } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -33,22 +33,22 @@ import type {
 
 /**
  * Compute cosine similarity using a pre-computed query magnitude and cached
- * entry magnitudes. Returns `undefined` when vectors are incompatible or
+ * volume magnitudes. Returns `undefined` when vectors are incompatible or
  * zero-magnitude.
  */
 function fastCosine(
 	queryEmbedding: readonly number[],
 	queryMag: number,
-	entry: VectorEntry,
+	vol: Volume,
 	magnitudeCache: MagnitudeCache,
 ): number | undefined {
-	if (entry.embedding.length !== queryEmbedding.length) return undefined;
+	if (vol.embedding.length !== queryEmbedding.length) return undefined;
 	const entryMag =
-		magnitudeCache.get(entry.id) ?? computeMagnitude(entry.embedding);
+		magnitudeCache.get(vol.id) ?? computeMagnitude(vol.embedding);
 	if (entryMag === 0) return undefined;
 	let dot = 0;
 	for (let i = 0; i < queryEmbedding.length; i++) {
-		dot += queryEmbedding[i] * entry.embedding[i];
+		dot += queryEmbedding[i] * vol.embedding[i];
 	}
 	const raw = dot / (queryMag * entryMag);
 	return Number.isFinite(raw) ? Math.min(1, Math.max(-1, raw)) : undefined;
@@ -59,13 +59,13 @@ function fastCosine(
 // ---------------------------------------------------------------------------
 
 /**
- * Compute recommendations from a set of vector entries.
+ * Compute recommendations from a set of volumes.
  *
  * This is a pure function — it does NOT track access or mutate any state.
  * The caller is responsible for any side-effect bookkeeping.
  *
- * @param entries       - All vector entries to consider.
- * @param accessStats   - Per-entry access statistics for frequency scoring.
+ * @param volumes       - All volumes to consider.
+ * @param accessStats   - Per-volume access statistics for frequency scoring.
  * @param options       - Recommendation query options (filters, weights, limits).
  * @param magnitudeCache - Pre-computed magnitude cache for fast cosine.
  * @param topicIndex    - Topic index for topic-based pre-filtering.
@@ -75,7 +75,7 @@ function fastCosine(
  * @returns Sorted recommendation results (highest score first).
  */
 export function computeRecommendations(
-	entries: readonly VectorEntry[],
+	volumes: readonly Volume[],
 	accessStats: ReadonlyMap<
 		string,
 		{ readonly accessCount: number; readonly lastAccessed: number }
@@ -86,7 +86,7 @@ export function computeRecommendations(
 	_metadataIndex: MetadataIndex,
 	learningEngine?: LearningEngine,
 	recencyOptions?: RecencyOptions,
-): RecommendationResult[] {
+): Recommendation[] {
 	// Use adapted weights from learning engine if available, falling back to user-provided or defaults
 	const baseWeights =
 		learningEngine && !options.weights
@@ -97,7 +97,7 @@ export function computeRecommendations(
 	const minScore = options.minScore ?? 0;
 
 	// Pre-filter candidates
-	let candidates: readonly VectorEntry[] = entries;
+	let candidates: readonly Volume[] = volumes;
 
 	// Topic filter
 	if (options.topics && options.topics.length > 0) {
@@ -134,8 +134,8 @@ export function computeRecommendations(
 
 	// Find max access count for frequency normalization
 	let maxAccessCount = 0;
-	for (const entry of candidates) {
-		const stats = accessStats.get(entry.id);
+	for (const vol of candidates) {
+		const stats = accessStats.get(vol.id);
 		if (stats && stats.accessCount > maxAccessCount) {
 			maxAccessCount = stats.accessCount;
 		}
@@ -148,25 +148,25 @@ export function computeRecommendations(
 			? computeMagnitude(queryEmbedding)
 			: 0;
 
-	const results: RecommendationResult[] = [];
+	const results: Recommendation[] = [];
 
-	for (const entry of candidates) {
+	for (const vol of candidates) {
 		// Vector similarity score
 		let vectorScoreVal: number | undefined;
 		if (queryEmbedding && queryEmbedding.length > 0 && queryMag > 0) {
 			vectorScoreVal = fastCosine(
 				queryEmbedding,
 				queryMag,
-				entry,
+				vol,
 				magnitudeCache,
 			);
 		}
 
 		// Recency score
-		const recencyVal = recencyScore(entry.timestamp, recencyOptions);
+		const recencyVal = recencyScore(vol.timestamp, recencyOptions);
 
 		// Frequency score
-		const stats = accessStats.get(entry.id);
+		const stats = accessStats.get(vol.id);
 		const freqVal = frequencyScore(stats?.accessCount ?? 0, maxAccessCount);
 
 		const recommendation = computeRecommendationScore(
@@ -180,13 +180,13 @@ export function computeRecommendations(
 
 		// Apply learning boost if available
 		const boost = learningEngine
-			? learningEngine.computeBoost(entry.id, entry.embedding)
+			? learningEngine.computeBoost(vol.id, vol.embedding)
 			: 1.0;
 		const boostedScore = recommendation.score * boost;
 
 		if (boostedScore >= minScore) {
 			results.push({
-				entry,
+				volume: vol,
 				score: boostedScore,
 				scores: recommendation.scores,
 			});

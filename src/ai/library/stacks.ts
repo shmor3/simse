@@ -19,30 +19,30 @@ import { createLearningEngine, type LearningEngine } from './patron-learning.js'
 import type { RecencyOptions } from './recommendation.js';
 import type { StorageBackend } from './storage.js';
 import type {
-	AdvancedSearchResult,
+	AdvancedLookup,
 	DateRange,
 	DuplicateCheckResult,
-	DuplicateGroup,
+	DuplicateVolumes,
 	LearningOptions,
-	LearningProfile,
+	PatronProfile,
 	MetadataFilter,
-	RecommendationResult,
+	Recommendation,
 	RecommendOptions,
 	SearchOptions,
-	SearchResult,
+	Lookup,
 	TextSearchOptions,
-	TextSearchResult,
+	TextLookup,
 	TopicInfo,
-	VectorEntry,
+	Volume,
 } from './types.js';
 import { computeRecommendations } from './stacks-recommend.js';
 import {
-	advancedVectorSearch,
-	filterEntriesByDateRange,
-	filterEntriesByMetadata,
-	textSearchEntries,
-	type VectorSearchConfig,
-	vectorSearch,
+	advancedStacksSearch,
+	filterVolumesByDateRange,
+	filterVolumesByMetadata,
+	textSearchVolumes,
+	type StacksSearchConfig,
+	stacksSearch,
 } from './stacks-search.js';
 import {
 	deserializeFromStorage,
@@ -53,7 +53,7 @@ import {
 // Configuration
 // ---------------------------------------------------------------------------
 
-export interface VectorStoreOptions {
+export interface StacksOptions {
 	/** Pluggable storage backend. Consumers must provide their own implementation. */
 	readonly storage: StorageBackend;
 
@@ -92,9 +92,9 @@ export interface VectorStoreOptions {
 
 	/**
 	 * Behavior when a duplicate is detected during `add()`.
-	 * - `'skip'` — silently skip the duplicate, return the existing entry's ID.
-	 * - `'warn'` — log a warning and add the entry anyway.
-	 * - `'error'` — throw a MemoryError.
+	 * - `'skip'` — silently skip the duplicate, return the existing volume's ID.
+	 * - `'warn'` — log a warning and add the volume anyway.
+	 * - `'error'` — throw a LibraryError.
 	 * Defaults to `'warn'`.
 	 */
 	readonly duplicateBehavior?: 'skip' | 'warn' | 'error';
@@ -117,17 +117,17 @@ export interface VectorStoreOptions {
 
 	/**
 	 * Optional text cache for RAM optimization.
-	 * When provided, entry texts are cached in the LRU cache and
+	 * When provided, volume texts are cached in the LRU cache and
 	 * populated on add/load for faster search result hydration.
 	 */
 	readonly textCache?: import('./text-cache.js').TextCache;
 }
 
 // ---------------------------------------------------------------------------
-// VectorStore interface
+// Stacks interface (was VectorStore)
 // ---------------------------------------------------------------------------
 
-export interface VectorStore {
+export interface Stacks {
 	readonly load: () => Promise<void>;
 	readonly save: () => Promise<void>;
 	readonly dispose: () => Promise<void>;
@@ -150,26 +150,26 @@ export interface VectorStore {
 		queryEmbedding: readonly number[],
 		maxResults: number,
 		threshold: number,
-	) => SearchResult[];
-	readonly textSearch: (options: TextSearchOptions) => TextSearchResult[];
+	) => Lookup[];
+	readonly textSearch: (options: TextSearchOptions) => TextLookup[];
 	readonly filterByMetadata: (
 		filters: readonly MetadataFilter[],
-	) => VectorEntry[];
-	readonly filterByDateRange: (range: DateRange) => VectorEntry[];
-	readonly advancedSearch: (options: SearchOptions) => AdvancedSearchResult[];
-	readonly getAll: () => VectorEntry[];
-	readonly getById: (id: string) => VectorEntry | undefined;
+	) => Volume[];
+	readonly filterByDateRange: (range: DateRange) => Volume[];
+	readonly advancedSearch: (options: SearchOptions) => AdvancedLookup[];
+	readonly getAll: () => Volume[];
+	readonly getById: (id: string) => Volume | undefined;
 	readonly getTopics: () => TopicInfo[];
-	readonly filterByTopic: (topics: readonly string[]) => VectorEntry[];
-	readonly findDuplicates: (threshold?: number) => DuplicateGroup[];
+	readonly filterByTopic: (topics: readonly string[]) => Volume[];
+	readonly findDuplicates: (threshold?: number) => DuplicateVolumes[];
 	readonly checkDuplicate: (
 		embedding: readonly number[],
 	) => DuplicateCheckResult;
-	readonly recommend: (options?: RecommendOptions) => RecommendationResult[];
+	readonly recommend: (options?: RecommendOptions) => Recommendation[];
 	/** The adaptive learning engine instance (if learning is enabled). */
 	readonly learningEngine: LearningEngine | undefined;
-	/** Snapshot of the current learning profile. */
-	readonly learningProfile: LearningProfile | undefined;
+	/** Snapshot of the current patron learning profile. */
+	readonly learningProfile: PatronProfile | undefined;
 	readonly size: number;
 	readonly isDirty: boolean;
 }
@@ -179,7 +179,7 @@ export interface VectorStore {
 // ---------------------------------------------------------------------------
 
 /**
- * Create a vector store backed by a pluggable {@link StorageBackend}.
+ * Create a stacks store backed by a pluggable {@link StorageBackend}.
  *
  * Supports cosine-similarity search, text search, metadata filtering,
  * date-range filtering, duplicate detection, topic indexing, and
@@ -187,12 +187,12 @@ export interface VectorStore {
  *
  * @param options - Storage backend (required), auto-save, flush interval,
  *   duplicate threshold, recency options, learning config, logger.
- * @returns A frozen {@link VectorStore}. Call `load()` before use, `dispose()` when done.
- * @throws {MemoryError} When accessed before `load()` or with empty text/embedding.
+ * @returns A frozen {@link Stacks}. Call `load()` before use, `dispose()` when done.
+ * @throws {LibraryError} When accessed before `load()` or with empty text/embedding.
  */
-export function createVectorStore(options: VectorStoreOptions): VectorStore {
-	let entries: VectorEntry[] = [];
-	const logger = (options.logger ?? getDefaultLogger()).child('vector-store');
+export function createStacks(options: StacksOptions): Stacks {
+	let volumes: Volume[] = [];
+	const logger = (options.logger ?? getDefaultLogger()).child('stacks');
 	const storage: StorageBackend = options.storage;
 	const autoSave = options.autoSave ?? false;
 	const flushIntervalMs = options.flushIntervalMs ?? 5_000;
@@ -213,7 +213,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	const invertedIdx = createInvertedIndex();
 
 	// Search config passed to pure search functions
-	const searchConfig: VectorSearchConfig = {
+	const searchConfig: StacksSearchConfig = {
 		maxRegexPatternLength,
 		warn: (msg: string) => logger.warn(msg),
 	};
@@ -230,7 +230,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	const ensureLoaded = (): void => {
 		if (!initialized) {
 			throw createMemoryError(
-				'VectorStore has not been loaded. Call load() first.',
+				'Stacks has not been loaded. Call load() first.',
 				{ code: 'VECTOR_STORE_NOT_LOADED' },
 			);
 		}
@@ -263,18 +263,18 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	// Index management
 	// -----------------------------------------------------------------------
 
-	const indexEntry = (entry: VectorEntry): void => {
-		topicIdx.addEntry(entry);
-		metadataIdx.addEntry(entry.id, entry.metadata as Record<string, string>);
-		magnitudeCache.set(entry.id, entry.embedding);
-		invertedIdx.addEntry(entry);
+	const indexVolume = (vol: Volume): void => {
+		topicIdx.addEntry(vol);
+		metadataIdx.addEntry(vol.id, vol.metadata as Record<string, string>);
+		magnitudeCache.set(vol.id, vol.embedding);
+		invertedIdx.addEntry(vol);
 	};
 
-	const deindexEntry = (entry: VectorEntry): void => {
-		topicIdx.removeEntry(entry.id);
-		metadataIdx.removeEntry(entry.id, entry.metadata as Record<string, string>);
-		magnitudeCache.remove(entry.id);
-		invertedIdx.removeEntry(entry.id, entry.text);
+	const deindexVolume = (vol: Volume): void => {
+		topicIdx.removeEntry(vol.id);
+		metadataIdx.removeEntry(vol.id, vol.metadata as Record<string, string>);
+		magnitudeCache.remove(vol.id);
+		invertedIdx.removeEntry(vol.id, vol.text);
 	};
 
 	const trackAccess = (id: string): void => {
@@ -293,13 +293,13 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		metadataIdx.clear();
 		magnitudeCache.clear();
 		invertedIdx.clear();
-		for (const entry of entries) {
-			indexEntry(entry);
+		for (const vol of volumes) {
+			indexVolume(vol);
 		}
 	};
 
 	const initEmpty = (reason: string): void => {
-		entries = [];
+		volumes = [];
 		dirty = false;
 		initialized = true;
 		dirtyIds.clear();
@@ -340,22 +340,22 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 
 		if (deserialized.skipped > 0) {
 			logger.warn(
-				`Loaded ${deserialized.entries.length} entries, skipped ${deserialized.skipped} corrupt entries`,
+				`Loaded ${deserialized.entries.length} volumes, skipped ${deserialized.skipped} corrupt volumes`,
 			);
 			dirty = true;
 		}
 
-		entries = deserialized.entries;
+		volumes = deserialized.entries;
 		accessStats.clear();
 		for (const [id, stats] of deserialized.accessStats) {
 			accessStats.set(id, stats);
 		}
 		rebuildIndexes();
 
-		// Populate text cache with loaded entries
+		// Populate text cache with loaded volumes
 		if (textCache) {
-			for (const entry of entries) {
-				textCache.put(entry.id, entry.text);
+			for (const vol of volumes) {
+				textCache.put(vol.id, vol.text);
 			}
 		}
 
@@ -376,17 +376,17 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		initialized = true;
 		dirtyIds.clear();
 		startFlushTimer();
-		logger.debug(`Loaded ${entries.length} entries from store`);
+		logger.debug(`Loaded ${volumes.length} volumes from store`);
 	};
 
 	const doSave = async (): Promise<void> => {
-		const { data } = serializeToStorage(entries, accessStats, learningEngine);
+		const { data } = serializeToStorage(volumes, accessStats, learningEngine);
 
 		await storage.save(data);
 
 		dirtyIds.clear();
 		dirty = false;
-		logger.debug(`Saved ${entries.length} entries to store`);
+		logger.debug(`Saved ${volumes.length} volumes to store`);
 	};
 
 	const save = (): Promise<void> => {
@@ -431,13 +431,13 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	): Promise<string> => {
 		ensureLoaded();
 		if (text.length === 0) {
-			throw createMemoryError('Cannot add empty text to vector store', {
+			throw createMemoryError('Cannot add empty text to stacks', {
 				code: 'VECTOR_STORE_EMPTY_TEXT',
 			});
 		}
 
 		if (embedding.length === 0) {
-			throw createMemoryError('Cannot add entry with empty embedding vector', {
+			throw createMemoryError('Cannot add volume with empty embedding vector', {
 				code: 'VECTOR_STORE_EMPTY_EMBEDDING',
 			});
 		}
@@ -447,41 +447,41 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 			if (duplicateThreshold > 0) {
 				const dupResult = checkDuplicateImpl(
 					embedding,
-					entries,
+					volumes,
 					duplicateThreshold,
 				);
 				if (dupResult.isDuplicate) {
 					if (duplicateBehavior === 'skip') {
 						logger.debug(
-							`Skipping duplicate entry (similarity: ${dupResult.similarity?.toFixed(4)})`,
-							{ existingId: dupResult.existingEntry?.id },
+							`Skipping duplicate volume (similarity: ${dupResult.similarity?.toFixed(4)})`,
+							{ existingId: dupResult.existingVolume?.id },
 						);
-						return dupResult.existingEntry?.id ?? '';
+						return dupResult.existingVolume?.id ?? '';
 					}
 					if (duplicateBehavior === 'error') {
 						throw createMemoryError(
-							`Duplicate entry detected (similarity: ${dupResult.similarity?.toFixed(4)}, existing: ${dupResult.existingEntry?.id})`,
+							`Duplicate volume detected (similarity: ${dupResult.similarity?.toFixed(4)}, existing: ${dupResult.existingVolume?.id})`,
 							{ code: 'VECTOR_STORE_DUPLICATE' },
 						);
 					}
 					// 'warn' — log and continue
 					logger.warn(
-						`Adding near-duplicate entry (similarity: ${dupResult.similarity?.toFixed(4)})`,
-						{ existingId: dupResult.existingEntry?.id },
+						`Adding near-duplicate volume (similarity: ${dupResult.similarity?.toFixed(4)})`,
+						{ existingId: dupResult.existingVolume?.id },
 					);
 				}
 			}
 
 			const id = randomUUID();
-			const newEntry: VectorEntry = {
+			const newVolume: Volume = {
 				id,
 				text,
 				embedding,
 				metadata,
 				timestamp: Date.now(),
 			};
-			entries.push(newEntry);
-			indexEntry(newEntry);
+			volumes.push(newVolume);
+			indexVolume(newVolume);
 			textCache?.put(id, text);
 			dirty = true;
 			dirtyIds.add(id);
@@ -490,7 +490,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 				await save();
 			}
 
-			logger.debug(`Added entry "${id}"`, {
+			logger.debug(`Added volume "${id}"`, {
 				textLength: text.length,
 				embeddingDim: embedding.length,
 			});
@@ -518,14 +518,14 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		for (const entry of batchEntries) {
 			if (entry.text.length === 0) {
 				throw createMemoryError(
-					'Cannot add empty text to vector store (in batch)',
+					'Cannot add empty text to stacks (in batch)',
 					{ code: 'VECTOR_STORE_EMPTY_TEXT' },
 				);
 			}
 
 			if (entry.embedding.length === 0) {
 				throw createMemoryError(
-					'Cannot add entry with empty embedding vector (in batch)',
+					'Cannot add volume with empty embedding vector (in batch)',
 					{ code: 'VECTOR_STORE_EMPTY_EMBEDDING' },
 				);
 			}
@@ -540,43 +540,43 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 				if (duplicateThreshold > 0) {
 					const dupResult = checkDuplicateImpl(
 						entry.embedding,
-						entries,
+						volumes,
 						duplicateThreshold,
 					);
 					if (dupResult.isDuplicate) {
 						if (duplicateBehavior === 'skip') {
 							logger.debug(
-								`Skipping duplicate entry in batch (similarity: ${dupResult.similarity?.toFixed(4)})`,
-								{ existingId: dupResult.existingEntry?.id },
+								`Skipping duplicate volume in batch (similarity: ${dupResult.similarity?.toFixed(4)})`,
+								{ existingId: dupResult.existingVolume?.id },
 							);
-							ids.push(dupResult.existingEntry?.id ?? '');
+							ids.push(dupResult.existingVolume?.id ?? '');
 							continue;
 						}
 						if (duplicateBehavior === 'error') {
 							throw createMemoryError(
-								`Duplicate entry detected in batch (similarity: ${dupResult.similarity?.toFixed(4)}, existing: ${dupResult.existingEntry?.id})`,
+								`Duplicate volume detected in batch (similarity: ${dupResult.similarity?.toFixed(4)}, existing: ${dupResult.existingVolume?.id})`,
 								{ code: 'VECTOR_STORE_DUPLICATE' },
 							);
 						}
 						// 'warn' — log and continue
 						logger.warn(
-							`Adding near-duplicate entry in batch (similarity: ${dupResult.similarity?.toFixed(4)})`,
-							{ existingId: dupResult.existingEntry?.id },
+							`Adding near-duplicate volume in batch (similarity: ${dupResult.similarity?.toFixed(4)})`,
+							{ existingId: dupResult.existingVolume?.id },
 						);
 					}
 				}
 
 				const id = randomUUID();
 				ids.push(id);
-				const newEntry: VectorEntry = {
+				const newVolume: Volume = {
 					id,
 					text: entry.text,
 					embedding: entry.embedding,
 					metadata: entry.metadata ?? {},
 					timestamp: now,
 				};
-				entries.push(newEntry);
-				indexEntry(newEntry);
+				volumes.push(newVolume);
+				indexVolume(newVolume);
 				textCache?.put(id, entry.text);
 				dirtyIds.add(id);
 			}
@@ -587,7 +587,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 				await save();
 			}
 
-			logger.debug(`Added batch of ${ids.length} entries`);
+			logger.debug(`Added batch of ${ids.length} volumes`);
 			return ids;
 		};
 
@@ -596,19 +596,19 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		return result;
 	};
 
-	const deleteEntry = (id: string): Promise<boolean> => {
+	const deleteVolume = (id: string): Promise<boolean> => {
 		ensureLoaded();
 
 		const doDelete = async (): Promise<boolean> => {
-			const idx = entries.findIndex((e) => e.id === id);
+			const idx = volumes.findIndex((e) => e.id === id);
 			if (idx === -1) {
-				logger.debug(`Entry "${id}" not found for deletion`);
+				logger.debug(`Volume "${id}" not found for deletion`);
 				return false;
 			}
 
-			const existing = entries[idx];
-			entries.splice(idx, 1);
-			deindexEntry(existing);
+			const existing = volumes[idx];
+			volumes.splice(idx, 1);
+			deindexVolume(existing);
 			accessStats.delete(id);
 			textCache?.remove(id);
 			dirtyIds.delete(id);
@@ -617,7 +617,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 			if (autoSave) {
 				await save();
 			}
-			logger.debug(`Deleted entry "${id}"`);
+			logger.debug(`Deleted volume "${id}"`);
 			return true;
 		};
 
@@ -632,22 +632,22 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 
 		const doDeleteBatch = async (): Promise<number> => {
 			const idSet = new Set(ids);
-			const toRemove = entries.filter((e) => idSet.has(e.id));
+			const toRemove = volumes.filter((e) => idSet.has(e.id));
 			if (toRemove.length === 0) return 0;
 
-			for (const entry of toRemove) {
-				deindexEntry(entry);
-				accessStats.delete(entry.id);
-				textCache?.remove(entry.id);
-				dirtyIds.delete(entry.id);
+			for (const vol of toRemove) {
+				deindexVolume(vol);
+				accessStats.delete(vol.id);
+				textCache?.remove(vol.id);
+				dirtyIds.delete(vol.id);
 			}
-			entries = entries.filter((e) => !idSet.has(e.id));
+			volumes = volumes.filter((e) => !idSet.has(e.id));
 			dirty = true;
 
 			if (autoSave) {
 				await save();
 			}
-			logger.debug(`Deleted batch of ${toRemove.length} entries`);
+			logger.debug(`Deleted batch of ${toRemove.length} volumes`);
 
 			return toRemove.length;
 		};
@@ -661,8 +661,8 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		ensureLoaded();
 
 		const doClear = async (): Promise<void> => {
-			const count = entries.length;
-			entries = [];
+			const count = volumes.length;
+			volumes = [];
 			topicIdx.clear();
 			metadataIdx.clear();
 			magnitudeCache.clear();
@@ -677,7 +677,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 				await save();
 			}
 
-			logger.debug(`Cleared store (removed ${count} entries)`);
+			logger.debug(`Cleared store (removed ${count} volumes)`);
 		};
 
 		const result = writeLock.then(doClear, doClear);
@@ -693,15 +693,15 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		queryEmbedding: readonly number[],
 		maxResults: number,
 		threshold: number,
-	): SearchResult[] => {
+	): Lookup[] => {
 		ensureLoaded();
 		if (queryEmbedding.length === 0) {
 			logger.warn('Search called with empty query embedding');
 			return [];
 		}
 
-		const results = vectorSearch(
-			entries,
+		const results = stacksSearch(
+			volumes,
 			queryEmbedding,
 			maxResults,
 			threshold,
@@ -709,14 +709,14 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		);
 
 		for (const r of results) {
-			trackAccess(r.entry.id);
+			trackAccess(r.volume.id);
 		}
 
 		// Record query for adaptive learning
 		if (learningEngine && results.length > 0) {
 			learningEngine.recordQuery(
 				queryEmbedding,
-				results.map((r) => r.entry.id),
+				results.map((r) => r.volume.id),
 			);
 			dirty = true;
 		}
@@ -728,14 +728,14 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	// Text Search
 	// -----------------------------------------------------------------------
 
-	const textSearch = (searchOptions: TextSearchOptions): TextSearchResult[] => {
+	const textSearch = (searchOptions: TextSearchOptions): TextLookup[] => {
 		ensureLoaded();
 		if (searchOptions.query.length === 0) {
 			logger.warn('textSearch called with empty query');
 			return [];
 		}
 
-		return textSearchEntries(entries, searchOptions, searchConfig, invertedIdx);
+		return textSearchVolumes(volumes, searchOptions, searchConfig, invertedIdx);
 	};
 
 	// -----------------------------------------------------------------------
@@ -744,18 +744,18 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 
 	const filterByMetadata = (
 		filters: readonly MetadataFilter[],
-	): VectorEntry[] => {
+	): Volume[] => {
 		ensureLoaded();
-		return filterEntriesByMetadata(entries, filters, metadataIdx);
+		return filterVolumesByMetadata(volumes, filters, metadataIdx);
 	};
 
 	// -----------------------------------------------------------------------
 	// Date Range Filtering
 	// -----------------------------------------------------------------------
 
-	const filterByDateRange = (range: DateRange): VectorEntry[] => {
+	const filterByDateRange = (range: DateRange): Volume[] => {
 		ensureLoaded();
-		return filterEntriesByDateRange(entries, range);
+		return filterVolumesByDateRange(volumes, range);
 	};
 
 	// -----------------------------------------------------------------------
@@ -764,11 +764,11 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 
 	const advancedSearch = (
 		searchOptions: SearchOptions,
-	): AdvancedSearchResult[] => {
+	): AdvancedLookup[] => {
 		ensureLoaded();
 
-		const topResults = advancedVectorSearch(
-			entries,
+		const topResults = advancedStacksSearch(
+			volumes,
 			searchOptions,
 			searchConfig,
 			magnitudeCache,
@@ -777,7 +777,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		);
 
 		for (const r of topResults) {
-			trackAccess(r.entry.id);
+			trackAccess(r.volume.id);
 		}
 
 		// Record query for adaptive learning (only if we have a query embedding)
@@ -790,7 +790,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		) {
 			learningEngine.recordQuery(
 				queryEmbedding,
-				topResults.map((r) => r.entry.id),
+				topResults.map((r) => r.volume.id),
 			);
 			dirty = true;
 		}
@@ -802,18 +802,18 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 	// Accessors
 	// -----------------------------------------------------------------------
 
-	const getAll = (): VectorEntry[] => {
+	const getAll = (): Volume[] => {
 		ensureLoaded();
-		return [...entries];
+		return [...volumes];
 	};
 
-	const getById = (id: string): VectorEntry | undefined => {
+	const getById = (id: string): Volume | undefined => {
 		ensureLoaded();
-		const entry = entries.find((e) => e.id === id);
-		if (entry) {
-			trackAccess(entry.id);
+		const vol = volumes.find((e) => e.id === id);
+		if (vol) {
+			trackAccess(vol.id);
 		}
-		return entry;
+		return vol;
 	};
 
 	const getTopics = (): TopicInfo[] => {
@@ -821,11 +821,11 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		return [...topicIdx.getAllTopics()];
 	};
 
-	const filterByTopic = (topics: readonly string[]): VectorEntry[] => {
+	const filterByTopic = (topics: readonly string[]): Volume[] => {
 		ensureLoaded();
-		if (topics.length === 0) return [...entries];
+		if (topics.length === 0) return [...volumes];
 
-		// Collect all entry IDs that match any of the requested topics
+		// Collect all volume IDs that match any of the requested topics
 		const matchingIds = new Set<string>();
 		for (const topic of topics) {
 			for (const id of topicIdx.getEntries(topic)) {
@@ -833,10 +833,10 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 			}
 		}
 
-		return entries.filter((e) => matchingIds.has(e.id));
+		return volumes.filter((e) => matchingIds.has(e.id));
 	};
 
-	const findDuplicates = (threshold?: number): DuplicateGroup[] => {
+	const findDuplicates = (threshold?: number): DuplicateVolumes[] => {
 		ensureLoaded();
 		const t = threshold ?? duplicateThreshold;
 		if (t <= 0) {
@@ -845,14 +845,14 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 			);
 			return [];
 		}
-		return findDuplicateGroups(entries, t);
+		return findDuplicateGroups(volumes, t);
 	};
 
 	const checkDuplicate = (
 		embedding: readonly number[],
 	): DuplicateCheckResult => {
 		ensureLoaded();
-		return checkDuplicateImpl(embedding, entries, duplicateThreshold);
+		return checkDuplicateImpl(embedding, volumes, duplicateThreshold);
 	};
 
 	// -----------------------------------------------------------------------
@@ -861,14 +861,14 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 
 	const recommend = (
 		recommendOptions?: RecommendOptions,
-	): RecommendationResult[] => {
+	): Recommendation[] => {
 		ensureLoaded();
 
 		// Delegate to the pure recommendation function.
 		// Do not call trackAccess here to avoid a positive feedback loop
-		// where frequently recommended entries inflate their own frequency scores.
+		// where frequently recommended volumes inflate their own frequency scores.
 		return computeRecommendations(
-			entries,
+			volumes,
 			accessStats,
 			recommendOptions ?? {},
 			magnitudeCache,
@@ -889,7 +889,7 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 		dispose,
 		add,
 		addBatch,
-		delete: deleteEntry,
+		delete: deleteVolume,
 		deleteBatch,
 		clear,
 		search,
@@ -911,10 +911,21 @@ export function createVectorStore(options: VectorStoreOptions): VectorStore {
 			return learningEngine?.getProfile();
 		},
 		get size() {
-			return entries.length;
+			return volumes.length;
 		},
 		get isDirty() {
 			return dirty;
 		},
 	});
 }
+
+// ---------------------------------------------------------------------------
+// Backward-compatibility aliases (temporary — removed after migration)
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use StacksOptions */
+export type VectorStoreOptions = StacksOptions;
+/** @deprecated Use Stacks */
+export type VectorStore = Stacks;
+/** @deprecated Use createStacks */
+export const createVectorStore = createStacks;

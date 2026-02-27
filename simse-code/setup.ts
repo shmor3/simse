@@ -251,20 +251,30 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
 			filesCreated.push('summarize.json');
 			console.log(`  Wrote ${summarizePath}`);
 		} else if (summarizeChoice === 2) {
-			const serverName = await askRequired(rl, '  Server name: ');
-			const command = await askRequired(rl, '  Command: ');
-			const argsStr = await askOptional(
-				rl,
-				'  Args (space-separated, enter to skip): ',
-			);
-			const args = argsStr ? argsStr.split(/\s+/) : undefined;
-			const agent = await askOptional(rl, '  Agent ID (enter to skip): ');
+			// Show the same preset picker as the main AI provider
+			console.log('\n  Select summarization provider:\n');
+			for (let i = 0; i < presets.length; i++) {
+				const p = presets[i];
+				console.log(`    ${i + 1}) ${p.label}  —  ${p.description}`);
+			}
+			console.log('');
 
+			let presetIdx = -1;
+			while (presetIdx < 0 || presetIdx >= presets.length) {
+				const answer = (
+					await ask(rl, `  Choice [1-${presets.length}]: `)
+				).trim();
+				const num = Number.parseInt(answer, 10);
+				if (!Number.isNaN(num) && num >= 1 && num <= presets.length) {
+					presetIdx = num - 1;
+				}
+			}
+
+			const presetResult = await presets[presetIdx].build(rl);
 			const summarizeConfig: SummarizeFileConfig = {
-				server: serverName,
-				command,
-				...(args && { args }),
-				...(agent && { agent }),
+				server: presetResult.server.name,
+				command: presetResult.server.command,
+				...(presetResult.server.args && { args: presetResult.server.args }),
 			};
 			writeFileSync(
 				summarizePath,

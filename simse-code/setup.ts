@@ -2,9 +2,10 @@
  * SimSE CLI — Setup
  *
  * Global setup: asks the bare minimum to get running (one ACP server).
+ * All config files are written atomically after the full setup flow completes.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Interface as ReadlineInterface } from 'node:readline';
 import type {
@@ -156,57 +157,66 @@ const presets: readonly Preset[] = [
 	},
 ];
 
+/**
+ * Run the preset picker and return the selected preset result.
+ */
+async function pickPreset(
+	rl: ReadlineInterface,
+	header: string,
+): Promise<PresetResult> {
+	console.log(`\n  ${header}\n`);
+	for (let i = 0; i < presets.length; i++) {
+		const p = presets[i];
+		console.log(`    ${i + 1}) ${p.label}  —  ${p.description}`);
+	}
+	console.log('');
+
+	let choiceIdx = -1;
+	while (choiceIdx < 0 || choiceIdx >= presets.length) {
+		const answer = (await ask(rl, `  Choice [1-${presets.length}]: `)).trim();
+		const num = Number.parseInt(answer, 10);
+		if (!Number.isNaN(num) && num >= 1 && num <= presets.length) {
+			choiceIdx = num - 1;
+		}
+	}
+
+	return presets[choiceIdx].build(rl);
+}
+
+// ---------------------------------------------------------------------------
+// Pending file — collected during the flow, written at the end
+// ---------------------------------------------------------------------------
+
+interface PendingFile {
+	readonly file: string;
+	readonly content: object;
+}
+
 // ---------------------------------------------------------------------------
 // Global setup — ACP only (first-run wizard)
 // ---------------------------------------------------------------------------
 
 export async function runSetup(options: SetupOptions): Promise<SetupResult> {
 	const { dataDir, rl } = options;
-	const filesCreated: string[] = [];
 
 	mkdirSync(dataDir, { recursive: true });
+
+	// Accumulate files to write — nothing touches disk until the end
+	const pendingFiles: PendingFile[] = [];
 
 	// -- ACP config (interactive preset selection) ---------------------------
 
 	const acpPath = join(dataDir, 'acp.json');
+	let acpConfig: ACPFileConfig | undefined;
 	let embedFromPreset: EmbedFileConfig | undefined;
 
 	if (existsSync(acpPath)) {
 		console.log('  acp.json already exists, skipping.');
 	} else {
-		console.log('\n  Select your AI provider:\n');
-		for (let i = 0; i < presets.length; i++) {
-			const p = presets[i];
-			console.log(`    ${i + 1}) ${p.label}  —  ${p.description}`);
-		}
-		console.log('');
-
-		let choiceIdx = -1;
-		while (choiceIdx < 0 || choiceIdx >= presets.length) {
-			const answer = (await ask(rl, `  Choice [1-${presets.length}]: `)).trim();
-			const num = Number.parseInt(answer, 10);
-			if (!Number.isNaN(num) && num >= 1 && num <= presets.length) {
-				choiceIdx = num - 1;
-			}
-		}
-
-		const result = await presets[choiceIdx].build(rl);
-		const config: ACPFileConfig = { servers: [result.server] };
+		const result = await pickPreset(rl, 'Select your AI provider:');
+		acpConfig = { servers: [result.server] };
 		embedFromPreset = result.embed;
-
-		writeFileSync(acpPath, `${JSON.stringify(config, null, '\t')}\n`, 'utf-8');
-		filesCreated.push('acp.json');
-		console.log(`\n  Wrote ${acpPath}`);
-	}
-
-	// -- Capture ACP config for reuse in summarization -------------------------
-
-	let acpFileConfig: ACPFileConfig | undefined;
-	try {
-		const rawAcp = readFileSync(acpPath, 'utf-8');
-		acpFileConfig = JSON.parse(rawAcp) as ACPFileConfig;
-	} catch {
-		// Ignore — preset may not have been written if acp.json already existed
+		pendingFiles.push({ file: 'acp.json', content: acpConfig });
 	}
 
 	// -- Summarization ACP config (interactive) --------------------------------
@@ -235,65 +245,33 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
 			}
 		}
 
-		if (summarizeChoice === 1 && acpFileConfig) {
-			// Reuse the first ACP server entry
-			const mainServer = acpFileConfig.servers[0];
+		if (summarizeChoice === 1 && acpConfig) {
+			const mainServer = acpConfig.servers[0];
 			const summarizeConfig: SummarizeFileConfig = {
 				server: mainServer.name,
 				command: mainServer.command,
 				...(mainServer.args && { args: mainServer.args }),
 			};
-			writeFileSync(
-				summarizePath,
-				`${JSON.stringify(summarizeConfig, null, '\t')}\n`,
-				'utf-8',
-			);
-			filesCreated.push('summarize.json');
-			console.log(`  Wrote ${summarizePath}`);
+			pendingFiles.push({ file: 'summarize.json', content: summarizeConfig });
 		} else if (summarizeChoice === 2) {
-			// Show the same preset picker as the main AI provider
-			console.log('\n  Select summarization provider:\n');
-			for (let i = 0; i < presets.length; i++) {
-				const p = presets[i];
-				console.log(`    ${i + 1}) ${p.label}  —  ${p.description}`);
-			}
-			console.log('');
-
-			let presetIdx = -1;
-			while (presetIdx < 0 || presetIdx >= presets.length) {
-				const answer = (
-					await ask(rl, `  Choice [1-${presets.length}]: `)
-				).trim();
-				const num = Number.parseInt(answer, 10);
-				if (!Number.isNaN(num) && num >= 1 && num <= presets.length) {
-					presetIdx = num - 1;
-				}
-			}
-
-			const presetResult = await presets[presetIdx].build(rl);
+			const presetResult = await pickPreset(
+				rl,
+				'Select summarization provider:',
+			);
 			const summarizeConfig: SummarizeFileConfig = {
 				server: presetResult.server.name,
 				command: presetResult.server.command,
 				...(presetResult.server.args && { args: presetResult.server.args }),
 			};
-			writeFileSync(
-				summarizePath,
-				`${JSON.stringify(summarizeConfig, null, '\t')}\n`,
-				'utf-8',
-			);
-			filesCreated.push('summarize.json');
-			console.log(`  Wrote ${summarizePath}`);
+			pendingFiles.push({ file: 'summarize.json', content: summarizeConfig });
 		} else {
 			console.log('  Skipping summarization config.');
 		}
 	}
 
-	// -- Generate remaining config files with defaults (skip existing) ------
+	// -- Default config files (skip existing) ---------------------------------
 
-	const defaults: readonly {
-		readonly file: string;
-		readonly content: object;
-	}[] = [
+	const defaults: readonly PendingFile[] = [
 		{ file: 'embed.json', content: embedFromPreset ?? {} },
 		{ file: 'config.json', content: {} },
 		{ file: 'mcp.json', content: { servers: [] } },
@@ -308,9 +286,19 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
 		},
 	];
 
-	for (const { file, content } of defaults) {
+	for (const entry of defaults) {
+		if (!existsSync(join(dataDir, entry.file))) {
+			pendingFiles.push(entry);
+		}
+	}
+
+	// -- Write all files atomically ------------------------------------------
+
+	console.log('');
+	const filesCreated: string[] = [];
+
+	for (const { file, content } of pendingFiles) {
 		const filePath = join(dataDir, file);
-		if (existsSync(filePath)) continue;
 		writeFileSync(
 			filePath,
 			`${JSON.stringify(content, null, '\t')}\n`,

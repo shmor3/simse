@@ -1,6 +1,18 @@
-import InkSpinner from 'ink-spinner';
 import { Box, Text } from 'ink';
-import React from 'react';
+import InkSpinner from 'ink-spinner';
+
+export function formatDuration(ms: number): string {
+	if (ms < 1000) return `${Math.round(ms)}ms`;
+	if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+	const minutes = Math.floor(ms / 60000);
+	const seconds = Math.round((ms % 60000) / 1000);
+	return `${minutes}m${seconds}s`;
+}
+
+export function formatTokens(tokens: number): string {
+	if (tokens >= 1000) return `${(tokens / 1000).toFixed(1)}k tokens`;
+	return `${tokens} tokens`;
+}
 
 interface ThinkingSpinnerProps {
 	readonly label?: string;
@@ -16,18 +28,21 @@ export function ThinkingSpinner({
 	elapsed,
 }: ThinkingSpinnerProps) {
 	const parts: string[] = [];
-	if (elapsed !== undefined) parts.push(`${(elapsed / 1000).toFixed(1)}s`);
-	if (tokens !== undefined) parts.push(`\u2193 ${tokens}`);
+	if (elapsed !== undefined) parts.push(formatDuration(elapsed));
+	if (tokens !== undefined) parts.push(formatTokens(tokens));
 	if (server) parts.push(server);
 
 	const suffix = parts.length > 0 ? ` (${parts.join(' \u00b7 ')})` : '';
 
 	return (
-		<Box>
-			<Text color="cyan">
+		<Box paddingLeft={2} gap={1}>
+			<Text color="magenta">
 				<InkSpinner type="dots" />
 			</Text>
-			<Text dimColor> {label}{suffix}</Text>
+			<Text>
+				<Text dimColor>{label}...</Text>
+				{suffix && <Text dimColor>{suffix}</Text>}
+			</Text>
 		</Box>
 	);
 }

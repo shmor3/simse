@@ -46,6 +46,16 @@ export function Banner({
 		const gapWidth = 3; // " \u2502 "
 		const rightColWidth = contentWidth - leftColWidth - gapWidth;
 
+		// Helper: center text within a given width, returning [leftPad, rightPad]
+		const centerPad = (
+			text: string,
+			width: number,
+		): [number, number] => {
+			const space = Math.max(0, width - text.length);
+			const left = Math.floor(space / 2);
+			return [left, space - left];
+		};
+
 		// Title: " \u2500\u2500 simse-code v1.0.0 \u2500\u2500...\u2500\u2500"
 		const titleLabel = `simse-code v${version}`;
 		const titleTrailerLen = Math.max(
@@ -56,69 +66,49 @@ export function Banner({
 		// Bottom border: fills contentWidth
 		const bottomLine = DIVIDER.repeat(contentWidth);
 
-		// Build left column lines
-		const leftLines: ColumnLine[] = [];
+		// Build left column content (no padding yet — centered later)
+		const leftContent: ColumnLine[] = [];
 
-		// Empty line at top for spacing
-		leftLines.push({
-			text: '',
-			isMascot: false,
-			isBold: false,
-			isDim: false,
-		});
-
-		// Mascot centered
+		// Mascot lines
 		for (const ml of MASCOT_LINES) {
-			const pad = Math.max(
-				0,
-				Math.floor((leftColWidth - ml.length) / 2),
-			);
-			leftLines.push({
-				text: ' '.repeat(pad) + ml,
+			leftContent.push({
+				text: ml,
 				isMascot: true,
 				isBold: false,
 				isDim: false,
 			});
 		}
 
-		// Empty line after mascot
-		leftLines.push({
+		// Empty line between mascot and info
+		leftContent.push({
 			text: '',
 			isMascot: false,
 			isBold: false,
 			isDim: false,
 		});
 
-		// Model label centered (e.g. "Opus 4.6 \u00b7 Claude Max")
+		// Model label (e.g. "Opus 4.6 \u00b7 Claude Max")
 		const modelLabel = server
 			? model
 				? `${server} \u00b7 ${model}`
 				: server
 			: model;
 		if (modelLabel) {
-			const pad = Math.max(
-				0,
-				Math.floor((leftColWidth - modelLabel.length) / 2),
-			);
-			leftLines.push({
-				text: ' '.repeat(pad) + modelLabel,
+			leftContent.push({
+				text: modelLabel,
 				isMascot: false,
 				isBold: false,
 				isDim: false,
 			});
 		}
 
-		// Working dir centered, dim
+		// Working dir, dim
 		const workDirTrunc =
 			workDir.length > leftColWidth
 				? `...${workDir.slice(-(leftColWidth - 3))}`
 				: workDir;
-		const wdPad = Math.max(
-			0,
-			Math.floor((leftColWidth - workDirTrunc.length) / 2),
-		);
-		leftLines.push({
-			text: ' '.repeat(wdPad) + workDirTrunc,
+		leftContent.push({
+			text: workDirTrunc,
 			isMascot: false,
 			isBold: false,
 			isDim: true,
@@ -181,8 +171,13 @@ export function Banner({
 			});
 		}
 
-		// Merge columns into rows
-		const maxRows = Math.max(leftLines.length, rightLines.length);
+		// Vertically center left content within right column height
+		const totalRows = Math.max(leftContent.length, rightLines.length);
+		const topPad = Math.max(
+			0,
+			Math.floor((totalRows - leftContent.length) / 2),
+		);
+
 		const emptyLine: ColumnLine = {
 			text: '',
 			isMascot: false,
@@ -190,6 +185,25 @@ export function Banner({
 			isDim: false,
 		};
 
+		// Build left column with vertical centering + horizontal centering
+		const leftLines: ColumnLine[] = [];
+		for (let i = 0; i < totalRows; i++) {
+			const contentIdx = i - topPad;
+			if (contentIdx >= 0 && contentIdx < leftContent.length) {
+				const line = leftContent[contentIdx]!;
+				const [lp] = centerPad(line.text, leftColWidth);
+				leftLines.push({
+					text: ' '.repeat(lp) + line.text,
+					isMascot: line.isMascot,
+					isBold: line.isBold,
+					isDim: line.isDim,
+				});
+			} else {
+				leftLines.push(emptyLine);
+			}
+		}
+
+		// Merge columns into rows
 		const rows: {
 			leftText: string;
 			leftStyle: ColumnLine;
@@ -199,7 +213,7 @@ export function Banner({
 			rightPad: number;
 		}[] = [];
 
-		for (let i = 0; i < maxRows; i++) {
+		for (let i = 0; i < totalRows; i++) {
 			const left = leftLines[i] ?? emptyLine;
 			const right = rightLines[i] ?? emptyLine;
 			const leftPad = Math.max(0, leftColWidth - left.text.length);

@@ -39,7 +39,7 @@ export function useAgenticLoop(): UseAgenticLoopResult {
 		completedItems: [],
 	});
 
-	const abortRef = useRef<AbortController | undefined>();
+	const abortRef = useRef<AbortController | undefined>(undefined);
 
 	const submit = useCallback(async (_input: string) => {
 		const ctrl = new AbortController();

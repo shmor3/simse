@@ -1,14 +1,15 @@
-import { Box, Text } from 'ink';
-import InkSpinner from 'ink-spinner';
+import { Box } from 'ink';
 import React, { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createACPClient, toError } from 'simse';
 import type { ACPClient, ACPPermissionRequestInfo } from 'simse';
 import { createCommandRegistry } from './command-registry.js';
+import { Markdown } from './components/chat/markdown.js';
+import { MessageList } from './components/chat/message-list.js';
+import { ToolCallBox } from './components/chat/tool-call-box.js';
 import { Banner } from './components/layout/banner.js';
 import { MainLayout } from './components/layout/main-layout.js';
 import { StatusBar } from './components/layout/status-bar.js';
-import { MessageList } from './components/chat/message-list.js';
-import { ToolCallBox } from './components/chat/tool-call-box.js';
+import { ThinkingSpinner } from './components/shared/spinner.js';
 import { PromptInput } from './components/input/prompt-input.js';
 import { useCommandDispatch } from './hooks/use-command-dispatch.js';
 import { useAgenticLoop } from './hooks/use-agentic-loop.js';
@@ -213,13 +214,10 @@ export function App({
 
 			{/* Active area: streaming text and active tool calls */}
 			{loopState.status !== 'idle' && (
-				<Box flexDirection="column" paddingLeft={2}>
+				<Box flexDirection="column">
 					{loopState.streamText && (
-						<Box>
-							<Text>
-								<Text color="magenta">{'● '}</Text>
-								{loopState.streamText}
-							</Text>
+						<Box paddingLeft={2}>
+							<Markdown text={loopState.streamText} />
 						</Box>
 					)}
 					{loopState.activeToolCalls.map((tc) => (
@@ -231,12 +229,7 @@ export function App({
 						/>
 					))}
 					{loopState.status === 'streaming' && !loopState.streamText && (
-						<Box gap={1}>
-							<Text color="cyan">
-								<InkSpinner type="dots" />
-							</Text>
-							<Text dimColor>Thinking...</Text>
-						</Box>
+						<ThinkingSpinner />
 					)}
 				</Box>
 			)}

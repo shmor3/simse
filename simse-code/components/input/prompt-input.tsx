@@ -29,7 +29,7 @@ export function PromptInput({
 			{planMode && <Badge label="PLAN" />}
 			{verbose && <Badge label="VERBOSE" />}
 			<Text bold color="cyan">
-				{'>'}
+				{'❯'}
 			</Text>
 			<TextInput
 				value={value}

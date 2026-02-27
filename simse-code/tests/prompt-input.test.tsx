@@ -8,7 +8,7 @@ describe('PromptInput', () => {
 		const { lastFrame } = render(
 			<PromptInput onSubmit={() => {}} />,
 		);
-		expect(lastFrame()).toContain('>');
+		expect(lastFrame()).toContain('❯');
 	});
 
 	test('shows plan mode badge when active', () => {
@@ -23,7 +23,7 @@ describe('PromptInput', () => {
 			<PromptInput onSubmit={() => {}} disabled />,
 		);
 		const frame = lastFrame()!;
-		expect(frame).toContain('>');
+		expect(frame).toContain('❯');
 		expect(frame).toContain('Send a message');
 	});
 });

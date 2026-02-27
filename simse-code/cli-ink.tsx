@@ -20,4 +20,13 @@ function parseArgs(): { dataDir: string; serverName?: string } {
 }
 
 const { dataDir, serverName } = parseArgs();
+
+if (!process.stdin.isTTY) {
+	console.error(
+		'Error: simse-code requires an interactive terminal (TTY).\n' +
+			'Use "bun run start:legacy" for non-interactive mode.',
+	);
+	process.exit(1);
+}
+
 render(<App dataDir={dataDir} serverName={serverName} />);

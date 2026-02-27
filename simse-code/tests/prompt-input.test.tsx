@@ -18,10 +18,12 @@ describe('PromptInput', () => {
 		expect(lastFrame()).toContain('PLAN');
 	});
 
-	test('renders when disabled', () => {
+	test('shows placeholder when disabled', () => {
 		const { lastFrame } = render(
 			<PromptInput onSubmit={() => {}} disabled />,
 		);
-		expect(lastFrame()).toBeDefined();
+		const frame = lastFrame()!;
+		expect(frame).toContain('>');
+		expect(frame).toContain('Send a message');
 	});
 });

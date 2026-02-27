@@ -11,12 +11,20 @@ interface MessageListProps {
 function OutputItemView({ item }: { item: OutputItem }) {
 	switch (item.kind) {
 		case 'message':
+			if (item.role === 'user') {
+				return (
+					<Box>
+						<Text color="cyan" bold>
+							{'> '}
+						</Text>
+						<Text bold>{item.text}</Text>
+					</Box>
+				);
+			}
 			return (
-				<Box paddingLeft={item.role === 'user' ? 0 : 2}>
-					<Text
-						bold={item.role === 'user'}
-						color={item.role === 'user' ? 'white' : undefined}
-					>
+				<Box paddingLeft={2}>
+					<Text>
+						<Text color="magenta">{'● '}</Text>
 						{item.text}
 					</Text>
 				</Box>

@@ -1,7 +1,7 @@
-import TextInput from 'ink-text-input';
 import { Box, Text } from 'ink';
 import React, { useState } from 'react';
 import { Badge } from '../shared/badge.js';
+import { TextInput } from './text-input.js';
 
 interface PromptInputProps {
 	readonly onSubmit: (value: string) => void;
@@ -31,13 +31,13 @@ export function PromptInput({
 			<Text bold color="cyan">
 				{'>'}
 			</Text>
-			{!disabled && (
-				<TextInput
-					value={value}
-					onChange={setValue}
-					onSubmit={handleSubmit}
-				/>
-			)}
+			<TextInput
+				value={value}
+				onChange={setValue}
+				onSubmit={handleSubmit}
+				isActive={!disabled}
+				placeholder="Send a message..."
+			/>
 		</Box>
 	);
 }

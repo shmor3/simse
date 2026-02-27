@@ -4,19 +4,18 @@ import { describe, expect, test } from 'bun:test';
 import { Banner } from '../components/layout/banner.js';
 
 describe('Banner', () => {
-	test('renders app name', () => {
+	test('renders title with version', () => {
 		const { lastFrame } = render(
 			<Banner
 				version="1.0.0"
 				workDir="/projects/test"
 				dataDir="~/.simse"
-				server="claude"
 			/>,
 		);
-		expect(lastFrame()).toContain('simse');
+		expect(lastFrame()).toContain('simse-code v1.0.0');
 	});
 
-	test('renders server name', () => {
+	test('renders server name in left column', () => {
 		const { lastFrame } = render(
 			<Banner
 				version="1.0.0"
@@ -28,19 +27,54 @@ describe('Banner', () => {
 		expect(lastFrame()).toContain('claude');
 	});
 
-	test('renders service counts', () => {
+	test('renders mascot', () => {
 		const { lastFrame } = render(
 			<Banner
 				version="1.0.0"
 				workDir="/projects/test"
 				dataDir="~/.simse"
-				server="claude"
-				noteCount={42}
-				toolCount={7}
 			/>,
 		);
 		const frame = lastFrame()!;
-		expect(frame).toContain('42');
-		expect(frame).toContain('7');
+		expect(frame).toContain('╭──╮');
+		expect(frame).toContain('╰─╮│');
+		expect(frame).toContain('╰╯');
+	});
+
+	test('renders tips section', () => {
+		const { lastFrame } = render(
+			<Banner
+				version="1.0.0"
+				workDir="/projects/test"
+				dataDir="~/.simse"
+			/>,
+		);
+		const frame = lastFrame()!;
+		expect(frame).toContain('Tips for getting started');
+		expect(frame).toContain('/help');
+	});
+
+	test('renders column separator', () => {
+		const { lastFrame } = render(
+			<Banner
+				version="1.0.0"
+				workDir="/projects/test"
+				dataDir="~/.simse"
+			/>,
+		);
+		expect(lastFrame()).toContain('│');
+	});
+
+	test('renders hint lines', () => {
+		const { lastFrame } = render(
+			<Banner
+				version="1.0.0"
+				workDir="/projects/test"
+				dataDir="~/.simse"
+			/>,
+		);
+		const frame = lastFrame()!;
+		expect(frame).toContain('▢');
+		expect(frame).toContain('shortcuts');
 	});
 });

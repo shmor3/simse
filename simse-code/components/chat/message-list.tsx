@@ -1,5 +1,5 @@
 import { Box, Static, Text } from 'ink';
-import React from 'react';
+import React, { useRef } from 'react';
 import type { OutputItem } from '../../ink-types.js';
 import { ErrorBox } from '../shared/error-box.js';
 import { ToolCallBox } from './tool-call-box.js';
@@ -46,9 +46,26 @@ function OutputItemView({ item }: { item: OutputItem }) {
 	}
 }
 
+interface KeyedItem {
+	readonly item: OutputItem;
+	readonly key: string;
+}
+
 export function MessageList({ items }: MessageListProps) {
+	const nextId = useRef(0);
+	const cached = useRef<KeyedItem[]>([]);
+
+	// Assign stable keys to new items only
+	while (cached.current.length < items.length) {
+		const idx = cached.current.length;
+		cached.current.push({
+			item: items[idx]!,
+			key: `msg-${nextId.current++}`,
+		});
+	}
+
 	return (
-		<Static items={items.map((item, i) => ({ item, key: i }))}>
+		<Static items={cached.current}>
 			{({ item, key }) => (
 				<Box key={key}>
 					<OutputItemView item={item} />

@@ -16,6 +16,7 @@ import {
 	createLocalEmbedder,
 	createVFSDisk,
 	createVirtualFS,
+	registerDelegationTools,
 	toError,
 	type VFSWriteEvent,
 	validateSnapshot,
@@ -72,6 +73,7 @@ import {
 	renderHelp,
 	renderModeBadge,
 	renderServiceStatus,
+	renderServiceStatusLine,
 	renderSkillLoading,
 	renderToolCallActive,
 	renderToolCallCompleted,
@@ -989,6 +991,21 @@ const agentsCommand: Command = {
 			}
 		}
 
+		// ACP servers (multi-server delegation)
+		if (acpClient.serverCount > 1) {
+			if (lines.length > 0) lines.push('');
+			lines.push(colors.bold(colors.cyan('ACP servers:')));
+			for (const name of acpClient.serverNames) {
+				const isPrimary = name === acpClient.defaultServerName;
+				const safeName = name.replace(/[^a-zA-Z0-9]/g, '_');
+				const delegateTool = isPrimary
+					? ''
+					: ` ${colors.dim(`→ delegate_${safeName}`)}`;
+				const primaryTag = isPrimary ? ` ${colors.dim('(primary)')}` : '';
+				lines.push(`  ${colors.bold(name)}${primaryTag}${delegateTool}`);
+			}
+		}
+
 		// Custom agents from .simse/agents/*.md
 		const { agents: customAgents } = ctx.configResult;
 		if (customAgents.length > 0) {
@@ -1388,11 +1405,11 @@ async function acpMenu(ctx: AppContext): Promise<string | undefined> {
 				const available = await acpClient.isAvailable(name);
 				if (available) {
 					lines.push(
-						renderServiceStatus('ACP', 'ok', `${name} — connected`, colors),
+						renderServiceStatusLine('ACP', 'ok', `${name} — connected`, colors),
 					);
 				} else {
 					lines.push(
-						renderServiceStatus(
+						renderServiceStatusLine(
 							'ACP',
 							'fail',
 							`${name} — not responding`,
@@ -1402,7 +1419,7 @@ async function acpMenu(ctx: AppContext): Promise<string | undefined> {
 				}
 			} catch {
 				lines.push(
-					renderServiceStatus(
+					renderServiceStatusLine(
 						'ACP',
 						'fail',
 						`${name} — connection error`,
@@ -2541,11 +2558,11 @@ const doctorCommand: Command = {
 				const available = await acpClient.isAvailable(name);
 				if (available) {
 					lines.push(
-						renderServiceStatus('ACP', 'ok', `${name} — connected`, colors),
+						renderServiceStatusLine('ACP', 'ok', `${name} — connected`, colors),
 					);
 				} else {
 					lines.push(
-						renderServiceStatus(
+						renderServiceStatusLine(
 							'ACP',
 							'fail',
 							`${name} — not responding`,
@@ -2555,7 +2572,7 @@ const doctorCommand: Command = {
 				}
 			} catch {
 				lines.push(
-					renderServiceStatus(
+					renderServiceStatusLine(
 						'ACP',
 						'fail',
 						`${name} — connection error`,
@@ -2569,7 +2586,7 @@ const doctorCommand: Command = {
 		const mcpCount = app.tools.mcpClient.connectionCount;
 		if (mcpCount > 0) {
 			lines.push(
-				renderServiceStatus(
+				renderServiceStatusLine(
 					'MCP',
 					'ok',
 					`${mcpCount} server(s) connected`,
@@ -2578,13 +2595,13 @@ const doctorCommand: Command = {
 			);
 		} else {
 			lines.push(
-				renderServiceStatus('MCP', 'warn', 'no servers connected', colors),
+				renderServiceStatusLine('MCP', 'warn', 'no servers connected', colors),
 			);
 		}
 
 		// Memory
 		lines.push(
-			renderServiceStatus(
+			renderServiceStatusLine(
 				'Memory',
 				'ok',
 				`${app.noteCount} notes stored`,
@@ -2596,7 +2613,7 @@ const doctorCommand: Command = {
 		const chars = ctx.conversation.estimatedChars;
 		const approxTokens = Math.round(chars / 4);
 		lines.push(
-			renderServiceStatus(
+			renderServiceStatusLine(
 				'Context',
 				ctx.conversation.needsCompaction ? 'warn' : 'ok',
 				`~${approxTokens} tokens, ${ctx.conversation.messageCount} messages`,
@@ -2606,10 +2623,15 @@ const doctorCommand: Command = {
 
 		// Data directory
 		if (existsSync(ctx.dataDir)) {
-			lines.push(renderServiceStatus('Data', 'ok', ctx.dataDir, colors));
+			lines.push(renderServiceStatusLine('Data', 'ok', ctx.dataDir, colors));
 		} else {
 			lines.push(
-				renderServiceStatus('Data', 'fail', `${ctx.dataDir} — missing`, colors),
+				renderServiceStatusLine(
+					'Data',
+					'fail',
+					`${ctx.dataDir} — missing`,
+					colors,
+				),
 			);
 		}
 
@@ -3656,7 +3678,7 @@ async function main(): Promise<void> {
 
 	for (const skipped of skippedServers) {
 		console.log(
-			renderServiceStatus(
+			renderServiceStatusLine(
 				'MCP',
 				'warn',
 				`"${skipped.name}" skipped — missing: ${skipped.missingEnv.join(', ')}`,
@@ -3728,13 +3750,37 @@ async function main(): Promise<void> {
 	// Discover MCP tools (built-ins are registered automatically)
 	await toolRegistry.discover();
 
+	// Register cross-ACP delegation tools (if multiple servers configured)
+	if (acpClient.serverCount > 1) {
+		registerDelegationTools(toolRegistry, {
+			acpClient,
+			toolRegistry,
+			primaryServer: acpClient.defaultServerName,
+		});
+	}
+
 	// -- Banner (after all services are initialized) --------------------------
 
-	const defaultAgent = config.acp.defaultAgent ?? config.acp.servers[0]?.name;
-	const defaultServer = config.acp.servers[0]?.name;
-	const modelLabel = defaultAgent
-		? `${defaultAgent}${defaultServer ? ` · ${defaultServer}` : ''}`
-		: undefined;
+	const defaultServer = acpClient.defaultServerName;
+	let bannerServerInfo:
+		| { name: string; model?: string; isPrimary: boolean }
+		| undefined;
+
+	if (defaultServer) {
+		try {
+			const modelInfo = await acpClient.getServerModelInfo(defaultServer);
+			bannerServerInfo = {
+				name: defaultServer,
+				model: modelInfo?.currentModelId,
+				isPrimary: true,
+			};
+		} catch {
+			bannerServerInfo = {
+				name: defaultServer,
+				isPrimary: true,
+			};
+		}
+	}
 
 	console.log('');
 	console.log(
@@ -3743,7 +3789,7 @@ async function main(): Promise<void> {
 				version: '1.0.0',
 				workDir: process.cwd(),
 				dataDir: cliArgs.dataDir,
-				model: modelLabel,
+				server: bannerServerInfo,
 				toolCount: toolRegistry.toolCount,
 				noteCount: app.noteCount,
 			},

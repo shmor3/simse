@@ -9,6 +9,13 @@ export {
 	registerVFSTools,
 } from './builtin-tools.js';
 export type {
+	DelegationCallbacks,
+	DelegationInfo,
+	DelegationResult,
+	DelegationToolsOptions,
+} from './delegation-tools.js';
+export { registerDelegationTools } from './delegation-tools.js';
+export type {
 	SubagentCallbacks,
 	SubagentToolsOptions,
 } from './subagent-tools.js';

@@ -447,3 +447,15 @@ export interface ACPClientCapabilities {
 	readonly permissions?: boolean;
 	readonly streaming?: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Server status (multi-ACP discovery)
+// ---------------------------------------------------------------------------
+
+export interface ACPServerStatus {
+	readonly name: string;
+	readonly connected: boolean;
+	readonly currentModel?: string;
+	readonly availableModels?: readonly ACPModelInfo[];
+	readonly agentId?: string;
+}

@@ -28,11 +28,13 @@ import type {
 	ACPContentBlock,
 	ACPEmbedResult,
 	ACPGenerateResult,
+	ACPModelInfo,
 	ACPModelsInfo,
 	ACPModesInfo,
 	ACPPermissionPolicy,
 	ACPSamplingParams,
 	ACPServerEntry,
+	ACPServerStatus,
 	ACPSessionInfo,
 	ACPSessionListEntry,
 	ACPSessionNewResult,
@@ -167,6 +169,12 @@ export interface ACPClient {
 		serverName?: string,
 	) => Promise<ACPModesInfo | undefined>;
 	readonly getServerHealth: (serverName?: string) => HealthSnapshot | undefined;
+	/** Get model info for a specific server by creating a temp session. */
+	readonly getServerModelInfo: (
+		serverName?: string,
+	) => Promise<ACPModelsInfo | undefined>;
+	/** Get status of all configured servers (connectivity, model, agent). */
+	readonly getServerStatuses: () => Promise<readonly ACPServerStatus[]>;
 	readonly serverNames: string[];
 	readonly serverCount: number;
 	readonly defaultServerName: string | undefined;
@@ -1081,6 +1089,69 @@ export function createACPClient(
 		}
 	};
 
+	const getServerModelInfo = async (
+		serverName?: string,
+	): Promise<ACPModelsInfo | undefined> => {
+		try {
+			const { connection } = resolveConnection(serverName);
+			const result = await connection.request<ACPSessionNewResult>(
+				'session/new',
+				{
+					cwd: process.cwd(),
+					mcpServers: config.mcpServers ?? [],
+				},
+			);
+
+			// Cache for later use
+			sessionInfoCache.set(result.sessionId, result);
+
+			// Clean up the temp session (fire-and-forget)
+			connection
+				.request('session/delete', { sessionId: result.sessionId })
+				.catch(() => {});
+
+			return result.models;
+		} catch {
+			return undefined;
+		}
+	};
+
+	const getServerStatuses = async (): Promise<readonly ACPServerStatus[]> => {
+		const statuses: ACPServerStatus[] = [];
+
+		for (const entry of config.servers) {
+			const connected = connections.has(entry.name);
+			let currentModel: string | undefined;
+			let availableModels: ACPModelInfo[] | undefined;
+
+			if (connected) {
+				try {
+					const models = await getServerModelInfo(entry.name);
+					if (models) {
+						currentModel = models.currentModelId;
+						availableModels = [...models.availableModels];
+					}
+				} catch {
+					// Server may not support model info
+				}
+			}
+
+			statuses.push(
+				Object.freeze({
+					name: entry.name,
+					connected,
+					currentModel,
+					availableModels: availableModels
+						? Object.freeze(availableModels)
+						: undefined,
+					agentId: entry.defaultAgent ?? config.defaultAgent,
+				}),
+			);
+		}
+
+		return Object.freeze(statuses);
+	};
+
 	return Object.freeze({
 		initialize,
 		dispose,
@@ -1095,6 +1166,8 @@ export function createACPClient(
 		getSessionModels,
 		getSessionModes,
 		getServerHealth,
+		getServerModelInfo,
+		getServerStatuses,
 		listSessions,
 		loadSession,
 		deleteSession,

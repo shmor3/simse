@@ -1,20 +1,28 @@
 /**
  * SimSE Code — Session Persistence
  *
- * Save and restore conversation sessions to JSON files.
- * Supports auto-save, resume, and session listing.
+ * Save and restore conversation sessions to gzipped JSON files.
+ * Supports auto-save, resume, crash-safe atomic writes, and session listing.
  * No external deps.
  */
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import type {
 	SessionRecord,
 	SessionStore,
 	SessionSummary,
 } from './app-context.js';
-import { readJsonFile, writeJsonFile } from './json-io.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -31,6 +39,46 @@ export interface SessionStoreOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Internal helpers — crash-safe gzip I/O
+// ---------------------------------------------------------------------------
+
+function writeGzipAtomic(path: string, data: unknown): void {
+	const dir = join(path, '..');
+	mkdirSync(dir, { recursive: true });
+
+	const json = JSON.stringify(data, null, '\t');
+	const compressed = gzipSync(Buffer.from(json, 'utf-8'));
+
+	// Write to a temp file first, then atomically rename.
+	// If simse-code crashes mid-write, only the temp file is corrupt —
+	// the previous session file is untouched.
+	const tmpPath = `${path}.tmp`;
+	writeFileSync(tmpPath, compressed);
+	renameSync(tmpPath, path);
+}
+
+function readGzipFile<T>(path: string): T | undefined {
+	try {
+		if (!existsSync(path)) return undefined;
+		const raw = readFileSync(path);
+		const decompressed = gunzipSync(raw);
+		return JSON.parse(decompressed.toString('utf-8')) as T;
+	} catch {
+		return undefined;
+	}
+}
+
+function readJsonFileFallback<T>(path: string): T | undefined {
+	try {
+		if (!existsSync(path)) return undefined;
+		const raw = readFileSync(path, 'utf-8');
+		return JSON.parse(raw) as T;
+	} catch {
+		return undefined;
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
@@ -40,28 +88,55 @@ export function createSessionStore(options: SessionStoreOptions): SessionStore {
 
 	mkdirSync(sessionsDir, { recursive: true });
 
-	const sessionPath = (id: string): string => join(sessionsDir, `${id}.json`);
+	const gzPath = (id: string): string => join(sessionsDir, `${id}.json.gz`);
+	const legacyPath = (id: string): string => join(sessionsDir, `${id}.json`);
 
 	const save = (session: SessionRecord): void => {
-		writeJsonFile(sessionPath(session.id), session);
+		writeGzipAtomic(gzPath(session.id), session);
+
+		// Clean up legacy .json file if it exists
+		const legacy = legacyPath(session.id);
+		if (existsSync(legacy)) {
+			try {
+				rmSync(legacy);
+			} catch {
+				// Best-effort cleanup
+			}
+		}
+
 		pruneOldSessions();
 	};
 
 	const load = (id: string): SessionRecord | undefined => {
-		const path = sessionPath(id);
-		if (!existsSync(path)) return undefined;
-		return readJsonFile<SessionRecord>(path);
+		// Try gzip first, fall back to legacy JSON
+		const gz = gzPath(id);
+		if (existsSync(gz)) {
+			return readGzipFile<SessionRecord>(gz);
+		}
+		return readJsonFileFallback<SessionRecord>(legacyPath(id));
 	};
 
 	const list = (): readonly SessionSummary[] => {
 		if (!existsSync(sessionsDir)) return [];
 
-		const files = readdirSync(sessionsDir).filter((f) => f.endsWith('.json'));
+		const files = readdirSync(sessionsDir).filter(
+			(f) => f.endsWith('.json.gz') || f.endsWith('.json'),
+		);
+
+		// Deduplicate: prefer .json.gz over .json for the same ID
+		const seen = new Set<string>();
 		const summaries: SessionSummary[] = [];
 
 		for (const file of files) {
-			const record = readJsonFile<SessionRecord>(join(sessionsDir, file));
+			const id = file.replace(/\.json(\.gz)?$/, '');
+			if (seen.has(id)) continue;
+			seen.add(id);
+
+			const record = file.endsWith('.json.gz')
+				? readGzipFile<SessionRecord>(join(sessionsDir, file))
+				: readJsonFileFallback<SessionRecord>(join(sessionsDir, file));
 			if (!record) continue;
+
 			summaries.push({
 				id: record.id,
 				createdAt: record.createdAt,
@@ -78,9 +153,10 @@ export function createSessionStore(options: SessionStoreOptions): SessionStore {
 	};
 
 	const remove = (id: string): void => {
-		const path = sessionPath(id);
-		if (existsSync(path)) {
-			rmSync(path);
+		for (const path of [gzPath(id), legacyPath(id)]) {
+			if (existsSync(path)) {
+				rmSync(path);
+			}
 		}
 	};
 
@@ -141,7 +217,7 @@ export function createAutoSaver(options: AutoSaveOptions): AutoSaver {
 }
 
 /**
- * Generate a new session ID.
+ * Generate a new session ID (truncated UUID).
  */
 export function newSessionId(): string {
 	return randomUUID().slice(0, 8);

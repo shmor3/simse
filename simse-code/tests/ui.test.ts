@@ -9,6 +9,7 @@ import {
 	renderError,
 	renderHelp,
 	renderServiceStatus,
+	renderServiceStatusLine,
 	renderSkillLoading,
 	renderToolCall,
 	renderToolResult,
@@ -307,27 +308,42 @@ describe('renderBanner', () => {
 });
 
 // ---------------------------------------------------------------------------
-// renderServiceStatus — uses ● for all statuses in CC style
+// renderServiceStatus — label + detail only (no bullet), for spinner use
 // ---------------------------------------------------------------------------
 
 describe('renderServiceStatus', () => {
 	const colors = noColors();
 
-	it('should render ok status with ● icon', () => {
+	it('should render label and detail without bullet', () => {
 		const result = renderServiceStatus('ACP', 'ok', 'Connected', colors);
+		expect(result).not.toContain('●');
+		expect(result).toContain('ACP');
+		expect(result).toContain('Connected');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// renderServiceStatusLine — standalone line with ● for non-spinner contexts
+// ---------------------------------------------------------------------------
+
+describe('renderServiceStatusLine', () => {
+	const colors = noColors();
+
+	it('should render ok status with ● icon', () => {
+		const result = renderServiceStatusLine('ACP', 'ok', 'Connected', colors);
 		expect(result).toContain('●');
 		expect(result).toContain('ACP');
 		expect(result).toContain('Connected');
 	});
 
 	it('should render warn status with ● icon', () => {
-		const result = renderServiceStatus('MCP', 'warn', 'Slow', colors);
+		const result = renderServiceStatusLine('MCP', 'warn', 'Slow', colors);
 		expect(result).toContain('●');
 		expect(result).toContain('MCP');
 	});
 
 	it('should render fail status with ● icon', () => {
-		const result = renderServiceStatus('Memory', 'fail', 'Offline', colors);
+		const result = renderServiceStatusLine('Memory', 'fail', 'Offline', colors);
 		expect(result).toContain('●');
 		expect(result).toContain('Memory');
 		expect(result).toContain('Offline');

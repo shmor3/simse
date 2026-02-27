@@ -132,6 +132,7 @@ export interface SessionRecord {
 	readonly model: string;
 	readonly directory: string;
 	readonly branch?: string;
+	readonly serverName?: string;
 	readonly messages: readonly unknown[];
 	readonly metadata?: Readonly<Record<string, unknown>>;
 }

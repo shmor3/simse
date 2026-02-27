@@ -62,8 +62,20 @@ export function createMockACPClient(
 		setSessionModel: mock((..._: unknown[]): unknown => {}).mockResolvedValue(
 			undefined,
 		),
+		getSessionModels: mock((..._: unknown[]): unknown => {}).mockResolvedValue(
+			undefined,
+		),
+		getSessionModes: mock((..._: unknown[]): unknown => {}).mockResolvedValue(
+			undefined,
+		),
 		getServerHealth: mock((..._: unknown[]): unknown => {}).mockReturnValue(
 			undefined,
+		),
+		getServerModelInfo: mock(
+			(..._: unknown[]): unknown => {},
+		).mockResolvedValue(undefined),
+		getServerStatuses: mock((..._: unknown[]): unknown => {}).mockResolvedValue(
+			[],
 		),
 		serverNames: ['local'],
 		serverCount: 1,

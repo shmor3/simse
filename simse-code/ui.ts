@@ -302,6 +302,8 @@ export interface ThinkingSpinner extends Spinner {
 	readonly setTokens: (tokens: number) => void;
 	/** Update the thinking/processing state label. */
 	readonly setState: (state: string) => void;
+	/** Set the active ACP server name shown in the spinner suffix. */
+	readonly setServer: (name: string | undefined) => void;
 }
 
 export function createThinkingSpinner(
@@ -323,6 +325,7 @@ export function createThinkingSpinner(
 	let startedAt = 0;
 	let tokenCount = 0;
 	let stateLabel = 'thinking';
+	let serverLabel: string | undefined;
 
 	const formatSuffix = (): string => {
 		const parts: string[] = [];
@@ -336,6 +339,9 @@ export function createThinkingSpinner(
 					? `${(tokenCount / 1000).toFixed(1)}k`
 					: String(tokenCount);
 			parts.push(`↓ ${formatted} tokens`);
+		}
+		if (serverLabel) {
+			parts.push(serverLabel);
 		}
 		if (stateLabel) {
 			parts.push(stateLabel);
@@ -428,6 +434,7 @@ export function createThinkingSpinner(
 		startedAt = 0;
 		tokenCount = 0;
 		stateLabel = 'thinking';
+		serverLabel = undefined;
 	};
 
 	const succeed = (message: string): void => {
@@ -448,6 +455,10 @@ export function createThinkingSpinner(
 		stateLabel = state;
 	};
 
+	const setServer = (name: string | undefined): void => {
+		serverLabel = name;
+	};
+
 	return Object.freeze({
 		start,
 		update,
@@ -456,6 +467,7 @@ export function createThinkingSpinner(
 		stop,
 		setTokens,
 		setState,
+		setServer,
 	});
 }
 
@@ -557,11 +569,19 @@ function formatInline(line: string, colors: TermColors): string {
 // Formatters
 // ---------------------------------------------------------------------------
 
+export interface BannerServerInfo {
+	readonly name: string;
+	readonly model?: string;
+	readonly isPrimary?: boolean;
+}
+
 export interface BannerOptions {
 	readonly version: string;
 	readonly dataDir: string;
 	readonly workDir: string;
 	readonly model?: string;
+	/** Primary ACP server info for the banner. Overrides `model` if provided. */
+	readonly server?: BannerServerInfo;
 	readonly toolCount?: number;
 	readonly noteCount?: number;
 	readonly tips?: readonly string[];
@@ -616,11 +636,18 @@ export function renderBanner(
 		leftLines.push(`${centered}${colors.enabled ? mascotColor(ml) : ml}`);
 	}
 	leftLines.push(''); // blank after mascot
-	if (options.model) {
+
+	// Show server + model info (prefer server over raw model string)
+	const modelLabel = options.server
+		? options.server.model
+			? `${options.server.name}: ${options.server.model}`
+			: options.server.name
+		: options.model;
+	if (modelLabel) {
 		const modelCentered = ' '.repeat(
-			Math.max(0, Math.floor((leftColWidth - options.model.length) / 2)),
+			Math.max(0, Math.floor((leftColWidth - modelLabel.length) / 2)),
 		);
-		leftLines.push(`${modelCentered}${options.model}`);
+		leftLines.push(`${modelCentered}${modelLabel}`);
 	}
 	const workDirTrunc =
 		options.workDir.length > leftColWidth
@@ -690,7 +717,26 @@ function stripAnsiForBanner(str: string): string {
 	return str.replace(BANNER_ANSI_RE, '');
 }
 
+/**
+ * Render a service status label + detail (no bullet/indent).
+ * Use with spinner.succeed() / spinner.fail() which supply the bullet.
+ * For standalone display (e.g. /doctor), use {@link renderServiceStatusLine}.
+ */
 export function renderServiceStatus(
+	name: string,
+	_status: 'ok' | 'warn' | 'fail',
+	detail: string,
+	colors: TermColors,
+): string {
+	const label = colors.bold(name.padEnd(10));
+	return `${label} ${detail}`;
+}
+
+/**
+ * Render a standalone service status line with bullet and indent.
+ * Use when there is no spinner providing the bullet (e.g. /doctor output).
+ */
+export function renderServiceStatusLine(
 	name: string,
 	status: 'ok' | 'warn' | 'fail',
 	detail: string,

@@ -61,6 +61,7 @@ export type {
 	ACPSamplingParams,
 	ACPServerEntry,
 	ACPServerInfo,
+	ACPServerStatus,
 	ACPSessionInfo,
 	ACPSessionListEntry,
 	ACPSessionPromptResult,
@@ -284,6 +285,10 @@ export { registerGitTools } from './ai/tools/host/git.js';
 export type {
 	BuiltinSubagentCallbacks,
 	BuiltinSubagentOptions,
+	DelegationCallbacks,
+	DelegationInfo,
+	DelegationResult,
+	DelegationToolsOptions,
 	RegisteredTool,
 	SubagentCallbacks,
 	SubagentToolsOptions,
@@ -302,6 +307,7 @@ export type {
 export {
 	createToolRegistry,
 	registerBuiltinSubagents,
+	registerDelegationTools,
 	registerMemoryTools,
 	registerSubagentTools,
 	registerTaskTools,

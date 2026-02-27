@@ -131,7 +131,34 @@ const presets: readonly Preset[] = [
 	},
 ];
 
-const DEFAULT_EMBEDDING_MODEL = 'nomic-ai/nomic-embed-text-v1.5';
+// ---------------------------------------------------------------------------
+// Embedding presets — small / medium / large / TEI
+// ---------------------------------------------------------------------------
+
+interface EmbeddingPreset {
+	readonly label: string;
+	readonly description: string;
+	readonly model: string;
+}
+
+const embeddingPresets: readonly EmbeddingPreset[] = [
+	{
+		label: 'Small',
+		description: 'Snowflake/snowflake-arctic-embed-xs  (fast, 22M params)',
+		model: 'Snowflake/snowflake-arctic-embed-xs',
+	},
+	{
+		label: 'Medium',
+		description: 'nomic-ai/nomic-embed-text-v1.5  (recommended, 137M params)',
+		model: 'nomic-ai/nomic-embed-text-v1.5',
+	},
+	{
+		label: 'Large',
+		description:
+			'Snowflake/snowflake-arctic-embed-l  (best quality, 335M params)',
+		model: 'Snowflake/snowflake-arctic-embed-l',
+	},
+];
 
 /**
  * Run the preset picker and return the selected server config.
@@ -249,17 +276,39 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
 		console.log('  embed.json already exists, skipping.');
 	} else {
 		console.log(
-			`\n  Embedding model (runs locally via HuggingFace Transformers)\n`,
+			'\n  Select embedding provider (used for memory search across all AI providers)\n',
 		);
+		for (let i = 0; i < embeddingPresets.length; i++) {
+			const p = embeddingPresets[i];
+			console.log(`    ${i + 1}) ${p.label}  —  ${p.description}`);
+		}
 		console.log(
-			`  The built-in embedder is used for all providers (Ollama, Claude, etc.)`,
+			`    ${embeddingPresets.length + 1}) TEI  —  Text Embeddings Inference server (custom URL)`,
 		);
+		console.log('');
 
-		const model =
-			(await askOptional(rl, `  Model [${DEFAULT_EMBEDDING_MODEL}]: `)) ??
-			DEFAULT_EMBEDDING_MODEL;
+		const totalChoices = embeddingPresets.length + 1;
+		let embedChoice = -1;
+		while (embedChoice < 1 || embedChoice > totalChoices) {
+			const answer = (await ask(rl, `  Choice [1-${totalChoices}]: `)).trim();
+			const num = Number.parseInt(answer, 10);
+			if (!Number.isNaN(num) && num >= 1 && num <= totalChoices) {
+				embedChoice = num;
+			}
+		}
 
-		embedConfig = { embeddingModel: model };
+		if (embedChoice <= embeddingPresets.length) {
+			// Built-in local model
+			const preset = embeddingPresets[embedChoice - 1];
+			embedConfig = { embeddingModel: preset.model };
+		} else {
+			// TEI bridge
+			const teiUrl =
+				(await askOptional(rl, '  TEI server URL [http://localhost:8080]: ')) ??
+				'http://localhost:8080';
+			embedConfig = { teiUrl };
+		}
+
 		pendingFiles.push({ file: 'embed.json', content: embedConfig });
 	}
 

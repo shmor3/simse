@@ -14,6 +14,7 @@ import {
 	createACPClient,
 	createDefaultValidators,
 	createLocalEmbedder,
+	createTEIEmbedder,
 	createVFSDisk,
 	createVirtualFS,
 	registerDelegationTools,
@@ -1746,12 +1747,20 @@ const configCommand: Command = {
 		const { embedConfig } = ctx.configResult;
 		lines.push('');
 		lines.push(colors.bold(colors.cyan('Embedding:')));
-		lines.push(
-			`  ${colors.bold('Model:')} ${embedConfig.embeddingModel ?? colors.dim('nomic-ai/nomic-embed-text-v1.5')}`,
-		);
-		lines.push(
-			`  ${colors.bold('Dtype:')} ${embedConfig.dtype ?? colors.dim('q8')}`,
-		);
+		if (embedConfig.teiUrl) {
+			lines.push(
+				`  ${colors.bold('Provider:')} TEI (Text Embeddings Inference)`,
+			);
+			lines.push(`  ${colors.bold('URL:')}      ${embedConfig.teiUrl}`);
+		} else {
+			lines.push(`  ${colors.bold('Provider:')} Built-in (HuggingFace)`);
+			lines.push(
+				`  ${colors.bold('Model:')}    ${embedConfig.embeddingModel ?? colors.dim('nomic-ai/nomic-embed-text-v1.5')}`,
+			);
+			lines.push(
+				`  ${colors.bold('Dtype:')}    ${embedConfig.dtype ?? colors.dim('q8')}`,
+			);
+		}
 
 		lines.push('');
 		lines.push(colors.bold(colors.cyan('Memory:')));
@@ -3576,10 +3585,12 @@ async function main(): Promise<void> {
 	}
 
 	const { embedConfig } = configResult;
-	const embedder = createLocalEmbedder({
-		model: embedConfig.embeddingModel,
-		dtype: embedConfig.dtype,
-	});
+	const embedder = embedConfig.teiUrl
+		? createTEIEmbedder({ baseUrl: embedConfig.teiUrl })
+		: createLocalEmbedder({
+				model: embedConfig.embeddingModel,
+				dtype: embedConfig.dtype,
+			});
 	const textGenerator = createACPGenerator({ client: acpClient });
 
 	const { workspaceSettings, workspacePrompt } = configResult;
@@ -3872,7 +3883,10 @@ async function main(): Promise<void> {
 	const statusLine = createStatusLine({ colors });
 
 	// Record session start
-	usageTracker.record({ type: 'message', model: modelLabel });
+	usageTracker.record({
+		type: 'message',
+		model: bannerServerInfo?.model ?? bannerServerInfo?.name ?? 'unknown',
+	});
 
 	// Register keybindings
 	keybindings.register({ name: 'o', ctrl: true }, 'Toggle verbose', () =>

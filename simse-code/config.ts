@@ -67,6 +67,8 @@ export interface EmbedFileConfig {
 	readonly embeddingModel?: string;
 	/** ONNX quantization dtype (fp32, fp16, q8, q4). */
 	readonly dtype?: 'fp32' | 'fp16' | 'q8' | 'q4';
+	/** TEI server URL — when set, uses TEI HTTP bridge instead of local embedder. */
+	readonly teiUrl?: string;
 	/** @deprecated ACP agent ID — use embeddingModel instead. */
 	readonly embeddingAgent?: string;
 	/** @deprecated ACP server name — use embeddingModel instead. */

@@ -1,8 +1,8 @@
 /**
- * SimSE Code — @-File Mentions with Autocomplete
+ * SimSE Code — @-Mentions with Autocomplete
  *
- * Detects @path mentions in user input, resolves them to file content,
- * and provides Tab autocomplete for file paths.
+ * Detects @path, @vfs://path, and @noteId mentions in user input,
+ * resolves them to content, and provides Tab autocomplete.
  * No external deps.
  */
 
@@ -17,12 +17,15 @@ export interface FileMention {
 	readonly path: string;
 	readonly content: string;
 	readonly size: number;
+	readonly kind: 'file' | 'vfs' | 'note';
+	/** For note mentions: topic label. */
+	readonly topic?: string;
 }
 
 export interface FileMentionResult {
 	/** User input with @mentions removed. */
 	readonly cleanInput: string;
-	/** Resolved file mentions with their content. */
+	/** Resolved mentions with their content. */
 	readonly mentions: readonly FileMention[];
 }
 
@@ -33,6 +36,21 @@ export interface FileMentionResolverOptions {
 	readonly maxFileSize?: number;
 	/** Directories to exclude from autocomplete. */
 	readonly excludeDirs?: readonly string[];
+	/** Resolve a VFS path to its content. */
+	readonly resolveVFS?: (
+		path: string,
+	) => { content: string; size: number } | undefined;
+	/** Resolve a library note by 8-char ID prefix. */
+	readonly resolveNote?: (
+		idPrefix: string,
+	) => { id: string; text: string; topic: string } | undefined;
+}
+
+export interface AtMentionCompleteOptions extends FileMentionResolverOptions {
+	/** Complete VFS paths given a partial (after `vfs://`). */
+	readonly completeVFS?: (partial: string) => readonly string[];
+	/** Complete note IDs given a partial prefix. */
+	readonly completeNote?: (partial: string) => readonly string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -61,11 +79,19 @@ const DEFAULT_EXCLUDE_DIRS = new Set([
 // Mention resolution
 // ---------------------------------------------------------------------------
 
-const MENTION_PATTERN = /@([\w./-]+(?:\.\w+)?)/g;
+/** Matches @vfs://path, @file/path.ext, and @hexid */
+const MENTION_PATTERN = /@(vfs:\/\/[\w./-]+|[\w./-]+(?:\.\w+)?)/g;
+
+/** 8-char lowercase alphanumeric — note ID prefix. */
+const NOTE_ID_RE = /^[a-f0-9]{8}$/;
+
+function isNoteIdPrefix(s: string): boolean {
+	return NOTE_ID_RE.test(s);
+}
 
 /**
- * Resolve @-file mentions in user input.
- * Returns the cleaned input and an array of file mentions with content.
+ * Resolve @-mentions in user input.
+ * Returns the cleaned input and an array of resolved mentions.
  */
 export function resolveFileMentions(
 	input: string,
@@ -76,29 +102,70 @@ export function resolveFileMentions(
 	const mentions: FileMention[] = [];
 	const seen = new Set<string>();
 
-	let cleanInput = input;
 	let match: RegExpExecArray | null = MENTION_PATTERN.exec(input);
 
 	while (match !== null) {
-		const rawPath = match[1];
-		const fullPath = resolve(baseDir, rawPath);
+		const raw = match[1];
 
-		if (!seen.has(fullPath) && existsSync(fullPath)) {
-			try {
-				const stat = statSync(fullPath);
-				if (stat.isFile() && stat.size <= maxSize) {
-					const content = readFileSync(fullPath, 'utf-8');
+		if (raw.startsWith('vfs://')) {
+			// VFS mention
+			const vfsPath = raw.slice(6); // strip "vfs://"
+			if (!seen.has(raw) && options?.resolveVFS) {
+				const resolved = options.resolveVFS(vfsPath);
+				if (resolved) {
 					mentions.push(
 						Object.freeze({
-							path: rawPath,
-							content,
-							size: stat.size,
+							path: raw,
+							content: resolved.content,
+							size: resolved.size,
+							kind: 'vfs' as const,
 						}),
 					);
-					seen.add(fullPath);
+					seen.add(raw);
 				}
-			} catch {
-				// Skip unreadable files
+			}
+		} else if (
+			isNoteIdPrefix(raw) &&
+			!raw.includes('/') &&
+			!raw.includes('.')
+		) {
+			// Note ID mention
+			if (!seen.has(raw) && options?.resolveNote) {
+				const resolved = options.resolveNote(raw);
+				if (resolved) {
+					mentions.push(
+						Object.freeze({
+							path: raw,
+							content: resolved.text,
+							size: resolved.text.length,
+							kind: 'note' as const,
+							topic: resolved.topic,
+						}),
+					);
+					seen.add(raw);
+				}
+			}
+		} else {
+			// Filesystem mention
+			const fullPath = resolve(baseDir, raw);
+			if (!seen.has(fullPath) && existsSync(fullPath)) {
+				try {
+					const stat = statSync(fullPath);
+					if (stat.isFile() && stat.size <= maxSize) {
+						const content = readFileSync(fullPath, 'utf-8');
+						mentions.push(
+							Object.freeze({
+								path: raw,
+								content,
+								size: stat.size,
+								kind: 'file' as const,
+							}),
+						);
+						seen.add(fullPath);
+					}
+				} catch {
+					// Skip unreadable files
+				}
 			}
 		}
 
@@ -106,7 +173,7 @@ export function resolveFileMentions(
 	}
 
 	// Remove mentions from input text
-	cleanInput = input.replace(MENTION_PATTERN, '').trim();
+	const cleanInput = input.replace(MENTION_PATTERN, '').trim();
 
 	return Object.freeze({
 		cleanInput,
@@ -124,14 +191,48 @@ export function formatMentionsAsContext(
 
 	const parts: string[] = [];
 	for (const mention of mentions) {
-		parts.push(`<file path="${mention.path}">\n${mention.content}\n</file>`);
+		if (mention.kind === 'note') {
+			parts.push(
+				`<note id="${mention.path}"${mention.topic ? ` topic="${mention.topic}"` : ''}>\n${mention.content}\n</note>`,
+			);
+		} else {
+			parts.push(
+				`<file path="${mention.path}">\n${mention.content}\n</file>`,
+			);
+		}
 	}
 	return parts.join('\n\n');
 }
 
 // ---------------------------------------------------------------------------
-// File autocomplete
+// Autocomplete
 // ---------------------------------------------------------------------------
+
+/**
+ * Provide Tab-completion candidates for @-mentions.
+ * Dispatches to VFS, note, or filesystem completion based on prefix.
+ */
+export function completeAtMention(
+	partial: string,
+	options?: AtMentionCompleteOptions,
+): readonly string[] {
+	if (partial.startsWith('vfs://')) {
+		const vfsPartial = partial.slice(6);
+		return options?.completeVFS?.(vfsPartial) ?? [];
+	}
+
+	// Short alphanum → note ID prefix
+	if (/^[a-f0-9]+$/.test(partial) && partial.length <= 8) {
+		const noteResults = options?.completeNote?.(partial) ?? [];
+		// Also try filesystem as fallback
+		const fileResults = completeFilePath(partial, options);
+		// Combine, notes first
+		const combined = [...noteResults, ...fileResults];
+		return [...new Set(combined)];
+	}
+
+	return completeFilePath(partial, options);
+}
 
 /**
  * Provide Tab-completion candidates for @-file mentions.

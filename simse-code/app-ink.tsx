@@ -1,3 +1,4 @@
+import chalk from 'chalk';
 import { Box, Text, useInput } from 'ink';
 import React, {
 	type ReactNode,
@@ -13,7 +14,10 @@ import { createCommandRegistry } from './command-registry.js';
 import { Markdown } from './components/chat/markdown.js';
 import { MessageList } from './components/chat/message-list.js';
 import { ToolCallBox } from './components/chat/tool-call-box.js';
-import { PromptInput, type PromptMode } from './components/input/prompt-input.js';
+import {
+	PromptInput,
+	type PromptMode,
+} from './components/input/prompt-input.js';
 import { Banner } from './components/layout/banner.js';
 import { MainLayout } from './components/layout/main-layout.js';
 import { StatusBar } from './components/layout/status-bar.js';
@@ -31,6 +35,12 @@ import { sessionCommands } from './features/session/index.js';
 import { toolsCommands } from './features/tools/index.js';
 import { useAgenticLoop } from './hooks/use-agentic-loop.js';
 import { useCommandDispatch } from './hooks/use-command-dispatch.js';
+import {
+	completeAtMention,
+	formatMentionsAsContext,
+	resolveFileMentions,
+} from './file-mentions.js';
+import { detectImages, formatImageIndicator } from './image-input.js';
 import type { OutputItem } from './ink-types.js';
 import type { ToolRegistry } from './tool-registry.js';
 import { createToolRegistry } from './tool-registry.js';
@@ -189,8 +199,11 @@ export function App({
 		[hasACP, currentServerName],
 	);
 
-	const { state: loopState, submit: submitToLoop, abort: abortLoop } =
-		useAgenticLoop(loopOptions);
+	const {
+		state: loopState,
+		submit: submitToLoop,
+		abort: abortLoop,
+	} = useAgenticLoop(loopOptions);
 
 	// Escape key interrupts the agentic loop when processing
 	useInput(
@@ -198,13 +211,15 @@ export function App({
 			if (key.escape) {
 				abortLoop();
 				setIsProcessing(false);
-				setItems((prev) => [
-					...prev,
-					{ kind: 'info', text: 'Interrupted.' },
-				]);
+				setItems((prev) => [...prev, { kind: 'info', text: 'Interrupted.' }]);
 			}
 		},
 		{ isActive: isProcessing },
+	);
+
+	const handleCompleteAtMention = useCallback(
+		(partial: string): readonly string[] => completeAtMention(partial),
+		[],
 	);
 
 	const handleSubmit = useCallback(
@@ -237,8 +252,47 @@ export function App({
 					},
 				]);
 			} else {
+				// Detect images in user input
+				const { cleanInput: imageClean, images } = detectImages(input);
+
+				// Show image indicators
+				if (images.length > 0) {
+					const indicators = images.map((img) =>
+						formatImageIndicator(img, {
+							dim: chalk.dim,
+							cyan: chalk.cyan,
+						}),
+					);
+					setItems((prev) => [
+						...prev,
+						{ kind: 'info', text: indicators.join('\n') },
+					]);
+				}
+
+				// Resolve @-mentions
+				const afterImages = images.length > 0 ? imageClean : input;
+				const mentionResult = resolveFileMentions(afterImages);
+				let processedInput = mentionResult.cleanInput || afterImages;
+
+				if (mentionResult.mentions.length > 0) {
+					const mentionContext = formatMentionsAsContext(
+						mentionResult.mentions,
+					);
+					processedInput = `${mentionContext}\n\n${processedInput}`;
+					setItems((prev) => [
+						...prev,
+						...mentionResult.mentions.map((m) => ({
+							kind: 'info' as const,
+							text: `  @${m.path} (${m.size} bytes)`,
+						})),
+					]);
+				}
+
 				// Send to agentic loop
-				const completedItems = await submitToLoop(input);
+				const completedItems = await submitToLoop(
+					processedInput,
+					images.length > 0 ? images : undefined,
+				);
 				setItems((prev) => [...prev, ...completedItems]);
 			}
 
@@ -280,6 +334,7 @@ export function App({
 					planMode={planMode}
 					commands={registry.getAll()}
 					onModeChange={setPromptMode}
+					onCompleteAtMention={handleCompleteAtMention}
 				/>
 			</Box>
 			{ctrlCWarning ? (
@@ -287,7 +342,11 @@ export function App({
 					<Text dimColor>Press Ctrl-C again to exit</Text>
 				</Box>
 			) : promptMode === 'normal' ? (
-				<StatusBar isProcessing={isProcessing} planMode={planMode} verbose={verbose} />
+				<StatusBar
+					isProcessing={isProcessing}
+					planMode={planMode}
+					verbose={verbose}
+				/>
 			) : null}
 		</MainLayout>
 	);

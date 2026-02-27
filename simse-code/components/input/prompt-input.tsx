@@ -28,7 +28,7 @@ const SHORTCUTS: readonly { key: string; desc: string }[] = [
 	{ key: 'ctrl+l', desc: 'clear' },
 ];
 
-export type PromptMode = 'normal' | 'shortcuts' | 'autocomplete';
+export type PromptMode = 'normal' | 'shortcuts' | 'autocomplete' | 'at-mention';
 
 interface PromptInputProps {
 	readonly onSubmit: (value: string) => void;
@@ -36,6 +36,7 @@ interface PromptInputProps {
 	readonly planMode?: boolean;
 	readonly commands?: readonly CommandDefinition[];
 	readonly onModeChange?: (mode: PromptMode) => void;
+	readonly onCompleteAtMention?: (partial: string) => readonly string[];
 }
 
 export function PromptInput({
@@ -44,6 +45,7 @@ export function PromptInput({
 	planMode,
 	commands = [],
 	onModeChange,
+	onCompleteAtMention,
 }: PromptInputProps) {
 	const [value, setValue] = useState('');
 	const [mode, _setMode] = useState<PromptMode>('normal');
@@ -58,6 +60,12 @@ export function PromptInput({
 			PLACEHOLDER_TIPS[Math.floor(Math.random() * PLACEHOLDER_TIPS.length)]!,
 	);
 
+	// Extract the @partial from the end of the current value
+	const atQuery = useMemo(() => {
+		const m = value.match(/@(\S*)$/);
+		return m ? m[1] : '';
+	}, [value]);
+
 	// Filter commands for autocomplete
 	const filteredCommands = useMemo(() => {
 		if (!value.startsWith('/')) return [];
@@ -71,6 +79,35 @@ export function PromptInput({
 			.slice(0, 8);
 	}, [value, commands]);
 
+	// @-mention completion candidates
+	const atCandidates = useMemo(() => {
+		if (mode !== 'at-mention' || !onCompleteAtMention) return [];
+		return onCompleteAtMention(atQuery).slice(0, 8);
+	}, [mode, atQuery, onCompleteAtMention]);
+
+	// Ghost text suggestion: complete a slash command when there's exactly one match
+	const suggestion = useMemo(() => {
+		// @ ghost text
+		if (mode === 'at-mention' && atCandidates.length === 1) {
+			const candidate = atCandidates[0]!;
+			if (candidate.startsWith(atQuery) && candidate !== atQuery) {
+				return candidate.slice(atQuery.length);
+			}
+			return undefined;
+		}
+
+		if (!value.startsWith('/') || value.length < 2) return undefined;
+		if (mode !== 'normal' && mode !== 'autocomplete') return undefined;
+		const prefix = value.slice(1).toLowerCase();
+		const matches = commands.filter((cmd) =>
+			cmd.name.toLowerCase().startsWith(prefix),
+		);
+		if (matches.length === 1 && matches[0]!.name.toLowerCase() !== prefix) {
+			return matches[0]!.name.slice(prefix.length);
+		}
+		return undefined;
+	}, [value, commands, mode, atCandidates, atQuery]);
+
 	const handleChange = (newValue: string) => {
 		// Intercept `?` on empty input to show shortcuts
 		if (newValue === '?' && value === '') {
@@ -80,10 +117,19 @@ export function PromptInput({
 
 		setValue(newValue);
 
+		// Check for @-mention at end of input
+		const atMatch = newValue.match(/@(\S*)$/);
+		if (atMatch && onCompleteAtMention) {
+			if (mode !== 'at-mention') setMode('at-mention');
+			setSelectedIndex(0);
+			return;
+		}
+
+		// Check for / command autocomplete
 		if (newValue.startsWith('/') && newValue.length >= 1) {
 			if (mode !== 'autocomplete') setMode('autocomplete');
 			setSelectedIndex(0);
-		} else if (mode === 'autocomplete') {
+		} else if (mode === 'autocomplete' || mode === 'at-mention') {
 			setMode('normal');
 		}
 	};
@@ -102,6 +148,41 @@ export function PromptInput({
 				// Any key dismisses shortcuts
 				setMode('normal');
 				return;
+			}
+
+			if (mode === 'at-mention') {
+				if (key.escape) {
+					// Remove the @partial from the end
+					const cleaned = value.replace(/@\S*$/, '');
+					setValue(cleaned);
+					setMode('normal');
+					return;
+				}
+				if (key.tab && atCandidates.length > 0) {
+					const candidate = atCandidates[selectedIndex];
+					if (candidate) {
+						// Replace the @partial at end with @candidate
+						const newVal = value.replace(/@\S*$/, `@${candidate}`);
+						setValue(newVal);
+						// Stay in at-mention mode if it's a directory
+						if (candidate.endsWith('/')) {
+							setSelectedIndex(0);
+						} else {
+							setMode('normal');
+						}
+					}
+					return;
+				}
+				if (key.upArrow) {
+					setSelectedIndex((i) => Math.max(0, i - 1));
+					return;
+				}
+				if (key.downArrow) {
+					setSelectedIndex((i) =>
+						Math.min(atCandidates.length - 1, i + 1),
+					);
+					return;
+				}
 			}
 
 			if (mode === 'autocomplete') {
@@ -148,6 +229,7 @@ export function PromptInput({
 					onSubmit={handleSubmit}
 					isActive={!disabled && mode !== 'shortcuts'}
 					placeholder={placeholder}
+					suggestion={suggestion}
 				/>
 			</Box>
 
@@ -166,6 +248,22 @@ export function PromptInput({
 								{i === selectedIndex ? '\u276F' : ' '} /{cmd.name.padEnd(24)}
 							</Text>
 							<Text dimColor>{cmd.description}</Text>
+						</Box>
+					))}
+				</Box>
+			)}
+
+			{/* @-mention autocomplete - below input */}
+			{mode === 'at-mention' && atCandidates.length > 0 && (
+				<Box flexDirection="column" paddingLeft={2}>
+					{atCandidates.map((candidate, i) => (
+						<Box key={candidate}>
+							<Text
+								color={i === selectedIndex ? 'cyan' : undefined}
+								bold={i === selectedIndex}
+							>
+								{i === selectedIndex ? '\u276F' : ' '} @{candidate}
+							</Text>
 						</Box>
 					))}
 				</Box>

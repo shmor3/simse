@@ -517,6 +517,47 @@ export interface Librarian {
 }
 
 // ---------------------------------------------------------------------------
+// Librarian Definition (configurable librarian JSON schema)
+// ---------------------------------------------------------------------------
+
+export interface LibrarianDefinition {
+	readonly name: string;
+	readonly description: string;
+	readonly purpose: string;
+	readonly topics: readonly string[];
+	readonly permissions: {
+		readonly add: boolean;
+		readonly delete: boolean;
+		readonly reorganize: boolean;
+	};
+	readonly thresholds: {
+		readonly topicComplexity: number;
+		readonly escalateAt: number;
+	};
+	readonly acp?: {
+		readonly command: string;
+		readonly args?: readonly string[];
+		readonly agentId?: string;
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Librarian Bidding & Arbitration
+// ---------------------------------------------------------------------------
+
+export interface LibrarianBid {
+	readonly librarianName: string;
+	readonly argument: string;
+	readonly confidence: number;
+}
+
+export interface ArbitrationResult {
+	readonly winner: string;
+	readonly reason: string;
+	readonly bids: readonly LibrarianBid[];
+}
+
+// ---------------------------------------------------------------------------
 // CirculationDesk (async background queue processing)
 // ---------------------------------------------------------------------------
 
@@ -532,6 +573,12 @@ export interface CirculationDeskThresholds {
 	readonly optimization?: {
 		readonly topicThreshold?: number;
 		readonly globalThreshold?: number;
+		readonly modelId: string;
+	};
+	readonly spawning?: {
+		readonly complexityThreshold?: number;
+		readonly depthThreshold?: number;
+		readonly childTopicThreshold?: number;
 		readonly modelId: string;
 	};
 }

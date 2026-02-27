@@ -15,6 +15,9 @@ export interface CirculationDeskOptions {
 	) => Promise<string>;
 	readonly checkDuplicate: (text: string) => Promise<DuplicateCheckResult>;
 	readonly getVolumesForTopic: (topic: string) => Volume[];
+	readonly deleteVolume?: (id: string) => Promise<void>;
+	readonly getTotalVolumeCount?: () => number;
+	readonly getAllTopics?: () => string[];
 	readonly thresholds?: CirculationDeskThresholds;
 	readonly catalog?: import('./types.js').TopicCatalog;
 }
@@ -33,25 +36,47 @@ export function createCirculationDesk(
 		addVolume,
 		checkDuplicate,
 		getVolumesForTopic,
+		deleteVolume,
+		getTotalVolumeCount,
+		getAllTopics,
 		catalog,
 	} = options;
 	const minEntries = options.thresholds?.compendium?.minEntries ?? 10;
 	const maxVolumesPerTopic =
 		options.thresholds?.reorganization?.maxVolumesPerTopic ?? 30;
-	const optimizationThreshold =
-		options.thresholds?.optimization?.topicThreshold ?? 20;
-	const optimizationModelId =
-		options.thresholds?.optimization?.modelId ?? 'default';
+	const optimizationConfig = options.thresholds?.optimization;
+	const topicThreshold = optimizationConfig?.topicThreshold ?? 50;
+	const globalThreshold = optimizationConfig?.globalThreshold ?? 500;
 
 	const queue: Job[] = [];
 	let isProcessing = false;
 	let disposed = false;
+
+	const checkEscalation = (topic: string): void => {
+		if (!optimizationConfig || !deleteVolume) return;
+
+		const topicVolumes = getVolumesForTopic(topic);
+		if (topicVolumes.length >= topicThreshold) {
+			queue.push({ type: 'optimization', topic });
+			return;
+		}
+
+		if (getTotalVolumeCount && getAllTopics) {
+			const total = getTotalVolumeCount();
+			if (total >= globalThreshold) {
+				for (const t of getAllTopics()) {
+					queue.push({ type: 'optimization', topic: t });
+				}
+			}
+		}
+	};
 
 	const processJob = async (job: Job): Promise<void> => {
 		try {
 			switch (job.type) {
 				case 'extraction': {
 					const result = await librarian.extract(job.turn);
+					const extractedTopics = new Set<string>();
 					for (const mem of result.memories) {
 						const dup = await checkDuplicate(mem.text);
 						if (dup.isDuplicate) continue;
@@ -65,6 +90,10 @@ export function createCirculationDesk(
 							tags: mem.tags.join(','),
 							entryType: mem.entryType,
 						});
+						extractedTopics.add(topic);
+					}
+					for (const topic of extractedTopics) {
+						checkEscalation(topic);
 					}
 					break;
 				}
@@ -94,20 +123,29 @@ export function createCirculationDesk(
 					break;
 				}
 				case 'optimization': {
+					if (!deleteVolume || !optimizationConfig) break;
 					const volumes = getVolumesForTopic(job.topic);
-					if (volumes.length >= optimizationThreshold) {
-						const result = await librarian.optimize(
-							volumes,
-							job.topic,
-							optimizationModelId,
-						);
-						if (catalog) {
-							for (const move of result.reorganization.moves) {
-								catalog.relocate(move.volumeId, move.newTopic);
-							}
-							for (const merge of result.reorganization.merges) {
-								catalog.merge(merge.source, merge.target);
-							}
+					if (volumes.length === 0) break;
+					const result = await librarian.optimize(
+						volumes,
+						job.topic,
+						optimizationConfig.modelId,
+					);
+					for (const id of result.pruned) {
+						await deleteVolume(id);
+					}
+					if (result.summary) {
+						await addVolume(result.summary, {
+							topic: job.topic,
+							entryType: 'compendium',
+						});
+					}
+					if (catalog) {
+						for (const move of result.reorganization.moves) {
+							catalog.relocate(move.volumeId, move.newTopic);
+						}
+						for (const merge of result.reorganization.merges) {
+							catalog.merge(merge.source, merge.target);
 						}
 					}
 					break;

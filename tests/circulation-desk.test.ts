@@ -144,3 +144,133 @@ describe('CirculationDesk', () => {
 		expect(addFn).not.toHaveBeenCalled();
 	});
 });
+
+describe('CirculationDesk optimization', () => {
+	it('enqueueOptimization adds an optimization job', async () => {
+		const librarian = createMockLibrarian();
+		const desk = createCirculationDesk({
+			librarian,
+			addVolume: async () => 'id',
+			checkDuplicate: async () => ({ isDuplicate: false }),
+			getVolumesForTopic: () => [],
+			deleteVolume: async () => {},
+			getTotalVolumeCount: () => 0,
+			getAllTopics: () => [],
+			thresholds: {
+				optimization: { modelId: 'claude-opus-4-6' },
+			},
+		});
+
+		desk.enqueueOptimization('test/topic');
+		expect(desk.pending).toBe(1);
+		await desk.drain();
+		expect(desk.pending).toBe(0);
+	});
+
+	it('optimization job calls librarian.optimize and deletes pruned volumes', async () => {
+		const librarian = createMockLibrarian();
+		(librarian.optimize as any).mockImplementation(async () => ({
+			pruned: ['v2'],
+			summary: 'Optimized summary',
+			reorganization: { moves: [], newSubtopics: [], merges: [] },
+			modelUsed: 'claude-opus-4-6',
+		}));
+
+		const deleteFn = mock(async () => {});
+		const addFn = mock(async () => 'new-id');
+		const volumes = [
+			{
+				id: 'v1',
+				text: 'fact 1',
+				embedding: [0.1],
+				metadata: { topic: 'test' },
+				timestamp: 1,
+			},
+			{
+				id: 'v2',
+				text: 'fact 2 (duplicate)',
+				embedding: [0.2],
+				metadata: { topic: 'test' },
+				timestamp: 2,
+			},
+		];
+
+		const desk = createCirculationDesk({
+			librarian,
+			addVolume: addFn,
+			checkDuplicate: async () => ({ isDuplicate: false }),
+			getVolumesForTopic: () => volumes,
+			deleteVolume: deleteFn,
+			getTotalVolumeCount: () => 2,
+			getAllTopics: () => ['test'],
+			thresholds: {
+				optimization: { modelId: 'claude-opus-4-6' },
+			},
+		});
+
+		desk.enqueueOptimization('test');
+		await desk.drain();
+		expect(librarian.optimize).toHaveBeenCalled();
+		expect(deleteFn).toHaveBeenCalledWith('v2');
+		expect(addFn).toHaveBeenCalledWith('Optimized summary', {
+			topic: 'test',
+			entryType: 'compendium',
+		});
+	});
+
+	it('auto-escalates when topic threshold is exceeded after extraction', async () => {
+		const librarian = createMockLibrarian();
+		const volumes = Array.from({ length: 51 }, (_, i) => ({
+			id: `v${i}`,
+			text: `fact ${i}`,
+			embedding: [0.1],
+			metadata: { topic: 'test/topic' },
+			timestamp: i,
+		}));
+
+		const desk = createCirculationDesk({
+			librarian,
+			addVolume: async () => 'id',
+			checkDuplicate: async () => ({ isDuplicate: false }),
+			getVolumesForTopic: () => volumes,
+			deleteVolume: async () => {},
+			getTotalVolumeCount: () => 51,
+			getAllTopics: () => ['test/topic'],
+			thresholds: {
+				optimization: {
+					topicThreshold: 50,
+					modelId: 'claude-opus-4-6',
+				},
+			},
+		});
+
+		desk.enqueueExtraction({ userInput: 'x', response: 'y' });
+		await desk.drain();
+		// After extraction, auto-escalation should have enqueued and processed an optimization job
+		expect(librarian.optimize).toHaveBeenCalled();
+	});
+
+	it('does not auto-escalate when thresholds are not exceeded', async () => {
+		const librarian = createMockLibrarian();
+		const desk = createCirculationDesk({
+			librarian,
+			addVolume: async () => 'id',
+			checkDuplicate: async () => ({ isDuplicate: false }),
+			getVolumesForTopic: () => [],
+			deleteVolume: async () => {},
+			getTotalVolumeCount: () => 5,
+			getAllTopics: () => ['test'],
+			thresholds: {
+				optimization: {
+					topicThreshold: 50,
+					globalThreshold: 500,
+					modelId: 'claude-opus-4-6',
+				},
+			},
+		});
+
+		desk.enqueueExtraction({ userInput: 'x', response: 'y' });
+		await desk.drain();
+		expect(librarian.optimize).not.toHaveBeenCalled();
+	});
+});

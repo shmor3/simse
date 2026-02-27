@@ -3,6 +3,8 @@
 // and reorganization.
 // ---------------------------------------------------------------------------
 
+import { createACPGenerator } from '../acp/acp-adapters.js';
+import type { ACPClient } from '../acp/acp-client.js';
 import type {
 	ClassificationResult,
 	ExtractionMemory,
@@ -218,4 +220,9 @@ Respond with ONLY valid JSON.`;
 	};
 
 	return Object.freeze({ extract, summarize, classifyTopic, reorganize, optimize });
+}
+
+export function createDefaultLibrarian(acpClient: ACPClient): Librarian {
+	const provider = createACPGenerator({ client: acpClient });
+	return createLibrarian(provider);
 }

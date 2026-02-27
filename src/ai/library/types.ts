@@ -495,6 +495,13 @@ export interface OptimizationResult {
 	readonly modelUsed: string;
 }
 
+/** Subset of Library needed during librarian bidding. */
+export interface LibrarianLibraryAccess {
+	readonly search: (query: string, maxResults?: number) => Promise<Lookup[]>;
+	readonly getTopics: () => TopicInfo[];
+	readonly filterByTopic: (topics: string[]) => Volume[];
+}
+
 export interface Librarian {
 	readonly extract: (turn: TurnContext) => Promise<ExtractionResult>;
 	readonly summarize: (
@@ -514,6 +521,11 @@ export interface Librarian {
 		topic: string,
 		modelId: string,
 	) => Promise<OptimizationResult>;
+	readonly bid: (
+		content: string,
+		topic: string,
+		library: LibrarianLibraryAccess,
+	) => Promise<LibrarianBid>;
 }
 
 // ---------------------------------------------------------------------------

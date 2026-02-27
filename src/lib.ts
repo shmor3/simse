@@ -200,6 +200,7 @@ export { createTextCache } from './ai/library/text-cache.js';
 export { createShelf } from './ai/library/shelf.js';
 export type { TopicCatalogOptions } from './ai/library/topic-catalog.js';
 export { createTopicCatalog } from './ai/library/topic-catalog.js';
+export type { LibrarianIdentity } from './ai/library/librarian.js';
 export { createLibrarian, createDefaultLibrarian } from './ai/library/librarian.js';
 export type { CirculationDeskOptions } from './ai/library/circulation-desk.js';
 export { createCirculationDesk } from './ai/library/circulation-desk.js';
@@ -217,7 +218,11 @@ export type {
 	ExtractionMemory,
 	ExtractionResult,
 	LearningOptions,
+	ArbitrationResult,
 	Librarian,
+	LibrarianBid,
+	LibrarianDefinition,
+	LibrarianLibraryAccess,
 	LibraryConfig,
 	Lookup,
 	MetadataFilter,

@@ -6,6 +6,7 @@ import {
 	createLibrarian,
 } from '../src/ai/library/librarian.js';
 import type {
+	LibrarianLibraryAccess,
 	TextGenerationProvider,
 	Volume,
 } from '../src/ai/library/types.js';
@@ -291,5 +292,101 @@ describe('createDefaultLibrarian', () => {
 		});
 		expect(result.memories).toEqual([]);
 		expect(client.generate).toHaveBeenCalled();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// bid
+// ---------------------------------------------------------------------------
+
+function createMockLibrary(
+	overrides?: Partial<LibrarianLibraryAccess>,
+): LibrarianLibraryAccess {
+	return {
+		search: mock(async () => []),
+		getTopics: mock(() => []),
+		filterByTopic: mock(() => []),
+		...overrides,
+	};
+}
+
+describe('bid', () => {
+	it('produces a bid with argument and confidence', async () => {
+		const generator = createMockGenerator(
+			JSON.stringify({
+				argument: 'This content aligns with my database expertise.',
+				confidence: 0.85,
+			}),
+		);
+		const librarian = createLibrarian(generator, {
+			name: 'db-librarian',
+			purpose: 'Manages database-related knowledge.',
+		});
+		const library = createMockLibrary();
+		const result = await librarian.bid(
+			'Users table uses UUID primary keys',
+			'architecture/database',
+			library,
+		);
+		expect(result.librarianName).toBe('db-librarian');
+		expect(result.argument).toBe(
+			'This content aligns with my database expertise.',
+		);
+		expect(result.confidence).toBe(0.85);
+	});
+
+	it('returns zero confidence on parse failure', async () => {
+		const generator = createMockGenerator('not valid json at all');
+		const librarian = createLibrarian(generator, {
+			name: 'broken-librarian',
+			purpose: 'Will fail to parse.',
+		});
+		const library = createMockLibrary();
+		const result = await librarian.bid(
+			'some content',
+			'any/topic',
+			library,
+		);
+		expect(result.librarianName).toBe('broken-librarian');
+		expect(result.argument).toBe('');
+		expect(result.confidence).toBe(0);
+	});
+
+	it('uses default identity when none provided', async () => {
+		const generator = createMockGenerator(
+			JSON.stringify({
+				argument: 'I can handle this.',
+				confidence: 0.5,
+			}),
+		);
+		const librarian = createLibrarian(generator);
+		const library = createMockLibrary();
+		const result = await librarian.bid(
+			'some content',
+			'general/topic',
+			library,
+		);
+		expect(result.librarianName).toBe('default');
+		expect(result.confidence).toBe(0.5);
+	});
+
+	it('clamps confidence to 0-1 range', async () => {
+		const generator = createMockGenerator(
+			JSON.stringify({
+				argument: 'Very confident.',
+				confidence: 2.5,
+			}),
+		);
+		const librarian = createLibrarian(generator, {
+			name: 'over-confident',
+			purpose: 'Returns inflated confidence.',
+		});
+		const library = createMockLibrary();
+		const result = await librarian.bid(
+			'some content',
+			'any/topic',
+			library,
+		);
+		expect(result.confidence).toBe(1);
 	});
 });

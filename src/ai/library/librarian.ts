@@ -10,6 +10,8 @@ import type {
 	ExtractionMemory,
 	ExtractionResult,
 	Librarian,
+	LibrarianBid,
+	LibrarianLibraryAccess,
 	OptimizationResult,
 	ReorganizationPlan,
 	TextGenerationProvider,
@@ -17,7 +19,21 @@ import type {
 	Volume,
 } from './types.js';
 
-export function createLibrarian(textGenerator: TextGenerationProvider): Librarian {
+export interface LibrarianIdentity {
+	readonly name: string;
+	readonly purpose: string;
+}
+
+const DEFAULT_IDENTITY: LibrarianIdentity = {
+	name: 'default',
+	purpose: 'General-purpose librarian for all topics.',
+};
+
+export function createLibrarian(
+	textGenerator: TextGenerationProvider,
+	identity?: LibrarianIdentity,
+): Librarian {
+	const resolvedIdentity = identity ?? DEFAULT_IDENTITY;
 	const extract = async (turn: TurnContext): Promise<ExtractionResult> => {
 		const prompt = `Analyze this conversation turn and extract important information worth remembering.
 
@@ -219,7 +235,67 @@ Respond with ONLY valid JSON.`;
 		}
 	};
 
-	return Object.freeze({ extract, summarize, classifyTopic, reorganize, optimize });
+	const bid = async (
+		content: string,
+		topic: string,
+		library: LibrarianLibraryAccess,
+	): Promise<LibrarianBid> => {
+		try {
+			const [searchResults, topics, topicVolumes] = await Promise.all([
+				library.search(content, 5),
+				Promise.resolve(library.getTopics()),
+				Promise.resolve(library.filterByTopic([topic])),
+			]);
+
+			const existingContext = searchResults.length > 0
+				? `Existing related volumes:\n${searchResults.map((r) => `- [score=${r.score.toFixed(2)}] ${r.volume.text}`).join('\n')}`
+				: 'No existing related volumes found.';
+
+			const topicContext = topics.length > 0
+				? `Known topics: ${topics.map((t) => `${t.topic} (${t.entryCount} entries)`).join(', ')}`
+				: 'No existing topics.';
+
+			const topicVolumeContext = topicVolumes.length > 0
+				? `Volumes already in topic "${topic}": ${topicVolumes.length}`
+				: `No existing volumes in topic "${topic}".`;
+
+			const prompt = `You are ${resolvedIdentity.name}, a specialized librarian.
+Your purpose: ${resolvedIdentity.purpose}
+
+You are bidding to manage this new content:
+Topic: ${topic}
+Content: ${content}
+
+${existingContext}
+
+${topicContext}
+
+${topicVolumeContext}
+
+Evaluate whether this content falls within your expertise.
+Then argue why you should manage it.
+
+Return ONLY valid JSON: {"argument": "your informed case", "confidence": 0.0-1.0}`;
+
+			const response = await textGenerator.generate(prompt);
+			const parsed = JSON.parse(response);
+			const rawConfidence = Number(parsed.confidence ?? 0);
+			const confidence = Math.max(0, Math.min(1, rawConfidence));
+			return {
+				librarianName: resolvedIdentity.name,
+				argument: typeof parsed.argument === 'string' ? parsed.argument : '',
+				confidence,
+			};
+		} catch {
+			return {
+				librarianName: resolvedIdentity.name,
+				argument: '',
+				confidence: 0,
+			};
+		}
+	};
+
+	return Object.freeze({ extract, summarize, classifyTopic, reorganize, optimize, bid });
 }
 
 export function createDefaultLibrarian(acpClient: ACPClient): Librarian {

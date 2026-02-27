@@ -1,7 +1,10 @@
 // tests/librarian.test.ts
 import { describe, expect, it, mock } from 'bun:test';
 import { createLibrarian } from '../src/ai/library/librarian.js';
-import type { TextGenerationProvider, Volume } from '../src/ai/library/types.js';
+import type {
+	TextGenerationProvider,
+	Volume,
+} from '../src/ai/library/types.js';
 
 function createMockGenerator(response: string): TextGenerationProvider {
 	return {
@@ -116,5 +119,108 @@ describe('Librarian', () => {
 		expect(result.moves[0].newTopic).toBe(
 			'architecture/database/optimization',
 		);
+	});
+});
+
+function createMockGeneratorWithModel(
+	defaultResponse: string,
+	modelResponse: string,
+): TextGenerationProvider {
+	return {
+		generate: mock(async () => defaultResponse),
+		generateWithModel: mock(async () => modelResponse),
+	};
+}
+
+describe('Librarian optimize', () => {
+	it('optimize() uses generateWithModel when available', async () => {
+		const optimizationResponse = JSON.stringify({
+			pruned: ['v2'],
+			summary: 'Condensed summary of database architecture.',
+			reorganization: {
+				moves: [],
+				newSubtopics: [],
+				merges: [],
+			},
+		});
+		const generator = createMockGeneratorWithModel(
+			'unused',
+			optimizationResponse,
+		);
+		const librarian = createLibrarian(generator);
+		const volumes: Volume[] = [
+			{
+				id: 'v1',
+				text: 'Users table uses UUID PKs',
+				embedding: [0.1],
+				metadata: {},
+				timestamp: 1,
+			},
+			{
+				id: 'v2',
+				text: 'Users table has UUID primary keys',
+				embedding: [0.2],
+				metadata: {},
+				timestamp: 2,
+			},
+		];
+		const result = await librarian.optimize(
+			volumes,
+			'architecture/database',
+			'claude-opus-4-6',
+		);
+		expect(result.pruned).toEqual(['v2']);
+		expect(result.summary.length).toBeGreaterThan(0);
+		expect(result.modelUsed).toBe('claude-opus-4-6');
+		expect(generator.generateWithModel).toHaveBeenCalled();
+		expect(generator.generate).not.toHaveBeenCalled();
+	});
+
+	it('optimize() falls back to generate when generateWithModel is absent', async () => {
+		const optimizationResponse = JSON.stringify({
+			pruned: [],
+			summary: 'Summary using default model.',
+			reorganization: { moves: [], newSubtopics: [], merges: [] },
+		});
+		const generator = createMockGenerator(optimizationResponse);
+		const librarian = createLibrarian(generator);
+		const volumes: Volume[] = [
+			{
+				id: 'v1',
+				text: 'Some fact',
+				embedding: [0.1],
+				metadata: {},
+				timestamp: 1,
+			},
+		];
+		const result = await librarian.optimize(volumes, 'test', 'any-model');
+		expect(result.pruned).toEqual([]);
+		expect(result.modelUsed).toBe('any-model');
+		expect(generator.generate).toHaveBeenCalled();
+	});
+
+	it('optimize() returns safe defaults on LLM garbage', async () => {
+		const generator = createMockGeneratorWithModel(
+			'unused',
+			'not valid json at all',
+		);
+		const librarian = createLibrarian(generator);
+		const result = await librarian.optimize(
+			[
+				{
+					id: 'v1',
+					text: 'fact',
+					embedding: [0.1],
+					metadata: {},
+					timestamp: 1,
+				},
+			],
+			'test',
+			'model-id',
+		);
+		expect(result.pruned).toEqual([]);
+		expect(result.summary).toBe('');
+		expect(result.reorganization.moves).toEqual([]);
+		expect(result.modelUsed).toBe('model-id');
 	});
 });

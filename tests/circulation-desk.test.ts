@@ -26,6 +26,12 @@ function createMockLibrarian(): Librarian {
 			newSubtopics: [],
 			merges: [],
 		})),
+		optimize: mock(async () => ({
+			pruned: [],
+			summary: '',
+			reorganization: { moves: [], newSubtopics: [], merges: [] },
+			modelUsed: '',
+		})),
 	};
 }
 

@@ -22,7 +22,8 @@ export interface CirculationDeskOptions {
 type Job =
 	| { type: 'extraction'; turn: TurnContext }
 	| { type: 'compendium'; topic: string }
-	| { type: 'reorganization'; topic: string };
+	| { type: 'reorganization'; topic: string }
+	| { type: 'optimization'; topic: string };
 
 export function createCirculationDesk(
 	options: CirculationDeskOptions,
@@ -37,6 +38,10 @@ export function createCirculationDesk(
 	const minEntries = options.thresholds?.compendium?.minEntries ?? 10;
 	const maxVolumesPerTopic =
 		options.thresholds?.reorganization?.maxVolumesPerTopic ?? 30;
+	const optimizationThreshold =
+		options.thresholds?.optimization?.topicThreshold ?? 20;
+	const optimizationModelId =
+		options.thresholds?.optimization?.modelId ?? 'default';
 
 	const queue: Job[] = [];
 	let isProcessing = false;
@@ -88,6 +93,25 @@ export function createCirculationDesk(
 					}
 					break;
 				}
+				case 'optimization': {
+					const volumes = getVolumesForTopic(job.topic);
+					if (volumes.length >= optimizationThreshold) {
+						const result = await librarian.optimize(
+							volumes,
+							job.topic,
+							optimizationModelId,
+						);
+						if (catalog) {
+							for (const move of result.reorganization.moves) {
+								catalog.relocate(move.volumeId, move.newTopic);
+							}
+							for (const merge of result.reorganization.merges) {
+								catalog.merge(merge.source, merge.target);
+							}
+						}
+					}
+					break;
+				}
 			}
 		} catch {
 			// Failed jobs are logged and dropped (fire-and-forget)
@@ -128,6 +152,10 @@ export function createCirculationDesk(
 		enqueueReorganization: (topic: string) => {
 			if (disposed) return;
 			queue.push({ type: 'reorganization', topic });
+		},
+		enqueueOptimization: (topic: string) => {
+			if (disposed) return;
+			queue.push({ type: 'optimization', topic });
 		},
 		drain,
 		flush,

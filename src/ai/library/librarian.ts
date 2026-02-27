@@ -8,6 +8,7 @@ import type {
 	ExtractionMemory,
 	ExtractionResult,
 	Librarian,
+	OptimizationResult,
 	ReorganizationPlan,
 	TextGenerationProvider,
 	TurnContext,
@@ -153,5 +154,68 @@ Respond with ONLY valid JSON.`;
 		}
 	};
 
-	return Object.freeze({ extract, summarize, classifyTopic, reorganize });
+	const optimize = async (
+		volumes: readonly Volume[],
+		topic: string,
+		modelId: string,
+	): Promise<OptimizationResult> => {
+		const volumeList = volumes
+			.map((v) => `- [${v.id}] ${v.text}`)
+			.join('\n');
+
+		const prompt = `You are a memory optimization agent. Analyze the following volumes in topic "${topic}" and perform maintenance.
+
+Volumes:
+${volumeList}
+
+Tasks:
+1. PRUNE: Identify volume IDs that are redundant, outdated, or low-value. List their IDs.
+2. SUMMARIZE: Write a single concise summary that preserves all important information from the remaining (non-pruned) volumes.
+3. REORGANIZE: Suggest any topic restructuring (moves, new subtopics, merges).
+
+Return a JSON object:
+{
+  "pruned": ["id1", "id2"],
+  "summary": "concise summary text",
+  "reorganization": {
+    "moves": [{"volumeId": "id", "newTopic": "new/topic"}],
+    "newSubtopics": ["new/subtopic"],
+    "merges": [{"source": "topic/a", "target": "topic/b"}]
+  }
+}
+
+Respond with ONLY valid JSON.`;
+
+		try {
+			const response = textGenerator.generateWithModel
+				? await textGenerator.generateWithModel(prompt, modelId)
+				: await textGenerator.generate(prompt);
+			const parsed = JSON.parse(response);
+			return {
+				pruned: Array.isArray(parsed.pruned) ? parsed.pruned : [],
+				summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+				reorganization: {
+					moves: Array.isArray(parsed.reorganization?.moves)
+						? parsed.reorganization.moves
+						: [],
+					newSubtopics: Array.isArray(parsed.reorganization?.newSubtopics)
+						? parsed.reorganization.newSubtopics
+						: [],
+					merges: Array.isArray(parsed.reorganization?.merges)
+						? parsed.reorganization.merges
+						: [],
+				},
+				modelUsed: modelId,
+			};
+		} catch {
+			return {
+				pruned: [],
+				summary: '',
+				reorganization: { moves: [], newSubtopics: [], merges: [] },
+				modelUsed: modelId,
+			};
+		}
+	};
+
+	return Object.freeze({ extract, summarize, classifyTopic, reorganize, optimize });
 }

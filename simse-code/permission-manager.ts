@@ -81,8 +81,8 @@ const READ_ONLY_TOOLS = new Set([
 	'file_read',
 	'glob',
 	'grep',
-	'memory_search',
-	'memory_list',
+	'library_search',
+	'library_list',
 	'task_list',
 	'task_get',
 ]);

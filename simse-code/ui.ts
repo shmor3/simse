@@ -820,10 +820,10 @@ const TOOL_DISPLAY_NAMES: Readonly<Record<string, string>> = {
 	file_create: 'Write',
 	glob: 'Search',
 	grep: 'Search',
-	memory_search: 'Search',
-	memory_add: 'Add',
-	memory_list: 'List',
-	memory_delete: 'Delete',
+	library_search: 'Search',
+	library_shelve: 'Shelve',
+	library_list: 'List',
+	library_withdraw: 'Withdraw',
 	task_list: 'TaskList',
 	task_create: 'TaskCreate',
 	task_update: 'TaskUpdate',
@@ -851,8 +851,8 @@ const TOOL_SUMMARY_VERBS: Readonly<Record<string, string>> = {
 	file_create: 'Created',
 	glob: 'Found',
 	grep: 'Searched',
-	memory_search: 'Found',
-	memory_add: 'Saved',
+	library_search: 'Found',
+	library_shelve: 'Shelved',
 };
 
 // ---------------------------------------------------------------------------

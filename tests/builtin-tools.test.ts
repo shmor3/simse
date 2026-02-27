@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
-import type { MemoryManager } from '../src/ai/memory/memory.js';
+import type { Library } from '../src/ai/library/library.js';
 import type { TaskList } from '../src/ai/tasks/types.js';
 import {
-	registerMemoryTools,
+	registerLibraryTools,
 	registerTaskTools,
 	registerVFSTools,
 } from '../src/ai/tools/builtin-tools.js';
@@ -15,7 +15,7 @@ import { createSilentLogger } from './utils/mocks.js';
 // Mock factories
 // ---------------------------------------------------------------------------
 
-function createMockMemoryManager(): MemoryManager {
+function createMockLibrary(): Library {
 	return {
 		initialize: mock(async () => {}),
 		dispose: mock(async () => {}),
@@ -23,7 +23,7 @@ function createMockMemoryManager(): MemoryManager {
 		addBatch: mock(async () => []),
 		search: mock(async () => [
 			{
-				entry: {
+				volume: {
 					id: '1',
 					text: 'result text',
 					embedding: [0.1],
@@ -44,7 +44,7 @@ function createMockMemoryManager(): MemoryManager {
 		recommend: mock(async () => []),
 		findDuplicates: mock(() => []),
 		checkDuplicate: mock(async () => ({ isDuplicate: false })),
-		summarize: mock(async () => ({
+		compendium: mock(async () => ({
 			summaryId: 's',
 			summaryText: '',
 			sourceIds: [],
@@ -54,12 +54,12 @@ function createMockMemoryManager(): MemoryManager {
 		delete: mock(async () => true),
 		deleteBatch: mock(async () => 0),
 		clear: mock(async () => {}),
-		learningProfile: undefined,
+		patronProfile: undefined,
 		size: 1,
 		isInitialized: true,
 		isDirty: false,
 		embeddingAgent: undefined,
-	} as unknown as MemoryManager;
+	} as unknown as Library;
 }
 
 function createMockTaskList(): TaskList {
@@ -105,28 +105,28 @@ function createMockTaskList(): TaskList {
 }
 
 // ---------------------------------------------------------------------------
-// Memory Tools
+// Library Tools
 // ---------------------------------------------------------------------------
 
-describe('registerMemoryTools', () => {
+describe('registerLibraryTools', () => {
 	let registry: ToolRegistry;
-	let memoryManager: MemoryManager;
+	let library: Library;
 
 	beforeEach(() => {
 		registry = createToolRegistry({ logger: createSilentLogger() });
-		memoryManager = createMockMemoryManager();
-		registerMemoryTools(registry, memoryManager);
+		library = createMockLibrary();
+		registerLibraryTools(registry, library);
 	});
 
-	it('registers memory_search and memory_add tools', () => {
-		expect(registry.toolNames).toContain('memory_search');
-		expect(registry.toolNames).toContain('memory_add');
+	it('registers library_search and library_shelve tools', () => {
+		expect(registry.toolNames).toContain('library_search');
+		expect(registry.toolNames).toContain('library_shelve');
 	});
 
-	it('memory_search returns formatted results', async () => {
+	it('library_search returns formatted results', async () => {
 		const result = await registry.execute({
 			id: 'call-1',
-			name: 'memory_search',
+			name: 'library_search',
 			arguments: { query: 'test' },
 		});
 		expect(result.isError).toBe(false);
@@ -134,34 +134,34 @@ describe('registerMemoryTools', () => {
 		expect(result.output).toContain('0.90');
 	});
 
-	it('memory_search returns no-match message for empty results', async () => {
-		(memoryManager.search as ReturnType<typeof mock>).mockResolvedValue([]);
+	it('library_search returns no-match message for empty results', async () => {
+		(library.search as ReturnType<typeof mock>).mockResolvedValue([]);
 		const result = await registry.execute({
 			id: 'call-1',
-			name: 'memory_search',
+			name: 'library_search',
 			arguments: { query: 'nothing' },
 		});
 		expect(result.isError).toBe(false);
 		expect(result.output).toContain('No matching');
 	});
 
-	it('memory_add stores text and returns ID', async () => {
+	it('library_shelve stores text and returns ID', async () => {
 		const result = await registry.execute({
 			id: 'call-2',
-			name: 'memory_add',
+			name: 'library_shelve',
 			arguments: { text: 'remember this', topic: 'notes' },
 		});
 		expect(result.isError).toBe(false);
 		expect(result.output).toContain('mock-id');
 	});
 
-	it('memory_add wraps errors via toError', async () => {
-		(memoryManager.add as ReturnType<typeof mock>).mockRejectedValue(
+	it('library_shelve wraps errors via toError', async () => {
+		(library.add as ReturnType<typeof mock>).mockRejectedValue(
 			'raw string error',
 		);
 		const result = await registry.execute({
 			id: 'call-3',
-			name: 'memory_add',
+			name: 'library_shelve',
 			arguments: { text: 'fail', topic: 'x' },
 		});
 		expect(result.isError).toBe(true);

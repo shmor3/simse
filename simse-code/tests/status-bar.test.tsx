@@ -1,10 +1,24 @@
 import { render } from 'ink-testing-library';
 import React from 'react';
 import { describe, expect, test } from 'bun:test';
-import { StatusBar } from '../components/layout/status-bar.js';
+import { StatusBar, formatTokens } from '../components/layout/status-bar.js';
+
+describe('formatTokens', () => {
+	test('formats tokens below 1000 without suffix', () => {
+		expect(formatTokens(500)).toBe('500 tokens');
+	});
+
+	test('formats tokens at 1000 with k suffix', () => {
+		expect(formatTokens(1000)).toBe('1.0k tokens');
+	});
+
+	test('formats tokens above 1000 with k suffix', () => {
+		expect(formatTokens(12345)).toBe('12.3k tokens');
+	});
+});
 
 describe('StatusBar', () => {
-	test('renders server and model', () => {
+	test('renders server and model with colon separator', () => {
 		const { lastFrame } = render(
 			<StatusBar
 				server="claude"
@@ -14,11 +28,22 @@ describe('StatusBar', () => {
 			/>,
 		);
 		const frame = lastFrame()!;
-		expect(frame).toContain('claude');
-		expect(frame).toContain('opus-4');
+		expect(frame).toContain('claude:opus-4');
 	});
 
-	test('renders token count', () => {
+	test('renders token count with k suffix', () => {
+		const { lastFrame } = render(
+			<StatusBar
+				server="claude"
+				model="opus-4"
+				tokens={12345}
+				cost="$0.03"
+			/>,
+		);
+		expect(lastFrame()).toContain('12.3k tokens');
+	});
+
+	test('renders cost', () => {
 		const { lastFrame } = render(
 			<StatusBar
 				server="claude"
@@ -27,10 +52,10 @@ describe('StatusBar', () => {
 				cost="$0.03"
 			/>,
 		);
-		expect(lastFrame()).toContain('1234');
+		expect(lastFrame()).toContain('$0.03');
 	});
 
-	test('renders badges when modes active', () => {
+	test('renders mode badges on the right', () => {
 		const { lastFrame } = render(
 			<StatusBar
 				server="claude"

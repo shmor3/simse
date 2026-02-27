@@ -109,8 +109,9 @@ src/
       shelf.ts              # Shelf (createShelf): agent-scoped library partition
       topic-catalog.ts      # TopicCatalog (createTopicCatalog): hierarchical topic classification
                              # Levenshtein-based fuzzy matching, aliases, resolve/relocate/merge
-      librarian.ts          # Librarian (createLibrarian): LLM-driven extraction, summarization,
-                             # topic classification, and reorganization
+      librarian.ts          # Librarian (createLibrarian, createDefaultLibrarian):
+                             # extract, summarize, classifyTopic, reorganize, optimize
+                             # createDefaultLibrarian wraps ACPClient for convenience
       circulation-desk.ts   # CirculationDesk (createCirculationDesk): async background queue
                              # for extraction, compendium, and reorganization jobs
       library-services.ts   # LibraryServices middleware (createLibraryServices)
@@ -203,8 +204,8 @@ The library subsystem uses a **library analogy** throughout. It has five storage
 **Higher-level services:**
 6. **Shelf** (`shelf.ts`): Agent-scoped library partitions. `createShelf(name, library)` returns a `Shelf` that auto-tags volumes with `metadata.shelf` and filters search results to the shelf. `library.shelf(name)` caches shelves. Subagents get dedicated shelves via `subagent-tools.ts`.
 7. **TopicCatalog** (`topic-catalog.ts`): Hierarchical topic classification with Levenshtein-based fuzzy matching (threshold 0.85). `resolve()` normalizes topics, `relocate()` moves volumes, `merge()` combines sections with alias redirection. Auto-creates ancestor topics.
-8. **Librarian** (`librarian.ts`): LLM-driven memory processing. `extract()` identifies facts/decisions/observations from conversation turns. `summarize()` creates compendia. `classifyTopic()` + `reorganize()` maintain the catalog. All methods return safe defaults on LLM parse failures.
-9. **CirculationDesk** (`circulation-desk.ts`): Async background queue for extraction, compendium, and reorganization jobs. Fire-and-forget error handling. Configurable thresholds (`minEntries`, `minAgeMs`, `maxVolumesPerTopic`).
+8. **Librarian** (`librarian.ts`): LLM-driven extraction, summarization, classification, reorganization, and optimization. `createDefaultLibrarian(acpClient)` wraps any ACP client. `optimize()` uses `generateWithModel()` for powerful-model maintenance.
+9. **CirculationDesk** (`circulation-desk.ts`): Async job queue with auto-escalation. Dual thresholds: per-topic (default 50) and global (default 500) trigger optimization with a powerful model. Fire-and-forget error handling.
 
 ### Formatting
 

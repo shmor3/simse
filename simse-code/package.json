@@ -9,6 +9,8 @@
 	"scripts": {
 		"start": "bun run cli.ts",
 		"bridge": "bun run acp-ollama-bridge.ts",
+		"build:engine": "cd ../simse-engine && cargo build --release",
+		"build:engine:wasm": "cd ../simse-engine && cargo build --release --target wasm32-wasip1",
 		"typecheck": "bun x tsc --noEmit",
 		"test": "bun test"
 	},

@@ -6,7 +6,8 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import type { Interface as ReadlineInterface } from 'node:readline';
 import type {
 	ACPFileConfig,
@@ -14,6 +15,51 @@ import type {
 	EmbedFileConfig,
 	SummarizeFileConfig,
 } from './config.js';
+
+// ---------------------------------------------------------------------------
+// simse-engine resolution — find bundled WASM or native binary
+// ---------------------------------------------------------------------------
+
+const __dir = typeof import.meta.dirname === 'string'
+	? import.meta.dirname
+	: dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Resolve the simse-engine binary, preferring:
+ *   1. Native binary on PATH (`simse-engine` / `simse-engine.exe`)
+ *   2. Native binary built locally (`../simse-engine/target/release/simse-engine`)
+ *   3. Bundled WASM (`../simse-engine/target/wasm32-wasip1/release/simse-engine.wasm`)
+ *
+ * Returns `{ command, args }` suitable for an ACPServerConfig entry.
+ */
+function resolveSimseEngine(): { command: string; args: string[] } | undefined {
+	// Check for local native build
+	const nativeExt = process.platform === 'win32' ? '.exe' : '';
+	const nativePath = resolve(__dir, '..', 'simse-engine', 'target', 'release', `simse-engine${nativeExt}`);
+	if (existsSync(nativePath)) {
+		return { command: nativePath, args: [] };
+	}
+
+	// Check for debug native build
+	const debugPath = resolve(__dir, '..', 'simse-engine', 'target', 'debug', `simse-engine${nativeExt}`);
+	if (existsSync(debugPath)) {
+		return { command: debugPath, args: [] };
+	}
+
+	// Check for WASM build (run via bun)
+	const wasmPath = resolve(__dir, '..', 'simse-engine', 'target', 'wasm32-wasip1', 'release', 'simse-engine.wasm');
+	if (existsSync(wasmPath)) {
+		return { command: 'bun', args: ['run', wasmPath] };
+	}
+
+	// Debug WASM build
+	const wasmDebugPath = resolve(__dir, '..', 'simse-engine', 'target', 'wasm32-wasip1', 'debug', 'simse-engine.wasm');
+	if (existsSync(wasmDebugPath)) {
+		return { command: 'bun', args: ['run', wasmDebugPath] };
+	}
+
+	return undefined;
+}
 
 // ---------------------------------------------------------------------------
 // Options & result
@@ -72,6 +118,17 @@ const presets: readonly Preset[] = [
 		label: 'simse-engine',
 		description: 'Local AI via Candle (Rust) — no external server needed',
 		build: async (rl) => {
+			const resolved = resolveSimseEngine();
+			if (!resolved) {
+				console.log(
+					'\n  simse-engine not found. Build it first:\n' +
+					'    cd simse-engine && cargo build --release\n' +
+					'  Or for WASM:\n' +
+					'    cd simse-engine && cargo build --release --target wasm32-wasip1\n',
+				);
+				throw new Error('simse-engine binary not found');
+			}
+
 			const model =
 				(await askOptional(
 					rl,
@@ -85,7 +142,8 @@ const presets: readonly Preset[] = [
 			const device =
 				(await askOptional(rl, '  Device [cpu]: ')) ?? 'cpu';
 
-			const args = [
+			const engineArgs = [
+				...resolved.args,
 				'--model',
 				model,
 				'--model-file',
@@ -96,8 +154,8 @@ const presets: readonly Preset[] = [
 
 			return {
 				name: 'simse-engine',
-				command: 'simse-engine',
-				args,
+				command: resolved.command,
+				args: engineArgs,
 			};
 		},
 	},

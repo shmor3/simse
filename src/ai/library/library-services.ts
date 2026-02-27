@@ -8,6 +8,7 @@
 
 import type { Logger } from '../../logger.js';
 import type { Library } from './library.js';
+import type { LibrarianRegistry } from './librarian-registry.js';
 import {
 	formatMemoryContext,
 	type PromptInjectionOptions,
@@ -48,6 +49,8 @@ export interface LibraryServicesOptions {
 	readonly logger?: Logger;
 	/** Optional CirculationDesk for async background extraction instead of direct library.add(). */
 	readonly circulationDesk?: CirculationDesk;
+	/** Optional LibrarianRegistry for multi-librarian routing via the CirculationDesk. */
+	readonly registry?: LibrarianRegistry;
 }
 
 // ---------------------------------------------------------------------------

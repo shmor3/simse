@@ -202,6 +202,20 @@ export type { TopicCatalogOptions } from './ai/library/topic-catalog.js';
 export { createTopicCatalog } from './ai/library/topic-catalog.js';
 export type { LibrarianIdentity } from './ai/library/librarian.js';
 export { createLibrarian, createDefaultLibrarian } from './ai/library/librarian.js';
+export type { ValidationResult } from './ai/library/librarian-definition.js';
+export {
+	loadDefinition,
+	loadAllDefinitions,
+	matchesTopic,
+	saveDefinition,
+	validateDefinition,
+} from './ai/library/librarian-definition.js';
+export type {
+	LibrarianRegistry,
+	LibrarianRegistryOptions,
+	ManagedLibrarian,
+} from './ai/library/librarian-registry.js';
+export { createLibrarianRegistry } from './ai/library/librarian-registry.js';
 export type { CirculationDeskOptions } from './ai/library/circulation-desk.js';
 export { createCirculationDesk } from './ai/library/circulation-desk.js';
 export type {

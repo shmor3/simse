@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Memory / Vector Store Types
+// Library / Stacks Types
 // ---------------------------------------------------------------------------
 //
 // All types are strictly readonly to enforce immutability throughout
@@ -18,10 +18,10 @@ export interface EmbeddingProvider {
 }
 
 // ---------------------------------------------------------------------------
-// Vector Store Types
+// Volume (was VectorEntry)
 // ---------------------------------------------------------------------------
 
-export interface VectorEntry {
+export interface Volume {
 	readonly id: string;
 	readonly text: string;
 	readonly embedding: readonly number[];
@@ -29,8 +29,12 @@ export interface VectorEntry {
 	readonly timestamp: number;
 }
 
-export interface SearchResult {
-	readonly entry: VectorEntry;
+// ---------------------------------------------------------------------------
+// Lookup (was SearchResult)
+// ---------------------------------------------------------------------------
+
+export interface Lookup {
+	readonly volume: Volume;
 	readonly score: number;
 }
 
@@ -39,7 +43,7 @@ export interface SearchResult {
 // ---------------------------------------------------------------------------
 
 /**
- * How the text query is matched against entry text.
+ * How the text query is matched against volume text.
  *
  * - `"fuzzy"` — Levenshtein / n-gram similarity (tolerates typos).
  * - `"substring"` — Case-insensitive substring containment.
@@ -70,8 +74,8 @@ export interface TextSearchOptions {
 	readonly threshold?: number;
 }
 
-export interface TextSearchResult {
-	readonly entry: VectorEntry;
+export interface TextLookup {
+	readonly volume: Volume;
 	/** Relevance score between 0 and 1. */
 	readonly score: number;
 }
@@ -156,13 +160,13 @@ export interface SearchOptions {
 
 	// -- Metadata filters -------------------------------------------------
 	/**
-	 * One or more metadata filters. All filters must match for an entry to
+	 * One or more metadata filters. All filters must match for a volume to
 	 * be included (logical AND).
 	 */
 	readonly metadata?: readonly MetadataFilter[];
 
 	// -- Date range -------------------------------------------------------
-	/** Restrict results to entries within a timestamp window. */
+	/** Restrict results to volumes within a timestamp window. */
 	readonly dateRange?: DateRange;
 
 	// -- Pagination / limits ---------------------------------------------
@@ -175,7 +179,7 @@ export interface SearchOptions {
 	 * - `"vector"` — Rank by vector similarity only (text is a filter).
 	 * - `"text"` — Rank by text relevance only (vector is a filter).
 	 * - `"average"` — Arithmetic mean of both scores.
-	 * - `"multiply"` — Product of both scores (boosts entries that rank
+	 * - `"multiply"` — Product of both scores (boosts volumes that rank
 	 *   highly on *both* axes).
 	 * - `"weighted"` — Combine using explicit `rankWeights` for each component.
 	 *
@@ -188,8 +192,8 @@ export interface SearchOptions {
 	 * Multipliers applied to individual score components before combining.
 	 *
 	 * - `text` — Scales the text relevance score (default 1.0).
-	 * - `metadata` — Bonus added when an entry passes metadata filters (default 1.0).
-	 * - `topic` — Bonus added when an entry matches a topic filter (default 1.0).
+	 * - `metadata` — Bonus added when a volume passes metadata filters (default 1.0).
+	 * - `topic` — Bonus added when a volume matches a topic filter (default 1.0).
 	 */
 	readonly fieldBoosts?: {
 		readonly text?: number;
@@ -213,14 +217,14 @@ export interface SearchOptions {
 	// -- Topic filter (for boosting) --------------------------------------
 	/**
 	 * Topics to match for topic-based field boosting.
-	 * Entries whose `metadata.topic` matches any of these topics receive the
+	 * Volumes whose `metadata.topic` matches any of these topics receive the
 	 * topic boost defined in `fieldBoosts.topic`.
 	 */
 	readonly topicFilter?: readonly string[];
 }
 
-export interface AdvancedSearchResult {
-	readonly entry: VectorEntry;
+export interface AdvancedLookup {
+	readonly volume: Volume;
 	/** Final combined score used for ranking (0–1). */
 	readonly score: number;
 	/** Individual score components, present when the corresponding search
@@ -237,13 +241,13 @@ export interface AdvancedSearchResult {
 
 export interface DuplicateCheckResult {
 	readonly isDuplicate: boolean;
-	readonly existingEntry?: VectorEntry;
+	readonly existingVolume?: Volume;
 	readonly similarity?: number;
 }
 
-export interface DuplicateGroup {
-	readonly representative: VectorEntry;
-	readonly duplicates: readonly VectorEntry[];
+export interface DuplicateVolumes {
+	readonly representative: Volume;
+	readonly duplicates: readonly Volume[];
 	readonly averageSimilarity: number;
 }
 
@@ -288,14 +292,14 @@ export interface RecommendOptions {
 	readonly minScore?: number;
 	/** Metadata filters to pre-filter candidates. */
 	readonly metadata?: readonly MetadataFilter[];
-	/** Topic filter — only entries matching any of these topics. */
+	/** Topic filter — only volumes matching any of these topics. */
 	readonly topics?: readonly string[];
 	/** Date range filter. */
 	readonly dateRange?: DateRange;
 }
 
-export interface RecommendationResult {
-	readonly entry: VectorEntry;
+export interface Recommendation {
+	readonly volume: Volume;
 	readonly score: number;
 	readonly scores: {
 		readonly vector?: number;
@@ -305,55 +309,55 @@ export interface RecommendationResult {
 }
 
 // ---------------------------------------------------------------------------
-// Summarization
+// Compendium (was Summarization)
 // ---------------------------------------------------------------------------
 
 export interface TextGenerationProvider {
 	readonly generate: (prompt: string, systemPrompt?: string) => Promise<string>;
 }
 
-export interface SummarizeOptions {
-	/** IDs of entries to summarize (minimum 2). */
+export interface CompendiumOptions {
+	/** IDs of volumes to summarize (minimum 2). */
 	readonly ids: readonly string[];
 	/**
 	 * Custom instruction prompt for the summarization.
-	 * The combined entry texts are always appended after this prompt.
+	 * The combined volume texts are always appended after this prompt.
 	 * When omitted a sensible default instruction is used.
 	 */
 	readonly prompt?: string;
 	/** Optional system prompt passed to the text generation provider. */
 	readonly systemPrompt?: string;
-	/** If true, delete the original entries after summarization. Defaults to `false`. */
+	/** If true, delete the original volumes after summarization. Defaults to `false`. */
 	readonly deleteOriginals?: boolean;
-	/** Additional metadata to attach to the summary entry. */
+	/** Additional metadata to attach to the compendium volume. */
 	readonly metadata?: Readonly<Record<string, string>>;
 }
 
-export interface SummarizeResult {
-	readonly summaryId: string;
-	readonly summaryText: string;
+export interface CompendiumResult {
+	readonly compendiumId: string;
+	readonly text: string;
 	readonly sourceIds: readonly string[];
 	readonly deletedOriginals: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// Learning / Adaptive Memory
+// Patron Learning / Adaptive Library
 // ---------------------------------------------------------------------------
 
-/** Per-entry feedback tracking how many unique queries retrieve this entry. */
+/** Per-volume feedback tracking how many unique queries retrieve this volume. */
 export interface RelevanceFeedback {
-	/** Number of unique query embeddings that retrieved this entry. */
+	/** Number of unique query embeddings that retrieved this volume. */
 	readonly queryCount: number;
-	/** Total times this entry was returned across all queries. */
+	/** Total times this volume was returned across all queries. */
 	readonly totalRetrievals: number;
-	/** Epoch ms when this entry was last returned by a query. */
+	/** Epoch ms when this volume was last returned by a query. */
 	readonly lastQueryTimestamp: number;
 	/** Computed diversity score (0–1). Higher = retrieved by many diverse queries. */
 	readonly relevanceScore: number;
 }
 
-/** Snapshot of the learning engine's full state. */
-export interface LearningProfile {
+/** Snapshot of the patron learning engine's full state. */
+export interface PatronProfile {
 	readonly queryHistory: readonly QueryRecord[];
 	readonly adaptedWeights: Readonly<Required<WeightProfile>>;
 	readonly interestEmbedding: readonly number[] | undefined;
@@ -368,7 +372,7 @@ export interface QueryRecord {
 	readonly resultCount: number;
 }
 
-/** Configuration for the adaptive learning engine. */
+/** Configuration for the adaptive patron learning engine. */
 export interface LearningOptions {
 	/** Whether adaptive learning is enabled. Defaults to `true`. */
 	readonly enabled?: boolean;
@@ -385,13 +389,38 @@ export interface LearningOptions {
 }
 
 // ---------------------------------------------------------------------------
-// Memory Config
+// Library Config (was MemoryConfig)
 // ---------------------------------------------------------------------------
 
-export interface MemoryConfig {
+export interface LibraryConfig {
 	readonly enabled: boolean;
 	/** ACP agent ID used for generating embeddings. */
 	readonly embeddingAgent?: string;
 	readonly similarityThreshold: number;
 	readonly maxResults: number;
 }
+
+// ---------------------------------------------------------------------------
+// Backward-compatibility type aliases (temporary — removed after migration)
+// ---------------------------------------------------------------------------
+
+/** @deprecated Use Volume */
+export type VectorEntry = Volume;
+/** @deprecated Use Lookup */
+export type SearchResult = Lookup;
+/** @deprecated Use TextLookup */
+export type TextSearchResult = TextLookup;
+/** @deprecated Use AdvancedLookup */
+export type AdvancedSearchResult = AdvancedLookup;
+/** @deprecated Use DuplicateVolumes */
+export type DuplicateGroup = DuplicateVolumes;
+/** @deprecated Use CompendiumOptions */
+export type SummarizeOptions = CompendiumOptions;
+/** @deprecated Use CompendiumResult */
+export type SummarizeResult = CompendiumResult;
+/** @deprecated Use PatronProfile */
+export type LearningProfile = PatronProfile;
+/** @deprecated Use LibraryConfig */
+export type MemoryConfig = LibraryConfig;
+/** @deprecated Use Recommendation */
+export type RecommendationResult = Recommendation;

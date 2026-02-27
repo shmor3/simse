@@ -65,6 +65,28 @@ describe('Banner', () => {
 		expect(lastNonEmpty).toContain('─');
 	});
 
+	test('renders greeting when provided', () => {
+		const { lastFrame } = render(
+			<Banner
+				version="1.0.0"
+				workDir="/projects/test"
+				dataDir="~/.simse"
+				greeting="Welcome back!"
+			/>,
+		);
+		expect(lastFrame()).toContain('Welcome back!');
+	});
+
+	test('separator uses simple line in right column, not junction characters', () => {
+		const { lastFrame } = render(
+			<Banner version="1.0.0" workDir="/projects/test" dataDir="~/.simse" />,
+		);
+		const frame = lastFrame()!;
+		// Should NOT contain junction characters ├ or ┤
+		expect(frame).not.toContain('\u251C');
+		expect(frame).not.toContain('\u2524');
+	});
+
 	test('renders custom tips', () => {
 		const { lastFrame } = render(
 			<Banner

@@ -1,8 +1,13 @@
 import { Box, Text, useStdout } from 'ink';
 import { useMemo } from 'react';
 
-const MASCOT_LINES = ['\u256D\u2500\u2500\u256E', '\u2570\u2500\u256E\u2502', '  \u2570\u256F'];
-const MASCOT_COLOR = '#00afd7';
+const MASCOT_LINES = [
+	'\u256D\u2500\u2500\u256E',
+	'\u2570\u2500\u256E\u2502',
+	'  \u2570\u256F',
+];
+const PRIMARY = '#87D6D6';
+const SECONDARY = '#86d6ae';
 const DIVIDER = '\u2500';
 
 const DEFAULT_TIPS: readonly string[] = [
@@ -19,6 +24,7 @@ interface BannerProps {
 	readonly model?: string;
 	readonly tips?: readonly string[];
 	readonly recentActivity?: readonly string[];
+	readonly greeting?: string;
 }
 
 interface ColumnLine {
@@ -27,6 +33,8 @@ interface ColumnLine {
 	readonly isBold: boolean;
 	readonly isDim: boolean;
 	readonly color?: string;
+	/** When true, this row is rendered as a separator in the right column. */
+	readonly isSeparator?: boolean;
 }
 
 export function Banner({
@@ -36,6 +44,7 @@ export function Banner({
 	model,
 	tips,
 	recentActivity,
+	greeting,
 }: BannerProps) {
 	const { stdout } = useStdout();
 	const cols = stdout?.columns ?? 80;
@@ -54,17 +63,35 @@ export function Banner({
 
 		// Title: " ╭── simse-code v1.0.0 ──────...──╮"
 		const titleLabel = `simse-code v${version}`;
-		// ╭ + ── + space + title + space + trailer + ╮ = contentWidth
+		// Inside border: ╭ + ── + space + title + space + trailer + ╮
+		// The inside width = contentWidth - 2 (for ╭ and ╮)
+		const insideWidth = contentWidth - 2;
 		const titleTrailerLen = Math.max(
 			0,
-			contentWidth - 1 - 2 - 1 - titleLabel.length - 1 - 1,
+			insideWidth - 2 - 1 - titleLabel.length - 1,
 		);
 
-		// Bottom border: ╰──...──╯ fills contentWidth
-		const bottomInner = contentWidth - 2; // minus ╰ and ╯
+		// Bottom border inner width (between ╰ and ╯)
+		const bottomInner = contentWidth - 2;
 
 		// Build left column content (raw, no padding yet)
 		const leftContent: ColumnLine[] = [];
+
+		// Greeting line (e.g. "Welcome back!")
+		if (greeting) {
+			leftContent.push({
+				text: greeting,
+				isMascot: false,
+				isBold: true,
+				isDim: false,
+			});
+			leftContent.push({
+				text: '',
+				isMascot: false,
+				isBold: false,
+				isDim: false,
+			});
+		}
 
 		// Mascot lines
 		for (const ml of MASCOT_LINES) {
@@ -111,7 +138,7 @@ export function Banner({
 			isDim: true,
 		});
 
-		// Build right column lines (no leading empty line — start immediately)
+		// Build right column lines
 		const rightLines: ColumnLine[] = [];
 
 		// Tips section header
@@ -121,7 +148,7 @@ export function Banner({
 			isMascot: false,
 			isBold: true,
 			isDim: false,
-			color: 'green',
+			color: SECONDARY,
 		});
 		for (const tip of tipList) {
 			const truncated =
@@ -136,13 +163,13 @@ export function Banner({
 			});
 		}
 
-		// Colored separator between sections
+		// Separator row between tips and recent
 		rightLines.push({
-			text: DIVIDER.repeat(rightColWidth),
+			text: '',
 			isMascot: false,
 			isBold: false,
 			isDim: false,
-			color: '#d77757',
+			isSeparator: true,
 		});
 
 		// Recent activity section
@@ -152,7 +179,7 @@ export function Banner({
 			isMascot: false,
 			isBold: true,
 			isDim: false,
-			color: 'yellow',
+			color: PRIMARY,
 		});
 		for (const item of activity) {
 			rightLines.push({
@@ -201,13 +228,17 @@ export function Banner({
 			rightStyle: ColumnLine;
 			leftPad: number;
 			rightPad: number;
+			isSeparator: boolean;
 		}[] = [];
 
 		for (let i = 0; i < totalRows; i++) {
 			const left = leftLines[i] ?? emptyLine;
 			const right = rightLines[i] ?? emptyLine;
+			const isSep = right.isSeparator === true;
 			const leftPad = Math.max(0, leftColWidth - left.text.length);
-			const rightPad = Math.max(0, rightColWidth - right.text.length);
+			const rightPad = isSep
+				? 0
+				: Math.max(0, rightColWidth - right.text.length);
 			rows.push({
 				leftText: left.text,
 				leftStyle: left,
@@ -215,6 +246,7 @@ export function Banner({
 				rightStyle: right,
 				leftPad,
 				rightPad,
+				isSeparator: isSep,
 			});
 		}
 
@@ -222,70 +254,103 @@ export function Banner({
 			titleLabel,
 			titleTrailerLen,
 			bottomInner,
+			leftColWidth,
+			rightColWidth,
 			rows,
 		};
-	}, [version, workDir, server, model, tips, recentActivity, cols]);
+	}, [version, workDir, server, model, tips, recentActivity, greeting, cols]);
 
 	return (
 		<Box flexDirection="column" marginBottom={1}>
 			{/* Title: " ╭── simse-code v1.0.0 ──────...──╮" */}
 			<Text>
 				{' '}
-				<Text dimColor>
-					{'\u256D'}{DIVIDER.repeat(2)}
+				<Text color={PRIMARY}>
+					{'\u256D'}
+					{DIVIDER.repeat(2)}
 				</Text>{' '}
-				{layout.titleLabel}{' '}
-				<Text dimColor>
-					{DIVIDER.repeat(layout.titleTrailerLen)}{'\u256E'}
+				<Text color={PRIMARY}>{layout.titleLabel}</Text>{' '}
+				<Text color={PRIMARY}>
+					{DIVIDER.repeat(layout.titleTrailerLen)}
+					{'\u256E'}
 				</Text>
 			</Text>
 
-			{/* Two-column content rows */}
-			{layout.rows.map((row, i) => (
-				// biome-ignore lint/suspicious/noArrayIndexKey: static layout
-				<Box key={i}>
-					<Text>
-						{' '}
-						{row.leftStyle.isMascot ? (
-							<Text color={MASCOT_COLOR}>
-								{row.leftText}
+			{/* Two-column content rows with left/right borders */}
+			{layout.rows.map((row, i) => {
+				if (row.isSeparator) {
+					// Separator row: │ <left content> │ ────── │
+					return (
+						// biome-ignore lint/suspicious/noArrayIndexKey: static layout
+						<Box key={i}>
+							<Text>
+								{' '}
+								<Text color={PRIMARY}>{'\u2502'}</Text>
+								{row.leftStyle.isMascot ? (
+									<Text color={PRIMARY}>{row.leftText}</Text>
+								) : row.leftStyle.isDim ? (
+									<Text dimColor>{row.leftText}</Text>
+								) : (
+									row.leftText
+								)}
+								{' '.repeat(row.leftPad)}
 							</Text>
-						) : row.leftStyle.isDim ? (
-							<Text dimColor>{row.leftText}</Text>
-						) : (
-							row.leftText
-						)}
-						{' '.repeat(row.leftPad)}
-					</Text>
-					<Text dimColor> {'\u2502'} </Text>
-					<Text>
-						{row.rightStyle.color ? (
-							<Text
-								bold={row.rightStyle.isBold}
-								color={row.rightStyle.color}
-							>
-								{row.rightText}
+							<Text color={PRIMARY}> {'\u2502'} </Text>
+							<Text color={PRIMARY}>
+								{DIVIDER.repeat(layout.rightColWidth)}
 							</Text>
-						) : row.rightStyle.isBold ? (
-							<Text bold>{row.rightText}</Text>
-						) : row.rightStyle.isDim ? (
-							<Text dimColor>{row.rightText}</Text>
-						) : (
-							row.rightText
-						)}
-						{' '.repeat(row.rightPad)}
-					</Text>
-				</Box>
-			))}
+							<Text color={PRIMARY}>{'\u2502'}</Text>
+						</Box>
+					);
+				}
+
+				return (
+					// biome-ignore lint/suspicious/noArrayIndexKey: static layout
+					<Box key={i}>
+						<Text>
+							{' '}
+							<Text color={PRIMARY}>{'\u2502'}</Text>
+							{row.leftStyle.isMascot ? (
+								<Text color={PRIMARY}>{row.leftText}</Text>
+							) : row.leftStyle.isDim ? (
+								<Text dimColor>{row.leftText}</Text>
+							) : (
+								row.leftText
+							)}
+							{' '.repeat(row.leftPad)}
+						</Text>
+						<Text color={PRIMARY}> {'\u2502'} </Text>
+						<Text>
+							{row.rightStyle.color ? (
+								<Text
+									bold={row.rightStyle.isBold}
+									color={row.rightStyle.color}
+								>
+									{row.rightText}
+								</Text>
+							) : row.rightStyle.isBold ? (
+								<Text bold>{row.rightText}</Text>
+							) : row.rightStyle.isDim ? (
+								<Text dimColor>{row.rightText}</Text>
+							) : (
+								row.rightText
+							)}
+							{' '.repeat(row.rightPad)}
+						</Text>
+						<Text color={PRIMARY}>{'\u2502'}</Text>
+					</Box>
+				);
+			})}
 
 			{/* Bottom border: ╰──...──╯ */}
 			<Text>
 				{' '}
-				<Text dimColor>
-					{'\u2570'}{DIVIDER.repeat(layout.bottomInner)}{'\u256F'}
+				<Text color={PRIMARY}>
+					{'\u2570'}
+					{DIVIDER.repeat(layout.bottomInner)}
+					{'\u256F'}
 				</Text>
 			</Text>
-
 		</Box>
 	);
 }

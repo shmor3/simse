@@ -1,6 +1,6 @@
 import { Box, Text } from 'ink';
 import InkSpinner from 'ink-spinner';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createACPClient, toError } from 'simse';
 import type { ACPClient, ACPPermissionRequestInfo } from 'simse';
 import { createCommandRegistry } from './command-registry.js';
@@ -46,7 +46,18 @@ export function App({
 	toolRegistry: initialToolRegistry,
 	hasACP: initialHasACP = true,
 }: AppProps) {
-	const [items, setItems] = useState<OutputItem[]>([]);
+	const bannerElement: ReactNode = (
+		<Banner
+			version="1.0.0"
+			workDir={process.cwd()}
+			dataDir={dataDir}
+			server={initialServerName}
+			model={initialModelName}
+		/>
+	);
+	const [items, setItems] = useState<OutputItem[]>([
+		{ kind: 'command-result', element: bannerElement },
+	]);
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [planMode, setPlanMode] = useState(false);
 	const [verbose, setVerbose] = useState(false);
@@ -198,13 +209,6 @@ export function App({
 
 	return (
 		<MainLayout>
-			<Banner
-				version="1.0.0"
-				workDir={process.cwd()}
-				dataDir={dataDir}
-				server={currentServerName}
-				model={currentModelName}
-			/>
 			<MessageList items={items} />
 
 			{/* Active area: streaming text and active tool calls */}

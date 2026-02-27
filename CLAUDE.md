@@ -106,9 +106,18 @@ src/
       recommendation.ts     # WeightProfile, recency/frequency scoring, computeRecommendationScore
       storage.ts            # StorageBackend interface (pluggable persistence)
       patron-learning.ts    # Adaptive learning engine: query tracking, weight adaptation
+      shelf.ts              # Shelf (createShelf): agent-scoped library partition
+      topic-catalog.ts      # TopicCatalog (createTopicCatalog): hierarchical topic classification
+                             # Levenshtein-based fuzzy matching, aliases, resolve/relocate/merge
+      librarian.ts          # Librarian (createLibrarian): LLM-driven extraction, summarization,
+                             # topic classification, and reorganization
+      circulation-desk.ts   # CirculationDesk (createCirculationDesk): async background queue
+                             # for extraction, compendium, and reorganization jobs
       library-services.ts   # LibraryServices middleware (createLibraryServices)
+                             # Optional CirculationDesk integration for per-turn extraction
       prompt-injection.ts   # formatMemoryContext: structured/natural memory context for prompts
       types.ts              # All library/search/deduplication/recommendation/compendium types
+                             # Shelf, TopicCatalog, Librarian, CirculationDesk interfaces
     tasks/
       task-list.ts          # createTaskList factory: CRUD, dependencies, blocking
       types.ts              # TaskItem, TaskStatus, TaskList, TaskCreateInput, TaskUpdateInput
@@ -118,6 +127,7 @@ src/
                              # Tool output truncation: maxOutputChars (registry + per-tool)
       builtin-tools.ts      # registerLibraryTools, registerVFSTools, registerTaskTools
       subagent-tools.ts     # registerSubagentTools: spawn sub-loops as tool calls
+                             # Shelf-scoped library integration for subagent isolation
       types.ts              # ToolDefinition, ToolHandler, ToolRegistry, ToolCallRequest
       index.ts              # Barrel re-export
     vfs/
@@ -181,13 +191,20 @@ The MCP implementation uses `@modelcontextprotocol/sdk`:
 
 ### Library System
 
-The library subsystem has five layers:
+The library subsystem uses a **library analogy** throughout. It has five storage layers plus four higher-level services:
 
+**Storage layers:**
 1. **Preservation** (`preservation.ts`): `encodeEmbedding`/`decodeEmbedding` (Float32↔base64, ~75% size reduction), `compressText`/`decompressText` (gzip wrappers).
 2. **Cataloging** (`cataloging.ts`): `createTopicIndex` (auto-extracts topics from text or uses `metadata.topic`), `createMetadataIndex` (O(1) key-value lookups), `createMagnitudeCache` (skip recomputation during search).
 3. **Deduplication** (`deduplication.ts`): `checkDuplicate` (single-entry cosine check), `findDuplicateGroups` (greedy clustering, O(N²)).
 4. **Recommendation** (`recommendation.ts`): `computeRecommendationScore` combining vector similarity + exponential recency decay + logarithmic frequency scoring with configurable `WeightProfile`.
 5. **Compendium** (`library.ts`): `compendium()` requires a `TextGenerationProvider`, condenses multiple volumes into one, optionally deletes originals.
+
+**Higher-level services:**
+6. **Shelf** (`shelf.ts`): Agent-scoped library partitions. `createShelf(name, library)` returns a `Shelf` that auto-tags volumes with `metadata.shelf` and filters search results to the shelf. `library.shelf(name)` caches shelves. Subagents get dedicated shelves via `subagent-tools.ts`.
+7. **TopicCatalog** (`topic-catalog.ts`): Hierarchical topic classification with Levenshtein-based fuzzy matching (threshold 0.85). `resolve()` normalizes topics, `relocate()` moves volumes, `merge()` combines sections with alias redirection. Auto-creates ancestor topics.
+8. **Librarian** (`librarian.ts`): LLM-driven memory processing. `extract()` identifies facts/decisions/observations from conversation turns. `summarize()` creates compendia. `classifyTopic()` + `reorganize()` maintain the catalog. All methods return safe defaults on LLM parse failures.
+9. **CirculationDesk** (`circulation-desk.ts`): Async background queue for extraction, compendium, and reorganization jobs. Fire-and-forget error handling. Configurable thresholds (`minEntries`, `minAgeMs`, `maxVolumesPerTopic`).
 
 ### Formatting
 

@@ -198,15 +198,26 @@ export type { StorageBackend } from './ai/library/storage.js';
 export type { TextCache, TextCacheOptions } from './ai/library/text-cache.js';
 export { createTextCache } from './ai/library/text-cache.js';
 export { createShelf } from './ai/library/shelf.js';
+export type { TopicCatalogOptions } from './ai/library/topic-catalog.js';
+export { createTopicCatalog } from './ai/library/topic-catalog.js';
+export { createLibrarian } from './ai/library/librarian.js';
+export type { CirculationDeskOptions } from './ai/library/circulation-desk.js';
+export { createCirculationDesk } from './ai/library/circulation-desk.js';
 export type {
 	AdvancedLookup,
+	CirculationDesk,
+	CirculationDeskThresholds,
+	ClassificationResult,
 	CompendiumOptions,
 	CompendiumResult,
 	DateRange,
 	DuplicateCheckResult,
 	DuplicateVolumes,
 	EmbeddingProvider,
+	ExtractionMemory,
+	ExtractionResult,
 	LearningOptions,
+	Librarian,
 	LibraryConfig,
 	Lookup,
 	MetadataFilter,
@@ -217,13 +228,17 @@ export type {
 	RecommendOptions,
 	RelatedTopic,
 	RelevanceFeedback,
+	ReorganizationPlan,
 	SearchOptions,
 	Shelf,
 	TextGenerationProvider,
 	TextLookup,
 	TextSearchMode,
 	TextSearchOptions,
+	TopicCatalog,
+	TopicCatalogSection,
 	TopicInfo,
+	TurnContext,
 	Volume,
 	WeightProfile,
 } from './ai/library/types.js';

@@ -23,10 +23,13 @@
     "simse": "file:.."
   },
   "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@xterm/headless": "^6.0.0",
     "ink-testing-library": "^4.0.0",
-    "@types/react": "^19.2.14"
+    "node-pty": "^1.1.0"
   },
   "trustedDependencies": [
+    "node-pty",
     "onnxruntime-node",
     "protobufjs"
   ]

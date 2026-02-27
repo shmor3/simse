@@ -1,4 +1,4 @@
-import { Box } from 'ink';
+import { Box, useInput } from 'ink';
 import React, {
 	type ReactNode,
 	useCallback,
@@ -165,8 +165,23 @@ export function App({
 		[hasACP, currentServerName],
 	);
 
-	const { state: loopState, submit: submitToLoop } =
+	const { state: loopState, submit: submitToLoop, abort: abortLoop } =
 		useAgenticLoop(loopOptions);
+
+	// Escape key interrupts the agentic loop when processing
+	useInput(
+		(_input, key) => {
+			if (key.escape) {
+				abortLoop();
+				setIsProcessing(false);
+				setItems((prev) => [
+					...prev,
+					{ kind: 'info', text: 'Interrupted.' },
+				]);
+			}
+		},
+		{ isActive: isProcessing },
+	);
 
 	const handleSubmit = useCallback(
 		async (input: string) => {
@@ -242,7 +257,7 @@ export function App({
 					commands={registry.getAll()}
 				/>
 			</Box>
-			<StatusBar planMode={planMode} verbose={verbose} />
+			<StatusBar isProcessing={isProcessing} planMode={planMode} verbose={verbose} />
 		</MainLayout>
 	);
 }

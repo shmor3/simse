@@ -18,11 +18,16 @@ describe('formatTokens', () => {
 });
 
 describe('StatusBar', () => {
-	test('renders default hints', () => {
+	test('renders default hints without interrupt when idle', () => {
 		const { lastFrame } = render(<StatusBar />);
 		const frame = lastFrame()!;
-		expect(frame).toContain('esc to interrupt');
+		expect(frame).not.toContain('esc to interrupt');
 		expect(frame).toContain('? for shortcuts');
+	});
+
+	test('shows esc to interrupt when processing', () => {
+		const { lastFrame } = render(<StatusBar isProcessing />);
+		expect(lastFrame()).toContain('esc to interrupt');
 	});
 
 	test('shows bypass permissions hint when enabled', () => {

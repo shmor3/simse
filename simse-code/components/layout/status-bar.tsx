@@ -8,6 +8,7 @@ export function formatTokens(tokens: number): string {
 }
 
 interface StatusBarProps {
+	readonly isProcessing?: boolean;
 	readonly planMode?: boolean;
 	readonly verbose?: boolean;
 	readonly bypassPermissions?: boolean;
@@ -16,6 +17,7 @@ interface StatusBarProps {
 const SEP = ' \u00b7 ';
 
 export function StatusBar({
+	isProcessing,
 	planMode,
 	verbose,
 	bypassPermissions,
@@ -26,7 +28,9 @@ export function StatusBar({
 		hints.push('bypass permissions on (shift+tab to cycle)');
 	}
 
-	hints.push('esc to interrupt');
+	if (isProcessing) {
+		hints.push('esc to interrupt');
+	}
 
 	if (planMode) {
 		hints.push('plan mode');

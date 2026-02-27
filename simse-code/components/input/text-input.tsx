@@ -1,6 +1,6 @@
 import chalk from 'chalk';
-import { Text, useInput } from 'ink';
-import React, { useCallback, useRef, useState } from 'react';
+import { Box, Text, useInput } from 'ink';
+import { useCallback, useRef, useState } from 'react';
 
 interface TextInputProps {
 	readonly value: string;
@@ -8,6 +8,28 @@ interface TextInputProps {
 	readonly onSubmit?: (value: string) => void;
 	readonly isActive?: boolean;
 	readonly placeholder?: string;
+}
+
+/**
+ * Map a flat cursor offset (index into the full string) to
+ * { lineIndex, col } within the split lines array.
+ */
+function cursorToLineCol(
+	lines: string[],
+	offset: number,
+): { lineIndex: number; col: number } {
+	let remaining = offset;
+	for (let i = 0; i < lines.length; i++) {
+		const lineLen = lines[i]!.length;
+		if (remaining <= lineLen) {
+			return { lineIndex: i, col: remaining };
+		}
+		// +1 accounts for the '\n' between lines
+		remaining -= lineLen + 1;
+	}
+	// Fallback: cursor at end of last line
+	const last = lines.length - 1;
+	return { lineIndex: last, col: lines[last]!.length };
 }
 
 export function TextInput({
@@ -47,6 +69,7 @@ export function TextInput({
 				shift: boolean;
 				tab: boolean;
 				escape: boolean;
+				meta: boolean;
 			},
 		) => {
 			if (
@@ -60,6 +83,19 @@ export function TextInput({
 			}
 
 			if (key.return) {
+				// Shift+Enter (Kitty protocol) or Alt/Option+Enter (legacy terminals)
+				// inserts a newline instead of submitting
+				if (key.shift || key.meta) {
+					const v = valueRef.current;
+					const c = cursorRef.current;
+					const next = `${v.slice(0, c)}\n${v.slice(c)}`;
+					const newCursor = c + 1;
+					valueRef.current = next;
+					cursorRef.current = newCursor;
+					setCursorOffset(newCursor);
+					onChangeRef.current(next);
+					return;
+				}
 				onSubmitRef.current?.(valueRef.current);
 				return;
 			}
@@ -110,7 +146,21 @@ export function TextInput({
 
 	// When inactive, show dimmed value or placeholder
 	if (!isActive) {
-		return <Text dimColor>{value || placeholder}</Text>;
+		if (!value.includes('\n')) {
+			return <Text dimColor>{value || placeholder}</Text>;
+		}
+		// Multi-line inactive: indent continuation lines
+		const lines = value.split('\n');
+		return (
+			<Box flexDirection="column">
+				{lines.map((line, i) => (
+					// biome-ignore lint/suspicious/noArrayIndexKey: lines derived from value split, index is stable
+					<Text key={i} dimColor>
+						{i > 0 ? `  ${line}` : line}
+					</Text>
+				))}
+			</Box>
+		);
 	}
 
 	// Empty with placeholder — show cursor on first char of placeholder
@@ -126,14 +176,51 @@ export function TextInput({
 		return <Text>{chalk.inverse(' ')}</Text>;
 	}
 
-	// Render value with fake inverse cursor
-	let rendered = '';
-	for (let i = 0; i < value.length; i++) {
-		rendered += i === cursorOffset ? chalk.inverse(value[i]!) : value[i]!;
-	}
-	if (cursorOffset === value.length) {
-		rendered += chalk.inverse(' ');
+	// Single-line fast path
+	if (!value.includes('\n')) {
+		let rendered = '';
+		for (let i = 0; i < value.length; i++) {
+			rendered += i === cursorOffset ? chalk.inverse(value[i]!) : value[i]!;
+		}
+		if (cursorOffset === value.length) {
+			rendered += chalk.inverse(' ');
+		}
+		return <Text>{rendered}</Text>;
 	}
 
-	return <Text>{rendered}</Text>;
+	// Multi-line rendering
+	const lines = value.split('\n');
+	const { lineIndex: cursorLine, col: cursorCol } = cursorToLineCol(
+		lines,
+		cursorOffset,
+	);
+
+	return (
+		<Box flexDirection="column">
+			{lines.map((line, i) => {
+				const isCursorLine = i === cursorLine;
+				const indent = i > 0 ? '  ' : '';
+
+				let rendered = '';
+				for (let j = 0; j < line.length; j++) {
+					rendered +=
+						isCursorLine && j === cursorCol
+							? chalk.inverse(line[j]!)
+							: line[j]!;
+				}
+				// Cursor at end of this line
+				if (isCursorLine && cursorCol === line.length) {
+					rendered += chalk.inverse(' ');
+				}
+
+				return (
+					// biome-ignore lint/suspicious/noArrayIndexKey: lines derived from value split, index is stable
+					<Text key={i}>
+						{indent}
+						{rendered}
+					</Text>
+				);
+			})}
+		</Box>
+	);
 }

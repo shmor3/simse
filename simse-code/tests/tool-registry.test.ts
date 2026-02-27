@@ -5,7 +5,7 @@ import { createToolRegistry } from '../tool-registry.js';
 // Helpers — minimal mocks for simse interfaces
 // ---------------------------------------------------------------------------
 
-function createMockMemoryManager() {
+function createMockLibrary() {
 	const entries: Array<{ id: string; text: string; topic: string }> = [];
 
 	return {
@@ -87,29 +87,29 @@ describe('createToolRegistry', () => {
 
 	// -- Built-in memory tools -------------------------------------------------
 
-	it('should register memory tools when memoryManager provided', () => {
-		const mm = createMockMemoryManager();
+	it('should register library tools when library provided', () => {
+		const mm = createMockLibrary();
 		const registry = createToolRegistry({
-			memoryManager: mm as never,
+			library: mm as never,
 		});
 
 		const defs = registry.getToolDefinitions();
 		const names = defs.map((d) => d.name);
-		expect(names).toContain('memory_search');
-		expect(names).toContain('memory_add');
+		expect(names).toContain('library_search');
+		expect(names).toContain('library_shelve');
 	});
 
-	it('should execute memory_search', async () => {
-		const mm = createMockMemoryManager();
+	it('should execute library_search', async () => {
+		const mm = createMockLibrary();
 		await mm.add('auth flow design', { topic: 'architecture' });
 
 		const registry = createToolRegistry({
-			memoryManager: mm as never,
+			library: mm as never,
 		});
 
 		const result = await registry.execute({
 			id: 'c1',
-			name: 'memory_search',
+			name: 'library_search',
 			arguments: { query: 'auth' },
 		});
 
@@ -117,15 +117,15 @@ describe('createToolRegistry', () => {
 		expect(result.output).toContain('auth flow design');
 	});
 
-	it('should execute memory_search with no results', async () => {
-		const mm = createMockMemoryManager();
+	it('should execute library_search with no results', async () => {
+		const mm = createMockLibrary();
 		const registry = createToolRegistry({
-			memoryManager: mm as never,
+			library: mm as never,
 		});
 
 		const result = await registry.execute({
 			id: 'c1',
-			name: 'memory_search',
+			name: 'library_search',
 			arguments: { query: 'nonexistent' },
 		});
 
@@ -133,15 +133,15 @@ describe('createToolRegistry', () => {
 		expect(result.output).toContain('No matching entries found');
 	});
 
-	it('should execute memory_add', async () => {
-		const mm = createMockMemoryManager();
+	it('should execute library_shelve', async () => {
+		const mm = createMockLibrary();
 		const registry = createToolRegistry({
-			memoryManager: mm as never,
+			library: mm as never,
 		});
 
 		const result = await registry.execute({
 			id: 'c1',
-			name: 'memory_add',
+			name: 'library_shelve',
 			arguments: { text: 'Remember this', topic: 'notes' },
 		});
 
@@ -254,19 +254,19 @@ describe('createToolRegistry', () => {
 	// -- Tool handler errors ---------------------------------------------------
 
 	it('should catch handler errors and return isError result', async () => {
-		const mm = createMockMemoryManager();
+		const mm = createMockLibrary();
 		// Make search throw
 		mm.search = async () => {
 			throw new Error('Database connection lost');
 		};
 
 		const registry = createToolRegistry({
-			memoryManager: mm as never,
+			library: mm as never,
 		});
 
 		const result = await registry.execute({
 			id: 'c1',
-			name: 'memory_search',
+			name: 'library_search',
 			arguments: { query: 'test' },
 		});
 
@@ -283,15 +283,15 @@ describe('createToolRegistry', () => {
 	});
 
 	it('should format tool definitions for system prompt', () => {
-		const mm = createMockMemoryManager();
+		const mm = createMockLibrary();
 		const registry = createToolRegistry({
-			memoryManager: mm as never,
+			library: mm as never,
 		});
 
 		const prompt = registry.formatForSystemPrompt();
 		expect(prompt).toContain('tool_use');
-		expect(prompt).toContain('memory_search');
-		expect(prompt).toContain('memory_add');
+		expect(prompt).toContain('library_search');
+		expect(prompt).toContain('library_shelve');
 		expect(prompt).toContain('query');
 		expect(prompt).toContain('Parameters:');
 	});
@@ -299,9 +299,9 @@ describe('createToolRegistry', () => {
 	// -- Discover resets tools -------------------------------------------------
 
 	it('should clear and re-register tools on discover', async () => {
-		const mm = createMockMemoryManager();
+		const mm = createMockLibrary();
 		const registry = createToolRegistry({
-			memoryManager: mm as never,
+			library: mm as never,
 		});
 
 		const countBefore = registry.toolCount;
@@ -315,9 +315,9 @@ describe('createToolRegistry', () => {
 	// -- getToolDefinitions returns frozen array -------------------------------
 
 	it('should return frozen array from getToolDefinitions', () => {
-		const mm = createMockMemoryManager();
+		const mm = createMockLibrary();
 		const registry = createToolRegistry({
-			memoryManager: mm as never,
+			library: mm as never,
 		});
 		expect(Object.isFrozen(registry.getToolDefinitions())).toBe(true);
 	});
@@ -325,17 +325,17 @@ describe('createToolRegistry', () => {
 	// -- Both memory and VFS ---------------------------------------------------
 
 	it('should register both memory and VFS tools', () => {
-		const mm = createMockMemoryManager();
+		const mm = createMockLibrary();
 		const vfs = createMockVFS();
 		const registry = createToolRegistry({
-			memoryManager: mm as never,
+			library: mm as never,
 			vfs: vfs as never,
 		});
 
 		expect(registry.toolCount).toBe(6); // 2 memory + 4 vfs
 		const names = registry.getToolDefinitions().map((d) => d.name);
-		expect(names).toContain('memory_search');
-		expect(names).toContain('memory_add');
+		expect(names).toContain('library_search');
+		expect(names).toContain('library_shelve');
 		expect(names).toContain('vfs_read');
 		expect(names).toContain('vfs_write');
 		expect(names).toContain('vfs_list');

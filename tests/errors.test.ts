@@ -18,7 +18,7 @@ import {
 	createMCPServerNotConnectedError,
 	createMCPToolError,
 	createMCPTransportConfigError,
-	createMemoryError,
+	createLibraryError,
 	createProviderError,
 	createProviderGenerationError,
 	createProviderHTTPError,
@@ -36,8 +36,8 @@ import {
 	createToolError,
 	createToolExecutionError,
 	createToolNotFoundError,
-	createVectorStoreCorruptionError,
-	createVectorStoreIOError,
+	createStacksCorruptionError,
+	createStacksIOError,
 	isChainError,
 	isChainNotFoundError,
 	isChainStepError,
@@ -53,7 +53,7 @@ import {
 	isMCPServerNotConnectedError,
 	isMCPToolError,
 	isMCPTransportConfigError,
-	isMemoryError,
+	isLibraryError,
 	isProviderError,
 	isProviderGenerationError,
 	isProviderHTTPError,
@@ -69,8 +69,8 @@ import {
 	isToolError,
 	isToolExecutionError,
 	isToolNotFoundError,
-	isVectorStoreCorruptionError,
-	isVectorStoreIOError,
+	isStacksCorruptionError,
+	isStacksIOError,
 	// Utility
 	toError,
 	wrapError,
@@ -500,16 +500,16 @@ describe('MCPTransportConfigError', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Memory / Vector Store Errors
+// Library / Stacks Errors
 // ---------------------------------------------------------------------------
 
-describe('MemoryError', () => {
+describe('LibraryError', () => {
 	it('should default code to MEMORY_ERROR', () => {
-		const err = createMemoryError('memory problem');
+		const err = createLibraryError('library problem');
 
-		expect(isMemoryError(err)).toBe(true);
-		expect(err.name).toBe('MemoryError');
-		expect(err.code).toBe('MEMORY_ERROR');
+		expect(isLibraryError(err)).toBe(true);
+		expect(err.name).toBe('LibraryError');
+		expect(err.code).toBe('LIBRARY_ERROR');
 	});
 });
 
@@ -531,25 +531,25 @@ describe('EmbeddingError', () => {
 	});
 });
 
-describe('VectorStoreCorruptionError', () => {
+describe('StacksCorruptionError', () => {
 	it('should include store path', () => {
-		const err = createVectorStoreCorruptionError('/data/memory.json');
+		const err = createStacksCorruptionError('/data/memory.json');
 
-		expect(isVectorStoreCorruptionError(err)).toBe(true);
-		expect(err.name).toBe('VectorStoreCorruptionError');
-		expect(err.code).toBe('VECTOR_STORE_CORRUPT');
+		expect(isStacksCorruptionError(err)).toBe(true);
+		expect(err.name).toBe('StacksCorruptionError');
+		expect(err.code).toBe('STACKS_CORRUPT');
 		expect(err.storePath).toBe('/data/memory.json');
 		expect(err.message).toContain('/data/memory.json');
 	});
 });
 
-describe('VectorStoreIOError', () => {
+describe('StacksIOError', () => {
 	it('should include store path and operation (read)', () => {
-		const err = createVectorStoreIOError('/data/memory.json', 'read');
+		const err = createStacksIOError('/data/memory.json', 'read');
 
-		expect(isVectorStoreIOError(err)).toBe(true);
-		expect(err.name).toBe('VectorStoreIOError');
-		expect(err.code).toBe('VECTOR_STORE_IO');
+		expect(isStacksIOError(err)).toBe(true);
+		expect(err.name).toBe('StacksIOError');
+		expect(err.code).toBe('STACKS_IO');
 		expect(err.storePath).toBe('/data/memory.json');
 		expect(err.message).toContain('read');
 		expect(err.metadata).toEqual(
@@ -558,7 +558,7 @@ describe('VectorStoreIOError', () => {
 	});
 
 	it('should include store path and operation (write)', () => {
-		const err = createVectorStoreIOError('/data/memory.json', 'write');
+		const err = createStacksIOError('/data/memory.json', 'write');
 		expect(err.message).toContain('write');
 		expect(err.metadata).toEqual(
 			expect.objectContaining({ operation: 'write' }),
@@ -699,7 +699,7 @@ describe('ToolError', () => {
 
 describe('ToolNotFoundError', () => {
 	it('should include toolName in metadata', () => {
-		const err = createToolNotFoundError('memory_search');
+		const err = createToolNotFoundError('library_search');
 
 		expect(isToolNotFoundError(err)).toBe(true);
 		expect(isToolError(err)).toBe(true);
@@ -707,9 +707,9 @@ describe('ToolNotFoundError', () => {
 		expect(err.name).toBe('ToolNotFoundError');
 		expect(err.code).toBe('TOOL_NOT_FOUND');
 		expect(err.metadata).toEqual(
-			expect.objectContaining({ toolName: 'memory_search' }),
+			expect.objectContaining({ toolName: 'library_search' }),
 		);
-		expect(err.message).toContain('memory_search');
+		expect(err.message).toContain('library_search');
 	});
 });
 
@@ -863,10 +863,10 @@ describe('Error hierarchy', () => {
 		expect(isMCPError(mcpErr)).toBe(true);
 		expect(isSimseError(mcpErr)).toBe(true);
 
-		// Memory hierarchy
-		const memErr = createVectorStoreCorruptionError('p');
-		expect(isVectorStoreCorruptionError(memErr)).toBe(true);
-		expect(isMemoryError(memErr)).toBe(true);
+		// Library hierarchy
+		const memErr = createStacksCorruptionError('p');
+		expect(isStacksCorruptionError(memErr)).toBe(true);
+		expect(isLibraryError(memErr)).toBe(true);
 		expect(isSimseError(memErr)).toBe(true);
 
 		// Loop hierarchy
@@ -926,13 +926,13 @@ describe('Error hierarchy', () => {
 		expect(createMCPTransportConfigError('', '').name).toBe(
 			'MCPTransportConfigError',
 		);
-		expect(createMemoryError('').name).toBe('MemoryError');
+		expect(createLibraryError('').name).toBe('LibraryError');
 		expect(createEmbeddingError('').name).toBe('EmbeddingError');
-		expect(createVectorStoreCorruptionError('').name).toBe(
-			'VectorStoreCorruptionError',
+		expect(createStacksCorruptionError('').name).toBe(
+			'StacksCorruptionError',
 		);
-		expect(createVectorStoreIOError('', 'read').name).toBe(
-			'VectorStoreIOError',
+		expect(createStacksIOError('', 'read').name).toBe(
+			'StacksIOError',
 		);
 
 		// New error types

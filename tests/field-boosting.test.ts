@@ -2,20 +2,20 @@ import { describe, expect, it } from 'bun:test';
 import {
 	createMagnitudeCache,
 	createMetadataIndex,
-} from '../src/ai/memory/indexing.js';
-import { createInvertedIndex } from '../src/ai/memory/inverted-index.js';
-import type { VectorEntry } from '../src/ai/memory/types.js';
+} from '../src/ai/library/cataloging.js';
+import { createInvertedIndex } from '../src/ai/library/inverted-index.js';
+import type { Volume } from '../src/ai/library/types.js';
 import {
 	advancedVectorSearch,
 	type VectorSearchConfig,
-} from '../src/ai/memory/vector-search.js';
+} from '../src/ai/library/stacks-search.js';
 
 function makeEntry(
 	id: string,
 	text: string,
 	embedding: number[],
 	metadata: Record<string, string> = {},
-): VectorEntry {
+): Volume {
 	return { id, text, embedding, metadata, timestamp: Date.now() };
 }
 
@@ -70,8 +70,8 @@ describe('field boosting', () => {
 		);
 
 		// Entry 1 matches 'rust' text — boosted results should show higher score for entry 1
-		const normal1 = normalResults.find((r) => r.entry.id === '1');
-		const boosted1 = boostedResults.find((r) => r.entry.id === '1');
+		const normal1 = normalResults.find((r) => r.volume.id === '1');
+		const boosted1 = boostedResults.find((r) => r.volume.id === '1');
 		expect(normal1).toBeDefined();
 		expect(boosted1).toBeDefined();
 		expect(boosted1!.score).toBeGreaterThan(normal1!.score);
@@ -176,8 +176,8 @@ describe('field boosting', () => {
 			invIdx,
 		);
 
-		const normal1 = normalResults.find((r) => r.entry.id === '1');
-		const boosted1 = boostedResults.find((r) => r.entry.id === '1');
+		const normal1 = normalResults.find((r) => r.volume.id === '1');
+		const boosted1 = boostedResults.find((r) => r.volume.id === '1');
 		expect(normal1).toBeDefined();
 		expect(boosted1).toBeDefined();
 		expect(boosted1!.score).toBeGreaterThan(normal1!.score);
@@ -216,7 +216,7 @@ describe('weighted ranking mode', () => {
 
 		expect(results.length).toBeGreaterThan(0);
 		// Entry 1 matches text 'rust' strongly and has perfect vector match
-		expect(results[0].entry.id).toBe('1');
+		expect(results[0].volume.id).toBe('1');
 	});
 
 	it('weighted ranking with zero vector weight ignores vector scores', () => {
@@ -251,7 +251,7 @@ describe('weighted ranking mode', () => {
 		);
 
 		// With zero vector weight, text-matching entry should rank first
-		expect(results[0].entry.id).toBe('1');
+		expect(results[0].volume.id).toBe('1');
 	});
 
 	it('weighted ranking includes recency component', () => {
@@ -261,7 +261,7 @@ describe('weighted ranking mode', () => {
 
 		const now = Date.now();
 		// Entry 1: recent, weaker vector match
-		const e1: VectorEntry = {
+		const e1: Volume = {
 			id: '1',
 			text: 'recent entry',
 			embedding: [0.7, 0.3, 0],
@@ -269,7 +269,7 @@ describe('weighted ranking mode', () => {
 			timestamp: now,
 		};
 		// Entry 2: old, stronger vector match
-		const e2: VectorEntry = {
+		const e2: Volume = {
 			id: '2',
 			text: 'old entry',
 			embedding: [0.95, 0.05, 0],
@@ -299,7 +299,7 @@ describe('weighted ranking mode', () => {
 		);
 
 		expect(results.length).toBe(2);
-		expect(results[0].entry.id).toBe('1');
+		expect(results[0].volume.id).toBe('1');
 	});
 
 	it('default rankWeights are used when not specified', () => {

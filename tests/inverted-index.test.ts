@@ -2,10 +2,10 @@ import { describe, expect, it } from 'bun:test';
 import {
 	createInvertedIndex,
 	tokenizeForIndex,
-} from '../src/ai/memory/inverted-index.js';
-import type { VectorEntry } from '../src/ai/memory/types.js';
+} from '../src/ai/library/inverted-index.js';
+import type { Volume } from '../src/ai/library/types.js';
 
-function makeEntry(id: string, text: string): VectorEntry {
+function makeEntry(id: string, text: string): Volume {
 	return {
 		id,
 		text,

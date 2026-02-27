@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import type { Buffer } from 'node:buffer';
-import type { LearningEngine } from '../src/ai/memory/learning.js';
-import { createLearningEngine } from '../src/ai/memory/learning.js';
-import type { StorageBackend } from '../src/ai/memory/storage.js';
-import { createVectorStore } from '../src/ai/memory/vector-store.js';
+import type { LearningEngine } from '../src/ai/library/patron-learning.js';
+import { createLearningEngine } from '../src/ai/library/patron-learning.js';
+import type { StorageBackend } from '../src/ai/library/storage.js';
+import { createStacks } from '../src/ai/library/stacks.js';
 import { createLogger, type Logger } from '../src/logger.js';
 
 // ---------------------------------------------------------------------------
@@ -219,9 +219,9 @@ describe('createLearningEngine', () => {
 // VectorStore Learning Integration Tests
 // ---------------------------------------------------------------------------
 
-describe('VectorStore learning integration', () => {
+describe('Stacks learning integration', () => {
 	it('creates a learning engine by default', async () => {
-		const store = createVectorStore({
+		const store = createStacks({
 			storage: createMemoryStorage(),
 			logger: createSilentLogger(),
 		});
@@ -235,7 +235,7 @@ describe('VectorStore learning integration', () => {
 	});
 
 	it('disables learning when configured', async () => {
-		const store = createVectorStore({
+		const store = createStacks({
 			storage: createMemoryStorage(),
 			logger: createSilentLogger(),
 			learning: { enabled: false },
@@ -249,7 +249,7 @@ describe('VectorStore learning integration', () => {
 	});
 
 	it('records queries during search()', async () => {
-		const store = createVectorStore({
+		const store = createStacks({
 			storage: createMemoryStorage(),
 			logger: createSilentLogger(),
 			autoSave: true,
@@ -267,7 +267,7 @@ describe('VectorStore learning integration', () => {
 	});
 
 	it('records queries during advancedSearch()', async () => {
-		const store = createVectorStore({
+		const store = createStacks({
 			storage: createMemoryStorage(),
 			logger: createSilentLogger(),
 			autoSave: true,
@@ -287,7 +287,7 @@ describe('VectorStore learning integration', () => {
 	});
 
 	it('applies learning boost to recommend()', async () => {
-		const store = createVectorStore({
+		const store = createStacks({
 			storage: createMemoryStorage(),
 			logger: createSilentLogger(),
 			autoSave: true,
@@ -309,7 +309,7 @@ describe('VectorStore learning integration', () => {
 
 		expect(recs.length).toBeGreaterThan(0);
 		// The first result should be the frequently-queried entry
-		expect(recs[0].entry.id).toBe(id1);
+		expect(recs[0].volume.id).toBe(id1);
 
 		await store.dispose();
 	});
@@ -318,7 +318,7 @@ describe('VectorStore learning integration', () => {
 		const sharedData = new Map<string, Buffer>();
 
 		// First session: create store, add entries, search, save
-		const store1 = createVectorStore({
+		const store1 = createStacks({
 			storage: createMemoryStorage(sharedData),
 			logger: createSilentLogger(),
 			autoSave: true,
@@ -332,7 +332,7 @@ describe('VectorStore learning integration', () => {
 		await store1.dispose();
 
 		// Second session: load and verify learning state persisted
-		const store2 = createVectorStore({
+		const store2 = createStacks({
 			storage: createMemoryStorage(sharedData),
 			logger: createSilentLogger(),
 		});
@@ -344,7 +344,7 @@ describe('VectorStore learning integration', () => {
 	});
 
 	it('clears learning state on clear()', async () => {
-		const store = createVectorStore({
+		const store = createStacks({
 			storage: createMemoryStorage(),
 			logger: createSilentLogger(),
 			autoSave: true,

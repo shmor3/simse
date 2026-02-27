@@ -1,15 +1,15 @@
 import { describe, expect, it } from 'bun:test';
-import { formatMemoryContext } from '../src/ai/memory/prompt-injection.js';
-import type { SearchResult } from '../src/ai/memory/types.js';
+import { formatMemoryContext } from '../src/ai/library/prompt-injection.js';
+import type { Lookup } from '../src/ai/library/types.js';
 
 function makeResult(
 	text: string,
 	topic: string,
 	score: number,
 	ageMs = 0,
-): SearchResult {
+): Lookup {
 	return {
-		entry: {
+		volume: {
 			id: `id-${text}`,
 			text,
 			embedding: [0.1, 0.2],
@@ -72,7 +72,7 @@ describe('formatMemoryContext', () => {
 		const results = [makeResult('Use bun test', 'testing', 0.92)];
 		const output = formatMemoryContext(results, { format: 'natural' });
 		expect(output).not.toContain('<memory-context>');
-		expect(output).toContain('Relevant context from memory:');
+		expect(output).toContain('Relevant context from library:');
 		expect(output).toContain('Use bun test');
 	});
 
@@ -89,8 +89,8 @@ describe('formatMemoryContext', () => {
 	});
 
 	it('uses uncategorized for entries without topic metadata', () => {
-		const result: SearchResult = {
-			entry: {
+		const result: Lookup = {
+			volume: {
 				id: 'no-topic',
 				text: 'no topic here',
 				embedding: [0.1],

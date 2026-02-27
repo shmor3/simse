@@ -4,7 +4,7 @@ import {
 	frequencyScore,
 	normalizeWeights,
 	recencyScore,
-} from '../src/ai/memory/recommendation.js';
+} from '../src/ai/library/recommendation.js';
 
 // ---------------------------------------------------------------------------
 // normalizeWeights

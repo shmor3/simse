@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { Buffer } from 'node:buffer';
-import { encodeEmbedding } from '../src/ai/memory/compression.js';
-import { cosineSimilarity } from '../src/ai/memory/cosine.js';
-import type { StorageBackend } from '../src/ai/memory/storage.js';
+import { encodeEmbedding } from '../src/ai/library/preservation.js';
+import { cosineSimilarity } from '../src/ai/library/cosine.js';
+import type { StorageBackend } from '../src/ai/library/storage.js';
 import {
 	fuzzyScore,
 	levenshteinDistance,
@@ -12,12 +12,12 @@ import {
 	ngramSimilarity,
 	tokenize,
 	tokenOverlapScore,
-} from '../src/ai/memory/text-search.js';
-import type { VectorEntry } from '../src/ai/memory/types.js';
-import type { VectorStore } from '../src/ai/memory/vector-store.js';
+} from '../src/ai/library/text-search.js';
+import type { Volume } from '../src/ai/library/types.js';
+import type { Stacks } from '../src/ai/library/stacks.js';
 import {
-	isMemoryError,
-	isVectorStoreCorruptionError,
+	isLibraryError,
+	isStacksCorruptionError,
 } from '../src/errors/index.js';
 import { createLogger, type Logger } from '../src/logger.js';
 import { expectGuardedThrow } from './utils/error-helpers';
@@ -58,14 +58,14 @@ function createFailingStorage(error: Error): StorageBackend {
 	});
 }
 
-import { createVectorStore } from '../src/ai/memory/vector-store.js';
+import { createStacks } from '../src/ai/library/stacks.js';
 
 function createStore(options?: {
 	autoSave?: boolean;
 	flushIntervalMs?: number;
 	storage?: StorageBackend;
-}): VectorStore {
-	return createVectorStore({
+}): Stacks {
+	return createStacks({
 		storage: options?.storage ?? createMemoryStorage(),
 		logger: createSilentLogger(),
 		autoSave: options?.autoSave ?? true,
@@ -77,7 +77,7 @@ function makeEmbedding(dim: number, fill: number = 0.5): number[] {
 	return new Array(dim).fill(fill);
 }
 
-function makeEntry(overrides: Partial<VectorEntry> = {}): VectorEntry {
+function makeEntry(overrides: Partial<Volume> = {}): Volume {
 	return {
 		id: overrides.id ?? 'test-id-1',
 		text: overrides.text ?? 'test text',
@@ -92,7 +92,7 @@ function makeEntry(overrides: Partial<VectorEntry> = {}): VectorEntry {
  * Format: [4b text-len][text][4b emb-b64-len][emb-b64][4b meta-json-len][meta-json]
  *         [8b timestamp][4b accessCount][8b lastAccessed]
  */
-function serializeTestEntry(entry: VectorEntry): Buffer {
+function serializeTestEntry(entry: Volume): Buffer {
 	const textBuf = Buffer.from(entry.text, 'utf-8');
 	const embBuf = Buffer.from(encodeEmbedding(entry.embedding), 'utf-8');
 	const metaBuf = Buffer.from(JSON.stringify(entry.metadata), 'utf-8');
@@ -134,13 +134,13 @@ function serializeTestEntry(entry: VectorEntry): Buffer {
 
 /**
  * Write pre-populated test data into an in-memory Map using the binary KV
- * format. Only entries with complete VectorEntry fields (id, text, embedding,
+ * format. Only entries with complete Volume fields (id, text, embedding,
  * metadata, timestamp) are written; entries missing required fields get a
  * corrupt blob (useful for testing partial-corruption scenarios).
  */
 async function writeStoreData(
 	sharedData: Map<string, Buffer>,
-	entries: Array<Record<string, unknown> | VectorEntry>,
+	entries: Array<Record<string, unknown> | Volume>,
 ): Promise<void> {
 	for (const entry of entries) {
 		const id = entry.id as string | undefined;
@@ -332,10 +332,10 @@ describe('cosineSimilarity', () => {
 });
 
 // ===========================================================================
-// VectorStore — Lifecycle
+// Stacks — Lifecycle
 // ===========================================================================
 
-describe('VectorStore — Lifecycle', () => {
+describe('Stacks — Lifecycle', () => {
 	it('should start with zero entries when no file exists', async () => {
 		const store = createStore();
 		await store.load();
@@ -378,25 +378,25 @@ describe('VectorStore — Lifecycle', () => {
 		expect(store.size).toBe(0);
 	});
 
-	it('should throw VectorStoreCorruptionError for corrupt store file', async () => {
+	it('should throw StacksCorruptionError for corrupt store file', async () => {
 		const store = createStore({
 			storage: createFailingStorage(new Error('corrupt data')),
 		});
 		await expectGuardedThrow(
 			() => store.load(),
-			isVectorStoreCorruptionError,
-			'VECTOR_STORE_CORRUPT',
+			isStacksCorruptionError,
+			'STACKS_CORRUPT',
 		);
 	});
 
-	it('should throw VectorStoreCorruptionError for truncated store file', async () => {
+	it('should throw StacksCorruptionError for truncated store file', async () => {
 		const store = createStore({
 			storage: createFailingStorage(new Error('truncated data')),
 		});
 		await expectGuardedThrow(
 			() => store.load(),
-			isVectorStoreCorruptionError,
-			'VECTOR_STORE_CORRUPT',
+			isStacksCorruptionError,
+			'STACKS_CORRUPT',
 		);
 	});
 
@@ -446,10 +446,10 @@ describe('VectorStore — Lifecycle', () => {
 });
 
 // ===========================================================================
-// VectorStore — Save
+// Stacks — Save
 // ===========================================================================
 
-describe('VectorStore — Save', () => {
+describe('Stacks — Save', () => {
 	it('should persist entries to disk in binary KV format', async () => {
 		const sharedData = new Map<string, Buffer>();
 		const store = createStore({ storage: createMemoryStorage(sharedData) });
@@ -531,10 +531,10 @@ describe('VectorStore — Save', () => {
 });
 
 // ===========================================================================
-// VectorStore — CRUD: add
+// Stacks — CRUD: add
 // ===========================================================================
 
-describe('VectorStore — add', () => {
+describe('Stacks — add', () => {
 	it('should add an entry and return a UUID', async () => {
 		const store = createStore();
 		await store.load();
@@ -581,25 +581,25 @@ describe('VectorStore — add', () => {
 		expect(entry?.metadata).toEqual({});
 	});
 
-	it('should throw MemoryError for empty text', async () => {
+	it('should throw LibraryError for empty text', async () => {
 		const store = createStore();
 		await store.load();
 
 		await expectGuardedThrow(
 			() => store.add('', [0.1, 0.2, 0.3]),
-			isMemoryError,
-			'VECTOR_STORE_EMPTY_TEXT',
+			isLibraryError,
+			'STACKS_EMPTY_TEXT',
 		);
 	});
 
-	it('should throw MemoryError for empty embedding', async () => {
+	it('should throw LibraryError for empty embedding', async () => {
 		const store = createStore();
 		await store.load();
 
 		await expectGuardedThrow(
 			() => store.add('some text', []),
-			isMemoryError,
-			'VECTOR_STORE_EMPTY_EMBEDDING',
+			isLibraryError,
+			'STACKS_EMPTY_EMBEDDING',
 		);
 	});
 
@@ -647,10 +647,10 @@ describe('VectorStore — add', () => {
 });
 
 // ===========================================================================
-// VectorStore — CRUD: addBatch
+// Stacks — CRUD: addBatch
 // ===========================================================================
 
-describe('VectorStore — addBatch', () => {
+describe('Stacks — addBatch', () => {
 	it('should add multiple entries at once', async () => {
 		const store = createStore();
 		await store.load();
@@ -675,7 +675,7 @@ describe('VectorStore — addBatch', () => {
 		expect(store.size).toBe(0);
 	});
 
-	it('should throw MemoryError if any entry has empty text', async () => {
+	it('should throw LibraryError if any entry has empty text', async () => {
 		const store = createStore();
 		await store.load();
 
@@ -685,12 +685,12 @@ describe('VectorStore — addBatch', () => {
 					{ text: 'ok', embedding: [1] },
 					{ text: '', embedding: [2] },
 				]),
-			isMemoryError,
-			'VECTOR_STORE_EMPTY_TEXT',
+			isLibraryError,
+			'STACKS_EMPTY_TEXT',
 		);
 	});
 
-	it('should throw MemoryError if any entry has empty embedding', async () => {
+	it('should throw LibraryError if any entry has empty embedding', async () => {
 		const store = createStore();
 		await store.load();
 
@@ -700,8 +700,8 @@ describe('VectorStore — addBatch', () => {
 					{ text: 'ok', embedding: [1] },
 					{ text: 'bad', embedding: [] },
 				]),
-			isMemoryError,
-			'VECTOR_STORE_EMPTY_EMBEDDING',
+			isLibraryError,
+			'STACKS_EMPTY_EMBEDDING',
 		);
 	});
 
@@ -733,10 +733,10 @@ describe('VectorStore — addBatch', () => {
 });
 
 // ===========================================================================
-// VectorStore — CRUD: delete
+// Stacks — CRUD: delete
 // ===========================================================================
 
-describe('VectorStore — delete', () => {
+describe('Stacks — delete', () => {
 	it('should delete an existing entry and return true', async () => {
 		const store = createStore();
 		await store.load();
@@ -788,10 +788,10 @@ describe('VectorStore — delete', () => {
 });
 
 // ===========================================================================
-// VectorStore — CRUD: deleteBatch
+// Stacks — CRUD: deleteBatch
 // ===========================================================================
 
-describe('VectorStore — deleteBatch', () => {
+describe('Stacks — deleteBatch', () => {
 	it('should delete multiple entries by ID', async () => {
 		const store = createStore();
 		await store.load();
@@ -840,10 +840,10 @@ describe('VectorStore — deleteBatch', () => {
 });
 
 // ===========================================================================
-// VectorStore — CRUD: clear
+// Stacks — CRUD: clear
 // ===========================================================================
 
-describe('VectorStore — clear', () => {
+describe('Stacks — clear', () => {
 	it('should remove all entries', async () => {
 		const store = createStore();
 		await store.load();
@@ -880,10 +880,10 @@ describe('VectorStore — clear', () => {
 });
 
 // ===========================================================================
-// VectorStore — Search
+// Stacks — Search
 // ===========================================================================
 
-describe('VectorStore — search', () => {
+describe('Stacks — search', () => {
 	it('should find the most similar entry', async () => {
 		const store = createStore();
 		await store.load();
@@ -895,7 +895,7 @@ describe('VectorStore — search', () => {
 		const results = store.search([1, 0, 0], 10, 0);
 
 		expect(results.length).toBeGreaterThan(0);
-		expect(results[0].entry.text).toBe('exact match');
+		expect(results[0].volume.text).toBe('exact match');
 		expect(results[0].score).toBeCloseTo(1.0, 5);
 	});
 
@@ -937,7 +937,7 @@ describe('VectorStore — search', () => {
 		const results = store.search([1, 0, 0], 10, 0.5);
 
 		expect(results).toHaveLength(1);
-		expect(results[0].entry.text).toBe('similar');
+		expect(results[0].volume.text).toBe('similar');
 	});
 
 	it('should return empty array when no entries meet the threshold', async () => {
@@ -982,7 +982,7 @@ describe('VectorStore — search', () => {
 		const results = store.search([1, 0, 0], 10, 0);
 		// Should only include the two 3D entries
 		expect(results).toHaveLength(2);
-		expect(results.map((r) => r.entry.id).sort()).toEqual(['dim3', 'dim3b']);
+		expect(results.map((r) => r.volume.id).sort()).toEqual(['dim3', 'dim3b']);
 	});
 
 	it('should return correct score values', async () => {
@@ -1022,15 +1022,15 @@ describe('VectorStore — search', () => {
 		const results = store.search([1, 0, 0], 10, 1.0);
 		// Only the exact match should pass
 		expect(results).toHaveLength(1);
-		expect(results[0].entry.text).toBe('exact');
+		expect(results[0].volume.text).toBe('exact');
 	});
 });
 
 // ===========================================================================
-// VectorStore — Accessors
+// Stacks — Accessors
 // ===========================================================================
 
-describe('VectorStore — Accessors', () => {
+describe('Stacks — Accessors', () => {
 	describe('getAll', () => {
 		it('should return a shallow copy of entries', async () => {
 			const store = createStore();
@@ -1149,10 +1149,10 @@ describe('VectorStore — Accessors', () => {
 });
 
 // ===========================================================================
-// VectorStore — dispose
+// Stacks — dispose
 // ===========================================================================
 
-describe('VectorStore — dispose', () => {
+describe('Stacks — dispose', () => {
 	it('should flush dirty data on dispose', async () => {
 		const sharedData = new Map<string, Buffer>();
 		const store = createStore({
@@ -1193,10 +1193,10 @@ describe('VectorStore — dispose', () => {
 });
 
 // ===========================================================================
-// VectorStore — Entry validation (on load)
+// Stacks — Entry validation (on load)
 // ===========================================================================
 
-describe('VectorStore — Entry validation', () => {
+describe('Stacks — Entry validation', () => {
 	it('should skip entries with corrupt binary blobs', async () => {
 		const sharedData = new Map<string, Buffer>();
 		sharedData.set(
@@ -1266,10 +1266,10 @@ describe('VectorStore — Entry validation', () => {
 });
 
 // ===========================================================================
-// VectorStore — Concurrency / ordering
+// Stacks — Concurrency / ordering
 // ===========================================================================
 
-describe('VectorStore — Ordering', () => {
+describe('Stacks — Ordering', () => {
 	it('should maintain insertion order in getAll', async () => {
 		const store = createStore();
 		await store.load();
@@ -1324,10 +1324,10 @@ describe('VectorStore — Ordering', () => {
 });
 
 // ===========================================================================
-// VectorStore — Edge cases
+// Stacks — Edge cases
 // ===========================================================================
 
-describe('VectorStore — Edge cases', () => {
+describe('Stacks — Edge cases', () => {
 	it('should handle entries with very long text', async () => {
 		const store = createStore();
 		await store.load();
@@ -1720,10 +1720,10 @@ describe('matchesAllMetadataFilters', () => {
 });
 
 // ===========================================================================
-// VectorStore — textSearch
+// Stacks — textSearch
 // ===========================================================================
 
-describe('VectorStore — textSearch', () => {
+describe('Stacks — textSearch', () => {
 	it('should find entries by fuzzy match (default mode)', async () => {
 		const store = createStore();
 		await store.load();
@@ -1734,7 +1734,7 @@ describe('VectorStore — textSearch', () => {
 
 		const results = store.textSearch({ query: 'quick brown fox' });
 		expect(results.length).toBeGreaterThanOrEqual(1);
-		expect(results[0].entry.text).toContain('quick brown fox');
+		expect(results[0].volume.text).toContain('quick brown fox');
 	});
 
 	it('should find entries by substring match', async () => {
@@ -1758,7 +1758,7 @@ describe('VectorStore — textSearch', () => {
 
 		const results = store.textSearch({ query: 'Hello World', mode: 'exact' });
 		expect(results).toHaveLength(1);
-		expect(results[0].entry.text).toBe('Hello World');
+		expect(results[0].volume.text).toBe('Hello World');
 	});
 
 	it('should find entries by regex match', async () => {
@@ -1791,7 +1791,7 @@ describe('VectorStore — textSearch', () => {
 		});
 		expect(results.length).toBeGreaterThanOrEqual(1);
 		// The entry with "machine learning algorithms" should rank highest
-		expect(results[0].entry.text).toContain('learning algorithms');
+		expect(results[0].volume.text).toContain('learning algorithms');
 	});
 
 	it('should return empty array for empty query', async () => {
@@ -1819,10 +1819,10 @@ describe('VectorStore — textSearch', () => {
 });
 
 // ===========================================================================
-// VectorStore — filterByMetadata
+// Stacks — filterByMetadata
 // ===========================================================================
 
-describe('VectorStore — filterByMetadata', () => {
+describe('Stacks — filterByMetadata', () => {
 	it('should filter entries by exact metadata match', async () => {
 		const store = createStore();
 		await store.load();
@@ -1890,10 +1890,10 @@ describe('VectorStore — filterByMetadata', () => {
 });
 
 // ===========================================================================
-// VectorStore — filterByDateRange
+// Stacks — filterByDateRange
 // ===========================================================================
 
-describe('VectorStore — filterByDateRange', () => {
+describe('Stacks — filterByDateRange', () => {
 	it('should filter entries after a timestamp', async () => {
 		const store = createStore();
 		await store.load();
@@ -1937,10 +1937,10 @@ describe('VectorStore — filterByDateRange', () => {
 });
 
 // ===========================================================================
-// VectorStore — advancedSearch
+// Stacks — advancedSearch
 // ===========================================================================
 
-describe('VectorStore — advancedSearch', () => {
+describe('Stacks — advancedSearch', () => {
 	it('should combine vector and text search', async () => {
 		const store = createStore();
 		await store.load();
@@ -1977,7 +1977,7 @@ describe('VectorStore — advancedSearch', () => {
 		});
 
 		expect(results).toHaveLength(2);
-		expect(results.every((r) => r.entry.metadata.source === 'web')).toBe(true);
+		expect(results.every((r) => r.volume.metadata.source === 'web')).toBe(true);
 	});
 
 	it('should filter by date range in advanced search', async () => {
@@ -1996,7 +1996,7 @@ describe('VectorStore — advancedSearch', () => {
 		});
 
 		expect(results).toHaveLength(1);
-		expect(results[0].entry.text).toBe('new entry');
+		expect(results[0].volume.text).toBe('new entry');
 	});
 
 	it('should work with text search only (no embedding)', async () => {
@@ -2014,7 +2014,7 @@ describe('VectorStore — advancedSearch', () => {
 
 		// Both "The quick brown fox" and "Quick brown cat" contain "quick brown" (case-insensitive)
 		expect(results).toHaveLength(2);
-		const texts = results.map((r) => r.entry.text);
+		const texts = results.map((r) => r.volume.text);
 		expect(texts).toContain('The quick brown fox');
 		expect(texts).toContain('Quick brown cat');
 	});

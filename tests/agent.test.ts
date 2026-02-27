@@ -3,8 +3,8 @@ import type { ACPClient } from '../src/ai/acp/acp-client.js';
 import type { ACPGenerateResult } from '../src/ai/acp/types.js';
 import { createAgentExecutor } from '../src/ai/agent/agent-executor.js';
 import type { MCPClient } from '../src/ai/mcp/mcp-client.js';
-import type { MemoryManager } from '../src/ai/memory/memory.js';
-import type { SearchResult } from '../src/ai/memory/types.js';
+import type { Library } from '../src/ai/library/library.js';
+import type { Lookup } from '../src/ai/library/types.js';
 import { isChainError, isMCPToolError } from '../src/errors/index.js';
 import { createLogger, type Logger } from '../src/logger.js';
 
@@ -76,9 +76,9 @@ function createMockMCPClient(overrides: Partial<MCPClient> = {}): MCPClient {
 	} as unknown as MCPClient;
 }
 
-function createMockMemoryManager(
-	overrides: Partial<MemoryManager> = {},
-): MemoryManager {
+function createMockLibrary(
+	overrides: Partial<Library> = {},
+): Library {
 	return {
 		initialize: mock((..._: any[]): any => {}),
 		dispose: mock((..._: any[]): any => {}),
@@ -89,7 +89,7 @@ function createMockMemoryManager(
 		]),
 		search: mock((..._: any[]): any => {}).mockResolvedValue([
 			{
-				entry: {
+				volume: {
 					id: 'e1',
 					text: 'previous memory',
 					embedding: [0.1],
@@ -98,7 +98,7 @@ function createMockMemoryManager(
 				},
 				score: 0.95,
 			},
-		] satisfies SearchResult[]),
+		] satisfies Lookup[]),
 		delete: mock((..._: any[]): any => {}).mockResolvedValue(true),
 		deleteBatch: mock((..._: any[]): any => {}).mockResolvedValue(1),
 		clear: mock((..._: any[]): any => {}),
@@ -107,7 +107,7 @@ function createMockMemoryManager(
 		isDirty: false,
 		embeddingAgent: 'embedding',
 		...overrides,
-	} as unknown as MemoryManager;
+	} as unknown as Library;
 }
 
 // ---------------------------------------------------------------------------
@@ -352,12 +352,12 @@ describe('createAgentExecutor', () => {
 	});
 
 	describe('execute (memory)', () => {
-		it('should call memoryManager.search with the prompt', async () => {
+		it('should call library.search with the prompt', async () => {
 			const acp = createMockACPClient();
-			const memory = createMockMemoryManager();
+			const memory = createMockLibrary();
 			const executor = createAgentExecutor({
 				acpClient: acp,
-				memoryManager: memory,
+				library: memory,
 				logger,
 			});
 
@@ -373,10 +373,10 @@ describe('createAgentExecutor', () => {
 
 		it('should return formatted search results', async () => {
 			const acp = createMockACPClient();
-			const memory = createMockMemoryManager();
+			const memory = createMockLibrary();
 			const executor = createAgentExecutor({
 				acpClient: acp,
-				memoryManager: memory,
+				library: memory,
 				logger,
 			});
 
@@ -388,10 +388,10 @@ describe('createAgentExecutor', () => {
 			);
 
 			expect(result.output).toContain('previous memory');
-			expect(result.model).toBe('memory:vector-search');
+			expect(result.model).toBe('library:search');
 		});
 
-		it('should throw CHAIN_MEMORY_NOT_CONFIGURED when memoryManager is absent', async () => {
+		it('should throw CHAIN_MEMORY_NOT_CONFIGURED when library is absent', async () => {
 			const acp = createMockACPClient();
 			const executor = createAgentExecutor({ acpClient: acp, logger });
 

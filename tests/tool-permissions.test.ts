@@ -44,17 +44,17 @@ describe('createToolPermissionResolver', () => {
 
 		expect(await resolver.check(makeRequest('fs_read'))).toBe(true);
 		expect(await resolver.check(makeRequest('fs_write'))).toBe(true);
-		expect(await resolver.check(makeRequest('memory_search'))).toBe(false);
+		expect(await resolver.check(makeRequest('library_search'))).toBe(false);
 	});
 
 	it('matches exact tool name', async () => {
 		const resolver = createToolPermissionResolver({
 			defaultPolicy: 'deny',
-			rules: [{ tool: 'memory_search', policy: 'allow' }],
+			rules: [{ tool: 'library_search', policy: 'allow' }],
 		});
 
-		expect(await resolver.check(makeRequest('memory_search'))).toBe(true);
-		expect(await resolver.check(makeRequest('memory_add'))).toBe(false);
+		expect(await resolver.check(makeRequest('library_search'))).toBe(true);
+		expect(await resolver.check(makeRequest('library_shelve'))).toBe(false);
 	});
 
 	it('matches bash command pattern', async () => {

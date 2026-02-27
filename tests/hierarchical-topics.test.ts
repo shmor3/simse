@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
-import { createTopicIndex } from '../src/ai/memory/indexing.js';
-import type { VectorEntry } from '../src/ai/memory/types.js';
+import { createTopicIndex } from '../src/ai/library/cataloging.js';
+import type { Volume } from '../src/ai/library/types.js';
 
 function makeEntry(
 	id: string,
 	text: string,
 	topics?: string[],
 	singleTopic?: string,
-): VectorEntry {
+): Volume {
 	const metadata: Record<string, string> = {};
 	if (topics) metadata.topics = JSON.stringify(topics);
 	if (singleTopic) metadata.topic = singleTopic;

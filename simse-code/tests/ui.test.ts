@@ -89,7 +89,7 @@ describe('renderToolCall', () => {
 
 	it('should format a tool call with JSON args (verbose)', () => {
 		const result = renderToolCall(
-			'memory_search',
+			'library_search',
 			'{"query": "auth flow"}',
 			colors,
 			{ verbose: true },
@@ -118,7 +118,7 @@ describe('renderToolCall', () => {
 
 	it('should handle non-string values (verbose)', () => {
 		const result = renderToolCall(
-			'memory_search',
+			'library_search',
 			'{"query": "test", "maxResults": 10}',
 			colors,
 			{ verbose: true },

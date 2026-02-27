@@ -110,18 +110,18 @@ describe('createContextPruner', () => {
 	it('preserves protected tools', () => {
 		const pruner = createContextPruner({
 			protectRecentTurns: 0,
-			pruneProtectedTools: ['memory_search'],
+			pruneProtectedTools: ['library_search'],
 		});
 
 		const messages: ConversationMessage[] = [
 			msg('user', 'go'),
-			toolResult('memory_search', chars(500)),
+			toolResult('library_search', chars(500)),
 			toolResult('web_search', chars(500)),
 		];
 
 		const result = pruner.prune(messages);
 
-		// memory_search should be preserved
+		// library_search should be preserved
 		expect(result[1].content).toBe(chars(500));
 		// web_search should be pruned
 		expect(result[2].content).toBe('[OUTPUT PRUNED \u2014 500 chars]');
@@ -251,12 +251,12 @@ describe('createContextPruner', () => {
 	it('handles multiple protected tools', () => {
 		const pruner = createContextPruner({
 			protectRecentTurns: 0,
-			pruneProtectedTools: ['memory_search', 'file_read'],
+			pruneProtectedTools: ['library_search', 'file_read'],
 		});
 
 		const messages: ConversationMessage[] = [
 			msg('user', 'go'),
-			toolResult('memory_search', chars(500)),
+			toolResult('library_search', chars(500)),
 			toolResult('file_read', chars(500)),
 			toolResult('web_search', chars(500)),
 		];

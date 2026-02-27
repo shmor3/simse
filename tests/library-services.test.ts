@@ -1,10 +1,10 @@
 import { describe, expect, it, mock } from 'bun:test';
-import type { MemoryManager } from '../src/ai/memory/memory.js';
-import { createMemoryMiddleware } from '../src/ai/memory/middleware.js';
+import type { Library } from '../src/ai/library/library.js';
+import { createLibraryServices } from '../src/ai/library/library-services.js';
 
-function createMockMemoryManager(
+function createMockLibrary(
 	searchResults: Array<{
-		entry: {
+		volume: {
 			id: string;
 			text: string;
 			embedding: number[];
@@ -13,7 +13,7 @@ function createMockMemoryManager(
 		};
 		score: number;
 	}> = [],
-): MemoryManager {
+): Library {
 	return {
 		initialize: mock(async () => {}),
 		dispose: mock(async () => {}),
@@ -32,7 +32,7 @@ function createMockMemoryManager(
 		recommend: mock(async () => []),
 		findDuplicates: mock(() => []),
 		checkDuplicate: mock(async () => ({ isDuplicate: false })),
-		summarize: mock(async () => ({
+		compendium: mock(async () => ({
 			summaryId: '',
 			summaryText: '',
 			sourceIds: [],
@@ -43,26 +43,26 @@ function createMockMemoryManager(
 		delete: mock(async () => false),
 		deleteBatch: mock(async () => 0),
 		clear: mock(async () => {}),
-		learningProfile: undefined,
+		patronProfile: undefined,
 		size: searchResults.length,
 		isInitialized: true,
 		isDirty: false,
 		embeddingAgent: undefined,
-	} as unknown as MemoryManager;
+	} as unknown as Library;
 }
 
-describe('createMemoryMiddleware', () => {
+describe('createLibraryServices', () => {
 	it('returns a frozen object with enrichSystemPrompt and afterResponse', () => {
-		const mw = createMemoryMiddleware(createMockMemoryManager());
-		expect(mw.enrichSystemPrompt).toBeFunction();
-		expect(mw.afterResponse).toBeFunction();
-		expect(Object.isFrozen(mw)).toBe(true);
+		const svc = createLibraryServices(createMockLibrary());
+		expect(svc.enrichSystemPrompt).toBeFunction();
+		expect(svc.afterResponse).toBeFunction();
+		expect(Object.isFrozen(svc)).toBe(true);
 	});
 
-	it('enrichSystemPrompt appends memory context to system prompt', async () => {
+	it('enrichSystemPrompt appends library context to system prompt', async () => {
 		const results = [
 			{
-				entry: {
+				volume: {
 					id: '1',
 					text: 'Use bun test',
 					embedding: [0.1],
@@ -72,8 +72,8 @@ describe('createMemoryMiddleware', () => {
 				score: 0.9,
 			},
 		];
-		const mw = createMemoryMiddleware(createMockMemoryManager(results));
-		const enriched = await mw.enrichSystemPrompt({
+		const svc = createLibraryServices(createMockLibrary(results));
+		const enriched = await svc.enrichSystemPrompt({
 			userInput: 'how do I test?',
 			currentSystemPrompt: 'You are helpful.',
 			conversationHistory: '',
@@ -85,8 +85,8 @@ describe('createMemoryMiddleware', () => {
 	});
 
 	it('enrichSystemPrompt returns original prompt when no results', async () => {
-		const mw = createMemoryMiddleware(createMockMemoryManager([]));
-		const enriched = await mw.enrichSystemPrompt({
+		const svc = createLibraryServices(createMockLibrary([]));
+		const enriched = await svc.enrichSystemPrompt({
 			userInput: 'hello',
 			currentSystemPrompt: 'You are helpful.',
 			conversationHistory: '',
@@ -96,12 +96,12 @@ describe('createMemoryMiddleware', () => {
 	});
 
 	it('enrichSystemPrompt gracefully handles search errors', async () => {
-		const mm = createMockMemoryManager();
-		(mm.search as ReturnType<typeof mock>).mockImplementation(async () => {
+		const lib = createMockLibrary();
+		(lib.search as ReturnType<typeof mock>).mockImplementation(async () => {
 			throw new Error('embed failed');
 		});
-		const mw = createMemoryMiddleware(mm);
-		const enriched = await mw.enrichSystemPrompt({
+		const svc = createLibraryServices(lib);
+		const enriched = await svc.enrichSystemPrompt({
 			userInput: 'hello',
 			currentSystemPrompt: 'You are helpful.',
 			conversationHistory: '',
@@ -110,35 +110,35 @@ describe('createMemoryMiddleware', () => {
 		expect(enriched).toBe('You are helpful.');
 	});
 
-	it('afterResponse stores Q&A in memory', async () => {
-		const mm = createMockMemoryManager();
-		const mw = createMemoryMiddleware(mm, { storeTopic: 'chat' });
-		await mw.afterResponse('What is Bun?', 'Bun is a JS runtime.');
-		expect(mm.add).toHaveBeenCalledTimes(1);
-		const callArgs = (mm.add as ReturnType<typeof mock>).mock.calls[0];
+	it('afterResponse stores Q&A in library', async () => {
+		const lib = createMockLibrary();
+		const svc = createLibraryServices(lib, { storeTopic: 'chat' });
+		await svc.afterResponse('What is Bun?', 'Bun is a JS runtime.');
+		expect(lib.add).toHaveBeenCalledTimes(1);
+		const callArgs = (lib.add as ReturnType<typeof mock>).mock.calls[0];
 		expect(callArgs[0]).toContain('What is Bun?');
 		expect(callArgs[0]).toContain('Bun is a JS runtime.');
 		expect(callArgs[1]).toEqual(expect.objectContaining({ topic: 'chat' }));
 	});
 
 	it('afterResponse skips empty responses', async () => {
-		const mm = createMockMemoryManager();
-		const mw = createMemoryMiddleware(mm);
-		await mw.afterResponse('hello', '');
-		expect(mm.add).not.toHaveBeenCalled();
+		const lib = createMockLibrary();
+		const svc = createLibraryServices(lib);
+		await svc.afterResponse('hello', '');
+		expect(lib.add).not.toHaveBeenCalled();
 	});
 
 	it('afterResponse skips error responses', async () => {
-		const mm = createMockMemoryManager();
-		const mw = createMemoryMiddleware(mm);
-		await mw.afterResponse('hello', 'Error communicating with ACP');
-		expect(mm.add).not.toHaveBeenCalled();
+		const lib = createMockLibrary();
+		const svc = createLibraryServices(lib);
+		await svc.afterResponse('hello', 'Error communicating with ACP');
+		expect(lib.add).not.toHaveBeenCalled();
 	});
 
 	it('respects maxResults option', async () => {
-		const mm = createMockMemoryManager([
+		const lib = createMockLibrary([
 			{
-				entry: {
+				volume: {
 					id: '1',
 					text: 'a',
 					embedding: [0.1],
@@ -148,28 +148,28 @@ describe('createMemoryMiddleware', () => {
 				score: 0.9,
 			},
 		]);
-		const mw = createMemoryMiddleware(mm, { maxResults: 3 });
-		await mw.enrichSystemPrompt({
+		const svc = createLibraryServices(lib, { maxResults: 3 });
+		await svc.enrichSystemPrompt({
 			userInput: 'test',
 			currentSystemPrompt: '',
 			conversationHistory: '',
 			turn: 1,
 		});
-		expect(mm.search).toHaveBeenCalledWith('test', 3, undefined);
+		expect(lib.search).toHaveBeenCalledWith('test', 3, undefined);
 	});
 
 	it('respects storeResponses: false', async () => {
-		const mm = createMockMemoryManager();
-		const mw = createMemoryMiddleware(mm, { storeResponses: false });
-		await mw.afterResponse('hello', 'world');
-		expect(mm.add).not.toHaveBeenCalled();
+		const lib = createMockLibrary();
+		const svc = createLibraryServices(lib, { storeResponses: false });
+		await svc.afterResponse('hello', 'world');
+		expect(lib.add).not.toHaveBeenCalled();
 	});
 
-	it('returns original prompt when memory not initialized', async () => {
-		const mm = createMockMemoryManager();
-		(mm as { isInitialized: boolean }).isInitialized = false;
-		const mw = createMemoryMiddleware(mm);
-		const enriched = await mw.enrichSystemPrompt({
+	it('returns original prompt when library not initialized', async () => {
+		const lib = createMockLibrary();
+		(lib as { isInitialized: boolean }).isInitialized = false;
+		const svc = createLibraryServices(lib);
+		const enriched = await svc.enrichSystemPrompt({
 			userInput: 'test',
 			currentSystemPrompt: 'System prompt.',
 			conversationHistory: '',

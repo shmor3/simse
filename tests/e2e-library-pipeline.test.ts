@@ -1,14 +1,14 @@
 /**
- * E2E test: Full memory pipeline — embed → store → search → dedup.
+ * E2E test: Full library pipeline — embed → store → search → dedup.
  *
  * Tests the complete flow from createLocalEmbedder through
- * createMemoryManager with real ONNX embeddings.
+ * createLibrary with real ONNX embeddings.
  */
 import { describe, expect, it } from 'bun:test';
 import type { Buffer } from 'node:buffer';
 import { createLocalEmbedder } from '../src/ai/acp/local-embedder.js';
-import { createMemoryManager } from '../src/ai/memory/memory.js';
-import type { StorageBackend } from '../src/ai/memory/storage.js';
+import { createLibrary } from '../src/ai/library/library.js';
+import type { StorageBackend } from '../src/ai/library/storage.js';
 
 // ---------------------------------------------------------------------------
 // In-memory storage backend for tests
@@ -30,34 +30,34 @@ function createMemoryStorage(): StorageBackend {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Memory pipeline E2E', () => {
+describe('Library pipeline E2E', () => {
 	const embedder = createLocalEmbedder({
 		model: 'Xenova/all-MiniLM-L6-v2',
 		dtype: 'q8',
 	});
 
-	it('adds notes and searches semantically', async () => {
-		const memory = createMemoryManager(
+	it('adds volumes and searches semantically', async () => {
+		const library = createLibrary(
 			embedder,
 			{},
 			{
 				storage: createMemoryStorage(),
 			},
 		);
-		await memory.initialize();
+		await library.initialize();
 
-		await memory.add('TypeScript is a typed superset of JavaScript', {
+		await library.add('TypeScript is a typed superset of JavaScript', {
 			topic: 'programming',
 		});
-		await memory.add('Python is great for data science and machine learning', {
+		await library.add('Python is great for data science and machine learning', {
 			topic: 'programming',
 		});
-		await memory.add('The weather in London is often rainy and cold', {
+		await library.add('The weather in London is often rainy and cold', {
 			topic: 'weather',
 		});
 
 		// Search with positional args: query, maxResults, threshold
-		const results = await memory.search(
+		const results = await library.search(
 			'What programming languages are useful?',
 			3,
 			0.0,
@@ -66,22 +66,22 @@ describe('Memory pipeline E2E', () => {
 		expect(results.length).toBeGreaterThanOrEqual(2);
 
 		// Programming results should rank above weather
-		const topics = results.map((r) => r.entry.metadata?.topic);
+		const topics = results.map((r) => r.volume.metadata?.topic);
 		expect(topics[0]).toBe('programming');
 		expect(topics[1]).toBe('programming');
 	}, 120_000);
 
 	it('detects near-duplicate text', async () => {
-		const memory = createMemoryManager(
+		const library = createLibrary(
 			embedder,
 			{ duplicateThreshold: 0.9 },
 			{ storage: createMemoryStorage() },
 		);
-		await memory.initialize();
+		await library.initialize();
 
-		await memory.add('TypeScript is a typed superset of JavaScript');
+		await library.add('TypeScript is a typed superset of JavaScript');
 
-		const dupeResult = await memory.checkDuplicate(
+		const dupeResult = await library.checkDuplicate(
 			'TypeScript is a typed superset of JavaScript language',
 		);
 		expect(dupeResult.isDuplicate).toBe(true);
@@ -89,26 +89,26 @@ describe('Memory pipeline E2E', () => {
 	}, 120_000);
 
 	it('stores and retrieves by topic', async () => {
-		const memory = createMemoryManager(
+		const library = createLibrary(
 			embedder,
 			{},
 			{
 				storage: createMemoryStorage(),
 			},
 		);
-		await memory.initialize();
+		await library.initialize();
 
-		await memory.add('React is a UI library', { topic: 'frontend' });
-		await memory.add('Express is a Node framework', { topic: 'backend' });
-		await memory.add('Vue is another UI framework', { topic: 'frontend' });
+		await library.add('React is a UI library', { topic: 'frontend' });
+		await library.add('Express is a Node framework', { topic: 'backend' });
+		await library.add('Vue is another UI framework', { topic: 'frontend' });
 
-		const frontend = memory.filterByTopic(['frontend']);
+		const frontend = library.filterByTopic(['frontend']);
 		expect(frontend).toHaveLength(2);
 
-		const backend = memory.filterByTopic(['backend']);
+		const backend = library.filterByTopic(['backend']);
 		expect(backend).toHaveLength(1);
 
-		const topics = memory.getTopics();
+		const topics = library.getTopics();
 		expect(topics.length).toBe(2);
 	}, 120_000);
 });

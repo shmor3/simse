@@ -12,7 +12,7 @@ import type {
 	ACPFileConfig,
 	EmbedFileConfig,
 	MCPFileConfig,
-	MemoryFileConfig,
+	LibraryFileConfig,
 	UserConfig,
 } from '../config.js';
 import { createCLIConfig } from '../config.js';
@@ -330,7 +330,7 @@ describe('createCLIConfig', () => {
 	it('should work without memory.json (optional)', () => {
 		writeJson(testDir, 'acp.json', makeACPConfig());
 		const result = createCLIConfig({ dataDir: testDir });
-		expect(result.memoryConfig).toEqual({});
+		expect(result.libraryConfig).toEqual({});
 	});
 
 	it('should read memory options from memory.json', () => {
@@ -342,9 +342,9 @@ describe('createCLIConfig', () => {
 			enabled: true,
 			similarityThreshold: 0.5,
 			maxResults: 20,
-		} satisfies MemoryFileConfig);
+		} satisfies LibraryFileConfig);
 
-		const { config, memoryConfig, embedConfig } = createCLIConfig({
+		const { config, libraryConfig, embedConfig } = createCLIConfig({
 			dataDir: testDir,
 		});
 		expect(config.memory.enabled).toBe(true);
@@ -352,37 +352,37 @@ describe('createCLIConfig', () => {
 		expect(embedConfig.embeddingModel).toBe('nomic-ai/nomic-embed-text-v1.5');
 		expect(config.memory.similarityThreshold).toBe(0.5);
 		expect(config.memory.maxResults).toBe(20);
-		expect(memoryConfig.enabled).toBe(true);
+		expect(libraryConfig.enabled).toBe(true);
 	});
 
 	it('should read embeddingServer from memory.json', () => {
 		writeJson(testDir, 'acp.json', makeACPConfig());
 		writeJson(testDir, 'memory.json', {
 			embeddingServer: 'embed-server',
-		} satisfies MemoryFileConfig);
+		} satisfies LibraryFileConfig);
 
 		const result = createCLIConfig({ dataDir: testDir });
-		expect(result.memoryConfig.embeddingServer).toBe('embed-server');
+		expect(result.libraryConfig.embeddingServer).toBe('embed-server');
 	});
 
 	it('should read embeddingModel from memory.json', () => {
 		writeJson(testDir, 'acp.json', makeACPConfig());
 		writeJson(testDir, 'memory.json', {
 			embeddingModel: 'nomic-embed-text',
-		} satisfies MemoryFileConfig);
+		} satisfies LibraryFileConfig);
 
 		const result = createCLIConfig({ dataDir: testDir });
-		expect(result.memoryConfig.embeddingModel).toBe('nomic-embed-text');
+		expect(result.libraryConfig.embeddingModel).toBe('nomic-embed-text');
 	});
 
 	it('should read storageFilename from memory.json', () => {
 		writeJson(testDir, 'acp.json', makeACPConfig());
 		writeJson(testDir, 'memory.json', {
 			storageFilename: 'custom.simk',
-		} satisfies MemoryFileConfig);
+		} satisfies LibraryFileConfig);
 
 		const result = createCLIConfig({ dataDir: testDir });
-		expect(result.memoryConfig.storageFilename).toBe('custom.simk');
+		expect(result.libraryConfig.storageFilename).toBe('custom.simk');
 	});
 
 	it('should read vector store options from memory.json', () => {
@@ -394,15 +394,15 @@ describe('createCLIConfig', () => {
 			flushIntervalMs: 10000,
 			compressionLevel: 9,
 			atomicWrite: false,
-		} satisfies MemoryFileConfig);
+		} satisfies LibraryFileConfig);
 
-		const { memoryConfig } = createCLIConfig({ dataDir: testDir });
-		expect(memoryConfig.autoSave).toBe(true);
-		expect(memoryConfig.duplicateThreshold).toBe(0.95);
-		expect(memoryConfig.duplicateBehavior).toBe('skip');
-		expect(memoryConfig.flushIntervalMs).toBe(10000);
-		expect(memoryConfig.compressionLevel).toBe(9);
-		expect(memoryConfig.atomicWrite).toBe(false);
+		const { libraryConfig } = createCLIConfig({ dataDir: testDir });
+		expect(libraryConfig.autoSave).toBe(true);
+		expect(libraryConfig.duplicateThreshold).toBe(0.95);
+		expect(libraryConfig.duplicateBehavior).toBe('skip');
+		expect(libraryConfig.flushIntervalMs).toBe(10000);
+		expect(libraryConfig.compressionLevel).toBe(9);
+		expect(libraryConfig.atomicWrite).toBe(false);
 	});
 
 	it('should fall back to default model when embeddingModel not in embed.json', () => {

@@ -231,7 +231,7 @@ export function createStacks(options: StacksOptions): Stacks {
 		if (!initialized) {
 			throw createLibraryError(
 				'Stacks has not been loaded. Call load() first.',
-				{ code: 'VECTOR_STORE_NOT_LOADED' },
+				{ code: 'STACKS_NOT_LOADED' },
 			);
 		}
 	};
@@ -432,13 +432,13 @@ export function createStacks(options: StacksOptions): Stacks {
 		ensureLoaded();
 		if (text.length === 0) {
 			throw createLibraryError('Cannot add empty text to stacks', {
-				code: 'VECTOR_STORE_EMPTY_TEXT',
+				code: 'STACKS_EMPTY_TEXT',
 			});
 		}
 
 		if (embedding.length === 0) {
 			throw createLibraryError('Cannot add volume with empty embedding vector', {
-				code: 'VECTOR_STORE_EMPTY_EMBEDDING',
+				code: 'STACKS_EMPTY_EMBEDDING',
 			});
 		}
 
@@ -461,7 +461,7 @@ export function createStacks(options: StacksOptions): Stacks {
 					if (duplicateBehavior === 'error') {
 						throw createLibraryError(
 							`Duplicate volume detected (similarity: ${dupResult.similarity?.toFixed(4)}, existing: ${dupResult.existingVolume?.id})`,
-							{ code: 'VECTOR_STORE_DUPLICATE' },
+							{ code: 'STACKS_DUPLICATE' },
 						);
 					}
 					// 'warn' — log and continue
@@ -519,14 +519,14 @@ export function createStacks(options: StacksOptions): Stacks {
 			if (entry.text.length === 0) {
 				throw createLibraryError(
 					'Cannot add empty text to stacks (in batch)',
-					{ code: 'VECTOR_STORE_EMPTY_TEXT' },
+					{ code: 'STACKS_EMPTY_TEXT' },
 				);
 			}
 
 			if (entry.embedding.length === 0) {
 				throw createLibraryError(
 					'Cannot add volume with empty embedding vector (in batch)',
-					{ code: 'VECTOR_STORE_EMPTY_EMBEDDING' },
+					{ code: 'STACKS_EMPTY_EMBEDDING' },
 				);
 			}
 		}
@@ -555,7 +555,7 @@ export function createStacks(options: StacksOptions): Stacks {
 						if (duplicateBehavior === 'error') {
 							throw createLibraryError(
 								`Duplicate volume detected in batch (similarity: ${dupResult.similarity?.toFixed(4)}, existing: ${dupResult.existingVolume?.id})`,
-								{ code: 'VECTOR_STORE_DUPLICATE' },
+								{ code: 'STACKS_DUPLICATE' },
 							);
 						}
 						// 'warn' — log and continue

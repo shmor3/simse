@@ -38,13 +38,13 @@ describe('createConversation', () => {
 
 	it('should add tool results with metadata', () => {
 		const conv = createConversation();
-		conv.addToolResult('call_1', 'memory_search', '3 results found');
+		conv.addToolResult('call_1', 'library_search', '3 results found');
 		expect(conv.messageCount).toBe(1);
 		const msgs = conv.toMessages();
 		expect(msgs[0].role).toBe('tool_result');
 		expect(msgs[0].content).toBe('3 results found');
 		expect(msgs[0].toolCallId).toBe('call_1');
-		expect(msgs[0].toolName).toBe('memory_search');
+		expect(msgs[0].toolName).toBe('library_search');
 	});
 
 	it('should freeze individual messages', () => {

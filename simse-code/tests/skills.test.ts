@@ -10,7 +10,7 @@ function makeSkill(overrides?: Partial<SkillConfig>): SkillConfig {
 	return {
 		name: overrides?.name ?? 'test-skill',
 		description: overrides?.description ?? 'A test skill',
-		allowedTools: overrides?.allowedTools ?? ['memory_search'],
+		allowedTools: overrides?.allowedTools ?? ['library_search'],
 		argumentHint: overrides?.argumentHint ?? '<query>',
 		model: overrides?.model,
 		serverName: overrides?.serverName,

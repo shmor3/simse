@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { createTextCache } from '../src/ai/memory/text-cache.js';
+import { createTextCache } from '../src/ai/library/text-cache.js';
 
 describe('createTextCache', () => {
 	it('returns a frozen object', () => {

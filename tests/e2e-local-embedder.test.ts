@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from 'bun:test';
 import { createLocalEmbedder } from '../src/ai/acp/local-embedder.js';
-import { cosineSimilarity } from '../src/ai/memory/cosine.js';
+import { cosineSimilarity } from '../src/ai/library/cosine.js';
 
 describe('Local embedder E2E', () => {
 	// Use a small model for faster CI — all-MiniLM-L6-v2 is ~23MB

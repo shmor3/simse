@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import {
-	createMemoryManager,
-	type MemoryManager,
-} from '../src/ai/memory/memory.js';
+	createLibrary,
+	type Library,
+} from '../src/ai/library/library.js';
 import type {
 	EmbeddingProvider,
-	MemoryConfig,
-} from '../src/ai/memory/types.js';
+	LibraryConfig,
+} from '../src/ai/library/types.js';
 import { createMemoryStorage, createSilentLogger } from './utils/mocks.js';
 
 // ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ function createMockEmbedder(dim = 8): EmbeddingProvider {
 	};
 }
 
-const defaultConfig: MemoryConfig = {
+const defaultConfig: LibraryConfig = {
 	enabled: true,
 	embeddingAgent: 'test',
 	similarityThreshold: 0,
@@ -53,22 +53,22 @@ const defaultConfig: MemoryConfig = {
 // Integration Tests
 // ---------------------------------------------------------------------------
 
-describe('Hierarchical Memory System Integration', () => {
-	let manager: MemoryManager;
+describe('Hierarchical Library System Integration', () => {
+	let library: Library;
 
 	beforeEach(async () => {
 		const storage = createMemoryStorage();
 		const embedder = createMockEmbedder();
-		manager = createMemoryManager(embedder, defaultConfig, {
+		library = createLibrary(embedder, defaultConfig, {
 			storage,
 			logger: createSilentLogger(),
-			vectorStoreOptions: {
+			stacksOptions: {
 				autoSave: true,
 				flushIntervalMs: 0,
 				learning: { enabled: true },
 			},
 		});
-		await manager.initialize();
+		await library.initialize();
 	});
 
 	// -----------------------------------------------------------------------
@@ -77,17 +77,17 @@ describe('Hierarchical Memory System Integration', () => {
 
 	describe('hierarchical topics', () => {
 		it('auto-creates parent topics from hierarchical paths', async () => {
-			await manager.add('Rust ownership model', {
+			await library.add('Rust ownership model', {
 				topics: JSON.stringify(['programming/rust/ownership']),
 			});
-			await manager.add('Python async await', {
+			await library.add('Python async await', {
 				topics: JSON.stringify(['programming/python/async']),
 			});
-			await manager.add('Italian pasta recipes', {
+			await library.add('Italian pasta recipes', {
 				topics: JSON.stringify(['cooking/italian']),
 			});
 
-			const topics = manager.getTopics();
+			const topics = library.getTopics();
 			const paths = topics.map((t) => t.topic);
 
 			// Auto-created parents should exist
@@ -101,18 +101,18 @@ describe('Hierarchical Memory System Integration', () => {
 		});
 
 		it('ancestor query returns all descendant entries', async () => {
-			await manager.add('Rust ownership model', {
+			await library.add('Rust ownership model', {
 				topics: JSON.stringify(['programming/rust/ownership']),
 			});
-			await manager.add('Python async await', {
+			await library.add('Python async await', {
 				topics: JSON.stringify(['programming/python/async']),
 			});
-			await manager.add('Italian pasta recipes', {
+			await library.add('Italian pasta recipes', {
 				topics: JSON.stringify(['cooking/italian']),
 			});
 
 			// Querying the ancestor 'programming' should return both programming entries
-			const progEntries = manager.filterByTopic(['programming']);
+			const progEntries = library.filterByTopic(['programming']);
 			expect(progEntries.length).toBe(2);
 
 			const progTexts = progEntries.map((e) => e.text).sort();
@@ -120,25 +120,25 @@ describe('Hierarchical Memory System Integration', () => {
 			expect(progTexts).toContain('Python async await');
 
 			// Querying a leaf topic should return only that entry
-			const rustEntries = manager.filterByTopic(['programming/rust/ownership']);
+			const rustEntries = library.filterByTopic(['programming/rust/ownership']);
 			expect(rustEntries.length).toBe(1);
 			expect(rustEntries[0].text).toBe('Rust ownership model');
 
 			// Querying 'cooking' should return only the cooking entry
-			const cookEntries = manager.filterByTopic(['cooking']);
+			const cookEntries = library.filterByTopic(['cooking']);
 			expect(cookEntries.length).toBe(1);
 			expect(cookEntries[0].text).toBe('Italian pasta recipes');
 		});
 
 		it('topic info includes parent and children', async () => {
-			await manager.add('Rust lifetimes', {
+			await library.add('Rust lifetimes', {
 				topics: JSON.stringify(['programming/rust/lifetimes']),
 			});
-			await manager.add('Rust ownership', {
+			await library.add('Rust ownership', {
 				topics: JSON.stringify(['programming/rust/ownership']),
 			});
 
-			const topics = manager.getTopics();
+			const topics = library.getTopics();
 			const rustTopic = topics.find((t) => t.topic === 'programming/rust');
 
 			expect(rustTopic).toBeDefined();
@@ -154,11 +154,11 @@ describe('Hierarchical Memory System Integration', () => {
 
 	describe('metadata operators', () => {
 		it('filters with numeric gt operator', async () => {
-			await manager.add('entry A', { score: '10', status: 'active' });
-			await manager.add('entry B', { score: '5', status: 'pending' });
-			await manager.add('entry C', { score: '1', status: 'closed' });
+			await library.add('entry A', { score: '10', status: 'active' });
+			await library.add('entry B', { score: '5', status: 'pending' });
+			await library.add('entry C', { score: '1', status: 'closed' });
 
-			const highScore = manager.filterByMetadata([
+			const highScore = library.filterByMetadata([
 				{ key: 'score', value: '5', mode: 'gt' },
 			]);
 			expect(highScore.length).toBe(1);
@@ -166,11 +166,11 @@ describe('Hierarchical Memory System Integration', () => {
 		});
 
 		it('filters with in operator for array membership', async () => {
-			await manager.add('entry A', { status: 'active' });
-			await manager.add('entry B', { status: 'pending' });
-			await manager.add('entry C', { status: 'closed' });
+			await library.add('entry A', { status: 'active' });
+			await library.add('entry B', { status: 'pending' });
+			await library.add('entry C', { status: 'closed' });
 
-			const activePending = manager.filterByMetadata([
+			const activePending = library.filterByMetadata([
 				{ key: 'status', value: ['active', 'pending'], mode: 'in' },
 			]);
 			expect(activePending.length).toBe(2);
@@ -181,11 +181,11 @@ describe('Hierarchical Memory System Integration', () => {
 		});
 
 		it('filters with between operator for numeric range', async () => {
-			await manager.add('entry A', { score: '10' });
-			await manager.add('entry B', { score: '5' });
-			await manager.add('entry C', { score: '1' });
+			await library.add('entry A', { score: '10' });
+			await library.add('entry B', { score: '5' });
+			await library.add('entry C', { score: '1' });
 
-			const midRange = manager.filterByMetadata([
+			const midRange = library.filterByMetadata([
 				{ key: 'score', value: ['3', '8'], mode: 'between' },
 			]);
 			expect(midRange.length).toBe(1);
@@ -193,11 +193,11 @@ describe('Hierarchical Memory System Integration', () => {
 		});
 
 		it('filters with notIn operator', async () => {
-			await manager.add('entry A', { status: 'active' });
-			await manager.add('entry B', { status: 'pending' });
-			await manager.add('entry C', { status: 'closed' });
+			await library.add('entry A', { status: 'active' });
+			await library.add('entry B', { status: 'pending' });
+			await library.add('entry C', { status: 'closed' });
 
-			const notActivePending = manager.filterByMetadata([
+			const notActivePending = library.filterByMetadata([
 				{ key: 'status', value: ['active', 'pending'], mode: 'notIn' },
 			]);
 			expect(notActivePending.length).toBe(1);
@@ -205,27 +205,27 @@ describe('Hierarchical Memory System Integration', () => {
 		});
 
 		it('filters with gte and lte operators', async () => {
-			await manager.add('low', { priority: '1' });
-			await manager.add('mid', { priority: '5' });
-			await manager.add('high', { priority: '10' });
+			await library.add('low', { priority: '1' });
+			await library.add('mid', { priority: '5' });
+			await library.add('high', { priority: '10' });
 
-			const gteResults = manager.filterByMetadata([
+			const gteResults = library.filterByMetadata([
 				{ key: 'priority', value: '5', mode: 'gte' },
 			]);
 			expect(gteResults.length).toBe(2);
 
-			const lteResults = manager.filterByMetadata([
+			const lteResults = library.filterByMetadata([
 				{ key: 'priority', value: '5', mode: 'lte' },
 			]);
 			expect(lteResults.length).toBe(2);
 		});
 
 		it('combines multiple metadata filters (AND logic)', async () => {
-			await manager.add('entry A', { score: '10', status: 'active' });
-			await manager.add('entry B', { score: '5', status: 'active' });
-			await manager.add('entry C', { score: '10', status: 'closed' });
+			await library.add('entry A', { score: '10', status: 'active' });
+			await library.add('entry B', { score: '5', status: 'active' });
+			await library.add('entry C', { score: '10', status: 'closed' });
 
-			const results = manager.filterByMetadata([
+			const results = library.filterByMetadata([
 				{ key: 'score', value: '5', mode: 'gt' },
 				{ key: 'status', value: 'active', mode: 'eq' },
 			]);
@@ -240,26 +240,26 @@ describe('Hierarchical Memory System Integration', () => {
 
 	describe('BM25 text search', () => {
 		it('finds entries via BM25 text search', async () => {
-			await manager.add('rust programming language systems');
-			await manager.add('python programming language scripting');
-			await manager.add('cooking italian pasta recipes');
+			await library.add('rust programming language systems');
+			await library.add('python programming language scripting');
+			await library.add('cooking italian pasta recipes');
 
-			const results = manager.textSearch({
+			const results = library.textSearch({
 				query: 'programming',
 				mode: 'bm25',
 			});
 			expect(results.length).toBe(2);
 
-			const texts = results.map((r) => r.entry.text);
+			const texts = results.map((r) => r.volume.text);
 			expect(texts).toContain('rust programming language systems');
 			expect(texts).toContain('python programming language scripting');
 		});
 
 		it('BM25 scores entries by term relevance', async () => {
-			await manager.add('programming programming programming');
-			await manager.add('programming language');
+			await library.add('programming programming programming');
+			await library.add('programming language');
 
-			const results = manager.textSearch({
+			const results = library.textSearch({
 				query: 'programming',
 				mode: 'bm25',
 			});
@@ -275,15 +275,15 @@ describe('Hierarchical Memory System Integration', () => {
 
 	describe('query DSL', () => {
 		it('combines metadata filters with text search via advancedSearch', async () => {
-			await manager.add('rust tutorial', {
+			await library.add('rust tutorial', {
 				topic: 'programming/rust',
 				type: 'tutorial',
 			});
-			await manager.add('python guide', {
+			await library.add('python guide', {
 				topic: 'programming/python',
 				type: 'guide',
 			});
-			await manager.add('rust reference', {
+			await library.add('rust reference', {
 				topic: 'programming/rust',
 				type: 'reference',
 			});
@@ -291,62 +291,62 @@ describe('Hierarchical Memory System Integration', () => {
 			// Use advancedSearch directly to exercise combined metadata + text
 			// without the DSL auto-embedding (which can produce negative cosine
 			// similarity with mock embeddings and filter out all results).
-			const results = await manager.advancedSearch({
+			const results = await library.advancedSearch({
 				text: { query: 'rust', mode: 'bm25', threshold: 0 },
 				metadata: [{ key: 'type', value: 'tutorial', mode: 'eq' }],
 				maxResults: 10,
 				rankBy: 'text',
 			});
 			expect(results.length).toBeGreaterThan(0);
-			const texts = results.map((r) => r.entry.text);
+			const texts = results.map((r) => r.volume.text);
 			expect(texts).toContain('rust tutorial');
 		});
 
 		it('filters by topic via filterByTopic after search', async () => {
-			await manager.add('Rust ownership', {
+			await library.add('Rust ownership', {
 				topics: JSON.stringify(['programming/rust']),
 			});
-			await manager.add('Italian cooking', {
+			await library.add('Italian cooking', {
 				topics: JSON.stringify(['cooking/italian']),
 			});
 
 			// Use textSearch + filterByTopic to exercise the feature combination
-			const textResults = manager.textSearch({
+			const textResults = library.textSearch({
 				query: 'ownership',
 				mode: 'bm25',
 			});
-			const topicEntries = manager.filterByTopic(['programming/rust']);
+			const topicEntries = library.filterByTopic(['programming/rust']);
 			const topicIds = new Set(topicEntries.map((e) => e.id));
 
 			// Intersect: entries that match both text and topic
-			const filtered = textResults.filter((r) => topicIds.has(r.entry.id));
+			const filtered = textResults.filter((r) => topicIds.has(r.volume.id));
 			expect(filtered.length).toBeGreaterThan(0);
-			expect(filtered[0].entry.text).toBe('Rust ownership');
+			expect(filtered[0].volume.text).toBe('Rust ownership');
 		});
 
 		it('DSL parses metadata filters correctly', async () => {
-			await manager.add('tutorial entry', { type: 'tutorial' });
-			await manager.add('guide entry', { type: 'guide' });
+			await library.add('tutorial entry', { type: 'tutorial' });
+			await library.add('guide entry', { type: 'guide' });
 
 			// The DSL "metadata:type=tutorial" produces a metadata eq filter.
 			// Use advancedSearch with text-only ranking to avoid mock embedding issues.
-			const results = await manager.advancedSearch({
+			const results = await library.advancedSearch({
 				text: { query: 'entry', mode: 'bm25', threshold: 0 },
 				metadata: [{ key: 'type', value: 'tutorial', mode: 'eq' }],
 				maxResults: 10,
 				rankBy: 'text',
 			});
 			expect(results.length).toBe(1);
-			expect(results[0].entry.text).toBe('tutorial entry');
+			expect(results[0].volume.text).toBe('tutorial entry');
 		});
 
 		it('returns results for plain text queries', async () => {
-			await manager.add('machine learning algorithms');
-			await manager.add('deep learning neural networks');
-			await manager.add('cooking recipes pasta');
+			await library.add('machine learning algorithms');
+			await library.add('deep learning neural networks');
+			await library.add('cooking recipes pasta');
 
 			// Use textSearch with BM25 directly (the DSL default text mode)
-			const results = manager.textSearch({
+			const results = library.textSearch({
 				query: 'learning',
 				mode: 'bm25',
 			});
@@ -360,33 +360,33 @@ describe('Hierarchical Memory System Integration', () => {
 
 	describe('explicit feedback', () => {
 		it('records positive and negative feedback', async () => {
-			const id1 = await manager.add('good entry');
-			const id2 = await manager.add('bad entry');
+			const id1 = await library.add('good entry');
+			const id2 = await library.add('bad entry');
 
 			// Search to populate learning data
-			await manager.search('entry');
+			await library.search('entry');
 
 			// Provide feedback
-			manager.recordFeedback(id1, true);
-			manager.recordFeedback(id2, false);
+			library.recordFeedback(id1, true);
+			library.recordFeedback(id2, false);
 
 			// The learning profile should reflect the queries
-			const profile = manager.learningProfile;
+			const profile = library.patronProfile;
 			expect(profile).toBeDefined();
 			expect(profile!.totalQueries).toBeGreaterThanOrEqual(1);
 		});
 
 		it('multiple positive feedback increases relevance', async () => {
-			const id = await manager.add('important entry');
-			await manager.search('important');
+			const id = await library.add('important entry');
+			await library.search('important');
 
 			// Record multiple positive feedback
-			manager.recordFeedback(id, true);
-			manager.recordFeedback(id, true);
-			manager.recordFeedback(id, true);
+			library.recordFeedback(id, true);
+			library.recordFeedback(id, true);
+			library.recordFeedback(id, true);
 
 			// Profile should still be valid
-			const profile = manager.learningProfile;
+			const profile = library.patronProfile;
 			expect(profile).toBeDefined();
 		});
 	});
@@ -399,16 +399,16 @@ describe('Hierarchical Memory System Integration', () => {
 		it('accumulates queries in the learning engine', async () => {
 			// Add several entries so that searches are likely to return results
 			for (let i = 0; i < 15; i++) {
-				await manager.add(`entry about topic ${i}`);
+				await library.add(`entry about topic ${i}`);
 			}
 
 			// Perform multiple searches — the learning engine only records
 			// queries that produce results, so count is >= number of successful ones
 			for (let i = 0; i < 15; i++) {
-				await manager.search(`entry topic ${i}`);
+				await library.search(`entry topic ${i}`);
 			}
 
-			const profile = manager.learningProfile;
+			const profile = library.patronProfile;
 			expect(profile).toBeDefined();
 			// With mock embeddings, not every query may produce results,
 			// but we expect the majority to succeed
@@ -416,15 +416,15 @@ describe('Hierarchical Memory System Integration', () => {
 		});
 
 		it('adapted weights change from defaults after queries', async () => {
-			await manager.add('first entry');
-			await manager.add('second entry');
+			await library.add('first entry');
+			await library.add('second entry');
 
 			// Record several searches so the learning engine adapts
 			for (let i = 0; i < 20; i++) {
-				await manager.search(`query variation ${i}`);
+				await library.search(`query variation ${i}`);
 			}
 
-			const profile = manager.learningProfile;
+			const profile = library.patronProfile;
 			expect(profile).toBeDefined();
 			expect(profile!.adaptedWeights).toBeDefined();
 			expect(profile!.adaptedWeights.vector).toBeGreaterThan(0);
@@ -443,70 +443,70 @@ describe('Hierarchical Memory System Integration', () => {
 			const storage1 = createMemoryStorage(sharedData);
 			const embedder = createMockEmbedder();
 
-			const manager1 = createMemoryManager(embedder, defaultConfig, {
+			const library1 = createLibrary(embedder, defaultConfig, {
 				storage: storage1,
 				logger: createSilentLogger(),
-				vectorStoreOptions: {
+				stacksOptions: {
 					autoSave: true,
 					flushIntervalMs: 0,
 					learning: { enabled: true },
 				},
 			});
-			await manager1.initialize();
+			await library1.initialize();
 
 			// Add entries
-			const id1 = await manager1.add('important memory', {
+			const id1 = await library1.add('important memory', {
 				priority: 'high',
 			});
-			await manager1.add('another memory', { priority: 'low' });
+			await library1.add('another memory', { priority: 'low' });
 
 			// Search and feedback
-			await manager1.search('important');
-			manager1.recordFeedback(id1, true);
+			await library1.search('important');
+			library1.recordFeedback(id1, true);
 
-			expect(manager1.size).toBe(2);
+			expect(library1.size).toBe(2);
 
 			// Dispose (triggers final save)
-			await manager1.dispose();
-			expect(manager1.isInitialized).toBe(false);
+			await library1.dispose();
+			expect(library1.isInitialized).toBe(false);
 
-			// Reload into a new manager using the same shared storage
+			// Reload into a new library using the same shared storage
 			const storage2 = createMemoryStorage(sharedData);
-			const manager2 = createMemoryManager(embedder, defaultConfig, {
+			const library2 = createLibrary(embedder, defaultConfig, {
 				storage: storage2,
 				logger: createSilentLogger(),
-				vectorStoreOptions: {
+				stacksOptions: {
 					autoSave: true,
 					flushIntervalMs: 0,
 					learning: { enabled: true },
 				},
 			});
-			await manager2.initialize();
+			await library2.initialize();
 
 			// Verify entries survived the round-trip
-			expect(manager2.size).toBe(2);
-			const entry = manager2.getById(id1);
+			expect(library2.size).toBe(2);
+			const entry = library2.getById(id1);
 			expect(entry).toBeDefined();
 			expect(entry!.text).toBe('important memory');
 			expect(entry!.metadata.priority).toBe('high');
 
 			// Verify learning state was restored
-			const profile = manager2.learningProfile;
+			const profile = library2.patronProfile;
 			expect(profile).toBeDefined();
 			expect(profile!.totalQueries).toBeGreaterThanOrEqual(1);
 
-			await manager2.dispose();
+			await library2.dispose();
 		});
 
 		it('clear removes all entries and resets state', async () => {
-			await manager.add('entry one');
-			await manager.add('entry two');
-			expect(manager.size).toBe(2);
+			await library.add('entry one');
+			await library.add('entry two');
+			expect(library.size).toBe(2);
 
-			await manager.clear();
-			expect(manager.size).toBe(0);
+			await library.clear();
+			expect(library.size).toBe(0);
 
-			const topics = manager.getTopics();
+			const topics = library.getTopics();
 			expect(topics.length).toBe(0);
 		});
 	});
@@ -517,25 +517,25 @@ describe('Hierarchical Memory System Integration', () => {
 
 	describe('cross-feature interactions', () => {
 		it('hierarchical topics work with metadata filters', async () => {
-			await manager.add('Rust beginner guide', {
+			await library.add('Rust beginner guide', {
 				topics: JSON.stringify(['programming/rust']),
 				level: 'beginner',
 			});
-			await manager.add('Rust advanced patterns', {
+			await library.add('Rust advanced patterns', {
 				topics: JSON.stringify(['programming/rust']),
 				level: 'advanced',
 			});
-			await manager.add('Python beginner guide', {
+			await library.add('Python beginner guide', {
 				topics: JSON.stringify(['programming/python']),
 				level: 'beginner',
 			});
 
 			// Filter by topic first
-			const rustEntries = manager.filterByTopic(['programming/rust']);
+			const rustEntries = library.filterByTopic(['programming/rust']);
 			expect(rustEntries.length).toBe(2);
 
 			// Filter by metadata
-			const beginnerEntries = manager.filterByMetadata([
+			const beginnerEntries = library.filterByMetadata([
 				{ key: 'level', value: 'beginner', mode: 'eq' },
 			]);
 			expect(beginnerEntries.length).toBe(2);
@@ -548,11 +548,11 @@ describe('Hierarchical Memory System Integration', () => {
 		});
 
 		it('advanced search combines vector and text scoring', async () => {
-			await manager.add('machine learning with neural networks');
-			await manager.add('deep learning transformers');
-			await manager.add('cooking pasta carbonara');
+			await library.add('machine learning with neural networks');
+			await library.add('deep learning transformers');
+			await library.add('cooking pasta carbonara');
 
-			const results = await manager.advancedSearch({
+			const results = await library.advancedSearch({
 				text: { query: 'learning', mode: 'bm25' },
 				maxResults: 10,
 				rankBy: 'average',
@@ -567,19 +567,19 @@ describe('Hierarchical Memory System Integration', () => {
 		});
 
 		it('recommendation considers access patterns', async () => {
-			await manager.add('frequently accessed entry');
-			await manager.add('rarely accessed entry');
+			await library.add('frequently accessed entry');
+			await library.add('rarely accessed entry');
 
 			// Access the first entry multiple times via search
 			for (let i = 0; i < 5; i++) {
-				await manager.search('frequently accessed');
+				await library.search('frequently accessed');
 			}
 
-			const recommendations = await manager.recommend('accessed entry');
+			const recommendations = await library.recommend('accessed entry');
 			expect(recommendations.length).toBeGreaterThan(0);
 
 			// Recommendations should include the frequently accessed entry
-			const recTexts = recommendations.map((r) => r.entry.text);
+			const recTexts = recommendations.map((r) => r.volume.text);
 			expect(recTexts).toContain('frequently accessed entry');
 		});
 	});

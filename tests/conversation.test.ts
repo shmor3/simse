@@ -31,12 +31,12 @@ describe('createConversation', () => {
 
 	it('adds tool result messages', () => {
 		const conv = createConversation();
-		conv.addToolResult('call_1', 'memory_search', 'found 3 results');
+		conv.addToolResult('call_1', 'library_search', 'found 3 results');
 		expect(conv.messageCount).toBe(1);
 		const msgs = conv.toMessages();
 		expect(msgs[0].role).toBe('tool_result');
 		expect(msgs[0].toolCallId).toBe('call_1');
-		expect(msgs[0].toolName).toBe('memory_search');
+		expect(msgs[0].toolName).toBe('library_search');
 	});
 
 	it('adds timestamps to messages', () => {

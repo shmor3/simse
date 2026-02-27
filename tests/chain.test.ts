@@ -10,8 +10,8 @@ import {
 } from '../src/ai/chain/index.js';
 import type { MCPClient } from '../src/ai/mcp/mcp-client.js';
 import type { MCPToolResult } from '../src/ai/mcp/types.js';
-import type { MemoryManager } from '../src/ai/memory/memory.js';
-import type { SearchResult } from '../src/ai/memory/types.js';
+import type { Library } from '../src/ai/library/library.js';
+import type { Lookup } from '../src/ai/library/types.js';
 import type { AppConfig, ChainDefinition } from '../src/config/settings.js';
 import type { SimseError } from '../src/errors/index.js';
 import {
@@ -95,9 +95,9 @@ function createMockMCPClient(overrides: Partial<MCPClient> = {}): MCPClient {
 	} as unknown as MCPClient;
 }
 
-function createMockMemoryManager(
-	overrides: Partial<MemoryManager> = {},
-): MemoryManager {
+function createMockLibrary(
+	overrides: Partial<Library> = {},
+): Library {
 	return {
 		initialize: mock((..._: any[]): any => {}),
 		dispose: mock((..._: any[]): any => {}),
@@ -108,7 +108,7 @@ function createMockMemoryManager(
 		]),
 		search: mock((..._: any[]): any => {}).mockResolvedValue([
 			{
-				entry: {
+				volume: {
 					id: 'e1',
 					text: 'previous memory',
 					embedding: [0.1],
@@ -117,7 +117,7 @@ function createMockMemoryManager(
 				},
 				score: 0.95,
 			},
-		] satisfies SearchResult[]),
+		] satisfies Lookup[]),
 		delete: mock((..._: any[]): any => {}).mockResolvedValue(true),
 		deleteBatch: mock((..._: any[]): any => {}).mockResolvedValue(1),
 		clear: mock((..._: any[]): any => {}),
@@ -126,7 +126,7 @@ function createMockMemoryManager(
 		isDirty: false,
 		embeddingAgent: 'embedding',
 		...overrides,
-	} as unknown as MemoryManager;
+	} as unknown as Library;
 }
 
 function createMinimalAppConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -355,14 +355,14 @@ describe('PromptTemplate', () => {
 describe('Chain', () => {
 	let mockACP: ACPClient;
 	let mockMCP: MCPClient;
-	let mockMemory: MemoryManager;
+	let mockLibrary: Library;
 	let config: AppConfig;
 	let silentLogger: Logger;
 
 	beforeEach(() => {
 		mockACP = createMockACPClient();
 		mockMCP = createMockMCPClient();
-		mockMemory = createMockMemoryManager();
+		mockLibrary = createMockLibrary();
 		config = createMinimalAppConfig();
 		silentLogger = createSilentLogger();
 	});
@@ -706,7 +706,7 @@ describe('Chain', () => {
 		it('should execute a memory search step', async () => {
 			const chain = createChain({
 				acpClient: mockACP,
-				memoryManager: mockMemory,
+				library: mockLibrary,
 				logger: silentLogger,
 			});
 
@@ -720,10 +720,10 @@ describe('Chain', () => {
 
 			expect(results).toHaveLength(1);
 			expect(results[0].provider).toBe('memory');
-			expect(results[0].model).toBe('memory:vector-search');
+			expect(results[0].model).toBe('library:search');
 			expect(results[0].output).toContain('previous memory');
 
-			expect(mockMemory.search).toHaveBeenCalledWith('Remember AI history');
+			expect(mockLibrary.search).toHaveBeenCalledWith('Remember AI history');
 		});
 	});
 
@@ -990,7 +990,7 @@ describe('Chain', () => {
 		it('should store output to memory when storeToMemory is true', async () => {
 			const chain = createChain({
 				acpClient: mockACP,
-				memoryManager: mockMemory,
+				library: mockLibrary,
 				logger: silentLogger,
 			});
 
@@ -1003,7 +1003,7 @@ describe('Chain', () => {
 
 			await chain.run({ topic: 'AI' });
 
-			expect(mockMemory.add).toHaveBeenCalledWith('acp response', {
+			expect(mockLibrary.add).toHaveBeenCalledWith('acp response', {
 				source: 'test',
 			});
 		});
@@ -1011,7 +1011,7 @@ describe('Chain', () => {
 		it('should not store to memory when storeToMemory is false/undefined', async () => {
 			const chain = createChain({
 				acpClient: mockACP,
-				memoryManager: mockMemory,
+				library: mockLibrary,
 				logger: silentLogger,
 			});
 
@@ -1022,11 +1022,11 @@ describe('Chain', () => {
 
 			await chain.run({ topic: 'AI' });
 
-			expect(mockMemory.add).not.toHaveBeenCalled();
+			expect(mockLibrary.add).not.toHaveBeenCalled();
 		});
 
 		it('should not fail the chain if memory add fails', async () => {
-			const failingMemory = createMockMemoryManager({
+			const failingMemory = createMockLibrary({
 				add: mock((..._: any[]): any => {}).mockRejectedValue(
 					new Error('Memory failed'),
 				),
@@ -1034,7 +1034,7 @@ describe('Chain', () => {
 
 			const chain = createChain({
 				acpClient: mockACP,
-				memoryManager: failingMemory,
+				library: failingMemory,
 				logger: silentLogger,
 			});
 

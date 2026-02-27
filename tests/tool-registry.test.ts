@@ -180,12 +180,12 @@ describe('parseToolCalls', () => {
 		const response = `Let me search for that.
 
 <tool_use>
-{"id": "call_1", "name": "memory_search", "arguments": {"query": "hello"}}
+{"id": "call_1", "name": "library_search", "arguments": {"query": "hello"}}
 </tool_use>`;
 
 		const result = registry.parseToolCalls(response);
 		expect(result.toolCalls.length).toBe(1);
-		expect(result.toolCalls[0].name).toBe('memory_search');
+		expect(result.toolCalls[0].name).toBe('library_search');
 		expect(result.toolCalls[0].arguments).toEqual({ query: 'hello' });
 		expect(result.text).toBe('Let me search for that.');
 	});

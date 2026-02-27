@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { matchesMetadataFilter } from '../src/ai/memory/text-search.js';
-import type { MetadataFilter } from '../src/ai/memory/types.js';
+import { matchesMetadataFilter } from '../src/ai/library/text-search.js';
+import type { MetadataFilter } from '../src/ai/library/types.js';
 
 describe('new metadata operators', () => {
 	it('gt: matches when value is greater', () => {

@@ -50,14 +50,23 @@ export {
 } from './mcp.js';
 export {
 	createEmbeddingError,
+	createLibraryError,
+	createStacksCorruptionError,
+	createStacksError,
+	createStacksIOError,
+	isEmbeddingError,
+	isLibraryError,
+	isStacksCorruptionError,
+	isStacksError,
+	isStacksIOError,
+	// Backward-compat aliases
 	createMemoryError,
 	createVectorStoreCorruptionError,
 	createVectorStoreIOError,
-	isEmbeddingError,
 	isMemoryError,
 	isVectorStoreCorruptionError,
 	isVectorStoreIOError,
-} from './memory.js';
+} from './library.js';
 export {
 	createProviderError,
 	createProviderGenerationError,

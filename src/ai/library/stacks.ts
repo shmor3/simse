@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
-	createMemoryError,
-	createVectorStoreCorruptionError,
+	createLibraryError,
+	createStacksCorruptionError,
 } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
 import {
@@ -229,7 +229,7 @@ export function createStacks(options: StacksOptions): Stacks {
 
 	const ensureLoaded = (): void => {
 		if (!initialized) {
-			throw createMemoryError(
+			throw createLibraryError(
 				'Stacks has not been loaded. Call load() first.',
 				{ code: 'VECTOR_STORE_NOT_LOADED' },
 			);
@@ -326,7 +326,7 @@ export function createStacks(options: StacksOptions): Stacks {
 		try {
 			rawData = await storage.load();
 		} catch (error) {
-			throw createVectorStoreCorruptionError('storage', {
+			throw createStacksCorruptionError('storage', {
 				cause: error,
 			});
 		}
@@ -431,13 +431,13 @@ export function createStacks(options: StacksOptions): Stacks {
 	): Promise<string> => {
 		ensureLoaded();
 		if (text.length === 0) {
-			throw createMemoryError('Cannot add empty text to stacks', {
+			throw createLibraryError('Cannot add empty text to stacks', {
 				code: 'VECTOR_STORE_EMPTY_TEXT',
 			});
 		}
 
 		if (embedding.length === 0) {
-			throw createMemoryError('Cannot add volume with empty embedding vector', {
+			throw createLibraryError('Cannot add volume with empty embedding vector', {
 				code: 'VECTOR_STORE_EMPTY_EMBEDDING',
 			});
 		}
@@ -459,7 +459,7 @@ export function createStacks(options: StacksOptions): Stacks {
 						return dupResult.existingVolume?.id ?? '';
 					}
 					if (duplicateBehavior === 'error') {
-						throw createMemoryError(
+						throw createLibraryError(
 							`Duplicate volume detected (similarity: ${dupResult.similarity?.toFixed(4)}, existing: ${dupResult.existingVolume?.id})`,
 							{ code: 'VECTOR_STORE_DUPLICATE' },
 						);
@@ -517,14 +517,14 @@ export function createStacks(options: StacksOptions): Stacks {
 		// Validate ALL entries before mutating state
 		for (const entry of batchEntries) {
 			if (entry.text.length === 0) {
-				throw createMemoryError(
+				throw createLibraryError(
 					'Cannot add empty text to stacks (in batch)',
 					{ code: 'VECTOR_STORE_EMPTY_TEXT' },
 				);
 			}
 
 			if (entry.embedding.length === 0) {
-				throw createMemoryError(
+				throw createLibraryError(
 					'Cannot add volume with empty embedding vector (in batch)',
 					{ code: 'VECTOR_STORE_EMPTY_EMBEDDING' },
 				);
@@ -553,7 +553,7 @@ export function createStacks(options: StacksOptions): Stacks {
 							continue;
 						}
 						if (duplicateBehavior === 'error') {
-							throw createMemoryError(
+							throw createLibraryError(
 								`Duplicate volume detected in batch (similarity: ${dupResult.similarity?.toFixed(4)}, existing: ${dupResult.existingVolume?.id})`,
 								{ code: 'VECTOR_STORE_DUPLICATE' },
 							);

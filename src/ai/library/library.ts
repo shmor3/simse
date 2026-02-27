@@ -1,6 +1,6 @@
 import {
 	createEmbeddingError,
-	createMemoryError,
+	createLibraryError,
 	isEmbeddingError,
 	toError,
 } from '../../errors/index.js';
@@ -140,7 +140,7 @@ export function createLibrary(
 
 	const ensureInitialized = (): void => {
 		if (!initialized) {
-			throw createMemoryError(
+			throw createLibraryError(
 				'Library has not been initialized. Call initialize() first.',
 				{ code: 'MEMORY_NOT_INITIALIZED' },
 			);
@@ -226,7 +226,7 @@ export function createLibrary(
 		ensureInitialized();
 
 		if (text.trim().length === 0) {
-			throw createMemoryError(
+			throw createLibraryError(
 				'Cannot add empty or whitespace-only text to library',
 				{
 					code: 'MEMORY_EMPTY_TEXT',
@@ -264,7 +264,7 @@ export function createLibrary(
 
 		for (let i = 0; i < batchEntries.length; i++) {
 			if (batchEntries[i].text.trim().length === 0) {
-				throw createMemoryError(
+				throw createLibraryError(
 					`Cannot add empty or whitespace-only text to library (batch index ${i})`,
 					{ code: 'MEMORY_EMPTY_TEXT', metadata: { batchIndex: i } },
 				);
@@ -595,14 +595,14 @@ export function createLibrary(
 		ensureInitialized();
 
 		if (!textGenerator) {
-			throw createMemoryError(
+			throw createLibraryError(
 				'Compendium requires a textGenerator. Pass it in LibraryOptions or call setTextGenerator().',
 				{ code: 'MEMORY_NO_TEXT_GENERATOR' },
 			);
 		}
 
 		if (compendiumOptions.ids.length < 2) {
-			throw createMemoryError(
+			throw createLibraryError(
 				'Compendium requires at least 2 volume IDs',
 				{
 					code: 'MEMORY_SUMMARIZE_TOO_FEW',
@@ -615,7 +615,7 @@ export function createLibrary(
 		for (const id of compendiumOptions.ids) {
 			const vol = store.getById(id);
 			if (!vol) {
-				throw createMemoryError(
+				throw createLibraryError(
 					`Volume "${id}" not found for compendium`,
 					{
 						code: 'MEMORY_ENTRY_NOT_FOUND',
@@ -693,7 +693,7 @@ export function createLibrary(
 
 		const engine = store.learningEngine;
 		if (!engine) {
-			throw createMemoryError(
+			throw createLibraryError(
 				'Cannot record feedback: adaptive learning is not enabled.',
 				{ code: 'MEMORY_LEARNING_DISABLED' },
 			);

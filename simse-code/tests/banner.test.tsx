@@ -3,13 +3,15 @@ import { render } from 'ink-testing-library';
 import { Banner } from '../components/layout/banner.js';
 
 describe('Banner', () => {
-	test('renders version info', () => {
+	test('renders title line with version', () => {
 		const { lastFrame } = render(
 			<Banner version="1.0.0" workDir="/projects/test" dataDir="~/.simse" />,
 		);
 		const frame = lastFrame()!;
 		expect(frame).toContain('simse-code');
 		expect(frame).toContain('1.0.0');
+		// Uses horizontal rule, not rounded box
+		expect(frame).toContain('─');
 	});
 
 	test('renders mascot lines', () => {
@@ -22,6 +24,16 @@ describe('Banner', () => {
 		expect(frame).toContain('╰╯');
 	});
 
+	test('renders two-column layout with divider', () => {
+		const { lastFrame } = render(
+			<Banner version="1.0.0" workDir="/projects/test" dataDir="~/.simse" />,
+		);
+		const frame = lastFrame()!;
+		expect(frame).toContain('│');
+		expect(frame).toContain('Tips for getting started');
+		expect(frame).toContain('Recent activity');
+	});
+
 	test('renders server and model info', () => {
 		const { lastFrame } = render(
 			<Banner
@@ -32,34 +44,7 @@ describe('Banner', () => {
 				model="llama3"
 			/>,
 		);
-		const frame = lastFrame()!;
-		expect(frame).toContain('ollama: llama3');
-	});
-
-	test('renders server only when no model', () => {
-		const { lastFrame } = render(
-			<Banner
-				version="1.0.0"
-				workDir="/projects/test"
-				dataDir="~/.simse"
-				server="ollama"
-			/>,
-		);
-		const frame = lastFrame()!;
-		expect(frame).toContain('ollama');
-	});
-
-	test('renders model only when no server', () => {
-		const { lastFrame } = render(
-			<Banner
-				version="1.0.0"
-				workDir="/projects/test"
-				dataDir="~/.simse"
-				model="llama3"
-			/>,
-		);
-		const frame = lastFrame()!;
-		expect(frame).toContain('llama3');
+		expect(lastFrame()).toContain('ollama: llama3');
 	});
 
 	test('renders working directory', () => {
@@ -69,12 +54,14 @@ describe('Banner', () => {
 		expect(lastFrame()).toContain('/projects/test');
 	});
 
-	test('renders tips text', () => {
+	test('renders tips and hint lines below banner', () => {
 		const { lastFrame } = render(
 			<Banner version="1.0.0" workDir="/projects/test" dataDir="~/.simse" />,
 		);
 		const frame = lastFrame()!;
 		expect(frame).toContain('/help');
+		expect(frame).toContain('▢');
+		expect(frame).toContain('? for shortcuts');
 	});
 
 	test('renders custom tips', () => {

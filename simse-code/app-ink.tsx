@@ -1,7 +1,8 @@
-import { Box, useInput } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import React, {
 	type ReactNode,
 	useCallback,
+	useEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -69,6 +70,28 @@ export function App({
 	const [planMode, setPlanMode] = useState(false);
 	const [verbose, setVerbose] = useState(false);
 	const [promptMode, setPromptMode] = useState<PromptMode>('normal');
+	const [ctrlCWarning, setCtrlCWarning] = useState(false);
+
+	// Ctrl+C double-press guard: first press shows warning, second exits
+	const ctrlCRef = useRef(false);
+	useEffect(() => {
+		const handler = () => {
+			if (ctrlCRef.current) {
+				process.exit(0);
+			}
+			ctrlCRef.current = true;
+			setCtrlCWarning(true);
+			const timer = setTimeout(() => {
+				ctrlCRef.current = false;
+				setCtrlCWarning(false);
+			}, 2000);
+			timer.unref?.();
+		};
+		process.on('SIGINT', handler);
+		return () => {
+			process.off('SIGINT', handler);
+		};
+	}, []);
 
 	// Mutable service refs — swapped on /setup reload
 	const [hasACP, setHasACP] = useState(initialHasACP);
@@ -259,9 +282,13 @@ export function App({
 					onModeChange={setPromptMode}
 				/>
 			</Box>
-			{promptMode === 'normal' && (
+			{ctrlCWarning ? (
+				<Box paddingX={1}>
+					<Text dimColor>Press Ctrl-C again to exit</Text>
+				</Box>
+			) : promptMode === 'normal' ? (
 				<StatusBar isProcessing={isProcessing} planMode={planMode} verbose={verbose} />
-			)}
+			) : null}
 		</MainLayout>
 	);
 }

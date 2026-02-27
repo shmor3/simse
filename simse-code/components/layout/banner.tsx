@@ -52,15 +52,16 @@ export function Banner({
 			return Math.max(0, Math.floor((width - text.length) / 2));
 		};
 
-		// Title: " ── simse-code v1.0.0 ──────...──"
+		// Title: " ╭── simse-code v1.0.0 ──────...──╮"
 		const titleLabel = `simse-code v${version}`;
+		// ╭ + ── + space + title + space + trailer + ╮ = contentWidth
 		const titleTrailerLen = Math.max(
 			0,
-			contentWidth - 2 - 1 - titleLabel.length - 1,
+			contentWidth - 1 - 2 - 1 - titleLabel.length - 1 - 1,
 		);
 
-		// Bottom border: fills contentWidth
-		const bottomLine = DIVIDER.repeat(contentWidth);
+		// Bottom border: ╰──...──╯ fills contentWidth
+		const bottomInner = contentWidth - 2; // minus ╰ and ╯
 
 		// Build left column content (raw, no padding yet)
 		const leftContent: ColumnLine[] = [];
@@ -135,12 +136,13 @@ export function Banner({
 			});
 		}
 
-		// Blank line between sections (not a divider line)
+		// Colored separator between sections
 		rightLines.push({
-			text: '',
+			text: DIVIDER.repeat(rightColWidth),
 			isMascot: false,
 			isBold: false,
 			isDim: false,
+			color: '#d77757',
 		});
 
 		// Recent activity section
@@ -219,20 +221,22 @@ export function Banner({
 		return {
 			titleLabel,
 			titleTrailerLen,
-			bottomLine,
+			bottomInner,
 			rows,
 		};
 	}, [version, workDir, server, model, tips, recentActivity, cols]);
 
 	return (
 		<Box flexDirection="column" marginBottom={1}>
-			{/* Title: " ── simse-code v1.0.0 ──────...──" */}
+			{/* Title: " ╭── simse-code v1.0.0 ──────...──╮" */}
 			<Text>
 				{' '}
-				<Text dimColor>{DIVIDER.repeat(2)}</Text>{' '}
+				<Text dimColor>
+					{'\u256D'}{DIVIDER.repeat(2)}
+				</Text>{' '}
 				{layout.titleLabel}{' '}
 				<Text dimColor>
-					{DIVIDER.repeat(layout.titleTrailerLen)}
+					{DIVIDER.repeat(layout.titleTrailerLen)}{'\u256E'}
 				</Text>
 			</Text>
 
@@ -256,7 +260,10 @@ export function Banner({
 					<Text dimColor> {'\u2502'} </Text>
 					<Text>
 						{row.rightStyle.color ? (
-							<Text bold color={row.rightStyle.color}>
+							<Text
+								bold={row.rightStyle.isBold}
+								color={row.rightStyle.color}
+							>
 								{row.rightText}
 							</Text>
 						) : row.rightStyle.isBold ? (
@@ -271,10 +278,12 @@ export function Banner({
 				</Box>
 			))}
 
-			{/* Bottom border */}
+			{/* Bottom border: ╰──...──╯ */}
 			<Text>
 				{' '}
-				<Text dimColor>{layout.bottomLine}</Text>
+				<Text dimColor>
+					{'\u2570'}{DIVIDER.repeat(layout.bottomInner)}{'\u256F'}
+				</Text>
 			</Text>
 
 		</Box>

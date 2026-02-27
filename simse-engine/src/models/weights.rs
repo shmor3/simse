@@ -119,24 +119,89 @@ pub mod embedded {
 /// Determine the weight source from a model identifier string.
 /// If it looks like a file path (contains / or \ and exists), use LocalPath.
 /// Otherwise, treat it as a HuggingFace repo ID.
+///
+/// When no filename is provided, queries the HuggingFace Hub repo to find
+/// a GGUF file automatically (preferring Q4_K_M quantization).
 pub fn resolve_source(model_id: &str, filename: Option<&str>, revision: Option<&str>) -> WeightSource {
     let path = PathBuf::from(model_id);
     if path.exists() {
-        WeightSource::LocalPath(path)
-    } else if let Some(fname) = filename {
-        WeightSource::HubDownload {
+        return WeightSource::LocalPath(path);
+    }
+
+    if let Some(fname) = filename {
+        return WeightSource::HubDownload {
             repo_id: model_id.to_string(),
             filename: fname.to_string(),
             revision: revision.map(String::from),
-        }
-    } else {
-        // Try common GGUF filenames
-        WeightSource::HubDownload {
-            repo_id: model_id.to_string(),
-            filename: "model.gguf".to_string(),
-            revision: revision.map(String::from),
+        };
+    }
+
+    // No filename specified — auto-discover GGUF files from the repo
+    #[cfg(not(target_family = "wasm"))]
+    {
+        if let Ok(discovered) = discover_gguf_file(model_id) {
+            tracing::info!(repo_id = model_id, filename = %discovered, "Auto-discovered GGUF file");
+            return WeightSource::HubDownload {
+                repo_id: model_id.to_string(),
+                filename: discovered,
+                revision: revision.map(String::from),
+            };
         }
     }
+
+    // Fallback: try model.gguf (unlikely to work but gives a clear 404 error)
+    WeightSource::HubDownload {
+        repo_id: model_id.to_string(),
+        filename: "model.gguf".to_string(),
+        revision: revision.map(String::from),
+    }
+}
+
+/// Query HuggingFace Hub to find a GGUF file in the given repo.
+/// Prefers Q4_K_M quantization, then any Q4 variant, then the first GGUF found.
+#[cfg(not(target_family = "wasm"))]
+fn discover_gguf_file(repo_id: &str) -> Result<String> {
+    tracing::info!(repo_id, "Discovering GGUF files in repo");
+    let api = hf_hub::api::sync::Api::new()?;
+    let repo = api.model(repo_id.to_string());
+
+    // hf-hub's info() returns repo metadata including sibling files
+    let info = repo.info()?;
+    let gguf_files: Vec<String> = info
+        .siblings
+        .iter()
+        .map(|s| s.rfilename.clone())
+        .filter(|name| name.ends_with(".gguf"))
+        .collect();
+
+    if gguf_files.is_empty() {
+        anyhow::bail!("No GGUF files found in repo: {}", repo_id);
+    }
+
+    tracing::debug!(files = ?gguf_files, "Found GGUF files");
+
+    // Prefer Q4_K_M (good quality/size balance)
+    if let Some(f) = gguf_files.iter().find(|f| f.contains("Q4_K_M")) {
+        return Ok(f.clone());
+    }
+
+    // Then any Q4 variant
+    if let Some(f) = gguf_files.iter().find(|f| f.contains("Q4_")) {
+        return Ok(f.clone());
+    }
+
+    // Then Q5_K_M
+    if let Some(f) = gguf_files.iter().find(|f| f.contains("Q5_K_M")) {
+        return Ok(f.clone());
+    }
+
+    // Then Q8
+    if let Some(f) = gguf_files.iter().find(|f| f.contains("Q8_")) {
+        return Ok(f.clone());
+    }
+
+    // Fall back to the first GGUF file
+    Ok(gguf_files[0].clone())
 }
 
 /// Resolve a tokenizer from a model ID or local path.

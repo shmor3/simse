@@ -1,6 +1,6 @@
 import chalk from 'chalk';
 import { Text, useInput } from 'ink';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 
 interface TextInputProps {
 	readonly value: string;
@@ -19,14 +19,25 @@ export function TextInput({
 }: TextInputProps) {
 	const [cursorOffset, setCursorOffset] = useState(value.length);
 
+	// Keep refs to avoid stale closures in useInput callback
+	const valueRef = useRef(value);
+	const cursorRef = useRef(cursorOffset);
+	const onChangeRef = useRef(onChange);
+	const onSubmitRef = useRef(onSubmit);
+
+	valueRef.current = value;
+	cursorRef.current = cursorOffset;
+	onChangeRef.current = onChange;
+	onSubmitRef.current = onSubmit;
+
 	useEffect(() => {
 		if (cursorOffset > value.length) {
 			setCursorOffset(value.length);
 		}
 	}, [value, cursorOffset]);
 
-	useInput(
-		(input, key) => {
+	const handleInput = useCallback(
+		(input: string, key: { upArrow: boolean; downArrow: boolean; leftArrow: boolean; rightArrow: boolean; return: boolean; backspace: boolean; delete: boolean; ctrl: boolean; shift: boolean; tab: boolean; escape: boolean }) => {
 			if (
 				key.upArrow ||
 				key.downArrow ||
@@ -38,16 +49,17 @@ export function TextInput({
 			}
 
 			if (key.return) {
-				onSubmit?.(value);
+				onSubmitRef.current?.(valueRef.current);
 				return;
 			}
 
 			if (key.backspace || key.delete) {
-				if (cursorOffset > 0) {
-					const next =
-						value.slice(0, cursorOffset - 1) + value.slice(cursorOffset);
-					setCursorOffset((c) => c - 1);
-					onChange(next);
+				if (cursorRef.current > 0) {
+					const v = valueRef.current;
+					const c = cursorRef.current;
+					const next = v.slice(0, c - 1) + v.slice(c);
+					setCursorOffset(c - 1);
+					onChangeRef.current(next);
 				}
 				return;
 			}
@@ -58,18 +70,23 @@ export function TextInput({
 			}
 
 			if (key.rightArrow) {
-				setCursorOffset((c) => Math.min(value.length, c + 1));
+				setCursorOffset((c) =>
+					Math.min(valueRef.current.length, c + 1),
+				);
 				return;
 			}
 
 			// Regular character input (including paste)
-			const next =
-				value.slice(0, cursorOffset) + input + value.slice(cursorOffset);
-			setCursorOffset((c) => c + input.length);
-			onChange(next);
+			const v = valueRef.current;
+			const c = cursorRef.current;
+			const next = v.slice(0, c) + input + v.slice(c);
+			setCursorOffset(c + input.length);
+			onChangeRef.current(next);
 		},
-		{ isActive },
+		[],
 	);
+
+	useInput(handleInput, { isActive });
 
 	// When inactive, show dimmed value or placeholder
 	if (!isActive) {

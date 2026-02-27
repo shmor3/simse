@@ -16,7 +16,7 @@ bun test --coverage    # bun test --coverage
 
 ## Architecture
 
-simse is a modular pipeline framework for orchestrating multi-step AI workflows. It connects to AI backends via **ACP** (Agent Client Protocol), exposes tools via **MCP** (Model Context Protocol), and provides a file-backed **vector memory** store with compression, indexing, deduplication, recommendation, and summarization.
+simse is a modular pipeline framework for orchestrating multi-step AI workflows. It connects to AI backends via **ACP** (Agent Client Protocol), exposes tools via **MCP** (Model Context Protocol), and provides a file-backed **library** (vector store) with compression, cataloging, deduplication, recommendation, and compendium (summarization).
 
 ### Module Layout
 
@@ -31,7 +31,7 @@ src/
     chain.ts                # Chain error factories + guards
     template.ts             # Template error factories + guards
     mcp.ts                  # MCP error factories + guards
-    memory.ts               # Memory/Embedding/VectorStore error factories + guards
+    library.ts              # Library/Embedding/Stacks error factories + guards
     loop.ts                 # Agentic loop error factories + guards
     resilience.ts           # CircuitBreaker/Timeout error factories + guards
     tasks.ts                # Task list error factories + guards
@@ -66,13 +66,13 @@ src/
                              # Resource templates: listResourceTemplates()
                              # Retry logic on tool calls and resource reads
       mcp-server.ts         # MCP server: generate, run-chain, list-agents,
-                             # memory-search, memory-add, vfs-*, task-* tools
+                             # library-search, library-shelve, vfs-*, task-* tools
                              # List-changed notifications
                              # Logging support
       types.ts              # MCP types: tools, resources, prompts, logging,
                              # completions, roots, resource templates, annotations
     agent/
-      agent-executor.ts     # Step execution dispatcher (acp/mcp/memory providers)
+      agent-executor.ts     # Step execution dispatcher (acp/mcp/library providers)
       types.ts              # AgentResult, AgentStepConfig, ParallelConfig, SwarmMerge
       index.ts              # Barrel re-export
     chain/
@@ -93,19 +93,22 @@ src/
                              # Structured compaction: compactionPrompt override, onPreCompaction hook
       types.ts              # AgenticLoopOptions, LoopTurn, AgenticLoopResult, LoopCallbacks
       index.ts              # Barrel re-export
-    memory/
-      memory.ts             # MemoryManager: add/search/recommend/summarize/findDuplicates
-      vector-store.ts       # VectorStore: file-backed storage with indexes + compression
+    library/
+      library.ts            # Library (createLibrary): add/search/recommend/compendium/findDuplicates
+      stacks.ts             # Stacks (createStacks): file-backed storage with indexes + compression
       cosine.ts             # Pure cosineSimilarity function (clamped to [-1, 1])
-      vector-persistence.ts # IndexEntry / IndexFile types + validation guards
+      stacks-persistence.ts # IndexEntry / IndexFile types + validation guards
+      stacks-search.ts      # Advanced search with field boosting + weighted ranking
       text-search.ts        # Text search: exact, substring, fuzzy, regex, token modes
-      compression.ts        # Float32 base64 embedding encode/decode, gzip wrappers
-      indexing.ts           # TopicIndex, MetadataIndex, MagnitudeCache factories
+      preservation.ts       # Float32 base64 embedding encode/decode, gzip wrappers
+      cataloging.ts         # TopicIndex, MetadataIndex, MagnitudeCache factories
       deduplication.ts      # checkDuplicate, findDuplicateGroups (cosine-based)
       recommendation.ts     # WeightProfile, recency/frequency scoring, computeRecommendationScore
       storage.ts            # StorageBackend interface (pluggable persistence)
-      learning.ts           # Adaptive learning engine: query tracking, weight adaptation
-      types.ts              # All memory/search/deduplication/recommendation/summarization types
+      patron-learning.ts    # Adaptive learning engine: query tracking, weight adaptation
+      library-services.ts   # LibraryServices middleware (createLibraryServices)
+      prompt-injection.ts   # formatMemoryContext: structured/natural memory context for prompts
+      types.ts              # All library/search/deduplication/recommendation/compendium types
     tasks/
       task-list.ts          # createTaskList factory: CRUD, dependencies, blocking
       types.ts              # TaskItem, TaskStatus, TaskList, TaskCreateInput, TaskUpdateInput
@@ -113,7 +116,7 @@ src/
     tools/
       tool-registry.ts      # createToolRegistry: register, discover, execute, parse
                              # Tool output truncation: maxOutputChars (registry + per-tool)
-      builtin-tools.ts      # registerMemoryTools, registerVFSTools, registerTaskTools
+      builtin-tools.ts      # registerLibraryTools, registerVFSTools, registerTaskTools
       subagent-tools.ts     # registerSubagentTools: spawn sub-loops as tool calls
       types.ts              # ToolDefinition, ToolHandler, ToolRegistry, ToolCallRequest
       index.ts              # Barrel re-export
@@ -134,12 +137,12 @@ src/
 
 - **Factory functions over classes**: Every module exports a `createXxx()` factory returning a readonly interface. No classes in the codebase.
 - **Immutable returns**: Factory functions use `Object.freeze()` on returned objects.
-- **Error hierarchy**: `createSimseError` is the base; specialized factories (`createProviderError`, `createConfigError`, `createMemoryError`, etc.) add typed `code` fields. Type guards use duck-typing on `code`.
+- **Error hierarchy**: `createSimseError` is the base; specialized factories (`createProviderError`, `createConfigError`, `createLibraryError`, etc.) add typed `code` fields. Type guards use duck-typing on `code`.
 - **`toError(unknown)`**: Always wrap catch-block errors with `toError()` from `errors/index.js` before accessing `.message`.
 - **ESM-only**: All imports use `.js` extensions (`import { foo } from './bar.js'`). The `verbatimModuleSyntax` tsconfig flag is enabled — use `import type` for type-only imports.
-- **Write-lock serialization**: `vector-store.ts` uses a promise-chain (`writeLock`) to serialize concurrent mutations (add, delete, save). Never bypass the write lock for mutating operations.
+- **Write-lock serialization**: `stacks.ts` uses a promise-chain (`writeLock`) to serialize concurrent mutations (add, delete, save). Never bypass the write lock for mutating operations.
 - **In-flight promise deduplication**: `load()`, `initialize()`, MCP `start()`, and MCP `connect()` use a stored promise to deduplicate concurrent callers. The pattern is: check for existing promise → create if missing → clear in `.finally()`.
-- **Crash-safe persistence**: The vector store writes `.md` content files before the index file, so the index never references non-existent files.
+- **Crash-safe persistence**: Stacks writes `.md` content files before the index file, so the index never references non-existent files.
 - **Compressed v2 format**: On-disk embeddings use Float32 base64 (not JSON arrays). The index file is gzipped. Loading auto-detects v1 (plain JSON array) vs v2 (gzipped `{ version: 2, entries }`).
 - **Doom loop detection**: The agentic loop tracks consecutive identical tool calls (same name + JSON-stringified args). After `maxIdenticalToolCalls` (default 3), it fires `onDoomLoop` callback, publishes `loop.doom_loop` event, and injects a system warning into the conversation.
 - **Tool output truncation**: `ToolRegistryOptions.maxOutputChars` (default 50,000) caps tool output to prevent context overflow. Per-tool `ToolDefinition.maxOutputChars` overrides the registry default. Truncated output gets an `[OUTPUT TRUNCATED]` suffix.
@@ -168,7 +171,7 @@ The ACP client implements the [Agent Client Protocol](https://agentclientprotoco
 The MCP implementation uses `@modelcontextprotocol/sdk`:
 
 - **Client**: Connects to external MCP servers via stdio or HTTP transport
-- **Server**: Exposes simse capabilities as MCP tools (generate, run-chain, list-agents, memory-search, memory-add)
+- **Server**: Exposes simse capabilities as MCP tools (generate, run-chain, list-agents, library-search, library-shelve)
 - **Logging**: `setLoggingLevel()` + `onLoggingMessage()` for structured log collection
 - **List-changed**: Notification handlers for dynamic tool/resource/prompt discovery
 - **Completions**: `complete()` for argument autocomplete
@@ -176,15 +179,15 @@ The MCP implementation uses `@modelcontextprotocol/sdk`:
 - **Resource templates**: `listResourceTemplates()` for URI pattern discovery
 - **Retry**: Tool calls and resource reads use exponential backoff
 
-### Memory System
+### Library System
 
-The memory subsystem has five layers:
+The library subsystem has five layers:
 
-1. **Compression** (`compression.ts`): `encodeEmbedding`/`decodeEmbedding` (Float32↔base64, ~75% size reduction), `compressText`/`decompressText` (gzip wrappers).
-2. **Indexing** (`indexing.ts`): `createTopicIndex` (auto-extracts topics from text or uses `metadata.topic`), `createMetadataIndex` (O(1) key-value lookups), `createMagnitudeCache` (skip recomputation during search).
+1. **Preservation** (`preservation.ts`): `encodeEmbedding`/`decodeEmbedding` (Float32↔base64, ~75% size reduction), `compressText`/`decompressText` (gzip wrappers).
+2. **Cataloging** (`cataloging.ts`): `createTopicIndex` (auto-extracts topics from text or uses `metadata.topic`), `createMetadataIndex` (O(1) key-value lookups), `createMagnitudeCache` (skip recomputation during search).
 3. **Deduplication** (`deduplication.ts`): `checkDuplicate` (single-entry cosine check), `findDuplicateGroups` (greedy clustering, O(N²)).
 4. **Recommendation** (`recommendation.ts`): `computeRecommendationScore` combining vector similarity + exponential recency decay + logarithmic frequency scoring with configurable `WeightProfile`.
-5. **Summarization** (`memory.ts`): `summarize()` requires a `TextGenerationProvider`, condenses multiple entries into one, optionally deletes originals.
+5. **Compendium** (`library.ts`): `compendium()` requires a `TextGenerationProvider`, condenses multiple volumes into one, optionally deletes originals.
 
 ### Formatting
 

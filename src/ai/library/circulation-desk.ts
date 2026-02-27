@@ -1,3 +1,4 @@
+import type { LibrarianRegistry } from './librarian-registry.js';
 import type {
 	CirculationDesk,
 	CirculationDeskThresholds,
@@ -8,7 +9,8 @@ import type {
 } from './types.js';
 
 export interface CirculationDeskOptions {
-	readonly librarian: Librarian;
+	readonly librarian?: Librarian;
+	readonly registry?: LibrarianRegistry;
 	readonly addVolume: (
 		text: string,
 		metadata?: Record<string, string>,
@@ -31,8 +33,13 @@ type Job =
 export function createCirculationDesk(
 	options: CirculationDeskOptions,
 ): CirculationDesk {
+	if (!options.librarian && !options.registry) {
+		throw new Error(
+			'CirculationDesk requires either librarian or registry',
+		);
+	}
+
 	const {
-		librarian,
 		addVolume,
 		checkDuplicate,
 		getVolumesForTopic,
@@ -47,6 +54,25 @@ export function createCirculationDesk(
 	const optimizationConfig = options.thresholds?.optimization;
 	const topicThreshold = optimizationConfig?.topicThreshold ?? 50;
 	const globalThreshold = optimizationConfig?.globalThreshold ?? 500;
+	const spawningConfig = options.thresholds?.spawning;
+
+	const getDefaultLibrarian = (): Librarian => {
+		if (options.librarian) return options.librarian;
+		if (options.registry) return options.registry.defaultLibrarian.librarian;
+		throw new Error(
+			'CirculationDesk requires either librarian or registry',
+		);
+	};
+
+	const resolveLibrarianForTopic = async (
+		topic: string,
+		content: string,
+	): Promise<Librarian> => {
+		if (!options.registry) return getDefaultLibrarian();
+		const result = await options.registry.resolveLibrarian(topic, content);
+		const managed = options.registry.get(result.winner);
+		return managed?.librarian ?? getDefaultLibrarian();
+	};
 
 	const queue: Job[] = [];
 	let isProcessing = false;
@@ -71,11 +97,26 @@ export function createCirculationDesk(
 		}
 	};
 
+	const checkSpawning = (topic: string): void => {
+		if (!spawningConfig || !options.registry) return;
+
+		const complexityThreshold = spawningConfig.complexityThreshold ?? 100;
+		const topicVolumes = getVolumesForTopic(topic);
+		if (topicVolumes.length >= complexityThreshold) {
+			// Fire-and-forget specialist spawning
+			options.registry
+				.spawnSpecialist(topic, topicVolumes)
+				.catch(() => {});
+		}
+	};
+
 	const processJob = async (job: Job): Promise<void> => {
 		try {
 			switch (job.type) {
 				case 'extraction': {
-					const result = await librarian.extract(job.turn);
+					const result = await getDefaultLibrarian().extract(
+						job.turn,
+					);
 					const extractedTopics = new Set<string>();
 					for (const mem of result.memories) {
 						const dup = await checkDuplicate(mem.text);
@@ -85,29 +126,47 @@ export function createCirculationDesk(
 							? catalog.resolve(mem.topic)
 							: mem.topic;
 
+						const owningLibrarian =
+							await resolveLibrarianForTopic(topic, mem.text);
+						const defaultLib = getDefaultLibrarian();
+						const librarianTag =
+							owningLibrarian === defaultLib
+								? 'default'
+								: 'specialist';
+
 						await addVolume(mem.text, {
 							topic,
 							tags: mem.tags.join(','),
 							entryType: mem.entryType,
+							librarian: librarianTag,
 						});
 						extractedTopics.add(topic);
 					}
 					for (const topic of extractedTopics) {
 						checkEscalation(topic);
+						checkSpawning(topic);
 					}
 					break;
 				}
 				case 'compendium': {
 					const volumes = getVolumesForTopic(job.topic);
 					if (volumes.length >= minEntries) {
-						await librarian.summarize(volumes, job.topic);
+						const lib = await resolveLibrarianForTopic(
+							job.topic,
+							'',
+						);
+						await lib.summarize(volumes, job.topic);
 					}
 					break;
 				}
 				case 'reorganization': {
 					const volumes = getVolumesForTopic(job.topic);
 					if (volumes.length >= maxVolumesPerTopic) {
-						const plan = await librarian.reorganize(
+						const lib = await resolveLibrarianForTopic(
+							job.topic,
+							'',
+						);
+						const plan = await lib.reorganize(
 							job.topic,
 							volumes,
 						);
@@ -126,7 +185,11 @@ export function createCirculationDesk(
 					if (!deleteVolume || !optimizationConfig) break;
 					const volumes = getVolumesForTopic(job.topic);
 					if (volumes.length === 0) break;
-					const result = await librarian.optimize(
+					const lib = await resolveLibrarianForTopic(
+						job.topic,
+						'',
+					);
+					const result = await lib.optimize(
 						volumes,
 						job.topic,
 						optimizationConfig.modelId,

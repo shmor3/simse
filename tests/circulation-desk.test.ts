@@ -1,6 +1,10 @@
 // tests/circulation-desk.test.ts
 import { describe, expect, it, mock } from 'bun:test';
 import { createCirculationDesk } from '../src/ai/library/circulation-desk.js';
+import type {
+	LibrarianRegistry,
+	ManagedLibrarian,
+} from '../src/ai/library/librarian-registry.js';
 import type { Librarian } from '../src/ai/library/types.js';
 
 // Mock librarian that returns a single extraction
@@ -16,7 +20,7 @@ function createMockLibrarian(): Librarian {
 				},
 			],
 		})),
-		summarize: mock(async (volumes, topic) => ({
+		summarize: mock(async (volumes, _topic) => ({
 			text: 'Summarized content',
 			sourceIds: volumes.map((v) => v.id),
 		})),
@@ -31,6 +35,11 @@ function createMockLibrarian(): Librarian {
 			summary: '',
 			reorganization: { moves: [], newSubtopics: [], merges: [] },
 			modelUsed: '',
+		})),
+		bid: mock(async () => ({
+			librarianName: 'default',
+			argument: 'I can handle this.',
+			confidence: 0.8,
 		})),
 	};
 }
@@ -272,5 +281,309 @@ describe('CirculationDesk optimization', () => {
 		desk.enqueueExtraction({ userInput: 'x', response: 'y' });
 		await desk.drain();
 		expect(librarian.optimize).not.toHaveBeenCalled();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Helper: create a mock LibrarianRegistry
+// ---------------------------------------------------------------------------
+
+function createMockManagedLibrarian(
+	name: string,
+	librarian: Librarian,
+): ManagedLibrarian {
+	return {
+		definition: {
+			name,
+			description: `Mock ${name} librarian`,
+			purpose: `Mock ${name} purpose`,
+			topics: ['*'],
+			permissions: { add: true, delete: true, reorganize: true },
+			thresholds: { topicComplexity: 100, escalateAt: 500 },
+		},
+		librarian,
+		provider: { generate: mock(async () => '') },
+	};
+}
+
+function createMockRegistry(
+	defaultLibrarian: Librarian,
+	overrides?: Partial<LibrarianRegistry>,
+): LibrarianRegistry {
+	const managed = createMockManagedLibrarian('default', defaultLibrarian);
+	return {
+		initialize: mock(async () => {}),
+		dispose: mock(async () => {}),
+		register: mock(async () => managed),
+		unregister: mock(async () => {}),
+		get: mock(() => managed),
+		list: mock(() => [managed]),
+		defaultLibrarian: managed,
+		resolveLibrarian: mock(async () => ({
+			winner: 'default',
+			reason: 'Only default available.',
+			bids: [],
+		})),
+		spawnSpecialist: mock(async () => managed),
+		...overrides,
+	};
+}
+
+describe('CirculationDesk with registry', () => {
+	it('routes extraction through registry', async () => {
+		const librarian = createMockLibrarian();
+		const registry = createMockRegistry(librarian);
+		const addFn = mock(async () => 'new-id');
+
+		const desk = createCirculationDesk({
+			registry,
+			addVolume: addFn,
+			checkDuplicate: async () => ({ isDuplicate: false }),
+			getVolumesForTopic: () => [],
+		});
+
+		desk.enqueueExtraction({
+			userInput: 'What is X?',
+			response: 'X is important.',
+		});
+
+		expect(desk.pending).toBe(1);
+		await desk.drain();
+		expect(desk.pending).toBe(0);
+		expect(librarian.extract).toHaveBeenCalled();
+		expect(registry.resolveLibrarian).toHaveBeenCalled();
+		expect(addFn).toHaveBeenCalled();
+		// Verify the librarian tag is included in metadata
+		const addCall = (addFn as any).mock.calls[0];
+		expect(addCall[1].librarian).toBe('default');
+	});
+
+	it('tags specialist when registry resolves a non-default librarian', async () => {
+		const defaultLib = createMockLibrarian();
+		const specialistLib = createMockLibrarian();
+		const specialistManaged = createMockManagedLibrarian(
+			'code-specialist',
+			specialistLib,
+		);
+
+		const registry = createMockRegistry(defaultLib, {
+			resolveLibrarian: mock(async () => ({
+				winner: 'code-specialist',
+				reason: 'Specialist matched.',
+				bids: [],
+			})),
+			get: mock((name: string) =>
+				name === 'code-specialist' ? specialistManaged : undefined,
+			),
+		});
+
+		const addFn = mock(async () => 'new-id');
+
+		const desk = createCirculationDesk({
+			registry,
+			addVolume: addFn,
+			checkDuplicate: async () => ({ isDuplicate: false }),
+			getVolumesForTopic: () => [],
+		});
+
+		desk.enqueueExtraction({ userInput: 'x', response: 'y' });
+		await desk.drain();
+
+		expect(addFn).toHaveBeenCalled();
+		const addCall = (addFn as any).mock.calls[0];
+		expect(addCall[1].librarian).toBe('specialist');
+	});
+
+	it('routes compendium job through resolved librarian', async () => {
+		const defaultLib = createMockLibrarian();
+		const specialistLib = createMockLibrarian();
+		const specialistManaged = createMockManagedLibrarian(
+			'code-specialist',
+			specialistLib,
+		);
+
+		const registry = createMockRegistry(defaultLib, {
+			resolveLibrarian: mock(async () => ({
+				winner: 'code-specialist',
+				reason: 'Specialist matched.',
+				bids: [],
+			})),
+			get: mock((name: string) =>
+				name === 'code-specialist' ? specialistManaged : undefined,
+			),
+		});
+
+		const volumes = Array.from({ length: 12 }, (_, i) => ({
+			id: `v${i}`,
+			text: `fact ${i}`,
+			embedding: [0.1],
+			metadata: { topic: 'code/react' },
+			timestamp: i,
+		}));
+
+		const desk = createCirculationDesk({
+			registry,
+			addVolume: async () => 'id',
+			checkDuplicate: async () => ({ isDuplicate: false }),
+			getVolumesForTopic: () => volumes,
+			thresholds: { compendium: { minEntries: 10 } },
+		});
+
+		desk.enqueueCompendium('code/react');
+		await desk.drain();
+
+		expect(specialistLib.summarize).toHaveBeenCalled();
+		expect(defaultLib.summarize).not.toHaveBeenCalled();
+	});
+
+	it('routes optimization job through resolved librarian', async () => {
+		const defaultLib = createMockLibrarian();
+		const specialistLib = createMockLibrarian();
+		const specialistManaged = createMockManagedLibrarian(
+			'code-specialist',
+			specialistLib,
+		);
+
+		(specialistLib.optimize as any).mockImplementation(async () => ({
+			pruned: ['v1'],
+			summary: 'Specialist optimized',
+			reorganization: { moves: [], newSubtopics: [], merges: [] },
+			modelUsed: 'claude-opus-4-6',
+		}));
+
+		const registry = createMockRegistry(defaultLib, {
+			resolveLibrarian: mock(async () => ({
+				winner: 'code-specialist',
+				reason: 'Specialist matched.',
+				bids: [],
+			})),
+			get: mock((name: string) =>
+				name === 'code-specialist' ? specialistManaged : undefined,
+			),
+		});
+
+		const volumes = [
+			{
+				id: 'v1',
+				text: 'fact 1',
+				embedding: [0.1],
+				metadata: { topic: 'code/react' },
+				timestamp: 1,
+			},
+		];
+
+		const deleteFn = mock(async () => {});
+		const addFn = mock(async () => 'new-id');
+
+		const desk = createCirculationDesk({
+			registry,
+			addVolume: addFn,
+			checkDuplicate: async () => ({ isDuplicate: false }),
+			getVolumesForTopic: () => volumes,
+			deleteVolume: deleteFn,
+			thresholds: { optimization: { modelId: 'claude-opus-4-6' } },
+		});
+
+		desk.enqueueOptimization('code/react');
+		await desk.drain();
+
+		expect(specialistLib.optimize).toHaveBeenCalled();
+		expect(defaultLib.optimize).not.toHaveBeenCalled();
+		expect(deleteFn).toHaveBeenCalledWith('v1');
+	});
+
+	it('falls back to default librarian without registry', async () => {
+		const librarian = createMockLibrarian();
+		const addFn = mock(async () => 'new-id');
+
+		const desk = createCirculationDesk({
+			librarian,
+			addVolume: addFn,
+			checkDuplicate: async () => ({ isDuplicate: false }),
+			getVolumesForTopic: () => [],
+		});
+
+		desk.enqueueExtraction({ userInput: 'a', response: 'b' });
+		await desk.drain();
+
+		expect(librarian.extract).toHaveBeenCalled();
+		expect(addFn).toHaveBeenCalled();
+	});
+
+	it('throws when neither librarian nor registry is provided', () => {
+		expect(() =>
+			createCirculationDesk({
+				addVolume: async () => 'id',
+				checkDuplicate: async () => ({ isDuplicate: false }),
+				getVolumesForTopic: () => [],
+			}),
+		).toThrow('CirculationDesk requires either librarian or registry');
+	});
+
+	it('triggers spawn check after extraction when spawning thresholds configured', async () => {
+		const defaultLib = createMockLibrarian();
+		const spawnFn = mock(async () =>
+			createMockManagedLibrarian('new-specialist', createMockLibrarian()),
+		);
+
+		const volumes = Array.from({ length: 101 }, (_, i) => ({
+			id: `v${i}`,
+			text: `fact ${i}`,
+			embedding: [0.1],
+			metadata: { topic: 'test/topic' },
+			timestamp: i,
+		}));
+
+		const registry = createMockRegistry(defaultLib, {
+			spawnSpecialist: spawnFn,
+		});
+
+		const desk = createCirculationDesk({
+			registry,
+			addVolume: async () => 'id',
+			checkDuplicate: async () => ({ isDuplicate: false }),
+			getVolumesForTopic: () => volumes,
+			thresholds: {
+				spawning: {
+					complexityThreshold: 100,
+					modelId: 'claude-opus-4-6',
+				},
+			},
+		});
+
+		desk.enqueueExtraction({ userInput: 'x', response: 'y' });
+		await desk.drain();
+
+		expect(spawnFn).toHaveBeenCalled();
+	});
+
+	it('does not trigger spawn check without registry', async () => {
+		const librarian = createMockLibrarian();
+
+		const volumes = Array.from({ length: 101 }, (_, i) => ({
+			id: `v${i}`,
+			text: `fact ${i}`,
+			embedding: [0.1],
+			metadata: { topic: 'test/topic' },
+			timestamp: i,
+		}));
+
+		const desk = createCirculationDesk({
+			librarian,
+			addVolume: async () => 'id',
+			checkDuplicate: async () => ({ isDuplicate: false }),
+			getVolumesForTopic: () => volumes,
+			thresholds: {
+				spawning: {
+					complexityThreshold: 100,
+					modelId: 'claude-opus-4-6',
+				},
+			},
+		});
+
+		desk.enqueueExtraction({ userInput: 'x', response: 'y' });
+		await desk.drain();
+		// Should complete without error; no registry means no spawning
+		expect(desk.pending).toBe(0);
 	});
 });

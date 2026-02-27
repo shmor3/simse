@@ -21,6 +21,7 @@ import {
 import { Banner } from './components/layout/banner.js';
 import { MainLayout } from './components/layout/main-layout.js';
 import { StatusBar } from './components/layout/status-bar.js';
+import { PermissionDialog } from './components/input/permission-dialog.js';
 import { ThinkingSpinner } from './components/shared/spinner.js';
 import { createCLIConfig } from './config.js';
 import type { Conversation } from './conversation.js';
@@ -42,6 +43,7 @@ import {
 } from './file-mentions.js';
 import { detectImages, formatImageIndicator } from './image-input.js';
 import type { OutputItem } from './ink-types.js';
+import type { PermissionManager } from './permission-manager.js';
 import type { ToolRegistry } from './tool-registry.js';
 import { createToolRegistry } from './tool-registry.js';
 
@@ -52,6 +54,7 @@ interface AppProps {
 	readonly acpClient: ACPClient;
 	readonly conversation: Conversation;
 	readonly toolRegistry: ToolRegistry;
+	readonly permissionManager: PermissionManager;
 	readonly hasACP?: boolean;
 }
 
@@ -62,6 +65,7 @@ export function App({
 	acpClient: initialAcpClient,
 	conversation: initialConversation,
 	toolRegistry: initialToolRegistry,
+	permissionManager,
 	hasACP: initialHasACP = true,
 }: AppProps) {
 	const bannerElement: ReactNode = (
@@ -197,16 +201,19 @@ export function App({
 			conversation: conversationRef.current,
 			toolRegistry: toolRegistryRef.current,
 			serverName: currentServerName,
+			permissionManager,
 		}),
 		// Re-create when hasACP changes (services were swapped)
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-		[hasACP, currentServerName],
+		[hasACP, currentServerName, permissionManager],
 	);
 
 	const {
 		state: loopState,
 		submit: submitToLoop,
 		abort: abortLoop,
+		pendingPermission,
+		resolvePermission,
 	} = useAgenticLoop(loopOptions);
 
 	// Escape key interrupts the agentic loop when processing
@@ -329,6 +336,18 @@ export function App({
 						<ThinkingSpinner />
 					)}
 				</Box>
+			)}
+
+			{pendingPermission && (
+				<PermissionDialog
+					toolName={pendingPermission.call.name}
+					args={
+						pendingPermission.call.arguments as Record<string, unknown>
+					}
+					onAllow={() => resolvePermission('allow')}
+					onDeny={() => resolvePermission('deny')}
+					onAllowAlways={() => resolvePermission('allow', true)}
+				/>
 			)}
 
 			<Box flexDirection="column">

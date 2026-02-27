@@ -1,16 +1,17 @@
 #!/usr/bin/env bun
-import { render } from 'ink';
-import React from 'react';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { createACPClient, toError } from 'simse';
+import { render } from 'ink';
+import React from 'react';
 import type { ACPClient, ACPPermissionRequestInfo } from 'simse';
+import { createACPClient, toError } from 'simse';
 import { App } from './app-ink.js';
 import { createCLIConfig } from './config.js';
-import { createConversation } from './conversation.js';
+import { createPermissionManager } from './permission-manager.js';
 import type { Conversation } from './conversation.js';
-import { createToolRegistry } from './tool-registry.js';
+import { createConversation } from './conversation.js';
 import type { ToolRegistry } from './tool-registry.js';
+import { createToolRegistry } from './tool-registry.js';
 
 function parseArgs(): {
 	dataDir: string;
@@ -55,6 +56,7 @@ async function bootstrap(): Promise<{
 	serverName?: string;
 	modelName?: string;
 	hasACP: boolean;
+	permissionManager: ReturnType<typeof createPermissionManager>;
 }> {
 	const configResult = createCLIConfig({ dataDir });
 	const { config, logger } = configResult;
@@ -96,8 +98,7 @@ async function bootstrap(): Promise<{
 	let modelName: string | undefined;
 	if (defaultServerName) {
 		try {
-			const modelInfo =
-				await acpClient.getServerModelInfo(defaultServerName);
+			const modelInfo = await acpClient.getServerModelInfo(defaultServerName);
 			modelName = modelInfo?.currentModelId;
 		} catch {
 			// Model info is optional
@@ -123,6 +124,11 @@ async function bootstrap(): Promise<{
 	// Discover MCP tools
 	await toolRegistry.discover();
 
+	const permissionManager = createPermissionManager({
+		dataDir,
+		initialMode: bypassPermissions ? 'dontAsk' : undefined,
+	});
+
 	return {
 		acpClient,
 		conversation,
@@ -130,24 +136,36 @@ async function bootstrap(): Promise<{
 		serverName: defaultServerName,
 		modelName,
 		hasACP: hasServers,
+		permissionManager,
 	};
 }
 
 // Bootstrap services then render
 bootstrap()
-	.then(({ acpClient, conversation, toolRegistry, serverName, modelName, hasACP }) => {
-		render(
-			<App
-				dataDir={dataDir}
-				serverName={serverName}
-				modelName={modelName}
-				acpClient={acpClient}
-				conversation={conversation}
-				toolRegistry={toolRegistry}
-				hasACP={hasACP}
-			/>,
-		);
-	})
+	.then(
+		({
+			acpClient,
+			conversation,
+			toolRegistry,
+			serverName,
+			modelName,
+			hasACP,
+			permissionManager,
+		}) => {
+			render(
+				<App
+					dataDir={dataDir}
+					serverName={serverName}
+					modelName={modelName}
+					acpClient={acpClient}
+					conversation={conversation}
+					toolRegistry={toolRegistry}
+					permissionManager={permissionManager}
+					hasACP={hasACP}
+				/>,
+			);
+		},
+	)
 	.catch((err) => {
 		console.error(`Failed to start: ${toError(err).message}`);
 		process.exit(1);

@@ -11,6 +11,7 @@
 import type { ACPClient, ACPToolCall, ACPToolCallUpdate, Logger } from 'simse';
 import { toError } from 'simse';
 import type { Conversation } from './conversation.js';
+import type { ImageAttachment } from './image-input.js';
 import type {
 	ToolCallRequest,
 	ToolCallResult,
@@ -54,6 +55,10 @@ export interface LoopCallbacks {
 	readonly onToolCallEnd?: (result: ToolCallResult) => void;
 	readonly onTurnComplete?: (turn: LoopTurn) => void;
 	readonly onError?: (error: Error) => void;
+	/** Called before tool execution to check permission. Return 'deny' to skip. */
+	readonly onPermissionCheck?: (
+		call: ToolCallRequest,
+	) => Promise<'allow' | 'deny'>;
 	/** Called when the ACP agent starts a tool call (agentManagesTools mode). */
 	readonly onAgentToolCall?: (toolCall: ACPToolCall) => void;
 	/** Called when the ACP agent updates a tool call (agentManagesTools mode). */
@@ -76,6 +81,7 @@ export interface AgenticLoop {
 	readonly run: (
 		userInput: string,
 		callbacks?: LoopCallbacks,
+		images?: readonly ImageAttachment[],
 	) => Promise<AgenticLoopResult>;
 }
 
@@ -148,8 +154,17 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 	const run = async (
 		userInput: string,
 		callbacks?: LoopCallbacks,
+		images?: readonly ImageAttachment[],
 	): Promise<AgenticLoopResult> => {
-		conversation.addUser(userInput);
+		// Build user message: text + optional image content blocks
+		if (images && images.length > 0) {
+			const imageContext = images
+				.map((img) => `[Image: ${img.path} (${img.mimeType})]`)
+				.join('\n');
+			conversation.addUser(`${userInput}\n\n${imageContext}`);
+		} else {
+			conversation.addUser(userInput);
+		}
 
 		// Build system prompt: tool definitions + user-provided system prompt.
 		// When agentManagesTools is true, skip injecting tool definitions —
@@ -273,6 +288,22 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 						hitTurnLimit: false,
 						aborted: true,
 					});
+				}
+
+				// Check permission before executing
+				if (callbacks?.onPermissionCheck) {
+					const decision = await callbacks.onPermissionCheck(call);
+					if (decision === 'deny') {
+						const denied: ToolCallResult = Object.freeze({
+							id: call.id,
+							name: call.name,
+							output: 'Tool call denied by user.',
+							isError: true,
+						});
+						toolResults.push(denied);
+						callbacks?.onToolCallEnd?.(denied);
+						continue;
+					}
 				}
 
 				callbacks?.onToolCallStart?.(call);

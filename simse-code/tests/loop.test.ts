@@ -488,6 +488,104 @@ describe('createAgenticLoop', () => {
 
 	// -- Malformed tool call JSON -----------------------------------------------
 
+	// -- Permission check ------------------------------------------------------
+
+	it('should skip tool execution when onPermissionCheck returns deny', async () => {
+		const acpClient = createMockACPClient({
+			responses: [
+				'<tool_use>\n{"id": "c1", "name": "file_write", "arguments": {"path": "/tmp/test"}}\n</tool_use>',
+				'OK denied',
+			],
+		});
+
+		const executed: string[] = [];
+		const toolRegistry = createMockToolRegistry({
+			file_write: (args) => {
+				executed.push(String(args.path));
+				return 'written';
+			},
+		});
+
+		const loop = createAgenticLoop({
+			acpClient: acpClient as never,
+			toolRegistry,
+			conversation: createConversation(),
+		});
+
+		const ends: ToolCallResult[] = [];
+		const starts: ToolCallRequest[] = [];
+		await loop.run('write file', {
+			onPermissionCheck: async () => 'deny',
+			onToolCallStart: (call) => starts.push(call),
+			onToolCallEnd: (result) => ends.push(result),
+		});
+
+		// Tool should NOT have been executed
+		expect(executed).toEqual([]);
+		// onToolCallStart should NOT have fired (denied before start)
+		expect(starts).toEqual([]);
+		// onToolCallEnd should fire with the denied result
+		expect(ends).toHaveLength(1);
+		expect(ends[0].isError).toBe(true);
+		expect(ends[0].output).toContain('denied');
+	});
+
+	it('should execute tool when onPermissionCheck returns allow', async () => {
+		const acpClient = createMockACPClient({
+			responses: [
+				'<tool_use>\n{"id": "c1", "name": "file_read", "arguments": {}}\n</tool_use>',
+				'Done',
+			],
+		});
+
+		const executed: string[] = [];
+		const toolRegistry = createMockToolRegistry({
+			file_read: () => {
+				executed.push('read');
+				return 'content';
+			},
+		});
+
+		const loop = createAgenticLoop({
+			acpClient: acpClient as never,
+			toolRegistry,
+			conversation: createConversation(),
+		});
+
+		await loop.run('read file', {
+			onPermissionCheck: async () => 'allow',
+		});
+
+		expect(executed).toEqual(['read']);
+	});
+
+	it('should execute tool normally when no onPermissionCheck callback', async () => {
+		const acpClient = createMockACPClient({
+			responses: [
+				'<tool_use>\n{"id": "c1", "name": "t", "arguments": {}}\n</tool_use>',
+				'Done',
+			],
+		});
+
+		const executed: string[] = [];
+		const toolRegistry = createMockToolRegistry({
+			t: () => {
+				executed.push('called');
+				return 'ok';
+			},
+		});
+
+		const loop = createAgenticLoop({
+			acpClient: acpClient as never,
+			toolRegistry,
+			conversation: createConversation(),
+		});
+
+		await loop.run('test', {});
+
+		expect(executed).toEqual(['called']);
+	});
+
 	it('should skip malformed tool call JSON', async () => {
 		const acpClient = createMockACPClient({
 			responses: [

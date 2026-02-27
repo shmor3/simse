@@ -2,13 +2,15 @@ import { useCallback, useRef, useState } from 'react';
 import type { ACPClient, ACPToolCall, ACPToolCallUpdate } from 'simse';
 import { toError } from 'simse';
 import type { Conversation } from '../conversation.js';
+import type { ImageAttachment } from '../image-input.js';
 import type { OutputItem, ToolCallState } from '../ink-types.js';
 import {
-	createAgenticLoop,
 	type AgenticLoopResult,
+	createAgenticLoop,
 	type LoopCallbacks,
 } from '../loop.js';
-import type { ToolRegistry } from '../tool-registry.js';
+import type { PermissionManager } from '../permission-manager.js';
+import type { ToolCallRequest, ToolRegistry } from '../tool-registry.js';
 
 export function deriveToolSummary(
 	name: string,
@@ -31,6 +33,7 @@ export interface UseAgenticLoopOptions {
 	readonly toolRegistry: ToolRegistry;
 	readonly serverName?: string;
 	readonly maxTurns?: number;
+	readonly permissionManager?: PermissionManager;
 }
 
 // ---------------------------------------------------------------------------
@@ -41,12 +44,24 @@ interface AgenticLoopState {
 	readonly status: 'idle' | 'streaming' | 'tool-executing';
 	readonly streamText: string;
 	readonly activeToolCalls: readonly ToolCallState[];
+	readonly pendingPermission: {
+		readonly call: ToolCallRequest;
+		readonly resolve: (decision: 'allow' | 'deny') => void;
+	} | null;
 }
 
 export interface UseAgenticLoopResult {
 	readonly state: AgenticLoopState;
-	readonly submit: (input: string) => Promise<readonly OutputItem[]>;
+	readonly submit: (
+		input: string,
+		images?: readonly ImageAttachment[],
+	) => Promise<readonly OutputItem[]>;
 	readonly abort: () => void;
+	readonly pendingPermission: AgenticLoopState['pendingPermission'];
+	readonly resolvePermission: (
+		decision: 'allow' | 'deny',
+		alwaysAllow?: boolean,
+	) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -60,6 +75,7 @@ export function useAgenticLoop(
 		status: 'idle',
 		streamText: '',
 		activeToolCalls: [],
+		pendingPermission: null,
 	});
 
 	const abortRef = useRef<AbortController | undefined>(undefined);
@@ -67,17 +83,15 @@ export function useAgenticLoop(
 	optionsRef.current = options;
 
 	const submit = useCallback(
-		async (input: string): Promise<readonly OutputItem[]> => {
+		async (
+			input: string,
+			images?: readonly ImageAttachment[],
+		): Promise<readonly OutputItem[]> => {
 			const ctrl = new AbortController();
 			abortRef.current = ctrl;
 
-			const {
-				acpClient,
-				conversation,
-				toolRegistry,
-				serverName,
-				maxTurns,
-			} = optionsRef.current;
+			const { acpClient, conversation, toolRegistry, serverName, maxTurns } =
+				optionsRef.current;
 
 			setState({
 				status: 'streaming',
@@ -149,9 +163,7 @@ export function useAgenticLoop(
 				onToolCallEnd: (result) => {
 					const startTime = toolTimings.get(result.id);
 					const durationMs =
-						startTime !== undefined
-							? Date.now() - startTime
-							: undefined;
+						startTime !== undefined ? Date.now() - startTime : undefined;
 					const summary = result.isError
 						? undefined
 						: deriveToolSummary(result.name, result.output);
@@ -189,24 +201,16 @@ export function useAgenticLoop(
 					}));
 				},
 				onAgentToolCallUpdate: (update: ACPToolCallUpdate) => {
-					if (
-						update.status === 'completed' ||
-						update.status === 'failed'
-					) {
+					if (update.status === 'completed' || update.status === 'failed') {
 						const startTime = toolTimings.get(update.toolCallId);
 						const durationMs =
-							startTime !== undefined
-								? Date.now() - startTime
-								: undefined;
+							startTime !== undefined ? Date.now() - startTime : undefined;
 
 						completedItems.push({
 							kind: 'tool-call',
 							name: update.toolCallId,
 							args: '{}',
-							status:
-								update.status === 'failed'
-									? 'failed'
-									: 'completed',
+							status: update.status === 'failed' ? 'failed' : 'completed',
 							duration: durationMs,
 						});
 
@@ -217,6 +221,25 @@ export function useAgenticLoop(
 							),
 						}));
 					}
+				},
+				onPermissionCheck: async (call) => {
+					const { permissionManager } = optionsRef.current;
+					if (!permissionManager) return 'allow';
+
+					const decision = permissionManager.check(
+						call.name,
+						call.arguments,
+					);
+					if (decision === 'allow') return 'allow';
+					if (decision === 'deny') return 'deny';
+
+					// decision === 'ask' — show dialog and wait for user
+					return new Promise<'allow' | 'deny'>((resolve) => {
+						setState((prev) => ({
+							...prev,
+							pendingPermission: { call, resolve },
+						}));
+					});
 				},
 				onError: (error: Error) => {
 					completedItems.push({
@@ -230,6 +253,7 @@ export function useAgenticLoop(
 				const result: AgenticLoopResult = await loop.run(
 					input,
 					callbacks,
+					images,
 				);
 
 				// Flush final stream text as assistant message
@@ -252,6 +276,7 @@ export function useAgenticLoop(
 					status: 'idle',
 					streamText: '',
 					activeToolCalls: [],
+					pendingPermission: null,
 				});
 			}
 
@@ -262,8 +287,37 @@ export function useAgenticLoop(
 
 	const abort = useCallback(() => {
 		abortRef.current?.abort();
-		setState({ status: 'idle', streamText: '', activeToolCalls: [] });
+		setState({
+			status: 'idle',
+			streamText: '',
+			activeToolCalls: [],
+			pendingPermission: null,
+		});
 	}, []);
 
-	return { state, submit, abort };
+	const resolvePermission = useCallback(
+		(decision: 'allow' | 'deny', alwaysAllow?: boolean) => {
+			setState((prev) => {
+				if (prev.pendingPermission) {
+					if (alwaysAllow && optionsRef.current.permissionManager) {
+						optionsRef.current.permissionManager.addRule({
+							tool: prev.pendingPermission.call.name,
+							policy: 'allow',
+						});
+					}
+					prev.pendingPermission.resolve(decision);
+				}
+				return { ...prev, pendingPermission: null };
+			});
+		},
+		[],
+	);
+
+	return {
+		state,
+		submit,
+		abort,
+		pendingPermission: state.pendingPermission,
+		resolvePermission,
+	};
 }

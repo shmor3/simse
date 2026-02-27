@@ -81,6 +81,8 @@ pub struct ModelConfig {
     pub filename: Option<String>,
     /// HuggingFace revision/branch
     pub revision: Option<String>,
+    /// Explicit tokenizer source (HF repo ID or local path)
+    pub tokenizer: Option<String>,
 }
 
 // ── Model registry ───────────────────────────────────────────────────────

@@ -204,63 +204,178 @@ fn discover_gguf_file(repo_id: &str) -> Result<String> {
     Ok(gguf_files[0].clone())
 }
 
-/// Resolve a tokenizer from a model ID or local path.
+/// Resolve a tokenizer from a model ID, explicit tokenizer source, or local path.
+///
+/// Resolution order:
+///   1. Explicit `--tokenizer` override (local path or HF repo)
+///   2. tokenizer.json in the model directory (for local models)
+///   3. tokenizer.json from the model's HF repo
+///   4. Inferred base model repo (strip `-GGUF` suffix, try common orgs)
 #[cfg(not(target_family = "wasm"))]
-pub fn resolve_tokenizer(model_id: &str) -> Result<PathBuf> {
-    let path = PathBuf::from(model_id);
-
-    // If model_id is a directory, look for tokenizer.json inside it
-    if path.is_dir() {
-        let tokenizer_path = path.join("tokenizer.json");
-        if tokenizer_path.exists() {
-            return Ok(tokenizer_path);
+pub fn resolve_tokenizer(model_id: &str, tokenizer_source: Option<&str>) -> Result<PathBuf> {
+    // 1. Explicit tokenizer source
+    if let Some(source) = tokenizer_source {
+        let source_path = PathBuf::from(source);
+        // Direct path to tokenizer.json
+        if source_path.is_file() {
+            return Ok(source_path);
         }
-        anyhow::bail!("No tokenizer.json found in {}", path.display());
+        // Directory containing tokenizer.json
+        if source_path.is_dir() {
+            let tp = source_path.join("tokenizer.json");
+            if tp.exists() {
+                return Ok(tp);
+            }
+        }
+        // Treat as HF repo ID
+        tracing::info!(source, "Downloading tokenizer from explicit source");
+        let api = hf_hub::api::sync::Api::new()?;
+        let repo = api.model(source.to_string());
+        return repo.get("tokenizer.json").map_err(|e| {
+            anyhow::anyhow!("Failed to download tokenizer from '{}': {}", source, e)
+        });
     }
 
-    // If it's a file path, look for tokenizer.json in the same directory
+    // 2. Local path checks
+    let path = PathBuf::from(model_id);
+    if path.is_dir() {
+        let tp = path.join("tokenizer.json");
+        if tp.exists() {
+            return Ok(tp);
+        }
+    }
     if path.is_file() {
         if let Some(parent) = path.parent() {
-            let tokenizer_path = parent.join("tokenizer.json");
-            if tokenizer_path.exists() {
-                return Ok(tokenizer_path);
+            let tp = parent.join("tokenizer.json");
+            if tp.exists() {
+                return Ok(tp);
             }
         }
     }
 
-    // Otherwise, download from HuggingFace Hub
-    // For GGUF repos, the tokenizer might be in a different repo
     let api = hf_hub::api::sync::Api::new()?;
-    let repo = api.model(model_id.to_string());
-    match repo.get("tokenizer.json") {
-        Ok(path) => Ok(path),
-        Err(_) => {
-            // Some GGUF repos don't have tokenizer.json — try the base model repo
-            tracing::warn!("No tokenizer.json in {}, will use embedded tokenizer from GGUF if available", model_id);
-            anyhow::bail!("Could not find tokenizer.json for model: {}", model_id)
+
+    // 3. Try the model's own HF repo
+    {
+        let repo = api.model(model_id.to_string());
+        match repo.get("tokenizer.json") {
+            Ok(path) => return Ok(path),
+            Err(_) => {
+                tracing::debug!("No tokenizer.json in {}", model_id);
+            }
         }
     }
+
+    // 4. Infer base model repo from GGUF repo naming conventions
+    //    e.g., "bartowski/Llama-3.2-3B-Instruct-GGUF" → "meta-llama/Llama-3.2-3B-Instruct"
+    if let Some(base_repo) = infer_base_model_repo(model_id) {
+        tracing::info!(base_repo = %base_repo, "Trying inferred base model for tokenizer");
+        let repo = api.model(base_repo.clone());
+        match repo.get("tokenizer.json") {
+            Ok(path) => {
+                tracing::info!(base_repo, "Tokenizer found in base model repo");
+                return Ok(path);
+            }
+            Err(_) => {
+                tracing::debug!("No tokenizer.json in inferred base repo {}", base_repo);
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "Could not find tokenizer for model '{}'. Use --tokenizer <repo-or-path> to specify one.",
+        model_id
+    )
 }
 
 #[cfg(target_family = "wasm")]
-pub fn resolve_tokenizer(model_id: &str) -> Result<PathBuf> {
+pub fn resolve_tokenizer(model_id: &str, tokenizer_source: Option<&str>) -> Result<PathBuf> {
+    if let Some(source) = tokenizer_source {
+        let source_path = PathBuf::from(source);
+        if source_path.is_file() {
+            return Ok(source_path);
+        }
+        if source_path.is_dir() {
+            let tp = source_path.join("tokenizer.json");
+            if tp.exists() {
+                return Ok(tp);
+            }
+        }
+    }
     let path = PathBuf::from(model_id);
     if path.is_dir() {
-        let tokenizer_path = path.join("tokenizer.json");
-        if tokenizer_path.exists() {
-            return Ok(tokenizer_path);
+        let tp = path.join("tokenizer.json");
+        if tp.exists() {
+            return Ok(tp);
         }
     }
     if path.is_file() {
         if let Some(parent) = path.parent() {
-            let tokenizer_path = parent.join("tokenizer.json");
-            if tokenizer_path.exists() {
-                return Ok(tokenizer_path);
+            let tp = parent.join("tokenizer.json");
+            if tp.exists() {
+                return Ok(tp);
             }
         }
     }
     anyhow::bail!(
-        "Could not find tokenizer.json for model: {}. In WASM, provide a local path.",
+        "Could not find tokenizer for model: {}. In WASM, provide a local path via --tokenizer.",
         model_id
     )
+}
+
+/// Infer the base (non-GGUF) model repo from a GGUF repo name.
+///
+/// Common patterns:
+///   - `bartowski/Llama-3.2-3B-Instruct-GGUF` → try `meta-llama/Llama-3.2-3B-Instruct`
+///   - `TheBloke/Llama-2-7B-Chat-GGUF` → try `meta-llama/Llama-2-7b-chat-hf`
+///   - `user/ModelName-GGUF` → try `user/ModelName` first, then known orgs
+#[cfg(not(target_family = "wasm"))]
+fn infer_base_model_repo(model_id: &str) -> Option<String> {
+    let parts: Vec<&str> = model_id.splitn(2, '/').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+
+    let model_name = parts[1];
+
+    // Strip -GGUF suffix (case-insensitive)
+    let base_name = if model_name.ends_with("-GGUF") || model_name.ends_with("-gguf") {
+        &model_name[..model_name.len() - 5]
+    } else {
+        return None; // Not a GGUF repo name
+    };
+
+    // Known org mappings for common model families
+    let known_orgs = [
+        "meta-llama",
+        "mistralai",
+        "google",
+        "microsoft",
+        "Qwen",
+        "deepseek-ai",
+        "HuggingFaceH4",
+        "tiiuae",
+        "01-ai",
+    ];
+
+    // Try the same org first (e.g., user uploaded both base and GGUF)
+    let same_org = format!("{}/{}", parts[0], base_name);
+
+    // Then try known orgs
+    let api = hf_hub::api::sync::Api::new().ok()?;
+
+    // Try same org
+    if api.model(same_org.clone()).info().is_ok() {
+        return Some(same_org);
+    }
+
+    // Try known orgs
+    for org in &known_orgs {
+        let candidate = format!("{}/{}", org, base_name);
+        if api.model(candidate.clone()).info().is_ok() {
+            return Some(candidate);
+        }
+    }
+
+    None
 }

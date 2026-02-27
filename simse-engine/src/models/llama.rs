@@ -45,31 +45,10 @@ impl LlamaGenerator {
         let source = weights::resolve_source(model_id, config.filename.as_deref(), config.revision.as_deref());
         let model_path = source.resolve()?;
 
-        // Try to load tokenizer
-        let tokenizer = match weights::resolve_tokenizer(model_id) {
-            Ok(tokenizer_path) => {
-                Tokenizer::from_file(&tokenizer_path)
-                    .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?
-            }
-            Err(_) => {
-                // For GGUF files, try to find tokenizer in the same directory
-                if let Some(parent) = model_path.parent() {
-                    let tokenizer_path = parent.join("tokenizer.json");
-                    if tokenizer_path.exists() {
-                        Tokenizer::from_file(&tokenizer_path)
-                            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?
-                    } else {
-                        anyhow::bail!(
-                            "Could not find tokenizer for model '{}'. \
-                             Place tokenizer.json next to the model file or use a repo with a tokenizer.",
-                            model_id
-                        );
-                    }
-                } else {
-                    anyhow::bail!("Could not find tokenizer for model '{}'", model_id);
-                }
-            }
-        };
+        // Resolve tokenizer — tries explicit source, model repo, inferred base repo
+        let tokenizer_path = weights::resolve_tokenizer(model_id, config.tokenizer.as_deref())?;
+        let tokenizer = Tokenizer::from_file(&tokenizer_path)
+            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer from {}: {}", tokenizer_path.display(), e))?;
 
         Self::from_gguf(&model_path, tokenizer, device)
     }

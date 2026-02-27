@@ -11,6 +11,11 @@ pub struct CliArgs {
     #[arg(long)]
     pub model_file: Option<String>,
 
+    /// Tokenizer source (HuggingFace repo ID or local path to tokenizer.json).
+    /// Auto-detected from the model repo if not specified.
+    #[arg(long, env = "SIMSE_ENGINE_TOKENIZER")]
+    pub tokenizer: Option<String>,
+
     /// Embedding model (HuggingFace repo ID or local path)
     #[arg(long, default_value = "nomic-ai/nomic-embed-text-v1.5", env = "SIMSE_ENGINE_EMBEDDING_MODEL")]
     pub embedding_model: String,

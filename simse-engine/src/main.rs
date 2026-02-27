@@ -41,6 +41,7 @@ fn main() -> Result<()> {
         &args.model,
         &ModelConfig {
             filename: args.model_file.clone(),
+            tokenizer: args.tokenizer.clone(),
             ..Default::default()
         },
     )?;

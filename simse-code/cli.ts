@@ -20,6 +20,7 @@ import {
 	registerDelegationTools,
 	toError,
 	type VFSWriteEvent,
+	type VirtualFS,
 	validateSnapshot,
 } from 'simse';
 import type { KnowledgeBaseApp } from './app.js';
@@ -33,7 +34,11 @@ import { createCheckpointManager } from './checkpoints.js';
 import type { EmbedFileConfig } from './config.js';
 import { createCLIConfig } from './config.js';
 import { createConversation } from './conversation.js';
-import { renderChangeCount } from './diff-display.js';
+import {
+	convertVFSDiff,
+	renderChangeCount,
+	renderUnifiedDiff,
+} from './diff-display.js';
 import {
 	formatMentionsAsContext,
 	resolveFileMentions,
@@ -119,6 +124,60 @@ function deriveToolSummary(name: string, output: string): string | undefined {
 		return `${(bytes / 1024).toFixed(1)} KB`;
 	}
 	return `${lineCount} line${lineCount !== 1 ? 's' : ''}`;
+}
+
+/**
+ * Try to compute and render an inline diff for a VFS write operation.
+ * Returns the rendered diff string, or undefined if no diff is available.
+ */
+function tryRenderInlineDiff(
+	toolName: string,
+	argsStr: string,
+	vfs: VirtualFS,
+	colors: TermColors,
+	themeColors?: {
+		readonly add: number;
+		readonly remove: number;
+		readonly context: number;
+		readonly hunkHeader: number;
+	},
+): string | undefined {
+	if (
+		!toolName.includes('write') &&
+		!toolName.includes('edit') &&
+		!toolName.includes('create')
+	) {
+		return undefined;
+	}
+
+	let path: string | undefined;
+	try {
+		const parsed = JSON.parse(argsStr) as Record<string, unknown>;
+		path =
+			(parsed.path as string) ??
+			(parsed.file_path as string) ??
+			(parsed.filePath as string);
+	} catch {
+		return undefined;
+	}
+
+	if (!path) return undefined;
+
+	try {
+		const history = vfs.history(path);
+		if (history.length < 1) return undefined;
+
+		const vfsDiff = vfs.diffVersions(path, history.length);
+		if (vfsDiff.additions === 0 && vfsDiff.deletions === 0) return undefined;
+
+		const displayDiff = convertVFSDiff(vfsDiff);
+		return renderUnifiedDiff(displayDiff, colors, {
+			maxLines: 50,
+			themeColors: themeColors,
+		});
+	} catch {
+		return undefined;
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -569,6 +628,58 @@ async function handleBareTextInput(
 					colors,
 				),
 			);
+			// Inline diff for write operations
+			if (!toolResult.isError) {
+				const activeTheme = ctx.themeManager?.getActive() as
+					| Record<string, unknown>
+					| undefined;
+				const themeDiff = activeTheme?.diff as
+					| {
+							readonly add: number;
+							readonly remove: number;
+							readonly context: number;
+							readonly hunkHeader: number;
+					  }
+					| undefined;
+				const inlineDiff = tryRenderInlineDiff(
+					toolResult.name,
+					argsStr,
+					ctx.vfs,
+					colors,
+					themeDiff,
+				);
+				if (inlineDiff) {
+					console.log(inlineDiff);
+				}
+			}
+			// Track file changes
+			if (!toolResult.isError && ctx.fileTracker) {
+				try {
+					const parsed = JSON.parse(argsStr) as Record<string, unknown>;
+					const filePath =
+						(parsed.path as string) ??
+						(parsed.file_path as string) ??
+						(parsed.filePath as string);
+					if (filePath) {
+						const history = ctx.vfs.history(filePath);
+						if (history.length >= 1) {
+							const vfsDiff = ctx.vfs.diffVersions(filePath, history.length);
+							ctx.fileTracker.track(
+								filePath,
+								vfsDiff.additions,
+								vfsDiff.deletions,
+								false,
+							);
+						} else {
+							const content = ctx.vfs.readFile(filePath);
+							const lineCount = content.text.split('\n').length;
+							ctx.fileTracker.track(filePath, lineCount, 0, true);
+						}
+					}
+				} catch {
+					// Skip tracking on error
+				}
+			}
 			spinner.start();
 		},
 		onAgentToolCall: (toolCall) => {
@@ -799,6 +910,58 @@ async function handleSkillInvocation(
 					colors,
 				),
 			);
+			// Inline diff for write operations
+			if (!toolResult.isError) {
+				const activeTheme = ctx.themeManager?.getActive() as
+					| Record<string, unknown>
+					| undefined;
+				const themeDiff = activeTheme?.diff as
+					| {
+							readonly add: number;
+							readonly remove: number;
+							readonly context: number;
+							readonly hunkHeader: number;
+					  }
+					| undefined;
+				const inlineDiff = tryRenderInlineDiff(
+					toolResult.name,
+					argsStr,
+					ctx.vfs,
+					colors,
+					themeDiff,
+				);
+				if (inlineDiff) {
+					console.log(inlineDiff);
+				}
+			}
+			// Track file changes
+			if (!toolResult.isError && ctx.fileTracker) {
+				try {
+					const parsed = JSON.parse(argsStr) as Record<string, unknown>;
+					const filePath =
+						(parsed.path as string) ??
+						(parsed.file_path as string) ??
+						(parsed.filePath as string);
+					if (filePath) {
+						const history = ctx.vfs.history(filePath);
+						if (history.length >= 1) {
+							const vfsDiff = ctx.vfs.diffVersions(filePath, history.length);
+							ctx.fileTracker.track(
+								filePath,
+								vfsDiff.additions,
+								vfsDiff.deletions,
+								false,
+							);
+						} else {
+							const content = ctx.vfs.readFile(filePath);
+							const lineCount = content.text.split('\n').length;
+							ctx.fileTracker.track(filePath, lineCount, 0, true);
+						}
+					}
+				} catch {
+					// Skip tracking on error
+				}
+			}
 			spinner.start();
 		},
 		onError: (error) => {
@@ -3168,33 +3331,101 @@ const todosCommand: Command = {
 
 const diffCommand: Command = {
 	name: 'diff',
-	usage: '/diff',
-	description: 'Show VFS file changes as unified diff',
+	aliases: ['d'],
+	usage: '/diff [path]',
+	description: 'Show unified diffs of changed files',
 	category: 'session',
-	handler: (ctx) => {
+	handler: (ctx, rest) => {
 		const { colors, vfs } = ctx;
 		if (vfs.fileCount === 0) return colors.dim('No files in sandbox.');
-		const files = vfs.listAll();
-		const lines: string[] = [colors.bold(colors.cyan('File changes:')), ''];
-		for (const entry of files) {
-			if (entry.type === 'file') {
-				const content = vfs.readFile(entry.path);
-				const lineCount = content.text.split('\n').length;
-				lines.push(
-					`  ${colors.green('+')} ${entry.path} ${colors.dim(`(${lineCount} lines)`)}`,
-				);
+
+		const activeTheme = ctx.themeManager?.getActive() as
+			| Record<string, unknown>
+			| undefined;
+		const themeColors = activeTheme?.diff as
+			| {
+					readonly add: number;
+					readonly remove: number;
+					readonly context: number;
+					readonly hunkHeader: number;
+			  }
+			| undefined;
+		const targetPath = rest?.trim();
+
+		if (targetPath) {
+			try {
+				const history = vfs.history(targetPath);
+				if (history.length < 1) {
+					return `  ${colors.green('+')} ${targetPath} ${colors.dim('(new file)')}`;
+				}
+				const vfsDiff = vfs.diffVersions(targetPath, history.length);
+				const displayDiff = convertVFSDiff(vfsDiff);
+				const header = `  ${colors.bold(targetPath)}  ${renderChangeCount(vfsDiff.additions, vfsDiff.deletions, colors)}`;
+				const diffOutput = renderUnifiedDiff(displayDiff, colors, {
+					maxLines: 200,
+					themeColors: themeColors,
+				});
+				return `${header}\n${diffOutput}`;
+			} catch {
+				return colors.red(`  File not found: ${targetPath}`);
 			}
 		}
-		if (ctx.fileTracker) {
-			const totals = ctx.fileTracker.getTotals();
-			if (totals.additions > 0 || totals.deletions > 0) {
-				lines.push('');
-				lines.push(
-					`  ${renderChangeCount(totals.additions, totals.deletions, colors)}`,
-				);
+
+		const filePaths = vfs.glob('**/*');
+		const sections: string[] = [];
+		let totalAdd = 0;
+		let totalDel = 0;
+
+		for (const filePath of filePaths) {
+			try {
+				const st = vfs.stat(filePath);
+				if (st.type !== 'file') continue;
+			} catch {
+				continue;
+			}
+
+			try {
+				const history = vfs.history(filePath);
+				if (history.length < 1) {
+					sections.push(
+						`  ${colors.green('+')} ${filePath} ${colors.dim('(new file)')}`,
+					);
+					const content = vfs.readFile(filePath);
+					totalAdd += content.text.split('\n').length;
+					continue;
+				}
+
+				const vfsDiff = vfs.diffVersions(filePath, history.length);
+				if (vfsDiff.additions === 0 && vfsDiff.deletions === 0) continue;
+
+				totalAdd += vfsDiff.additions;
+				totalDel += vfsDiff.deletions;
+
+				const displayDiff = convertVFSDiff(vfsDiff);
+				const header = `  ${colors.bold(filePath)}  ${renderChangeCount(vfsDiff.additions, vfsDiff.deletions, colors)}`;
+				const diffOutput = renderUnifiedDiff(displayDiff, colors, {
+					maxLines: 200,
+					themeColors: themeColors,
+				});
+				sections.push(`${header}\n${diffOutput}`);
+			} catch {
+				sections.push(`  ${filePath} ${colors.dim('(unable to diff)')}`);
 			}
 		}
-		return lines.join('\n');
+
+		if (sections.length === 0) return colors.dim('No file changes to show.');
+
+		const output: string[] = [colors.bold(colors.cyan('File changes:')), ''];
+		output.push(sections.join('\n\n'));
+
+		if (totalAdd > 0 || totalDel > 0) {
+			output.push('');
+			output.push(
+				`  ${colors.bold('Total:')} ${renderChangeCount(totalAdd, totalDel, colors)}`,
+			);
+		}
+
+		return output.join('\n');
 	},
 };
 

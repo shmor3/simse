@@ -192,13 +192,13 @@ describe('registerVFSTools', () => {
 		await registry.execute({
 			id: 'w1',
 			name: 'vfs_write',
-			arguments: { path: '/test.txt', content: 'hello world' },
+			arguments: { path: 'vfs:///test.txt', content: 'hello world' },
 		});
 
 		const result = await registry.execute({
 			id: 'r1',
 			name: 'vfs_read',
-			arguments: { path: '/test.txt' },
+			arguments: { path: 'vfs:///test.txt' },
 		});
 		expect(result.isError).toBe(false);
 		expect(result.output).toBe('hello world');
@@ -208,13 +208,13 @@ describe('registerVFSTools', () => {
 		await registry.execute({
 			id: 'w1',
 			name: 'vfs_write',
-			arguments: { path: '/dir/a.txt', content: 'a' },
+			arguments: { path: 'vfs:///dir/a.txt', content: 'a' },
 		});
 
 		const result = await registry.execute({
 			id: 'l1',
 			name: 'vfs_list',
-			arguments: { path: '/dir' },
+			arguments: { path: 'vfs:///dir' },
 		});
 		expect(result.isError).toBe(false);
 		expect(result.output).toContain('a.txt');
@@ -224,7 +224,7 @@ describe('registerVFSTools', () => {
 		const result = await registry.execute({
 			id: 'l2',
 			name: 'vfs_list',
-			arguments: { path: '/' },
+			arguments: { path: 'vfs:///' },
 		});
 		expect(result.isError).toBe(false);
 		expect(result.output).toContain('empty');
@@ -234,7 +234,7 @@ describe('registerVFSTools', () => {
 		await registry.execute({
 			id: 'w1',
 			name: 'vfs_write',
-			arguments: { path: '/a/b.txt', content: 'data' },
+			arguments: { path: 'vfs:///a/b.txt', content: 'data' },
 		});
 
 		const result = await registry.execute({
@@ -250,7 +250,7 @@ describe('registerVFSTools', () => {
 		const result = await registry.execute({
 			id: 'r2',
 			name: 'vfs_read',
-			arguments: { path: '/nope.txt' },
+			arguments: { path: 'vfs:///nope.txt' },
 		});
 		expect(result.isError).toBe(true);
 	});

@@ -515,7 +515,11 @@ export function createMCPServer(
 					title: 'VFS Read',
 					description: 'Read a file from the virtual filesystem sandbox',
 					inputSchema: {
-						path: z.string().describe('The file path to read'),
+						path: z
+						.string()
+						.describe(
+							'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
+						),
 					},
 				},
 				async ({ path }) => {
@@ -550,7 +554,11 @@ export function createMCPServer(
 					title: 'VFS Write',
 					description: 'Write a file to the virtual filesystem sandbox',
 					inputSchema: {
-						path: z.string().describe('The file path to write'),
+						path: z
+						.string()
+						.describe(
+							'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
+						),
 						content: z.string().describe('The file content'),
 					},
 				},
@@ -587,12 +595,14 @@ export function createMCPServer(
 						path: z
 							.string()
 							.optional()
-							.describe('The directory path to list (default: /)'),
+							.describe(
+							'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
+						),
 					},
 				},
 				async ({ path }) => {
 					try {
-						const entries = vfs.readdir((path as string) ?? '/');
+						const entries = vfs.readdir((path as string) ?? 'vfs:///');
 						if (entries.length === 0) {
 							return {
 								content: [
@@ -625,12 +635,14 @@ export function createMCPServer(
 						path: z
 							.string()
 							.optional()
-							.describe('The root path for the tree (default: /)'),
+							.describe(
+							'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
+						),
 					},
 				},
 				async ({ path }) => {
 					try {
-						const tree = vfs.tree((path as string) ?? '/');
+						const tree = vfs.tree((path as string) ?? 'vfs:///');
 						return {
 							content: [{ type: 'text' as const, text: tree }],
 						};
@@ -917,7 +929,7 @@ export function createMCPServer(
 					mimeType: 'text/plain',
 				},
 				async (uri) => {
-					const tree = vfs.tree('/');
+					const tree = vfs.tree('vfs:///');
 					return {
 						contents: [
 							{

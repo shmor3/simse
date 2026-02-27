@@ -143,7 +143,8 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 			parameters: {
 				path: {
 					type: 'string',
-					description: 'The file path to read',
+					description:
+						'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
 					required: true,
 				},
 			},
@@ -152,7 +153,7 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 		},
 		async (args) => {
 			try {
-				const path = String(args.path ?? '/');
+				const path = String(args.path ?? 'vfs:///');
 				const result = vfs.readFile(path);
 				if (result.contentType === 'binary') {
 					return `[Binary file: ${result.size} bytes]`;
@@ -172,7 +173,8 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 			parameters: {
 				path: {
 					type: 'string',
-					description: 'The file path to write',
+					description:
+						'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
 					required: true,
 				},
 				content: {
@@ -185,7 +187,7 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 		},
 		async (args) => {
 			try {
-				const path = String(args.path ?? '');
+				const path = String(args.path ?? 'vfs:///');
 				const content = String(args.content ?? '');
 				vfs.writeFile(path, content, { createParents: true });
 				return `Wrote ${Buffer.byteLength(content, 'utf-8')} bytes to ${path}`;
@@ -204,7 +206,8 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 			parameters: {
 				path: {
 					type: 'string',
-					description: 'The directory path to list (default: /)',
+					description:
+						'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
 				},
 			},
 			category: 'vfs',
@@ -212,7 +215,7 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 		},
 		async (args) => {
 			try {
-				const path = String(args.path ?? '/');
+				const path = String(args.path ?? 'vfs:///');
 				const entries = vfs.readdir(path);
 				if (entries.length === 0) return 'Directory is empty.';
 				return entries
@@ -232,7 +235,8 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 			parameters: {
 				path: {
 					type: 'string',
-					description: 'The root path for the tree (default: /)',
+					description:
+						'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
 				},
 			},
 			category: 'vfs',
@@ -240,7 +244,7 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 		},
 		async (args) => {
 			try {
-				const path = String(args.path ?? '/');
+				const path = String(args.path ?? 'vfs:///');
 				return vfs.tree(path);
 			} catch (err) {
 				throw toError(err);

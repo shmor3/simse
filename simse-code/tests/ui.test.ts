@@ -108,11 +108,11 @@ describe('renderToolCall', () => {
 	it('should format multiple parameters (verbose)', () => {
 		const result = renderToolCall(
 			'vfs_write',
-			'{"path": "/app.py", "content": "print()"}',
+			'{"path": "vfs:///app.py", "content": "print()"}',
 			colors,
 			{ verbose: true },
 		);
-		expect(result).toContain('path: "/app.py"');
+		expect(result).toContain('path: "vfs:///app.py"');
 		expect(result).toContain('content: "print()"');
 	});
 

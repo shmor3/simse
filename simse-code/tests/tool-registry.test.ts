@@ -175,7 +175,7 @@ describe('createToolRegistry', () => {
 		const writeResult = await registry.execute({
 			id: 'c1',
 			name: 'vfs_write',
-			arguments: { path: '/test.txt', content: 'hello world' },
+			arguments: { path: 'vfs:///test.txt', content: 'hello world' },
 		});
 		expect(writeResult.isError).toBe(false);
 		expect(writeResult.output).toContain('bytes');
@@ -184,7 +184,7 @@ describe('createToolRegistry', () => {
 		const readResult = await registry.execute({
 			id: 'c2',
 			name: 'vfs_read',
-			arguments: { path: '/test.txt' },
+			arguments: { path: 'vfs:///test.txt' },
 		});
 		expect(readResult.isError).toBe(false);
 		expect(readResult.output).toBe('hello world');
@@ -192,8 +192,8 @@ describe('createToolRegistry', () => {
 
 	it('should execute vfs_list', async () => {
 		const vfs = createMockVFS();
-		vfs._files.set('/dir/file1.txt', 'content1');
-		vfs._files.set('/dir/file2.txt', 'content2');
+		vfs._files.set('vfs:///dir/file1.txt', 'content1');
+		vfs._files.set('vfs:///dir/file2.txt', 'content2');
 
 		const registry = createToolRegistry({
 			vfs: vfs as never,
@@ -202,7 +202,7 @@ describe('createToolRegistry', () => {
 		const result = await registry.execute({
 			id: 'c1',
 			name: 'vfs_list',
-			arguments: { path: '/dir' },
+			arguments: { path: 'vfs:///dir' },
 		});
 
 		expect(result.isError).toBe(false);
@@ -219,11 +219,11 @@ describe('createToolRegistry', () => {
 		const result = await registry.execute({
 			id: 'c1',
 			name: 'vfs_tree',
-			arguments: { path: '/' },
+			arguments: { path: 'vfs:///' },
 		});
 
 		expect(result.isError).toBe(false);
-		expect(result.output).toContain('Tree of /');
+		expect(result.output).toContain('Tree of vfs:///');
 	});
 
 	// -- Unknown tool ----------------------------------------------------------

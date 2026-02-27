@@ -6,11 +6,13 @@ import { createVFSError } from '../../errors/vfs.js';
 import type { Logger } from '../../logger.js';
 import { getDefaultLogger } from '../../logger.js';
 import {
+	VFS_ROOT,
 	ancestorPaths,
 	baseName,
 	normalizePath,
 	parentPath,
 	pathDepth,
+	toLocalPath,
 	validatePath,
 } from './path-utils.js';
 import type {
@@ -159,8 +161,8 @@ const matchSegment = (segment: string, pattern: string): boolean => {
 
 const matchGlob = (filePath: string, pattern: string): boolean => {
 	const normalizedPattern = normalizePath(pattern);
-	const pathParts = filePath.split('/').filter(Boolean);
-	const patternParts = normalizedPattern.split('/').filter(Boolean);
+	const pathParts = toLocalPath(filePath).split('/').filter(Boolean);
+	const patternParts = toLocalPath(normalizedPattern).split('/').filter(Boolean);
 
 	return matchParts(pathParts, 0, patternParts, 0);
 };
@@ -227,7 +229,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 
 	const initRoot = (): void => {
 		const now = Date.now();
-		nodes.set('/', {
+		nodes.set(VFS_ROOT, {
 			type: 'directory',
 			contentType: 'text',
 			text: undefined,
@@ -367,7 +369,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 	};
 
 	const getDirectChildren = (dirPath: string): string[] => {
-		const prefix = dirPath === '/' ? '/' : `${dirPath}/`;
+		const prefix = dirPath === VFS_ROOT ? VFS_ROOT : `${dirPath}/`;
 		const result: string[] = [];
 		for (const key of nodes.keys()) {
 			if (key === dirPath) continue;
@@ -381,7 +383,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 	};
 
 	const getDescendants = (dirPath: string): string[] => {
-		const prefix = dirPath === '/' ? '/' : `${dirPath}/`;
+		const prefix = dirPath === VFS_ROOT ? VFS_ROOT : `${dirPath}/`;
 		const result: string[] = [];
 		for (const key of nodes.keys()) {
 			if (key === dirPath) continue;
@@ -459,7 +461,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 		writeOptions?: VFSWriteOptions,
 	): void => {
 		const normalized = assertValidPath(path);
-		if (normalized === '/') {
+		if (normalized === VFS_ROOT) {
 			throw createVFSError('Cannot write to root directory as a file', {
 				code: 'VFS_INVALID_OPERATION',
 			});
@@ -580,7 +582,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 
 	const mkdir = (path: string, mkdirOptions?: VFSMkdirOptions): void => {
 		const normalized = assertValidPath(path);
-		if (normalized === '/') return;
+		if (normalized === VFS_ROOT) return;
 
 		const existing = nodes.get(normalized);
 		if (existing) {
@@ -626,7 +628,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 			return Object.freeze(
 				descendants.map((p) => {
 					const n = getNode(p);
-					const prefix = normalized === '/' ? '/' : `${normalized}/`;
+					const prefix = normalized === VFS_ROOT ? VFS_ROOT : `${normalized}/`;
 					const relativeName = p.slice(prefix.length);
 					return Object.freeze({ name: relativeName, type: n.type });
 				}),
@@ -644,7 +646,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 
 	const rmdir = (path: string, deleteOptions?: VFSDeleteOptions): boolean => {
 		const normalized = assertValidPath(path);
-		if (normalized === '/') {
+		if (normalized === VFS_ROOT) {
 			throw createVFSError('Cannot delete root directory', {
 				code: 'VFS_INVALID_OPERATION',
 			});
@@ -708,7 +710,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 		const normalizedOld = assertValidPath(oldPath);
 		const normalizedNew = assertValidPath(newPath);
 
-		if (normalizedOld === '/') {
+		if (normalizedOld === VFS_ROOT) {
 			throw createVFSError('Cannot rename root directory', {
 				code: 'VFS_INVALID_OPERATION',
 			});
@@ -848,7 +850,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 	const globFn = (pattern: string): readonly string[] => {
 		const results: string[] = [];
 		for (const [path, node] of nodes) {
-			if (path === '/') continue;
+			if (path === VFS_ROOT) continue;
 			if (node.type === 'file' && matchGlob(path, pattern)) {
 				results.push(path);
 			}
@@ -875,12 +877,12 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 	};
 
 	const tree = (path?: string): string => {
-		const normalized = path ? assertValidPath(path) : '/';
+		const normalized = path ? assertValidPath(path) : VFS_ROOT;
 		const node = assertNodeExists(normalized);
 		assertIsDirectory(normalized, node);
 
 		const lines: string[] = [];
-		const rootName = normalized === '/' ? '/' : baseName(normalized);
+		const rootName = normalized === VFS_ROOT ? VFS_ROOT : baseName(normalized);
 		lines.push(rootName);
 
 		const buildTree = (dirPath: string, prefix: string): void => {
@@ -1373,7 +1375,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 		const directories: VFSSnapshot['directories'][number][] = [];
 
 		for (const [path, node] of nodes) {
-			if (path === '/' && node.type === 'directory') continue;
+			if (path === VFS_ROOT && node.type === 'directory') continue;
 			if (node.type === 'file') {
 				files.push(
 					Object.freeze({
@@ -1461,7 +1463,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 			const normalized = normalizePath(file.path);
 			const ancestors = ancestorPaths(normalized);
 			for (const ancestor of ancestors) {
-				if (ancestor === '/') continue;
+				if (ancestor === VFS_ROOT) continue;
 				if (!dirPaths.has(ancestor)) {
 					throw createVFSError(
 						`Snapshot restore failed: missing parent directory "${ancestor}" for file "${file.path}"`,

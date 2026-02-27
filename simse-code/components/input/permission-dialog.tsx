@@ -9,6 +9,18 @@ interface PermissionDialogProps {
 	readonly onAllowAlways?: () => void;
 }
 
+const PRIMARY_ARG_KEYS = ['command', 'path', 'file_path', 'query', 'name'];
+
+function extractPrimaryArg(args: Record<string, unknown>): string | undefined {
+	for (const key of PRIMARY_ARG_KEYS) {
+		const value = args[key];
+		if (typeof value === 'string' && value.length > 0) {
+			return value;
+		}
+	}
+	return undefined;
+}
+
 export function PermissionDialog({
 	toolName,
 	args,
@@ -22,34 +34,20 @@ export function PermissionDialog({
 		else if (input === 'a' && onAllowAlways) onAllowAlways();
 	});
 
-	const argsStr = JSON.stringify(args, null, 2);
-	const truncated =
-		argsStr.length > 500 ? `${argsStr.slice(0, 500)}...` : argsStr;
+	const primaryArg = extractPrimaryArg(args);
+	const toolDisplay = primaryArg ? `${toolName}(${primaryArg})` : toolName;
 
 	return (
-		<Box
-			flexDirection="column"
-			borderStyle="round"
-			borderColor="yellow"
-			paddingX={1}
-			marginLeft={2}
-		>
-			<Text bold color="yellow">
-				⚠ Permission requested
+		<Box flexDirection="column" paddingLeft={2} marginY={1}>
+			<Box>
+				<Text color="yellow">{'⚠  '}</Text>
+				<Text>simse wants to run </Text>
+				<Text bold>{toolDisplay}</Text>
+			</Box>
+			<Text> </Text>
+			<Text dimColor>
+				{'   '}Allow? [y]es / [n]o{onAllowAlways ? ' / [a]lways' : ''}
 			</Text>
-			<Box marginTop={1}>
-				<Text>
-					Allow <Text bold>{toolName}</Text>?
-				</Text>
-			</Box>
-			<Box marginTop={1}>
-				<Text dimColor>{truncated}</Text>
-			</Box>
-			<Box marginTop={1} gap={2}>
-				<Text color="green">[y] Allow</Text>
-				<Text color="red">[n] Deny</Text>
-				{onAllowAlways && <Text color="blue">[a] Always</Text>}
-			</Box>
 		</Box>
 	);
 }

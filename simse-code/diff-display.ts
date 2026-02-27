@@ -42,20 +42,33 @@ export interface DiffDisplayOptions {
 	readonly lineNumbers?: boolean;
 	/** Context lines around changes. Default: 3 */
 	readonly contextLines?: number;
+	/** Theme diff colors (256-color codes). Overrides default red/green backgrounds. */
+	readonly themeColors?: {
+		readonly add: number;
+		readonly remove: number;
+		readonly context: number;
+		readonly hunkHeader: number;
+	};
 }
 
 // ---------------------------------------------------------------------------
 // Render
 // ---------------------------------------------------------------------------
 
-// ANSI background colors for diff highlighting
-const RED_BG = '\x1b[41m';
-const GREEN_BG = '\x1b[42m';
+// ANSI background colors — defaults (standard 16-color)
+const DEFAULT_RED_BG = '\x1b[41m';
+const DEFAULT_GREEN_BG = '\x1b[42m';
 const RESET = '\x1b[0m';
+
+/** Build ANSI 256-color background escape sequence. */
+function bg256(code: number): string {
+	return `\x1b[48;5;${code}m`;
+}
 
 /**
  * Render a unified diff with ANSI colors — Claude Code style.
  * Uses background colors for full-line highlighting.
+ * Supports theme colors via options.themeColors.
  */
 export function renderUnifiedDiff(
 	diff: DiffResult,
@@ -64,7 +77,12 @@ export function renderUnifiedDiff(
 ): string {
 	const maxLines = options?.maxLines ?? 100;
 	const showLineNumbers = options?.lineNumbers ?? true;
+	const theme = options?.themeColors;
 	const lines: string[] = [];
+
+	// Use theme 256-color backgrounds if provided, else standard 16-color
+	const addBg = theme ? bg256(theme.add) : DEFAULT_GREEN_BG;
+	const removeBg = theme ? bg256(theme.remove) : DEFAULT_RED_BG;
 
 	let lineCount = 0;
 
@@ -72,7 +90,11 @@ export function renderUnifiedDiff(
 		// Hunk header (only if multiple hunks or non-contiguous)
 		if (diff.hunks.length > 1) {
 			const header = `@@ -${hunk.oldStart},${hunk.oldCount} +${hunk.newStart},${hunk.newCount} @@`;
-			lines.push(`    ${colors.cyan(header)}`);
+			if (theme) {
+				lines.push(`    \x1b[38;5;${theme.hunkHeader}m${header}${RESET}`);
+			} else {
+				lines.push(`    ${colors.cyan(header)}`);
+			}
 			lineCount++;
 		}
 
@@ -91,20 +113,26 @@ export function renderUnifiedDiff(
 			switch (line.type) {
 				case 'add':
 					if (colors.enabled) {
-						lines.push(`    ${lineNum}${GREEN_BG}+${line.content}${RESET}`);
+						lines.push(`    ${lineNum}${addBg}+${line.content}${RESET}`);
 					} else {
 						lines.push(`    ${lineNum}+${line.content}`);
 					}
 					break;
 				case 'remove':
 					if (colors.enabled) {
-						lines.push(`    ${lineNum}${RED_BG}-${line.content}${RESET}`);
+						lines.push(`    ${lineNum}${removeBg}-${line.content}${RESET}`);
 					} else {
 						lines.push(`    ${lineNum}-${line.content}`);
 					}
 					break;
 				case 'context':
-					lines.push(`    ${lineNum}${colors.dim(` ${line.content}`)}`);
+					if (theme) {
+						lines.push(
+							`    ${lineNum}\x1b[38;5;${theme.context}m ${line.content}${RESET}`,
+						);
+					} else {
+						lines.push(`    ${lineNum}${colors.dim(` ${line.content}`)}`);
+					}
 					break;
 			}
 			lineCount++;

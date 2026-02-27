@@ -81,8 +81,8 @@ export function createColors(options?: TermColorsOptions): TermColors {
 // Mascot — pixel-art character rendered with Unicode block elements
 // ---------------------------------------------------------------------------
 
-// 3-line mascot — stylized brain/circuit icon in teal (38 = deep cyan in 256-color)
-const MASCOT_LINES = ['╭◉─◉╮', '│▓▓▓│', '╰─┬─╯'];
+// 3-line mascot — flowing "S" for simse in teal (38 = deep cyan in 256-color)
+const MASCOT_LINES = ['╭──╮', '╰─╮│', '  ╰╯'];
 
 function ansi256Fg(code: number): (s: string) => string {
 	return (s: string) => `\x1b[38;5;${code}m${s}\x1b[0m`;
@@ -564,43 +564,130 @@ export interface BannerOptions {
 	readonly model?: string;
 	readonly toolCount?: number;
 	readonly noteCount?: number;
+	readonly tips?: readonly string[];
+	readonly recentActivity?: readonly string[];
 }
 
 /**
- * Render the banner with mascot:
+ * Render a Claude Code-style bordered startup banner:
  *
- *   ╭◉─◉╮    simse-code v1.0.0
- *   │▓▓▓│    llama3 · ollama
- *   ╰─┬─╯    D:\GitHub\project
+ *  ── simse-code v1.0.0 ────────────────────────────────────────
+ *                              │
+ *      ╭──╮                   │  Tips for getting started
+ *      ╰─╮│                   │  Run /help for all commands
+ *        ╰╯                   │  ──────────────────────────
+ *                              │  Recent activity
+ *      ollama · ollama         │  No recent activity
+ *      D:\GitHub\project       │
+ *  ─────────────────────────────────────────────────────────────
+ *
+ *  ▢ Try "add <text>" to save a note
+ *
+ *  ? for shortcuts
  */
 export function renderBanner(
 	options: BannerOptions,
 	colors: TermColors,
 ): string {
-	const textLines: string[] = [];
-	textLines.push(
-		`${colors.bold('simse-code')} ${colors.dim(`v${options.version}`)}`,
+	const cols = process.stdout.columns ?? 80;
+	const boxWidth = Math.min(cols - 2, 72);
+	const dividerChar = '─';
+
+	// Title bar
+	const titleText = ` simse-code v${options.version} `;
+	const titlePadding = Math.max(0, boxWidth - titleText.length);
+	const titleLine = colors.dim(
+		`${dividerChar.repeat(2)}${titleText}${dividerChar.repeat(titlePadding)}`,
 	);
+
+	// Bottom border
+	const bottomLine = colors.dim(dividerChar.repeat(boxWidth + 2));
+
+	// Left column: mascot + model + workdir
+	const leftColWidth = Math.floor(boxWidth * 0.45);
+	const rightColWidth = boxWidth - leftColWidth - 3; // 3 for " │ "
+
+	const leftLines: string[] = [];
+	leftLines.push(''); // blank line after title
+	for (const ml of MASCOT_LINES) {
+		const centered = ' '.repeat(
+			Math.max(0, Math.floor((leftColWidth - ml.length) / 2)),
+		);
+		leftLines.push(`${centered}${colors.enabled ? mascotColor(ml) : ml}`);
+	}
+	leftLines.push(''); // blank after mascot
 	if (options.model) {
-		textLines.push(options.model);
+		const modelCentered = ' '.repeat(
+			Math.max(0, Math.floor((leftColWidth - options.model.length) / 2)),
+		);
+		leftLines.push(`${modelCentered}${options.model}`);
 	}
-	textLines.push(colors.dim(options.workDir));
+	const workDirTrunc =
+		options.workDir.length > leftColWidth
+			? `...${options.workDir.slice(-(leftColWidth - 3))}`
+			: options.workDir;
+	const wdCentered = ' '.repeat(
+		Math.max(0, Math.floor((leftColWidth - workDirTrunc.length) / 2)),
+	);
+	leftLines.push(`${wdCentered}${colors.dim(workDirTrunc)}`);
 
-	// Pad mascot + text side by side
-	const mascotWidth = 10; // visual width of widest mascot line + padding
+	// Right column: tips + recent activity
+	const rightLines: string[] = [];
+	rightLines.push(''); // blank line after title
+
+	const tips = options.tips ?? [
+		'Run /help for all commands',
+		'Use /add <text> to save a note',
+		'Use /search <query> to find notes',
+	];
+	rightLines.push(colors.bold('Tips for getting started'));
+	for (const tip of tips) {
+		rightLines.push(tip);
+	}
+	rightLines.push(colors.dim(dividerChar.repeat(Math.min(rightColWidth, 28))));
+
+	const activity = options.recentActivity ?? ['No recent activity'];
+	rightLines.push(colors.bold('Recent activity'));
+	for (const item of activity) {
+		rightLines.push(colors.dim(item));
+	}
+
+	// Merge columns
+	const maxRows = Math.max(leftLines.length, rightLines.length);
 	const output: string[] = [];
-	const maxLines = Math.max(MASCOT_LINES.length, textLines.length);
+	output.push(` ${titleLine}`);
 
-	for (let i = 0; i < maxLines; i++) {
-		const mascotPart = MASCOT_LINES[i] ?? '';
-		const textPart = textLines[i] ?? '';
-		const coloredMascot = colors.enabled ? mascotColor(mascotPart) : mascotPart;
-		// Pad mascot to fixed width (account for visible chars only)
-		const padding = ' '.repeat(Math.max(0, mascotWidth - mascotPart.length));
-		output.push(`  ${coloredMascot}${padding}${textPart}`);
+	for (let i = 0; i < maxRows; i++) {
+		const leftText = leftLines[i] ?? '';
+		const rightText = rightLines[i] ?? '';
+
+		// Pad left column to fixed width (strip ANSI for length calc)
+		const leftPlain = stripAnsiForBanner(leftText);
+		const leftPad = Math.max(0, leftColWidth - leftPlain.length);
+
+		output.push(
+			` ${leftText}${' '.repeat(leftPad)} ${colors.dim('│')} ${rightText}`,
+		);
 	}
+
+	output.push(` ${bottomLine}`);
+
+	// Hint lines below the box
+	output.push('');
+	output.push(
+		` ${colors.dim('▢')} Try ${colors.cyan('"add <text>"')} to save a note`,
+	);
+	output.push('');
+	output.push(` ${colors.dim('?')} for shortcuts`);
 
 	return output.join('\n');
+}
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: ANSI escape stripping requires matching ESC character
+const BANNER_ANSI_RE = /\x1b\[[0-9;]*m/g;
+
+function stripAnsiForBanner(str: string): string {
+	return str.replace(BANNER_ANSI_RE, '');
 }
 
 export function renderServiceStatus(

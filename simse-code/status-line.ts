@@ -79,6 +79,27 @@ export function createStatusLine(options: StatusLineOptions): StatusLine {
 		// Build right segments (status info)
 		const rightParts: string[] = [];
 
+		// Model name
+		if (currentData.model) {
+			rightParts.push(currentData.model);
+		}
+
+		// Context usage
+		if (currentData.contextPercent > 0) {
+			const pct = Math.round(currentData.contextPercent * 100);
+			rightParts.push(`${pct}%`);
+		}
+
+		// File changes
+		if (currentData.additions > 0 || currentData.deletions > 0) {
+			const changeParts: string[] = [];
+			if (currentData.additions > 0)
+				changeParts.push(`+${currentData.additions}`);
+			if (currentData.deletions > 0)
+				changeParts.push(`-${currentData.deletions}`);
+			rightParts.push(changeParts.join(' '));
+		}
+
 		// Background tasks
 		if (currentData.bgTaskCount > 0) {
 			rightParts.push(`${currentData.bgTaskCount} bg`);
@@ -87,6 +108,11 @@ export function createStatusLine(options: StatusLineOptions): StatusLine {
 		// Todos
 		if (currentData.todoCount > 0) {
 			rightParts.push(`${currentData.todoDone}/${currentData.todoCount} todos`);
+		}
+
+		// Cost estimate
+		if (currentData.costEstimate) {
+			rightParts.push(currentData.costEstimate);
 		}
 
 		rightParts.push('esc to interrupt');

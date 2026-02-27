@@ -508,6 +508,8 @@ async function handleBareTextInput(
 	const toolTimings = new Map<string, number>();
 	const toolArgs = new Map<string, string>();
 
+	const agentToolMeta = new Map<string, { title: string; kind: string }>();
+
 	const result = await loop.run(enrichedInput, {
 		onStreamStart: () => {
 			// Spinner continues until first delta
@@ -573,6 +575,10 @@ async function handleBareTextInput(
 			}
 			spinner.stop();
 			toolTimings.set(toolCall.toolCallId, Date.now());
+			agentToolMeta.set(toolCall.toolCallId, {
+				title: toolCall.title || toolCall.toolCallId,
+				kind: toolCall.kind,
+			});
 			console.log(
 				renderAgentToolCallActive(
 					toolCall.title || toolCall.toolCallId,
@@ -588,6 +594,9 @@ async function handleBareTextInput(
 				const startTime = toolTimings.get(update.toolCallId);
 				const durationMs =
 					startTime !== undefined ? Date.now() - startTime : undefined;
+				const meta = agentToolMeta.get(update.toolCallId);
+				const title = meta?.title ?? '';
+				const kind = meta?.kind ?? 'other';
 				const output =
 					typeof update.content === 'string'
 						? update.content
@@ -595,10 +604,10 @@ async function handleBareTextInput(
 							? JSON.stringify(update.content)
 							: update.status;
 				if (update.status === 'failed') {
-					console.log(renderAgentToolCallFailed('other', output, colors));
+					console.log(renderAgentToolCallFailed(kind, output, colors));
 				} else {
 					console.log(
-						renderAgentToolCallCompleted('', 'other', colors, {
+						renderAgentToolCallCompleted(title, kind, colors, {
 							durationMs,
 						}),
 					);
@@ -3869,7 +3878,17 @@ async function main(): Promise<void> {
 	let shuttingDown = false;
 	let pendingInput = '';
 
-	const promptStr = `${colors.dim('>')} `;
+	const buildPrompt = (): string => {
+		const parts: string[] = [];
+		if (ctx.planModeState.isActive) {
+			parts.push(colors.yellow('[plan]'));
+		}
+		if (ctx.verboseState.isVerbose) {
+			parts.push(colors.cyan('[verbose]'));
+		}
+		const prefix = parts.length > 0 ? `${parts.join(' ')} ` : '';
+		return `${prefix}${colors.dim('>')} `;
+	};
 	const continuationStr = `${colors.dim('…')} `;
 
 	const processInput = async (fullInput: string): Promise<void> => {
@@ -3903,7 +3922,7 @@ async function main(): Promise<void> {
 	};
 
 	const prompt = (): void => {
-		rl.question(pendingInput ? continuationStr : promptStr, (line) => {
+		rl.question(pendingInput ? continuationStr : buildPrompt(), (line) => {
 			// Multi-line: backslash continuation
 			if (line.endsWith('\\')) {
 				pendingInput += `${line.slice(0, -1)}\n`;

@@ -277,21 +277,6 @@ export function Banner({
 				<Text dimColor>{layout.bottomLine}</Text>
 			</Text>
 
-			{/* Hint lines */}
-			<Text> </Text>
-			<Text>
-				{' '}
-				<Text dimColor>{'\u25A2'}</Text> Try{' '}
-				<Text color="cyan">
-					&quot;add {'<text>'}&quot;
-				</Text>{' '}
-				to save a note
-			</Text>
-			<Text> </Text>
-			<Text>
-				{' '}
-				<Text dimColor>?</Text> for shortcuts
-			</Text>
 		</Box>
 	);
 }

@@ -3,6 +3,19 @@ import React, { useMemo, useState } from 'react';
 import type { CommandDefinition } from '../../ink-types.js';
 import { TextInput } from './text-input.js';
 
+const PLACEHOLDER_TIPS: readonly string[] = [
+	'Try "add a note about today\'s meeting"',
+	'Try "search for deployment notes"',
+	'Try "summarize my recent notes"',
+	'Try "help me write a changelog"',
+	'Try "find notes about authentication"',
+	'Try "create a checklist for release"',
+	'Try "what did I save last week?"',
+	'Try "organize my project notes"',
+	'Try "draft a quick status update"',
+	'Try "list everything about the API"',
+];
+
 const SHORTCUTS: readonly { key: string; desc: string }[] = [
 	{ key: '!', desc: 'bash mode' },
 	{ key: '/', desc: 'commands' },
@@ -33,6 +46,10 @@ export function PromptInput({
 		'normal',
 	);
 	const [selectedIndex, setSelectedIndex] = useState(0);
+	const [placeholder] = useState(
+		() =>
+			PLACEHOLDER_TIPS[Math.floor(Math.random() * PLACEHOLDER_TIPS.length)]!,
+	);
 
 	// Filter commands for autocomplete
 	const filteredCommands = useMemo(() => {
@@ -123,7 +140,7 @@ export function PromptInput({
 					onChange={handleChange}
 					onSubmit={handleSubmit}
 					isActive={!disabled && mode !== 'shortcuts'}
-					placeholder="Send a message..."
+					placeholder={placeholder}
 				/>
 			</Box>
 

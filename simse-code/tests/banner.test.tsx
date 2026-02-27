@@ -54,14 +54,15 @@ describe('Banner', () => {
 		expect(lastFrame()).toContain('/projects/test');
 	});
 
-	test('renders tips and hint lines below banner', () => {
+	test('renders bottom border below content', () => {
 		const { lastFrame } = render(
 			<Banner version="1.0.0" workDir="/projects/test" dataDir="~/.simse" />,
 		);
 		const frame = lastFrame()!;
-		expect(frame).toContain('/help');
-		expect(frame).toContain('▢');
-		expect(frame).toContain('? for shortcuts');
+		// Bottom border is a full-width line of ─
+		const lines = frame.split('\n');
+		const lastNonEmpty = lines.filter((l: string) => l.trim()).pop()!;
+		expect(lastNonEmpty).toContain('─');
 	});
 
 	test('renders custom tips', () => {

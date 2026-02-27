@@ -19,11 +19,11 @@ describe('PromptInput', () => {
 		expect(frame).toContain('\u276F');
 	});
 
-	test('shows placeholder when disabled', () => {
+	test('shows placeholder tip when disabled', () => {
 		const { lastFrame } = render(<PromptInput onSubmit={() => {}} disabled />);
 		const frame = lastFrame()!;
 		expect(frame).toContain('\u276F');
-		expect(frame).toContain('Send a message');
+		expect(frame).toContain('Try');
 	});
 
 	test('accepts commands prop for autocomplete', () => {

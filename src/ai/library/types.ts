@@ -412,6 +412,29 @@ export interface Shelf {
 }
 
 // ---------------------------------------------------------------------------
+// Topic Catalog
+// ---------------------------------------------------------------------------
+
+export interface TopicCatalogSection {
+	readonly topic: string;
+	readonly parent?: string;
+	readonly children: readonly string[];
+	readonly volumeCount: number;
+}
+
+export interface TopicCatalog {
+	readonly resolve: (proposedTopic: string) => string;
+	readonly relocate: (volumeId: string, newTopic: string) => void;
+	readonly merge: (sourceTopic: string, targetTopic: string) => void;
+	readonly sections: () => TopicCatalogSection[];
+	readonly volumes: (topic: string) => readonly string[];
+	readonly addAlias: (alias: string, canonical: string) => void;
+	readonly registerVolume: (volumeId: string, topic: string) => void;
+	readonly removeVolume: (volumeId: string) => void;
+	readonly getTopicForVolume: (volumeId: string) => string | undefined;
+}
+
+// ---------------------------------------------------------------------------
 // Library Config (was MemoryConfig)
 // ---------------------------------------------------------------------------
 
@@ -421,4 +444,57 @@ export interface LibraryConfig {
 	readonly embeddingAgent?: string;
 	readonly similarityThreshold: number;
 	readonly maxResults: number;
+}
+
+// ---------------------------------------------------------------------------
+// Librarian (LLM-driven memory extraction, summarization, classification)
+// ---------------------------------------------------------------------------
+
+export interface TurnContext {
+	readonly userInput: string;
+	readonly response: string;
+}
+
+export interface ExtractionMemory {
+	readonly text: string;
+	readonly topic: string;
+	readonly tags: string[];
+	readonly entryType: 'fact' | 'decision' | 'observation';
+}
+
+export interface ExtractionResult {
+	readonly memories: readonly ExtractionMemory[];
+}
+
+export interface ClassificationResult {
+	readonly topic: string;
+	readonly confidence: number;
+}
+
+export interface ReorganizationPlan {
+	readonly moves: ReadonlyArray<{
+		readonly volumeId: string;
+		readonly newTopic: string;
+	}>;
+	readonly newSubtopics: readonly string[];
+	readonly merges: ReadonlyArray<{
+		readonly source: string;
+		readonly target: string;
+	}>;
+}
+
+export interface Librarian {
+	readonly extract: (turn: TurnContext) => Promise<ExtractionResult>;
+	readonly summarize: (
+		volumes: readonly Volume[],
+		topic: string,
+	) => Promise<{ text: string; sourceIds: readonly string[] }>;
+	readonly classifyTopic: (
+		text: string,
+		existingTopics: readonly string[],
+	) => Promise<ClassificationResult>;
+	readonly reorganize: (
+		topic: string,
+		volumes: readonly Volume[],
+	) => Promise<ReorganizationPlan>;
 }

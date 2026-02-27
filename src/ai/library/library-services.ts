@@ -12,6 +12,7 @@ import {
 	formatMemoryContext,
 	type PromptInjectionOptions,
 } from './prompt-injection.js';
+import type { CirculationDesk } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +46,8 @@ export interface LibraryServicesOptions {
 	readonly storeResponses?: boolean;
 	/** Optional logger for debug/warning output. */
 	readonly logger?: Logger;
+	/** Optional CirculationDesk for async background extraction instead of direct library.add(). */
+	readonly circulationDesk?: CirculationDesk;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,6 +77,7 @@ export function createLibraryServices(
 	const storeResponses = options?.storeResponses ?? true;
 	const formatOptions = options?.format;
 	const logger = options?.logger;
+	const circulationDesk = options?.circulationDesk;
 
 	const enrichSystemPrompt = async (
 		context: LibraryContext,
@@ -125,8 +129,12 @@ export function createLibraryServices(
 		if (!library.isInitialized) return;
 
 		try {
-			const text = `Q: ${userInput}\nA: ${response}`;
-			await library.add(text, { topic: storeTopic });
+			if (circulationDesk) {
+				circulationDesk.enqueueExtraction({ userInput, response });
+			} else {
+				const text = `Q: ${userInput}\nA: ${response}`;
+				await library.add(text, { topic: storeTopic });
+			}
 		} catch (err) {
 			logger?.warn('Library services: failed to store response', {
 				error: err instanceof Error ? err.message : String(err),

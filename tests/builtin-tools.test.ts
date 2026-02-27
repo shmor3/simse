@@ -45,8 +45,8 @@ function createMockLibrary(): Library {
 		findDuplicates: mock(() => []),
 		checkDuplicate: mock(async () => ({ isDuplicate: false })),
 		compendium: mock(async () => ({
-			summaryId: 's',
-			summaryText: '',
+			compendiumId: 'comp-1',
+			text: '',
 			sourceIds: [],
 			deletedOriginals: false,
 		})),
@@ -165,6 +165,100 @@ describe('registerLibraryTools', () => {
 			arguments: { text: 'fail', topic: 'x' },
 		});
 		expect(result.isError).toBe(true);
+	});
+
+	it('registers library_catalog tool', () => {
+		const defs = registry.getToolDefinitions();
+		expect(defs.find((d) => d.name === 'library_catalog')).toBeDefined();
+	});
+
+	it('library_catalog returns topic tree', async () => {
+		const result = await registry.execute({
+			id: 'call_1',
+			name: 'library_catalog',
+			arguments: {},
+		});
+		expect(result.isError).toBe(false);
+	});
+
+	it('library_catalog returns no-topics message for empty catalog', async () => {
+		const result = await registry.execute({
+			id: 'call_2',
+			name: 'library_catalog',
+			arguments: {},
+		});
+		expect(result.isError).toBe(false);
+		expect(result.output).toContain('No topics found');
+	});
+
+	it('library_catalog formats topics with indent and counts', async () => {
+		(library.getTopics as ReturnType<typeof mock>).mockReturnValue([
+			{ topic: 'code', entryCount: 5 },
+			{ topic: 'code/js', entryCount: 3 },
+			{ topic: 'notes', entryCount: 2 },
+		]);
+		const result = await registry.execute({
+			id: 'call_3',
+			name: 'library_catalog',
+			arguments: {},
+		});
+		expect(result.isError).toBe(false);
+		expect(result.output).toContain('code (5 volumes)');
+		expect(result.output).toContain('  code/js (3 volumes)');
+		expect(result.output).toContain('notes (2 volumes)');
+	});
+
+	it('library_catalog filters by topic', async () => {
+		(library.getTopics as ReturnType<typeof mock>).mockReturnValue([
+			{ topic: 'code', entryCount: 5 },
+			{ topic: 'code/js', entryCount: 3 },
+			{ topic: 'notes', entryCount: 2 },
+		]);
+		const result = await registry.execute({
+			id: 'call_4',
+			name: 'library_catalog',
+			arguments: { topic: 'code' },
+		});
+		expect(result.isError).toBe(false);
+		expect(result.output).toContain('code');
+		expect(result.output).toContain('code/js');
+		expect(result.output).not.toContain('notes');
+	});
+
+	it('registers library_compact tool', () => {
+		const defs = registry.getToolDefinitions();
+		expect(defs.find((d) => d.name === 'library_compact')).toBeDefined();
+	});
+
+	it('library_compact returns nothing-to-compact for < 2 volumes', async () => {
+		const result = await registry.execute({
+			id: 'call_5',
+			name: 'library_compact',
+			arguments: { topic: 'empty' },
+		});
+		expect(result.isError).toBe(false);
+		expect(result.output).toContain('fewer than 2 volumes');
+	});
+
+	it('library_compact creates compendium when volumes exist', async () => {
+		(library.filterByTopic as ReturnType<typeof mock>).mockReturnValue([
+			{ id: 'v1', text: 'a' },
+			{ id: 'v2', text: 'b' },
+		]);
+		(library.compendium as ReturnType<typeof mock>).mockResolvedValue({
+			compendiumId: 'comp-1',
+			text: 'summary',
+			sourceIds: ['v1', 'v2'],
+			deletedOriginals: false,
+		});
+		const result = await registry.execute({
+			id: 'call_6',
+			name: 'library_compact',
+			arguments: { topic: 'code' },
+		});
+		expect(result.isError).toBe(false);
+		expect(result.output).toContain('comp-1');
+		expect(result.output).toContain('2 volumes');
 	});
 });
 

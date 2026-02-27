@@ -128,6 +128,83 @@ export function registerLibraryTools(
 			}
 		},
 	);
+
+	// library_catalog — browse the topic catalog
+	registerTool(
+		registry,
+		{
+			name: 'library_catalog',
+			description:
+				'Browse the topic catalog. Returns the hierarchical topic tree with volume counts.',
+			parameters: {
+				topic: {
+					type: 'string',
+					description: 'Optional topic to filter by (shows subtopics)',
+				},
+			},
+			category: 'library',
+			annotations: { readOnly: true },
+		},
+		async (args) => {
+			try {
+				const topics = library.getTopics();
+				const filterTopic =
+					typeof args.topic === 'string' ? args.topic : undefined;
+				const filtered = filterTopic
+					? topics.filter(
+							(t) =>
+								t.topic === filterTopic ||
+								t.topic.startsWith(`${filterTopic}/`),
+						)
+					: topics;
+
+				if (filtered.length === 0) return 'No topics found.';
+
+				return filtered
+					.map((t) => {
+						const indent = '  '.repeat(
+							(t.topic.match(/\//g) || []).length,
+						);
+						return `${indent}${t.topic} (${t.entryCount} volumes)`;
+					})
+					.join('\n');
+			} catch (err) {
+				throw toError(err);
+			}
+		},
+	);
+
+	// library_compact — trigger compendium for a topic
+	registerTool(
+		registry,
+		{
+			name: 'library_compact',
+			description:
+				'Trigger a compendium (summarization) for a specific topic. Condenses multiple volumes into a single summary.',
+			parameters: {
+				topic: {
+					type: 'string',
+					description: 'The topic to compact',
+					required: true,
+				},
+			},
+			category: 'library',
+		},
+		async (args) => {
+			try {
+				const topic = String(args.topic ?? '');
+				const volumes = library.filterByTopic([topic]);
+				if (volumes.length < 2) {
+					return `Topic "${topic}" has fewer than 2 volumes — nothing to compact.`;
+				}
+				const ids = volumes.map((v) => v.id);
+				const result = await library.compendium({ ids });
+				return `Created compendium ${result.compendiumId} from ${result.sourceIds.length} volumes.`;
+			} catch (err) {
+				throw toError(err);
+			}
+		},
+	);
 }
 
 // ---------------------------------------------------------------------------

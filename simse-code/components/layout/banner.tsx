@@ -26,6 +26,7 @@ interface ColumnLine {
 	readonly isMascot: boolean;
 	readonly isBold: boolean;
 	readonly isDim: boolean;
+	readonly color?: string;
 }
 
 export function Banner({
@@ -42,21 +43,16 @@ export function Banner({
 	const layout = useMemo(() => {
 		// 1-char left margin like Claude Code, content fills rest
 		const contentWidth = cols - 1;
-		const leftColWidth = Math.floor(contentWidth * 0.35);
-		const gapWidth = 3; // " \u2502 "
+		const leftColWidth = Math.floor(contentWidth * 0.27);
+		const gapWidth = 3; // " │ "
 		const rightColWidth = contentWidth - leftColWidth - gapWidth;
 
-		// Helper: center text within a given width, returning [leftPad, rightPad]
-		const centerPad = (
-			text: string,
-			width: number,
-		): [number, number] => {
-			const space = Math.max(0, width - text.length);
-			const left = Math.floor(space / 2);
-			return [left, space - left];
+		// Helper: center text within a given width
+		const centerPad = (text: string, width: number): number => {
+			return Math.max(0, Math.floor((width - text.length) / 2));
 		};
 
-		// Title: " \u2500\u2500 simse-code v1.0.0 \u2500\u2500...\u2500\u2500"
+		// Title: " ── simse-code v1.0.0 ──────...──"
 		const titleLabel = `simse-code v${version}`;
 		const titleTrailerLen = Math.max(
 			0,
@@ -66,7 +62,7 @@ export function Banner({
 		// Bottom border: fills contentWidth
 		const bottomLine = DIVIDER.repeat(contentWidth);
 
-		// Build left column content (no padding yet — centered later)
+		// Build left column content (raw, no padding yet)
 		const leftContent: ColumnLine[] = [];
 
 		// Mascot lines
@@ -87,7 +83,7 @@ export function Banner({
 			isDim: false,
 		});
 
-		// Model label (e.g. "Opus 4.6 \u00b7 Claude Max")
+		// Model label (e.g. "Opus 4.6 · Claude Max")
 		const modelLabel = server
 			? model
 				? `${server} \u00b7 ${model}`
@@ -114,24 +110,17 @@ export function Banner({
 			isDim: true,
 		});
 
-		// Build right column lines
+		// Build right column lines (no leading empty line — start immediately)
 		const rightLines: ColumnLine[] = [];
 
-		// Empty line at top for spacing
-		rightLines.push({
-			text: '',
-			isMascot: false,
-			isBold: false,
-			isDim: false,
-		});
-
-		// Tips section
+		// Tips section header
 		const tipList = tips ?? DEFAULT_TIPS;
 		rightLines.push({
 			text: 'Tips for getting started',
 			isMascot: false,
 			isBold: true,
 			isDim: false,
+			color: 'green',
 		});
 		for (const tip of tipList) {
 			const truncated =
@@ -146,12 +135,12 @@ export function Banner({
 			});
 		}
 
-		// Section divider
+		// Blank line between sections (not a divider line)
 		rightLines.push({
-			text: DIVIDER.repeat(rightColWidth),
+			text: '',
 			isMascot: false,
 			isBold: false,
-			isDim: true,
+			isDim: false,
 		});
 
 		// Recent activity section
@@ -161,6 +150,7 @@ export function Banner({
 			isMascot: false,
 			isBold: true,
 			isDim: false,
+			color: 'yellow',
 		});
 		for (const item of activity) {
 			rightLines.push({
@@ -185,18 +175,16 @@ export function Banner({
 			isDim: false,
 		};
 
-		// Build left column with vertical centering + horizontal centering
+		// Build left column with vertical + horizontal centering
 		const leftLines: ColumnLine[] = [];
 		for (let i = 0; i < totalRows; i++) {
 			const contentIdx = i - topPad;
 			if (contentIdx >= 0 && contentIdx < leftContent.length) {
 				const line = leftContent[contentIdx]!;
-				const [lp] = centerPad(line.text, leftColWidth);
+				const lp = centerPad(line.text, leftColWidth);
 				leftLines.push({
+					...line,
 					text: ' '.repeat(lp) + line.text,
-					isMascot: line.isMascot,
-					isBold: line.isBold,
-					isDim: line.isDim,
 				});
 			} else {
 				leftLines.push(emptyLine);
@@ -267,7 +255,11 @@ export function Banner({
 					</Text>
 					<Text dimColor> {'\u2502'} </Text>
 					<Text>
-						{row.rightStyle.isBold ? (
+						{row.rightStyle.color ? (
+							<Text bold color={row.rightStyle.color}>
+								{row.rightText}
+							</Text>
+						) : row.rightStyle.isBold ? (
 							<Text bold>{row.rightText}</Text>
 						) : row.rightStyle.isDim ? (
 							<Text dimColor>{row.rightText}</Text>

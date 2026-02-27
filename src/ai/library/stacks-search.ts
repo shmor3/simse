@@ -7,8 +7,8 @@
 // functions and handles access tracking / learning engine recording itself.
 // ---------------------------------------------------------------------------
 
-import type { MagnitudeCache, MetadataIndex } from './indexing.js';
-import { computeMagnitude } from './indexing.js';
+import type { MagnitudeCache, MetadataIndex } from './cataloging.js';
+import { computeMagnitude } from './cataloging.js';
 import type { InvertedIndex } from './inverted-index.js';
 import { recencyScore } from './recommendation.js';
 import {

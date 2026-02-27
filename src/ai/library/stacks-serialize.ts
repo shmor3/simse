@@ -9,10 +9,10 @@
 // ---------------------------------------------------------------------------
 
 import { Buffer } from 'node:buffer';
-import { decodeEmbedding, encodeEmbedding } from './compression.js';
+import { decodeEmbedding, encodeEmbedding } from './preservation.js';
 import type { VectorEntry } from './types.js';
-import type { LearningState } from './vector-persistence.js';
-import { isValidLearningState } from './vector-persistence.js';
+import type { LearningState } from './stacks-persistence.js';
+import { isValidLearningState } from './stacks-persistence.js';
 
 // ---------------------------------------------------------------------------
 // Types

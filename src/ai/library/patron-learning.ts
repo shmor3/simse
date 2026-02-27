@@ -18,7 +18,7 @@
 // compressed JSON format.
 // ---------------------------------------------------------------------------
 
-import { decodeEmbedding, encodeEmbedding } from './compression.js';
+import { decodeEmbedding, encodeEmbedding } from './preservation.js';
 import { cosineSimilarity } from './cosine.js';
 import type {
 	LearningOptions,
@@ -34,7 +34,7 @@ import type {
 	LearningState,
 	SerializedQueryRecord,
 	TopicProfileEntry,
-} from './vector-persistence.js';
+} from './stacks-persistence.js';
 
 // ---------------------------------------------------------------------------
 // LearningEngine interface

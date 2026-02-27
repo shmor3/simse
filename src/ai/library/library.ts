@@ -29,7 +29,7 @@ import type {
 	TopicInfo,
 	VectorEntry,
 } from './types.js';
-import { createVectorStore, type VectorStoreOptions } from './vector-store.js';
+import { createVectorStore, type VectorStoreOptions } from './stacks.js';
 
 // ---------------------------------------------------------------------------
 // Options

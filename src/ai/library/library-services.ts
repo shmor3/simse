@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Logger } from '../../logger.js';
-import type { MemoryManager } from './memory.js';
+import type { MemoryManager } from './library.js';
 import {
 	formatMemoryContext,
 	type PromptInjectionOptions,

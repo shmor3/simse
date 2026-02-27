@@ -13,9 +13,9 @@ import {
 	createMetadataIndex,
 	createTopicIndex,
 	type TopicIndexOptions,
-} from './indexing.js';
+} from './cataloging.js';
 import { createInvertedIndex } from './inverted-index.js';
-import { createLearningEngine, type LearningEngine } from './learning.js';
+import { createLearningEngine, type LearningEngine } from './patron-learning.js';
 import type { RecencyOptions } from './recommendation.js';
 import type { StorageBackend } from './storage.js';
 import type {
@@ -35,7 +35,7 @@ import type {
 	TopicInfo,
 	VectorEntry,
 } from './types.js';
-import { computeRecommendations } from './vector-recommend.js';
+import { computeRecommendations } from './stacks-recommend.js';
 import {
 	advancedVectorSearch,
 	filterEntriesByDateRange,
@@ -43,11 +43,11 @@ import {
 	textSearchEntries,
 	type VectorSearchConfig,
 	vectorSearch,
-} from './vector-search.js';
+} from './stacks-search.js';
 import {
 	deserializeFromStorage,
 	serializeToStorage,
-} from './vector-serialize.js';
+} from './stacks-serialize.js';
 
 // ---------------------------------------------------------------------------
 // Configuration

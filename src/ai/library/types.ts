@@ -314,6 +314,11 @@ export interface Recommendation {
 
 export interface TextGenerationProvider {
 	readonly generate: (prompt: string, systemPrompt?: string) => Promise<string>;
+	readonly generateWithModel?: (
+		prompt: string,
+		modelId: string,
+		systemPrompt?: string,
+	) => Promise<string>;
 }
 
 export interface CompendiumOptions {
@@ -483,6 +488,13 @@ export interface ReorganizationPlan {
 	}>;
 }
 
+export interface OptimizationResult {
+	readonly pruned: readonly string[];
+	readonly summary: string;
+	readonly reorganization: ReorganizationPlan;
+	readonly modelUsed: string;
+}
+
 export interface Librarian {
 	readonly extract: (turn: TurnContext) => Promise<ExtractionResult>;
 	readonly summarize: (
@@ -497,6 +509,11 @@ export interface Librarian {
 		topic: string,
 		volumes: readonly Volume[],
 	) => Promise<ReorganizationPlan>;
+	readonly optimize: (
+		volumes: readonly Volume[],
+		topic: string,
+		modelId: string,
+	) => Promise<OptimizationResult>;
 }
 
 // ---------------------------------------------------------------------------
@@ -512,12 +529,18 @@ export interface CirculationDeskThresholds {
 	readonly reorganization?: {
 		readonly maxVolumesPerTopic?: number;
 	};
+	readonly optimization?: {
+		readonly topicThreshold?: number;
+		readonly globalThreshold?: number;
+		readonly modelId: string;
+	};
 }
 
 export interface CirculationDesk {
 	readonly enqueueExtraction: (turn: TurnContext) => void;
 	readonly enqueueCompendium: (topic: string) => void;
 	readonly enqueueReorganization: (topic: string) => void;
+	readonly enqueueOptimization: (topic: string) => void;
 	readonly drain: () => Promise<void>;
 	readonly flush: () => Promise<void>;
 	readonly dispose: () => void;

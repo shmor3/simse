@@ -58,18 +58,13 @@ async function askOptional(
 }
 
 // ---------------------------------------------------------------------------
-// ACP Presets
+// ACP Presets — only configure ACP servers, never embedding
 // ---------------------------------------------------------------------------
-
-interface PresetResult {
-	readonly server: ACPServerConfig;
-	readonly embed?: EmbedFileConfig;
-}
 
 interface Preset {
 	readonly label: string;
 	readonly description: string;
-	readonly build: (rl: ReadlineInterface) => Promise<PresetResult>;
+	readonly build: (rl: ReadlineInterface) => Promise<ACPServerConfig>;
 }
 
 const presets: readonly Preset[] = [
@@ -82,28 +77,18 @@ const presets: readonly Preset[] = [
 				'http://127.0.0.1:11434';
 			const model =
 				(await askOptional(rl, '  Model [llama3.2]: ')) ?? 'llama3.2';
-			const embeddingModel =
-				(await askOptional(rl, '  Embedding model [nomic-embed-text]: ')) ??
-				'nomic-embed-text';
 
 			return {
-				server: {
-					name: 'ollama',
-					command: 'bun',
-					args: [
-						'run',
-						'acp-ollama-bridge.ts',
-						'--ollama',
-						url,
-						'--model',
-						model,
-						'--embedding-model',
-						embeddingModel,
-					],
-				},
-				embed: {
-					embeddingModel,
-				},
+				name: 'ollama',
+				command: 'bun',
+				args: [
+					'run',
+					'acp-ollama-bridge.ts',
+					'--ollama',
+					url,
+					'--model',
+					model,
+				],
 			};
 		},
 	},
@@ -111,22 +96,18 @@ const presets: readonly Preset[] = [
 		label: 'Claude Code',
 		description: 'Anthropic Claude via claude-code-acp',
 		build: async () => ({
-			server: {
-				name: 'claude',
-				command: 'bunx',
-				args: ['claude-code-acp'],
-			},
+			name: 'claude',
+			command: 'bunx',
+			args: ['claude-code-acp'],
 		}),
 	},
 	{
 		label: 'GitHub Copilot',
 		description: 'GitHub Copilot CLI',
 		build: async () => ({
-			server: {
-				name: 'copilot',
-				command: 'copilot',
-				args: ['--acp'],
-			},
+			name: 'copilot',
+			command: 'copilot',
+			args: ['--acp'],
 		}),
 	},
 	{
@@ -140,30 +121,25 @@ const presets: readonly Preset[] = [
 				'  Args (space-separated, enter to skip): ',
 			);
 			const args = argsStr ? argsStr.split(/\s+/) : undefined;
-			const embeddingModel = await askOptional(
-				rl,
-				'  Embedding model (enter to skip): ',
-			);
 
 			return {
-				server: {
-					name,
-					command,
-					...(args && { args }),
-				},
-				...(embeddingModel && { embed: { embeddingModel } }),
+				name,
+				command,
+				...(args && { args }),
 			};
 		},
 	},
 ];
 
+const DEFAULT_EMBEDDING_MODEL = 'nomic-ai/nomic-embed-text-v1.5';
+
 /**
- * Run the preset picker and return the selected preset result.
+ * Run the preset picker and return the selected server config.
  */
 async function pickPreset(
 	rl: ReadlineInterface,
 	header: string,
-): Promise<PresetResult> {
+): Promise<ACPServerConfig> {
 	console.log(`\n  ${header}\n`);
 	for (let i = 0; i < presets.length; i++) {
 		const p = presets[i];
@@ -193,7 +169,7 @@ interface PendingFile {
 }
 
 // ---------------------------------------------------------------------------
-// Global setup — ACP only (first-run wizard)
+// Global setup
 // ---------------------------------------------------------------------------
 
 export async function runSetup(options: SetupOptions): Promise<SetupResult> {
@@ -204,22 +180,20 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
 	// Accumulate files to write — nothing touches disk until the end
 	const pendingFiles: PendingFile[] = [];
 
-	// -- ACP config (interactive preset selection) ---------------------------
+	// -- Step 1: ACP provider ------------------------------------------------
 
 	const acpPath = join(dataDir, 'acp.json');
 	let acpConfig: ACPFileConfig | undefined;
-	let embedFromPreset: EmbedFileConfig | undefined;
 
 	if (existsSync(acpPath)) {
 		console.log('  acp.json already exists, skipping.');
 	} else {
-		const result = await pickPreset(rl, 'Select your AI provider:');
-		acpConfig = { servers: [result.server] };
-		embedFromPreset = result.embed;
+		const server = await pickPreset(rl, 'Select your AI provider:');
+		acpConfig = { servers: [server] };
 		pendingFiles.push({ file: 'acp.json', content: acpConfig });
 	}
 
-	// -- Summarization ACP config (interactive) --------------------------------
+	// -- Step 2: Summarization -----------------------------------------------
 
 	const summarizePath = join(dataDir, 'summarize.json');
 
@@ -254,14 +228,11 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
 			};
 			pendingFiles.push({ file: 'summarize.json', content: summarizeConfig });
 		} else if (summarizeChoice === 2) {
-			const presetResult = await pickPreset(
-				rl,
-				'Select summarization provider:',
-			);
+			const server = await pickPreset(rl, 'Select summarization provider:');
 			const summarizeConfig: SummarizeFileConfig = {
-				server: presetResult.server.name,
-				command: presetResult.server.command,
-				...(presetResult.server.args && { args: presetResult.server.args }),
+				server: server.name,
+				command: server.command,
+				...(server.args && { args: server.args }),
 			};
 			pendingFiles.push({ file: 'summarize.json', content: summarizeConfig });
 		} else {
@@ -269,10 +240,32 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
 		}
 	}
 
+	// -- Step 3: Embedding model ---------------------------------------------
+
+	const embedPath = join(dataDir, 'embed.json');
+	let embedConfig: EmbedFileConfig | undefined;
+
+	if (existsSync(embedPath)) {
+		console.log('  embed.json already exists, skipping.');
+	} else {
+		console.log(
+			`\n  Embedding model (runs locally via HuggingFace Transformers)\n`,
+		);
+		console.log(
+			`  The built-in embedder is used for all providers (Ollama, Claude, etc.)`,
+		);
+
+		const model =
+			(await askOptional(rl, `  Model [${DEFAULT_EMBEDDING_MODEL}]: `)) ??
+			DEFAULT_EMBEDDING_MODEL;
+
+		embedConfig = { embeddingModel: model };
+		pendingFiles.push({ file: 'embed.json', content: embedConfig });
+	}
+
 	// -- Default config files (skip existing) ---------------------------------
 
 	const defaults: readonly PendingFile[] = [
-		{ file: 'embed.json', content: embedFromPreset ?? {} },
 		{ file: 'config.json', content: {} },
 		{ file: 'mcp.json', content: { servers: [] } },
 		{

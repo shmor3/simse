@@ -215,6 +215,7 @@ export function createLibrary(
 	const dispose = async (): Promise<void> => {
 		logger.debug('Disposing library');
 		await store.dispose();
+		shelfCache.clear();
 		initialized = false;
 		logger.debug('Library disposed');
 	};
@@ -737,6 +738,7 @@ export function createLibrary(
 	const clear = async (): Promise<void> => {
 		ensureInitialized();
 		await store.clear();
+		shelfCache.clear();
 		logger.info('Library store cleared');
 	};
 

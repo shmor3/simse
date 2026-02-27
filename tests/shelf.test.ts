@@ -66,7 +66,8 @@ describe('Shelf', () => {
 		const s2 = library.shelf('writer');
 		await s1.add('API endpoint design');
 		await s2.add('prose style guide');
-		const results = await s1.search('design');
+		const results = await s1.search('design', undefined, -1);
+		expect(results.length).toBeGreaterThan(0);
 		for (const r of results) {
 			expect(r.volume.metadata.shelf).toBe('researcher');
 		}

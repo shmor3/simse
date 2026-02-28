@@ -3,8 +3,8 @@ import React from 'react';
 
 export function formatTokens(tokens: number): string {
 	return tokens >= 1000
-		? `${(tokens / 1000).toFixed(1)}k tokens`
-		: `${tokens} tokens`;
+		? `${(tokens / 1000).toFixed(1)}k`
+		: `${tokens}`;
 }
 
 interface StatusBarProps {
@@ -12,6 +12,8 @@ interface StatusBarProps {
 	readonly planMode?: boolean;
 	readonly verbose?: boolean;
 	readonly bypassPermissions?: boolean;
+	readonly totalTokens?: number;
+	readonly contextPercent?: number;
 }
 
 const SEP = ' \u00b7 ';
@@ -21,6 +23,8 @@ export function StatusBar({
 	planMode,
 	verbose,
 	bypassPermissions,
+	totalTokens,
+	contextPercent,
 }: StatusBarProps) {
 	const hints: string[] = [];
 
@@ -42,9 +46,21 @@ export function StatusBar({
 
 	hints.push('? for shortcuts');
 
+	// Right-aligned stats
+	const stats: string[] = [];
+	if (totalTokens && totalTokens > 0) {
+		stats.push(`${formatTokens(totalTokens)} tokens`);
+	}
+	if (contextPercent !== undefined && contextPercent > 0) {
+		stats.push(`${contextPercent}% context`);
+	}
+
 	return (
-		<Box paddingX={1}>
+		<Box paddingX={1} justifyContent="space-between">
 			<Text dimColor>{hints.join(SEP)}</Text>
+			{stats.length > 0 && (
+				<Text dimColor>{stats.join(SEP)}</Text>
+			)}
 		</Box>
 	);
 }

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import chalk from 'chalk';
 import { Box, Text, useInput } from 'ink';
 import React, {
@@ -282,6 +283,7 @@ export function App({
 		abort: abortLoop,
 		pendingPermission,
 		resolvePermission,
+		tokenUsage,
 	} = useAgenticLoop(loopOptions);
 
 	// Escape key interrupts the agentic loop when processing
@@ -294,6 +296,17 @@ export function App({
 			}
 		},
 		{ isActive: isProcessing },
+	);
+
+	// Ctrl+L clears the screen (like /clear)
+	useInput(
+		(input, key) => {
+			if (key.ctrl && input === 'l') {
+				conversationRef.current.clear();
+				setItems([{ kind: 'command-result', element: bannerRef.current }]);
+			}
+		},
+		{ isActive: !isProcessing },
 	);
 
 	const handleCompleteAtMention = useCallback(
@@ -328,7 +341,34 @@ export function App({
 				{ kind: 'message', role: 'user', text: input },
 			]);
 
-			if (isCommand(input)) {
+			if (input.startsWith('!') && input.length > 1) {
+				// Bash mode: execute shell command directly
+				const cmd = input.slice(1).trim();
+				try {
+					const shell =
+						process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
+					const shellArgs =
+						process.platform === 'win32' ? ['/c', cmd] : ['-c', cmd];
+					const output = execFileSync(shell, shellArgs, {
+						encoding: 'utf-8',
+						timeout: 30_000,
+						stdio: ['pipe', 'pipe', 'pipe'],
+					});
+					setItems((prev) => [
+						...prev,
+						{ kind: 'info', text: output.trimEnd() || '(no output)' },
+					]);
+				} catch (err) {
+					const e = err as { stderr?: string; message?: string };
+					setItems((prev) => [
+						...prev,
+						{
+							kind: 'error',
+							message: e.stderr?.trimEnd() || e.message || 'Command failed',
+						},
+					]);
+				}
+			} else if (isCommand(input)) {
 				const result = await dispatch(input);
 				if (result?.text) {
 					setItems((prev) => [...prev, { kind: 'info', text: result.text! }]);
@@ -463,6 +503,10 @@ export function App({
 					isProcessing={isProcessing}
 					planMode={planMode}
 					verbose={verbose}
+					totalTokens={tokenUsage.totalTokens}
+					contextPercent={Math.round(
+						(conversationRef.current.estimatedChars / 200_000) * 100,
+					)}
 				/>
 			) : null}
 		</MainLayout>

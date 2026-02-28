@@ -1,3 +1,4 @@
+import chalk from 'chalk';
 import { Box, Text } from 'ink';
 import type React from 'react';
 
@@ -192,6 +193,87 @@ function keyedLines(content: string): { key: string; text: string }[] {
 	return content.split('\n').map((text) => ({ key: `cl${id++}`, text }));
 }
 
+// ---------------------------------------------------------------------------
+// Lightweight syntax highlighter (no external deps)
+// ---------------------------------------------------------------------------
+
+const JS_KEYWORDS =
+	/\b(const|let|var|function|return|if|else|for|while|class|import|export|from|default|async|await|new|throw|try|catch|finally|typeof|instanceof|in|of|switch|case|break|continue|yield|type|interface|readonly|extends|implements)\b/g;
+
+const PY_KEYWORDS =
+	/\b(def|class|return|if|elif|else|for|while|import|from|as|with|try|except|finally|raise|yield|lambda|pass|break|continue|and|or|not|in|is|True|False|None|self|async|await)\b/g;
+
+const BASH_KEYWORDS =
+	/\b(if|then|else|elif|fi|for|while|do|done|case|esac|function|return|exit|export|source|echo|cd|ls|grep|sed|awk|cat|rm|cp|mv|mkdir|chmod|chown|sudo|apt|npm|bun|git|docker)\b/g;
+
+type HighlightLang = 'js' | 'py' | 'bash' | 'json' | 'none';
+
+function detectLang(language?: string): HighlightLang {
+	if (!language) return 'none';
+	const l = language.toLowerCase();
+	if (
+		l === 'js' ||
+		l === 'javascript' ||
+		l === 'ts' ||
+		l === 'typescript' ||
+		l === 'tsx' ||
+		l === 'jsx'
+	)
+		return 'js';
+	if (l === 'python' || l === 'py') return 'py';
+	if (l === 'bash' || l === 'sh' || l === 'shell' || l === 'zsh') return 'bash';
+	if (l === 'json' || l === 'jsonc') return 'json';
+	return 'none';
+}
+
+function highlightLine(line: string, lang: HighlightLang): string {
+	if (lang === 'none') return line;
+
+	if (lang === 'json') {
+		return line
+			.replace(/"([^"]*)"(?=\s*:)/g, (m) => chalk.cyan(m)) // keys
+			.replace(/:\s*"([^"]*)"/g, (m) => chalk.green(m)) // string values
+			.replace(/:\s*(-?\d+\.?\d*)/g, (_, n) => `: ${chalk.yellow(n)}`) // numbers
+			.replace(/\b(true|false|null)\b/g, (m) => chalk.magenta(m));
+	}
+
+	let result = line;
+
+	// Strings (single and double quoted)
+	const strings: string[] = [];
+	result = result.replace(/(["'])(?:(?=(\\?))\2.)*?\1/g, (m) => {
+		strings.push(m);
+		return `\x00S${strings.length - 1}\x00`;
+	});
+
+	// Comments
+	const commentIdx = lang === 'py' ? result.indexOf('#') : result.indexOf('//');
+	let comment = '';
+	if (commentIdx >= 0) {
+		comment = result.slice(commentIdx);
+		result = result.slice(0, commentIdx);
+	}
+
+	// Keywords
+	const keywords = lang === 'py' ? PY_KEYWORDS : lang === 'bash' ? BASH_KEYWORDS : JS_KEYWORDS;
+	result = result.replace(keywords, (m) => chalk.magenta(m));
+
+	// Numbers
+	result = result.replace(/\b(\d+\.?\d*)\b/g, (m) => chalk.yellow(m));
+
+	// Restore strings
+	result = result.replace(/\x00S(\d+)\x00/g, (_, i) =>
+		chalk.green(strings[Number.parseInt(i, 10)]!),
+	);
+
+	// Append comment
+	if (comment) {
+		result += chalk.dim(comment);
+	}
+
+	return result;
+}
+
 function CodeBlock({
 	content,
 	language,
@@ -199,6 +281,7 @@ function CodeBlock({
 	content: string;
 	language?: string;
 }) {
+	const lang = detectLang(language);
 	const lines = keyedLines(content);
 	return (
 		<Box flexDirection="column">
@@ -206,7 +289,7 @@ function CodeBlock({
 			{lines.map((line) => (
 				<Text key={line.key}>
 					<Text dimColor>{'\u2502'} </Text>
-					{line.text}
+					{highlightLine(line.text, lang)}
 				</Text>
 			))}
 		</Box>

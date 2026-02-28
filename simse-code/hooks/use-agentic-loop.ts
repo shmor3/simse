@@ -50,6 +50,12 @@ interface AgenticLoopState {
 	} | null;
 }
 
+export interface TokenUsage {
+	readonly promptTokens: number;
+	readonly completionTokens: number;
+	readonly totalTokens: number;
+}
+
 export interface UseAgenticLoopResult {
 	readonly state: AgenticLoopState;
 	readonly submit: (
@@ -62,6 +68,7 @@ export interface UseAgenticLoopResult {
 		decision: 'allow' | 'deny',
 		alwaysAllow?: boolean,
 	) => void;
+	readonly tokenUsage: TokenUsage;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +88,11 @@ export function useAgenticLoop(
 	const abortRef = useRef<AbortController | undefined>(undefined);
 	const optionsRef = useRef(options);
 	optionsRef.current = options;
+	const [tokenUsage, setTokenUsage] = useState<TokenUsage>({
+		promptTokens: 0,
+		completionTokens: 0,
+		totalTokens: 0,
+	});
 
 	const submit = useCallback(
 		async (
@@ -247,6 +259,20 @@ export function useAgenticLoop(
 						text: `Warning: detected repeated "${toolName}" calls (${count}x). Asking model to try a different approach.`,
 					});
 				},
+				onTokenUsage: (usage) => {
+					setTokenUsage((prev) => ({
+						promptTokens: prev.promptTokens + usage.promptTokens,
+						completionTokens:
+							prev.completionTokens + usage.completionTokens,
+						totalTokens: prev.totalTokens + usage.totalTokens,
+					}));
+				},
+				onCompaction: () => {
+					completedItems.push({
+						kind: 'info',
+						text: 'Context compacted — conversation summarized to free space.',
+					});
+				},
 				onError: (error: Error) => {
 					completedItems.push({
 						kind: 'error',
@@ -333,5 +359,6 @@ export function useAgenticLoop(
 		abort,
 		pendingPermission: state.pendingPermission,
 		resolvePermission,
+		tokenUsage,
 	};
 }

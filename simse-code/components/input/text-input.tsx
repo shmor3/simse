@@ -89,7 +89,7 @@ export function TextInput({
 			if (
 				key.upArrow ||
 				key.downArrow ||
-				(key.ctrl && input === 'c') ||
+				(key.ctrl && (input === 'c' || input === 'l')) ||
 				key.tab ||
 				(key.shift && key.tab)
 			) {

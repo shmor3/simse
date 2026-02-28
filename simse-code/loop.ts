@@ -65,6 +65,14 @@ export interface LoopCallbacks {
 	readonly onAgentToolCallUpdate?: (update: ACPToolCallUpdate) => void;
 	/** Called when the loop detects consecutive identical tool calls (doom loop). */
 	readonly onDoomLoop?: (toolName: string, count: number) => void;
+	/** Called when auto-compaction fires to summarize conversation. */
+	readonly onCompaction?: () => void;
+	/** Called with token usage after each ACP response. */
+	readonly onTokenUsage?: (usage: {
+		promptTokens: number;
+		completionTokens: number;
+		totalTokens: number;
+	}) => void;
 }
 
 export interface AgenticLoopResult {
@@ -195,6 +203,24 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 				});
 			}
 
+			// Auto-compact when conversation exceeds threshold
+			if (conversation.needsCompaction && turn > 1) {
+				try {
+					const compactPrompt =
+						'Summarize this conversation concisely. Include: current goal, progress made, key decisions, relevant file paths, and next steps.\n\n' +
+						conversation.serialize();
+					const summary = await acpClient.generate(compactPrompt, {
+						serverName,
+					});
+					if (summary.content) {
+						conversation.compact(summary.content);
+						callbacks?.onCompaction?.();
+					}
+				} catch {
+					// Best-effort: continue without compaction
+				}
+			}
+
 			// Serialize conversation to a single prompt string
 			const prompt = conversation.serialize();
 
@@ -238,6 +264,8 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 					if (chunk.type === 'delta') {
 						fullResponse += chunk.text;
 						callbacks?.onStreamDelta?.(chunk.text);
+					} else if (chunk.type === 'complete' && chunk.usage) {
+						callbacks?.onTokenUsage?.(chunk.usage);
 					}
 				}
 			} catch (err) {

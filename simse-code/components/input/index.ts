@@ -1,3 +1,4 @@
+export { ConfirmDialog } from './confirm-dialog.js';
 export type { OllamaWizardResult } from './ollama-wizard.js';
 export { OllamaWizard } from './ollama-wizard.js';
 export { PermissionDialog } from './permission-dialog.js';

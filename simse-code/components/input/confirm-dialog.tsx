@@ -62,7 +62,10 @@ export function ConfirmDialog({
 				<Text color={selectedIndex === 0 ? 'cyan' : undefined}>
 					{selectedIndex === 0 ? '  ❯ ' : '    '}
 				</Text>
-				<Text bold={selectedIndex === 0} color={selectedIndex === 0 ? 'cyan' : undefined}>
+				<Text
+					bold={selectedIndex === 0}
+					color={selectedIndex === 0 ? 'cyan' : undefined}
+				>
 					No, cancel
 				</Text>
 			</Box>
@@ -72,7 +75,10 @@ export function ConfirmDialog({
 				<Text color={selectedIndex === 1 ? 'red' : undefined}>
 					{selectedIndex === 1 ? '  ❯ ' : '    '}
 				</Text>
-				<Text bold={selectedIndex === 1} color={selectedIndex === 1 ? 'red' : undefined}>
+				<Text
+					bold={selectedIndex === 1}
+					color={selectedIndex === 1 ? 'red' : undefined}
+				>
 					Yes, delete everything
 				</Text>
 			</Box>

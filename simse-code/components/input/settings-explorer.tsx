@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
 	getAllConfigSchemas,
 	loadConfigFile,
+	resolveFieldOptions,
 	saveConfigField,
 } from '../../features/config/settings-schema.js';
 import type {
@@ -23,7 +24,7 @@ interface SettingsExplorerProps {
 }
 
 type Panel = 'files' | 'fields';
-type EditMode = 'none' | 'selecting' | 'text-input';
+type EditMode = 'none' | 'selecting' | 'text-input' | 'setup-flow';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -57,10 +58,22 @@ function formatValue(value: unknown): string {
 
 /**
  * Builds the dropdown options list for a field.
- * Enums: all options + "(unset)" + "Custom value..."
- * Booleans: true, false, (unset)
+ * Priority: resolve (dynamic) > presets (static) > enum > boolean.
  */
-function buildDropdownOptions(field: FieldSchema): readonly string[] {
+function buildDropdownOptions(
+	field: FieldSchema,
+	dataDir: string,
+	workDir?: string,
+): readonly string[] {
+	// Dynamic resolution from on-disk data
+	if (field.resolve) {
+		return resolveFieldOptions(field.resolve, dataDir, workDir);
+	}
+	// Static presets (number fields with common values)
+	if (field.presets) {
+		return [...field.presets, '(unset)', 'Custom value...'];
+	}
+	// Existing enum/boolean handling
 	if (field.type === 'boolean') {
 		return ['true', 'false', '(unset)'];
 	}
@@ -193,9 +206,9 @@ export function SettingsExplorer({
 				const field = fields[fieldIndex];
 				if (!field) return;
 
-				if (field.type === 'boolean' || field.type === 'enum') {
-					// Open dropdown selector
-					const options = buildDropdownOptions(field);
+				const options = buildDropdownOptions(field, dataDir, workDir);
+				if (options.length > 0) {
+					// Open dropdown selector for any field with options
 					setDropdownOptions(options);
 					setDropdownIndex(
 						findCurrentIndex(fileData[field.key], options),
@@ -203,7 +216,7 @@ export function SettingsExplorer({
 					setEditMode('selecting');
 					return;
 				}
-				// string or number — enter text editing mode
+				// Fallback: plain text input for fields without dropdown options
 				const current = fileData[field.key];
 				setEditValue(
 					current !== undefined && current !== null
@@ -239,8 +252,10 @@ export function SettingsExplorer({
 				if (!field) return;
 
 				const selected = dropdownOptions[dropdownIndex];
-				if (selected === 'Custom value...') {
-					// Switch to text input mode
+				if (
+					selected === 'Custom value...' ||
+					selected === 'Custom model...'
+				) {
 					const current = fileData[field.key];
 					setEditValue(
 						current !== undefined && current !== null
@@ -250,10 +265,19 @@ export function SettingsExplorer({
 					setEditMode('text-input');
 					return;
 				}
+				if (selected === 'Add new server...') {
+					setEditMode('setup-flow');
+					return;
+				}
 				if (selected === '(unset)') {
 					saveField(selectedSchema, field.key, undefined);
 				} else if (field.type === 'boolean') {
 					saveField(selectedSchema, field.key, selected === 'true');
+				} else if (field.type === 'number') {
+					const num = Number(selected);
+					if (!Number.isNaN(num)) {
+						saveField(selectedSchema, field.key, num);
+					}
 				} else {
 					saveField(selectedSchema, field.key, selected);
 				}
@@ -442,7 +466,11 @@ export function SettingsExplorer({
 												}
 												italic={
 													opt ===
-													'Custom value...'
+														'Custom value...' ||
+													opt ===
+														'Custom model...' ||
+													opt ===
+														'Add new server...'
 												}
 											>
 												{opt}

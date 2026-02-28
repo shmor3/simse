@@ -66,6 +66,10 @@ export interface VFSCopyOptions {
 export interface VFSSearchOptions {
 	readonly glob?: string;
 	readonly maxResults?: number;
+	readonly mode?: 'substring' | 'regex';
+	readonly contextBefore?: number;
+	readonly contextAfter?: number;
+	readonly countOnly?: boolean;
 }
 
 export interface VFSSearchResult {
@@ -73,6 +77,8 @@ export interface VFSSearchResult {
 	readonly line: number;
 	readonly column: number;
 	readonly match: string;
+	readonly contextBefore?: readonly string[];
+	readonly contextAfter?: readonly string[];
 }
 
 // ---------------------------------------------------------------------------

@@ -76,13 +76,13 @@ export interface VirtualFS {
 	readonly rename: (oldPath: string, newPath: string) => void;
 	readonly copy: (src: string, dest: string, options?: VFSCopyOptions) => void;
 
-	readonly glob: (pattern: string) => readonly string[];
+	readonly glob: (pattern: string | readonly string[]) => readonly string[];
 	readonly tree: (path?: string) => string;
 	readonly du: (path: string) => number;
 	readonly search: (
 		query: string,
 		options?: VFSSearchOptions,
-	) => readonly VFSSearchResult[];
+	) => readonly VFSSearchResult[] | number;
 
 	readonly history: (path: string) => readonly VFSHistoryEntry[];
 	readonly diff: (
@@ -126,6 +126,41 @@ interface InternalNode {
 // Glob matching
 // ---------------------------------------------------------------------------
 
+const expandBraces = (pattern: string): string[] => {
+	const braceStart = pattern.indexOf('{');
+	if (braceStart < 0) return [pattern];
+
+	// Find matching closing brace (handle nesting)
+	let depth = 0;
+	let braceEnd = -1;
+	for (let i = braceStart; i < pattern.length; i++) {
+		if (pattern[i] === '{') depth++;
+		else if (pattern[i] === '}') {
+			depth--;
+			if (depth === 0) {
+				braceEnd = i;
+				break;
+			}
+		}
+	}
+
+	if (braceEnd < 0) return [pattern]; // unmatched brace, treat as literal
+
+	const prefix = pattern.slice(0, braceStart);
+	const suffix = pattern.slice(braceEnd + 1);
+	const alternatives = pattern.slice(braceStart + 1, braceEnd).split(',');
+
+	const results: string[] = [];
+	for (const alt of alternatives) {
+		// Recursively expand in case of nested braces or suffix braces
+		for (const expanded of expandBraces(prefix + alt.trim() + suffix)) {
+			results.push(expanded);
+		}
+	}
+
+	return results;
+};
+
 const matchSegment = (segment: string, pattern: string): boolean => {
 	let si = 0;
 	let pi = 0;
@@ -160,13 +195,19 @@ const matchSegment = (segment: string, pattern: string): boolean => {
 };
 
 const matchGlob = (filePath: string, pattern: string): boolean => {
-	const normalizedPattern = normalizePath(pattern);
+	const expanded = expandBraces(pattern);
 	const pathParts = toLocalPath(filePath).split('/').filter(Boolean);
-	const patternParts = toLocalPath(normalizedPattern)
-		.split('/')
-		.filter(Boolean);
 
-	return matchParts(pathParts, 0, patternParts, 0);
+	for (const exp of expanded) {
+		const normalizedPattern = normalizePath(exp);
+		const patternParts = toLocalPath(normalizedPattern)
+			.split('/')
+			.filter(Boolean);
+		if (matchParts(pathParts, 0, patternParts, 0)) {
+			return true;
+		}
+	}
+	return false;
 };
 
 const matchParts = (
@@ -849,13 +890,37 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 
 	// -- Query operations -------------------------------------------------
 
-	const globFn = (pattern: string): readonly string[] => {
+	const globFn = (pattern: string | readonly string[]): readonly string[] => {
+		const patterns = typeof pattern === 'string' ? [pattern] : pattern;
+		const positivePatterns: string[] = [];
+		const negativePatterns: string[] = [];
+
+		for (const p of patterns) {
+			if (p.startsWith('!')) {
+				negativePatterns.push(p.slice(1));
+			} else {
+				positivePatterns.push(p);
+			}
+		}
+
+		// If no positive patterns, match all files (negation-only filters everything)
+		const matchAll = positivePatterns.length === 0;
+
 		const results: string[] = [];
 		for (const [path, node] of nodes) {
 			if (path === VFS_ROOT) continue;
-			if (node.type === 'file' && matchGlob(path, pattern)) {
-				results.push(path);
-			}
+			if (node.type !== 'file') continue;
+
+			// Check positive patterns (must match at least one)
+			const included =
+				matchAll || positivePatterns.some((p) => matchGlob(path, p));
+			if (!included) continue;
+
+			// Check negative patterns (must not match any)
+			const excluded = negativePatterns.some((p) => matchGlob(path, p));
+			if (excluded) continue;
+
+			results.push(path);
 		}
 		results.sort();
 		return Object.freeze(results);
@@ -915,35 +980,77 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 	const search = (
 		query: string,
 		searchOptions?: VFSSearchOptions,
-	): readonly VFSSearchResult[] => {
+	): readonly VFSSearchResult[] | number => {
 		const maxResults = searchOptions?.maxResults ?? 100;
 		const globPattern = searchOptions?.glob;
+		const mode = searchOptions?.mode ?? 'substring';
+		const ctxBefore = searchOptions?.contextBefore ?? 0;
+		const ctxAfter = searchOptions?.contextAfter ?? 0;
+		const countOnly = searchOptions?.countOnly ?? false;
+
+		const regex = mode === 'regex' ? new RegExp(query, 'g') : null;
+		let count = 0;
 		const results: VFSSearchResult[] = [];
 
 		for (const [path, node] of nodes) {
-			if (results.length >= maxResults) break;
+			if (!countOnly && results.length >= maxResults) break;
 			if (node.type !== 'file' || node.contentType !== 'text') continue;
 			if (globPattern && !matchGlob(path, globPattern)) continue;
 
 			const text = node.text ?? '';
 			const lines = text.split('\n');
 			for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
-				if (results.length >= maxResults) break;
+				if (!countOnly && results.length >= maxResults) break;
 				const line = lines[lineIdx];
-				const col = line.indexOf(query);
-				if (col >= 0) {
-					results.push(
-						Object.freeze({
-							path,
-							line: lineIdx + 1,
-							column: col + 1,
-							match: line,
-						}),
-					);
+
+				let col: number;
+				if (regex) {
+					regex.lastIndex = 0;
+					const m = regex.exec(line);
+					if (!m) continue;
+					col = m.index;
+				} else {
+					col = line.indexOf(query);
+					if (col < 0) continue;
 				}
+
+				if (countOnly) {
+					count++;
+					continue;
+				}
+
+				const beforeLines: string[] = [];
+				const afterLines: string[] = [];
+				if (ctxBefore > 0) {
+					const start = Math.max(0, lineIdx - ctxBefore);
+					for (let i = start; i < lineIdx; i++) {
+						beforeLines.push(lines[i]);
+					}
+				}
+				if (ctxAfter > 0) {
+					const end = Math.min(lines.length - 1, lineIdx + ctxAfter);
+					for (let i = lineIdx + 1; i <= end; i++) {
+						afterLines.push(lines[i]);
+					}
+				}
+
+				const result: VFSSearchResult = {
+					path,
+					line: lineIdx + 1,
+					column: col + 1,
+					match: line,
+					...(beforeLines.length > 0
+						? { contextBefore: Object.freeze(beforeLines) }
+						: {}),
+					...(afterLines.length > 0
+						? { contextAfter: Object.freeze(afterLines) }
+						: {}),
+				};
+				results.push(Object.freeze(result));
 			}
 		}
 
+		if (countOnly) return count;
 		return Object.freeze(results);
 	};
 

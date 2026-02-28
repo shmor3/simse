@@ -15,6 +15,9 @@ export {
 	createMetadataIndex,
 	createTopicIndex,
 } from './cataloging.js';
+// ---- Circulation desk (async job queue) ------------------------------------
+export type { CirculationDeskOptions } from './circulation-desk.js';
+export { createCirculationDesk } from './circulation-desk.js';
 // ---- Cosine similarity -----------------------------------------------------
 export { cosineSimilarity } from './cosine.js';
 // ---- Deduplication ---------------------------------------------------------
@@ -28,9 +31,36 @@ export type {
 	InvertedIndex,
 } from './inverted-index.js';
 export { createInvertedIndex, tokenizeForIndex } from './inverted-index.js';
+// ---- Librarian (LLM-driven extraction, summarization) ---------------------
+export type { LibrarianOptions } from './librarian.js';
+export { createDefaultLibrarian, createLibrarian } from './librarian.js';
+// ---- Librarian definition (validation, persistence) -----------------------
+export type { ValidationResult } from './librarian-definition.js';
+export {
+	loadAllDefinitions,
+	loadDefinition,
+	matchesTopic,
+	saveDefinition,
+	validateDefinition,
+} from './librarian-definition.js';
+// ---- Librarian registry (multi-librarian management) ----------------------
+export type {
+	DisposableConnection,
+	LibrarianRegistry,
+	LibrarianRegistryOptions,
+	ManagedLibrarian,
+} from './librarian-registry.js';
+export { createLibrarianRegistry } from './librarian-registry.js';
 // ---- Library (high-level API) ----------------------------------------------
 export type { Library, LibraryOptions } from './library.js';
 export { createLibrary } from './library.js';
+// ---- Library services (memory middleware) ----------------------------------
+export type {
+	LibraryContext,
+	LibraryServices,
+	LibraryServicesOptions,
+} from './library-services.js';
+export { createLibraryServices } from './library-services.js';
 // ---- Logger / EventBus -----------------------------------------------------
 export type { EventBus, Logger } from './logger.js';
 export { createNoopLogger } from './logger.js';

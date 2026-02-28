@@ -15,6 +15,7 @@ import { createCommandRegistry } from './command-registry.js';
 import { Markdown } from './components/chat/markdown.js';
 import { MessageList } from './components/chat/message-list.js';
 import { ToolCallBox } from './components/chat/tool-call-box.js';
+import { ConfirmDialog } from './components/input/confirm-dialog.js';
 import { OnboardingWizard } from './components/input/onboarding-wizard.js';
 import { PermissionDialog } from './components/input/permission-dialog.js';
 import {
@@ -22,6 +23,7 @@ import {
 	type PromptMode,
 } from './components/input/prompt-input.js';
 import type { SetupPresetOption } from './components/input/setup-selector.js';
+import { SettingsExplorer } from './components/input/settings-explorer.js';
 import { SetupSelector } from './components/input/setup-selector.js';
 import { Banner } from './components/layout/banner.js';
 import { MainLayout } from './components/layout/main-layout.js';
@@ -31,8 +33,9 @@ import { createCLIConfig } from './config.js';
 import type { Conversation } from './conversation.js';
 import { createConversation } from './conversation.js';
 import { aiCommands } from './features/ai/index.js';
-import { configCommands } from './features/config/index.js';
+import { createSettingsCommands } from './features/config/index.js';
 import { createInitCommands } from './features/config/init.js';
+import { createResetCommands } from './features/config/reset.js';
 import { createSetupCommands } from './features/config/setup.js';
 import { filesCommands } from './features/files/index.js';
 import { libraryCommands } from './features/library/index.js';
@@ -213,6 +216,32 @@ export function App({
 		[],
 	);
 
+	// Confirm dialog — Promise-based active-area dialog (factory reset, etc.)
+	const [pendingConfirm, setPendingConfirm] = useState<{
+		message: string;
+		resolve: (confirmed: boolean) => void;
+	} | null>(null);
+
+	const handleConfirm = useCallback(
+		(message: string): Promise<boolean> => {
+			return new Promise((resolve) => {
+				setPendingConfirm({ message, resolve });
+			});
+		},
+		[],
+	);
+
+	// Interactive settings explorer — Promise-based active-area dialog
+	const [pendingSettings, setPendingSettings] = useState<{
+		resolve: () => void;
+	} | null>(null);
+
+	const handleShowSettingsExplorer = useCallback((): Promise<void> => {
+		return new Promise((resolve) => {
+			setPendingSettings({ resolve });
+		});
+	}, []);
+
 	// Refs for meta command state access (commands are created once but execute later)
 	const verboseRef = useRef(verbose);
 	verboseRef.current = verbose;
@@ -281,7 +310,7 @@ export function App({
 		);
 		reg.registerAll(createSessionCommands(sessionCtx));
 		reg.registerAll(filesCommands);
-		reg.registerAll(configCommands);
+		reg.registerAll(createSettingsCommands(dataDir, handleShowSettingsExplorer));
 		reg.registerAll(
 			createSetupCommands(
 				dataDir,
@@ -297,11 +326,14 @@ export function App({
 			}),
 		);
 		reg.registerAll(aiCommands);
+		reg.registerAll(createResetCommands(dataDir, process.cwd(), handleConfirm));
 		return reg;
 	}, [
 		dataDir,
+		handleConfirm,
 		handleSetupComplete,
 		handleShowSetupSelector,
+		handleShowSettingsExplorer,
 		sessionStore,
 		currentServerName,
 		currentModelName,
@@ -333,10 +365,10 @@ export function App({
 	} = useAgenticLoop(loopOptions);
 
 	// Escape key interrupts the agentic loop when processing
-	// (but not when setup selector is active — it handles its own Escape)
+	// (but not when setup selector or settings explorer is active — they handle their own Escape)
 	useInput(
 		(_input, key) => {
-			if (key.escape && !pendingSetup) {
+			if (key.escape && !pendingSetup && !pendingSettings && !pendingConfirm) {
 				abortLoop();
 				setIsProcessing(false);
 				setItems((prev) => [...prev, { kind: 'info', text: 'Interrupted.' }]);
@@ -539,6 +571,30 @@ export function App({
 					onDismiss={() => {
 						pendingSetup.resolve(null);
 						setPendingSetup(null);
+					}}
+				/>
+			)}
+
+			{pendingSettings && (
+				<SettingsExplorer
+					dataDir={dataDir}
+					onDismiss={() => {
+						pendingSettings.resolve();
+						setPendingSettings(null);
+					}}
+				/>
+			)}
+
+			{pendingConfirm && (
+				<ConfirmDialog
+					message={pendingConfirm.message}
+					onConfirm={() => {
+						pendingConfirm.resolve(true);
+						setPendingConfirm(null);
+					}}
+					onCancel={() => {
+						pendingConfirm.resolve(false);
+						setPendingConfirm(null);
 					}}
 				/>
 			)}

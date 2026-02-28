@@ -1,41 +1,35 @@
 {
-  "name": "simse-code",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "bin": {
-    "simse": "./cli-ink.tsx"
-  },
-  "scripts": {
-    "start": "bun run cli-ink.tsx",
-    "start:legacy": "bun run cli.ts",
-    "bridge": "bun run acp-ollama-bridge.ts",
-    "build:engine": "cd ../simse-engine && cargo build --release",
-    "build:engine:wasm": "cd ../simse-engine && cargo build --release --target wasm32-wasip1",
-    "typecheck": "bun x tsc --noEmit",
-    "test": "bun test",
-    "test:e2e": "bun test ./e2e/startup.e2e.ts ./e2e/commands/*.e2e.ts ./e2e/ui/*.e2e.ts",
-    "test:e2e:commands": "bun test ./e2e/commands/*.e2e.ts",
-    "test:e2e:ui": "bun test ./e2e/ui/*.e2e.ts",
-    "test:e2e:claude": "ACP_BACKEND=claude bun test ./e2e/startup.e2e.ts ./e2e/commands/*.e2e.ts ./e2e/ui/*.e2e.ts ./e2e/flows/*.e2e.ts",
-    "test:e2e:ollama": "ACP_BACKEND=ollama bun test ./e2e/startup.e2e.ts ./e2e/commands/*.e2e.ts ./e2e/ui/*.e2e.ts ./e2e/flows/*.e2e.ts"
-  },
-  "dependencies": {
-    "ink": "^6.8.0",
-    "ink-select-input": "^6.2.0",
-    "ink-spinner": "^5.0.0",
-    "react": "^19.2.4",
-    "simse": "file:.."
-  },
-  "devDependencies": {
-    "@types/react": "^19.2.14",
-    "@xterm/headless": "^6.0.0",
-    "ink-testing-library": "^4.0.0",
-    "node-pty": "^1.1.0"
-  },
-  "trustedDependencies": [
-    "node-pty",
-    "onnxruntime-node",
-    "protobufjs"
-  ]
+	"name": "simse-code",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"bin": {
+		"simse": "./cli-ink.tsx"
+	},
+	"scripts": {
+		"start": "bun run cli-ink.tsx",
+		"bridge": "bun run acp-ollama-bridge.ts",
+		"build:engine": "cd ../simse-engine && cargo build --release",
+		"build:engine:wasm": "cd ../simse-engine && cargo build --release --target wasm32-wasip1",
+		"typecheck": "bun x tsc --noEmit",
+		"test": "bun test"
+	},
+	"dependencies": {
+		"ink": "^6.8.0",
+		"ink-select-input": "^6.2.0",
+		"ink-spinner": "^5.0.0",
+		"react": "^19.2.4",
+		"simse": "file:.."
+	},
+	"devDependencies": {
+		"@types/react": "^19.2.14",
+		"@xterm/headless": "^6.0.0",
+		"ink-testing-library": "^4.0.0",
+		"node-pty": "^1.1.0"
+	},
+	"trustedDependencies": [
+		"node-pty",
+		"onnxruntime-node",
+		"protobufjs"
+	]
 }

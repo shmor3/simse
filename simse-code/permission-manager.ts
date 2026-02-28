@@ -8,14 +8,13 @@
  */
 
 import { join } from 'node:path';
-import type { PermissionMode } from './app-context.js';
 import { readJsonFile, writeJsonFile } from './json-io.js';
+
+export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'dontAsk';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export type { PermissionMode };
 
 export type PermissionDecision = 'allow' | 'deny' | 'ask';
 

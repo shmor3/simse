@@ -16,6 +16,25 @@ export function ConfirmDialog({
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const [confirmValue, setConfirmValue] = useState('');
 
+	// Navigation when "No" is focused
+	useInput(
+		(_input, key) => {
+			if (key.escape) {
+				onCancel();
+				return;
+			}
+			if (key.downArrow) {
+				setSelectedIndex(1);
+				return;
+			}
+			if (key.return) {
+				onCancel();
+			}
+		},
+		{ isActive: selectedIndex === 0 },
+	);
+
+	// Navigation when "Yes" is focused (escape + arrow up to go back)
 	useInput(
 		(_input, key) => {
 			if (key.escape) {
@@ -25,17 +44,9 @@ export function ConfirmDialog({
 			if (key.upArrow) {
 				setSelectedIndex(0);
 				setConfirmValue('');
-				return;
-			}
-			if (key.downArrow) {
-				setSelectedIndex(1);
-				return;
-			}
-			if (key.return && selectedIndex === 0) {
-				onCancel();
 			}
 		},
-		{ isActive: selectedIndex === 0 },
+		{ isActive: selectedIndex === 1 },
 	);
 
 	return (

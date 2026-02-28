@@ -5,7 +5,6 @@ import { Box, Text, useInput } from 'ink';
 import {
 	type ReactNode,
 	useCallback,
-	useEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -113,24 +112,25 @@ export function App({
 
 	// Ctrl+C double-press guard: first press shows warning, second exits
 	const ctrlCRef = useRef(false);
-	useEffect(() => {
-		const handler = () => {
+	const ctrlCTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+	// Ctrl+C double-press to exit (must be useInput, not SIGINT — raw mode)
+	useInput((input, key) => {
+		if (key.ctrl && input === 'c') {
 			if (ctrlCRef.current) {
 				process.exit(0);
 			}
 			ctrlCRef.current = true;
 			setCtrlCWarning(true);
+			if (ctrlCTimerRef.current) clearTimeout(ctrlCTimerRef.current);
 			const timer = setTimeout(() => {
 				ctrlCRef.current = false;
 				setCtrlCWarning(false);
 			}, 2000);
 			timer.unref?.();
-		};
-		process.on('SIGINT', handler);
-		return () => {
-			process.off('SIGINT', handler);
-		};
-	}, []);
+			ctrlCTimerRef.current = timer;
+		}
+	});
 
 	// Mutable service refs — swapped on /setup reload
 	const [hasACP, setHasACP] = useState(initialHasACP);

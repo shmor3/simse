@@ -93,7 +93,7 @@ pub struct WeightProfile {
 	pub frequency: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MetadataFilter {
 	pub key: String,
 	pub value: Option<serde_json::Value>,

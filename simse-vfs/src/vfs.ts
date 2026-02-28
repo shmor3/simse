@@ -180,9 +180,9 @@ const routeEvent = (
 			callbacks?.onWrite?.(event.path, event.size ?? 0);
 			onFileWrite?.({
 				path: event.path,
-				contentType: 'text',
+				contentType: (event.contentType as 'text' | 'binary') ?? 'text',
 				size: event.size ?? 0,
-				isNew: false,
+				isNew: event.isNew ?? false,
 			});
 			break;
 		case 'delete':
@@ -298,7 +298,7 @@ export async function createVirtualFS(
 				path,
 				recursive: opts?.recursive,
 			});
-			return result.entries;
+			return Object.freeze(result.entries);
 		},
 
 		rmdir: async (
@@ -318,7 +318,9 @@ export async function createVirtualFS(
 		// ----- Stat / exists / rename / copy ----------------------------------
 
 		stat: async (path: string): Promise<VFSStat> => {
-			return client.request<VFSStat>('vfs/stat', { path });
+			return Object.freeze(
+				await client.request<VFSStat>('vfs/stat', { path }),
+			);
 		},
 
 		exists: async (path: string): Promise<boolean> => {
@@ -395,7 +397,7 @@ export async function createVirtualFS(
 			const result = await client.request<{
 				results: readonly VFSSearchResult[];
 			}>('vfs/search', params);
-			return result.results;
+			return Object.freeze(result.results);
 		},
 
 		// ----- History / diff / checkout --------------------------------------
@@ -406,7 +408,7 @@ export async function createVirtualFS(
 			const result = await client.request<{
 				entries: readonly VFSHistoryEntry[];
 			}>('vfs/history', { path });
-			return result.entries;
+			return Object.freeze(result.entries);
 		},
 
 		diff: async (
@@ -416,7 +418,12 @@ export async function createVirtualFS(
 		): Promise<VFSDiffResult> => {
 			const params: Record<string, unknown> = { oldPath, newPath };
 			if (opts?.context !== undefined) params.context = opts.context;
-			return client.request<VFSDiffResult>('vfs/diff', params);
+			const result = await client.request<VFSDiffResult>(
+				'vfs/diff',
+				params,
+			);
+			Object.freeze(result.hunks);
+			return Object.freeze(result);
 		},
 
 		diffVersions: async (
@@ -428,7 +435,12 @@ export async function createVirtualFS(
 			const params: Record<string, unknown> = { path, oldVersion };
 			if (newVersion !== undefined) params.newVersion = newVersion;
 			if (opts?.context !== undefined) params.context = opts.context;
-			return client.request<VFSDiffResult>('vfs/diffVersions', params);
+			const result = await client.request<VFSDiffResult>(
+				'vfs/diffVersions',
+				params,
+			);
+			Object.freeze(result.hunks);
+			return Object.freeze(result);
 		},
 
 		checkout: async (path: string, version: number): Promise<void> => {
@@ -438,7 +450,13 @@ export async function createVirtualFS(
 		// ----- Snapshot / restore / clear / transaction -----------------------
 
 		snapshot: async (): Promise<VFSSnapshot> => {
-			return client.request<VFSSnapshot>('vfs/snapshot', {});
+			const result = await client.request<VFSSnapshot>(
+				'vfs/snapshot',
+				{},
+			);
+			Object.freeze(result.files);
+			Object.freeze(result.directories);
+			return Object.freeze(result);
 		},
 
 		restore: async (snapshot: VFSSnapshot): Promise<void> => {

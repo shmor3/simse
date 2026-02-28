@@ -157,6 +157,12 @@ pub struct CheckoutParams {
     pub version: usize,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreParams {
+    pub snapshot: SnapshotData,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotData {

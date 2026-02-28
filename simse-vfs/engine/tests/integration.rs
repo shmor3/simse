@@ -194,12 +194,12 @@ fn mkdir_and_readdir() {
     );
 
     // readdir on src/
-    let entries = proc.call(
+    let result = proc.call(
         "vfs/readdir",
         json!({"path": "vfs:///src", "recursive": false}),
     );
 
-    let entries = entries.as_array().expect("readdir should return array");
+    let entries = result["entries"].as_array().expect("readdir should return entries array");
     assert_eq!(entries.len(), 2);
 
     // Collect names and types
@@ -299,14 +299,14 @@ fn search_file_content() {
         }),
     );
 
-    let results = proc.call(
+    let result = proc.call(
         "vfs/search",
         json!({
             "query": "needle",
         }),
     );
 
-    let results = results.as_array().expect("search should return array");
+    let results = result["results"].as_array().expect("search should return results array");
     assert_eq!(results.len(), 1);
     assert_eq!(results[0]["path"], "vfs:///notes.txt");
     assert_eq!(results[0]["line"], 2);
@@ -351,8 +351,8 @@ fn glob_matches() {
     );
 
     // Glob for all .ts files
-    let matches = proc.call("vfs/glob", json!({"pattern": "**/*.ts"}));
-    let matches = matches.as_array().expect("glob should return array");
+    let result = proc.call("vfs/glob", json!({"pattern": "**/*.ts"}));
+    let matches = result["matches"].as_array().expect("glob should return matches array");
 
     // Should find app.ts, lib.ts, src/index.ts
     assert_eq!(matches.len(), 3, "expected 3 .ts files, got: {matches:?}");
@@ -452,7 +452,7 @@ fn snapshot_clear_restore() {
     assert_eq!(result["exists"], false);
 
     // Restore from snapshot
-    proc.call("vfs/restore", snapshot);
+    proc.call("vfs/restore", json!({"snapshot": snapshot}));
 
     // Verify content is back
     let result = proc.call("vfs/readFile", json!({"path": "vfs:///data/config.json"}));

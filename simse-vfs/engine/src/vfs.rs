@@ -181,7 +181,12 @@ pub struct MetricsResult {
 
 #[derive(Debug, Clone)]
 pub enum VfsEvent {
-	Write { path: String, size: u64 },
+	Write {
+		path: String,
+		size: u64,
+		content_type: String,
+		is_new: bool,
+	},
 	Delete { path: String },
 	Rename { old_path: String, new_path: String },
 	Mkdir { path: String },
@@ -566,12 +571,15 @@ impl VirtualFs {
 			},
 		);
 
+		let is_new_file = existing.is_none();
 		self.total_size = (self.total_size as i64 + size_delta) as u64;
 		self.update_parent_modified_at(&normalized, ts);
 
 		self.pending_events.push(VfsEvent::Write {
 			path: normalized,
 			size: new_size,
+			content_type: if is_binary { "binary".to_string() } else { "text".to_string() },
+			is_new: is_new_file,
 		});
 
 		Ok(())
@@ -619,6 +627,8 @@ impl VirtualFs {
 		self.pending_events.push(VfsEvent::Write {
 			path: normalized,
 			size: new_size,
+			content_type: "text".to_string(),
+			is_new: false,
 		});
 
 		Ok(())

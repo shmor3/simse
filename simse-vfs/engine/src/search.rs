@@ -73,7 +73,7 @@ pub fn search_text(
 			}
 		};
 
-		let Some((col_0, match_text)) = found else {
+		let Some((col_0, _match_text)) = found else {
 			continue;
 		};
 
@@ -107,7 +107,7 @@ pub fn search_text(
 			path: path.to_string(),
 			line: line_idx + 1,
 			column: col_0 + 1,
-			match_text,
+			match_text: line.to_string(),
 			context_before,
 			context_after,
 		});
@@ -149,11 +149,11 @@ mod tests {
 		assert_eq!(results[0].path, "/test.txt");
 		assert_eq!(results[0].line, 1);
 		assert_eq!(results[0].column, 1);
-		assert_eq!(results[0].match_text, "hello");
+		assert_eq!(results[0].match_text, "hello world");
 
 		assert_eq!(results[1].line, 3);
 		assert_eq!(results[1].column, 1);
-		assert_eq!(results[1].match_text, "hello");
+		assert_eq!(results[1].match_text, "hello again");
 	}
 
 	#[test]

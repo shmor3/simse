@@ -25,6 +25,8 @@ export interface VFSClientEvent {
 	readonly type: 'write' | 'delete' | 'rename' | 'mkdir';
 	readonly path: string;
 	readonly size?: number;
+	readonly contentType?: string;
+	readonly isNew?: boolean;
 	readonly oldPath?: string;
 	readonly newPath?: string;
 }

@@ -93,8 +93,8 @@ impl VfsServer {
 		if let Some(ref mut vfs) = self.vfs {
 			for event in vfs.drain_events() {
 				let params = match &event {
-					VfsEvent::Write { path, size } => {
-						serde_json::json!({"type": "write", "path": path, "size": size})
+					VfsEvent::Write { path, size, content_type, is_new } => {
+						serde_json::json!({"type": "write", "path": path, "size": size, "contentType": content_type, "isNew": is_new})
 					}
 					VfsEvent::Delete { path } => {
 						serde_json::json!({"type": "delete", "path": path})
@@ -265,7 +265,7 @@ fn handle_readdir(
 			node_type: e.node_type,
 		})
 		.collect();
-	Ok(serde_json::to_value(result)?)
+	Ok(serde_json::json!({ "entries": result }))
 }
 
 fn handle_rmdir(
@@ -342,7 +342,7 @@ fn handle_glob(
 		}
 	};
 	let results = vfs.glob(patterns);
-	Ok(serde_json::to_value(results)?)
+	Ok(serde_json::json!({ "matches": results }))
 }
 
 fn handle_tree(
@@ -390,7 +390,7 @@ fn handle_search(
 					context_after: m.context_after,
 				})
 				.collect();
-			Ok(serde_json::to_value(results)?)
+			Ok(serde_json::json!({ "results": results }))
 		}
 		SearchOutput::Count(count) => Ok(serde_json::json!({ "count": count })),
 	}
@@ -413,7 +413,7 @@ fn handle_history(
 			timestamp: e.timestamp,
 		})
 		.collect();
-	Ok(serde_json::to_value(result)?)
+	Ok(serde_json::json!({ "entries": result }))
 }
 
 fn convert_diff_output(d: DiffResultOutput) -> DiffResult {
@@ -504,7 +504,8 @@ fn handle_restore(
 	vfs: &mut VirtualFs,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
-	let snap: SnapshotData = parse_params(params)?;
+	let wrapper: RestoreParams = parse_params(params)?;
+	let snap = wrapper.snapshot;
 	// Convert protocol SnapshotData to vfs SnapshotData
 	let vfs_snap = crate::vfs::SnapshotData {
 		files: snap

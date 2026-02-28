@@ -152,6 +152,50 @@ describe('TextInput', () => {
 	});
 });
 
+function SelectionHarness() {
+	const [value, setValue] = useState('hello world');
+	return (
+		<>
+			<TextInput value={value} onChange={setValue} />
+			<Text>VALUE:{value}</Text>
+		</>
+	);
+}
+
+describe('selection', () => {
+	test('Ctrl+A selects all — next character replaces everything', async () => {
+		const { lastFrame, stdin } = render(<SelectionHarness />);
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Ctrl+A = \x01
+		stdin.write('\x01');
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Type a replacement character
+		stdin.write('x');
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(lastFrame()).toContain('VALUE:x');
+	});
+
+	test('Ctrl+A then backspace clears all text', async () => {
+		const { lastFrame, stdin } = render(<SelectionHarness />);
+		await new Promise((r) => setTimeout(r, 50));
+
+		stdin.write('\x01');
+		await new Promise((r) => setTimeout(r, 50));
+
+		stdin.write('\x7F'); // backspace
+		await new Promise((r) => setTimeout(r, 50));
+
+		const frame = lastFrame() ?? '';
+		// Extract the VALUE: line and ensure it's empty after the colon
+		const match = frame.match(/VALUE:(.*)/);
+		expect(match).not.toBeNull();
+		expect(match![1]).toBe('');
+	});
+});
+
 describe('word boundary helpers', () => {
 	test('findWordBoundaryLeft from middle of word', () => {
 		expect(findWordBoundaryLeft('hello world', 8)).toBe(6);

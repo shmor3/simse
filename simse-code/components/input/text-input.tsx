@@ -74,6 +74,11 @@ export function TextInput({
 	interceptKeys = false,
 }: TextInputProps) {
 	const [cursorOffset, setCursorOffset] = useState(value.length);
+	const [selectionAnchor, setSelectionAnchor] = useState<number | null>(null);
+	const anchorRef = useRef<number | null>(null);
+
+	// Sync anchor ref
+	anchorRef.current = selectionAnchor;
 
 	// Refs for stable callback access — synced from props during render
 	// AND eagerly updated inside the handler to avoid stale reads between renders
@@ -105,6 +110,48 @@ export function TextInput({
 		cursorRef.current = end;
 	}, [value]);
 
+	/** Delete the selected range and return { newValue, newCursor }. */
+	function deleteSelection(): { value: string; cursor: number } | null {
+		const anchor = anchorRef.current;
+		if (anchor === null) return null;
+		const cursor = cursorRef.current;
+		const v = valueRef.current;
+		const start = Math.min(anchor, cursor);
+		const end = Math.max(anchor, cursor);
+		if (start === end) return null;
+		return { value: v.slice(0, start) + v.slice(end), cursor: start };
+	}
+
+	/** Clear selection state. */
+	function clearSelection(): void {
+		anchorRef.current = null;
+		setSelectionAnchor(null);
+	}
+
+	/** Set or extend selection. If no anchor yet, set anchor at current cursor pos, then move cursor. */
+	function extendSelection(newCursor: number): void {
+		if (anchorRef.current === null) {
+			const anchor = cursorRef.current;
+			anchorRef.current = anchor;
+			setSelectionAnchor(anchor);
+		}
+		cursorRef.current = newCursor;
+		setCursorOffset(newCursor);
+	}
+
+	/** Collapse selection in a direction: 'left' = move to start, 'right' = move to end. */
+	function collapseSelection(direction: 'left' | 'right'): number {
+		const anchor = anchorRef.current;
+		if (anchor === null) return cursorRef.current;
+		const cursor = cursorRef.current;
+		const pos =
+			direction === 'left'
+				? Math.min(anchor, cursor)
+				: Math.max(anchor, cursor);
+		clearSelection();
+		return pos;
+	}
+
 	const handleInput = useCallback(
 		(
 			input: string,
@@ -133,6 +180,18 @@ export function TextInput({
 				return;
 			}
 
+			// Select all: Ctrl+A on all platforms
+			if (key.ctrl && input === 'a') {
+				const v = valueRef.current;
+				if (v.length > 0) {
+					anchorRef.current = 0;
+					setSelectionAnchor(0);
+					cursorRef.current = v.length;
+					setCursorOffset(v.length);
+				}
+				return;
+			}
+
 			// When interceptKeys is active, let the parent handle return and rightArrow
 			if (interceptKeysRef.current && (key.return || key.rightArrow)) {
 				return;
@@ -158,6 +217,16 @@ export function TextInput({
 			}
 
 			if (key.backspace || key.delete) {
+				const sel = deleteSelection();
+				if (sel) {
+					clearSelection();
+					valueRef.current = sel.value;
+					cursorRef.current = sel.cursor;
+					setCursorOffset(sel.cursor);
+					internalChangeRef.current = true;
+					onChangeRef.current(sel.value);
+					return;
+				}
 				const c = cursorRef.current;
 				if (c > 0) {
 					const v = valueRef.current;
@@ -200,6 +269,22 @@ export function TextInput({
 			}
 
 			// Regular character input (including paste)
+			const sel = deleteSelection();
+			if (sel) {
+				clearSelection();
+				const next =
+					sel.value.slice(0, sel.cursor) +
+					input +
+					sel.value.slice(sel.cursor);
+				const newCursor = sel.cursor + input.length;
+				valueRef.current = next;
+				cursorRef.current = newCursor;
+				setCursorOffset(newCursor);
+				internalChangeRef.current = true;
+				onChangeRef.current(next);
+				return;
+			}
+			clearSelection(); // Clear any degenerate selection (anchor === cursor) on regular typing
 			const v = valueRef.current;
 			const c = cursorRef.current;
 			const next = v.slice(0, c) + input + v.slice(c);

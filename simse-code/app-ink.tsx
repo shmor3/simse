@@ -418,7 +418,10 @@ export function App({
 	);
 
 	const handleSubmit = useCallback(
-		async (input: string) => {
+		async (rawInput: string) => {
+			// Treat bare "exit" as the /exit command
+			const input = rawInput.trim() === 'exit' ? '/exit' : rawInput;
+
 			setIsProcessing(true);
 
 			// Save user message to session immediately (crash-safe)

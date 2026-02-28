@@ -191,6 +191,7 @@ export function useAgenticLoop(
 						duration: durationMs,
 						summary,
 						error: result.isError ? result.output : undefined,
+						diff: result.diff,
 					});
 
 					setState((prev) => ({

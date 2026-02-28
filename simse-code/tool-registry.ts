@@ -35,9 +35,17 @@ export interface ToolCallResult {
 	readonly name: string;
 	readonly output: string;
 	readonly isError: boolean;
+	readonly diff?: string;
 }
 
-type ToolHandler = (args: Record<string, unknown>) => Promise<string>;
+interface ToolHandlerResult {
+	readonly output: string;
+	readonly diff?: string;
+}
+
+type ToolHandler = (
+	args: Record<string, unknown>,
+) => Promise<string | ToolHandlerResult>;
 
 interface RegisteredTool {
 	readonly definition: ToolDefinition;
@@ -61,6 +69,24 @@ export interface ToolRegistry {
 	readonly formatForSystemPrompt: () => string;
 	readonly execute: (call: ToolCallRequest) => Promise<ToolCallResult>;
 	readonly toolCount: number;
+}
+
+// ---------------------------------------------------------------------------
+// Diff helper
+// ---------------------------------------------------------------------------
+
+function generateWriteDiff(oldContent: string, newContent: string): string {
+	const newLines = newContent.split('\n');
+	if (!oldContent) {
+		// New file — all additions
+		return newLines.map((l) => `+${l}`).join('\n');
+	}
+	const oldLines = oldContent.split('\n');
+	// Full overwrite — show removals then additions
+	const result: string[] = [];
+	for (const line of oldLines) result.push(`-${line}`);
+	for (const line of newLines) result.push(`+${line}`);
+	return result.join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -190,8 +216,21 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 				async (args) => {
 					const path = String(args.path ?? 'vfs:///');
 					const content = String(args.content ?? '');
+					// Capture old content for diff
+					let oldContent = '';
+					try {
+						const existing = vfs.readFile(path);
+						if (existing.contentType === 'text') {
+							oldContent = existing.text;
+						}
+					} catch {
+						// File doesn't exist yet
+					}
 					vfs.writeFile(path, content, { createParents: true });
-					return `Wrote ${Buffer.byteLength(content, 'utf-8')} bytes to ${path}`;
+					return {
+						output: `Wrote ${Buffer.byteLength(content, 'utf-8')} bytes to ${path}`,
+						diff: generateWriteDiff(oldContent, content),
+					};
 				},
 			);
 
@@ -355,12 +394,15 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 		}
 
 		try {
-			const output = await registered.handler(call.arguments);
+			const raw = await registered.handler(call.arguments);
+			const { output, diff } =
+				typeof raw === 'string' ? { output: raw, diff: undefined } : raw;
 			return Object.freeze({
 				id: call.id,
 				name: call.name,
 				output,
 				isError: false,
+				diff,
 			});
 		} catch (err) {
 			return Object.freeze({

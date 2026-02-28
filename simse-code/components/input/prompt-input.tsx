@@ -237,7 +237,7 @@ export function PromptInput({
 						if (key.return && cmd.name.toLowerCase() === typed) {
 							handleSubmit(value);
 						} else {
-							setValue(`/${cmd.name} `);
+							setValue(`/${cmd.name}`);
 							setMode('normal');
 						}
 					}

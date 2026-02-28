@@ -232,8 +232,14 @@ export function PromptInput({
 				if ((key.tab || key.return || key.rightArrow) && filteredCommands.length > 0) {
 					const cmd = filteredCommands[selectedIndex];
 					if (cmd) {
-						setValue(`/${cmd.name} `);
-						setMode('normal');
+						// If the command is already fully typed, Enter submits it
+						const typed = value.slice(1).trim().toLowerCase();
+						if (key.return && cmd.name.toLowerCase() === typed) {
+							handleSubmit(value);
+						} else {
+							setValue(`/${cmd.name} `);
+							setMode('normal');
+						}
 					}
 					return;
 				}

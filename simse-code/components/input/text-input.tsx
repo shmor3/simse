@@ -56,6 +56,7 @@ export function TextInput({
 	const onSubmitRef = useRef(onSubmit);
 	const suggestionRef = useRef(suggestion);
 	const interceptKeysRef = useRef(interceptKeys);
+	const internalChangeRef = useRef(false);
 
 	// Sync from props each render
 	valueRef.current = value;
@@ -65,14 +66,17 @@ export function TextInput({
 	suggestionRef.current = suggestion;
 	interceptKeysRef.current = interceptKeys;
 
-	// Clamp cursor when value changes externally (e.g., autocomplete fill)
+	// Move cursor to end when value changes externally (e.g., autocomplete fill, history)
+	// Internal changes (user typing) set the flag so we skip the override.
 	useEffect(() => {
-		if (cursorOffset > value.length) {
-			const clamped = value.length;
-			setCursorOffset(clamped);
-			cursorRef.current = clamped;
+		if (internalChangeRef.current) {
+			internalChangeRef.current = false;
+			return;
 		}
-	}, [value, cursorOffset]);
+		const end = value.length;
+		setCursorOffset(end);
+		cursorRef.current = end;
+	}, [value]);
 
 	const handleInput = useCallback(
 		(
@@ -118,6 +122,7 @@ export function TextInput({
 					valueRef.current = next;
 					cursorRef.current = newCursor;
 					setCursorOffset(newCursor);
+					internalChangeRef.current = true;
 					onChangeRef.current(next);
 					return;
 				}
@@ -134,6 +139,7 @@ export function TextInput({
 					valueRef.current = next;
 					cursorRef.current = c - 1;
 					setCursorOffset(c - 1);
+					internalChangeRef.current = true;
 					onChangeRef.current(next);
 				}
 				return;
@@ -156,6 +162,7 @@ export function TextInput({
 					valueRef.current = next;
 					cursorRef.current = newCursor;
 					setCursorOffset(newCursor);
+					internalChangeRef.current = true;
 					onChangeRef.current(next);
 					return;
 				}
@@ -174,6 +181,7 @@ export function TextInput({
 			valueRef.current = next;
 			cursorRef.current = newCursor;
 			setCursorOffset(newCursor);
+			internalChangeRef.current = true;
 			onChangeRef.current(next);
 		},
 		[],

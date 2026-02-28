@@ -15,6 +15,7 @@ import { createCommandRegistry } from './command-registry.js';
 import { Markdown } from './components/chat/markdown.js';
 import { MessageList } from './components/chat/message-list.js';
 import { ToolCallBox } from './components/chat/tool-call-box.js';
+import { OnboardingWizard } from './components/input/onboarding-wizard.js';
 import { PermissionDialog } from './components/input/permission-dialog.js';
 import {
 	PromptInput,
@@ -97,6 +98,7 @@ export function App({
 	const sessionIdRef = useRef(initialSessionId);
 	const [promptMode, setPromptMode] = useState<PromptMode>('normal');
 	const [ctrlCWarning, setCtrlCWarning] = useState(false);
+	const [showOnboarding, setShowOnboarding] = useState(!initialHasACP);
 	const [permissionModeLabel, setPermissionModeLabel] = useState(
 		permissionManager.formatMode(),
 	);
@@ -551,32 +553,61 @@ export function App({
 				/>
 			)}
 
-			<Box flexDirection="column">
-				<PromptInput
-					onSubmit={handleSubmit}
-					disabled={isProcessing}
-					planMode={planMode}
-					commands={registry.getAll()}
-					onModeChange={setPromptMode}
-					onCompleteAtMention={handleCompleteAtMention}
+			{showOnboarding ? (
+				<OnboardingWizard
+					dataDir={dataDir}
+					onComplete={async (filesCreated) => {
+						setShowOnboarding(false);
+						await handleSetupComplete();
+						setItems((prev) => [
+							...prev,
+							{
+								kind: 'info',
+								text: `Setup complete! Files written: ${filesCreated.join(', ')}`,
+							},
+						]);
+					}}
+					onDismiss={() => {
+						setShowOnboarding(false);
+						setItems((prev) => [
+							...prev,
+							{
+								kind: 'info',
+								text: 'Setup skipped. Run /setup to configure later.',
+							},
+						]);
+					}}
 				/>
-			</Box>
-			{ctrlCWarning ? (
-				<Box paddingX={1}>
-					<Text dimColor>Press Ctrl-C again to exit</Text>
-				</Box>
-			) : promptMode === 'normal' ? (
-				<StatusBar
-					isProcessing={isProcessing}
-					planMode={planMode}
-					verbose={verbose}
-					permissionMode={permissionModeLabel}
-					totalTokens={tokenUsage.totalTokens}
-					contextPercent={Math.round(
-						(conversationRef.current.estimatedChars / 200_000) * 100,
-					)}
-				/>
-			) : null}
+			) : (
+				<>
+					<Box flexDirection="column">
+						<PromptInput
+							onSubmit={handleSubmit}
+							disabled={isProcessing}
+							planMode={planMode}
+							commands={registry.getAll()}
+							onModeChange={setPromptMode}
+							onCompleteAtMention={handleCompleteAtMention}
+						/>
+					</Box>
+					{ctrlCWarning ? (
+						<Box paddingX={1}>
+							<Text dimColor>Press Ctrl-C again to exit</Text>
+						</Box>
+					) : promptMode === 'normal' ? (
+						<StatusBar
+							isProcessing={isProcessing}
+							planMode={planMode}
+							verbose={verbose}
+							permissionMode={permissionModeLabel}
+							totalTokens={tokenUsage.totalTokens}
+							contextPercent={Math.round(
+								(conversationRef.current.estimatedChars / 200_000) * 100,
+							)}
+						/>
+					) : null}
+				</>
+			)}
 		</MainLayout>
 	);
 }

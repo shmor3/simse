@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import type { FieldSchema } from '../features/config/settings-schema.js';
 import {
 	getAllConfigSchemas,
 	getConfigSchema,
@@ -377,5 +378,84 @@ describe('saveConfigField', () => {
 		expect(existsSync(join(nestedDir, 'config.json'))).toBe(true);
 		const result = loadConfigFile(nestedDir, 'config.json');
 		expect(result.logLevel).toBe('info');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// field presets and resolve
+// ---------------------------------------------------------------------------
+
+describe('field presets and resolve', () => {
+	// Helper to get a field from a schema by filename and key
+	function getField(filename: string, key: string): FieldSchema {
+		const schema = getConfigSchema(filename);
+		expect(schema).toBeDefined();
+		const field = schema!.fields.find((f) => f.key === key);
+		expect(field).toBeDefined();
+		return field!;
+	}
+
+	// -- presets on number fields in memory.json --
+
+	it('similarityThreshold in memory.json should have presets with common thresholds', () => {
+		const field = getField('memory.json', 'similarityThreshold');
+		expect(field.presets).toBeDefined();
+		expect(field.presets).toContain('0.5');
+		expect(field.presets).toContain('0.7');
+	});
+
+	it('maxResults in memory.json should have presets including 10', () => {
+		const field = getField('memory.json', 'maxResults');
+		expect(field.presets).toBeDefined();
+		expect(field.presets).toContain('10');
+	});
+
+	it('autoSummarizeThreshold in memory.json should have presets including 0', () => {
+		const field = getField('memory.json', 'autoSummarizeThreshold');
+		expect(field.presets).toBeDefined();
+		expect(field.presets).toContain('0');
+	});
+
+	it('duplicateThreshold in memory.json should have presets including 0', () => {
+		const field = getField('memory.json', 'duplicateThreshold');
+		expect(field.presets).toBeDefined();
+		expect(field.presets).toContain('0');
+	});
+
+	// -- resolve on string fields --
+
+	it('defaultServer in acp.json should have resolve acp-servers', () => {
+		const field = getField('acp.json', 'defaultServer');
+		expect(field.resolve).toBe('acp-servers');
+	});
+
+	it('defaultAgent in config.json should have resolve agents', () => {
+		const field = getField('config.json', 'defaultAgent');
+		expect(field.resolve).toBe('agents');
+	});
+
+	it('embeddingModel in embed.json should have resolve embedding-models', () => {
+		const field = getField('embed.json', 'embeddingModel');
+		expect(field.resolve).toBe('embedding-models');
+	});
+
+	it('server in summarize.json should have resolve acp-servers', () => {
+		const field = getField('summarize.json', 'server');
+		expect(field.resolve).toBe('acp-servers');
+	});
+
+	it('agent in summarize.json should have resolve agents', () => {
+		const field = getField('summarize.json', 'agent');
+		expect(field.resolve).toBe('agents');
+	});
+
+	it('defaultAgent in settings.json should have resolve agents', () => {
+		const field = getField('settings.json', 'defaultAgent');
+		expect(field.resolve).toBe('agents');
+	});
+
+	it('defaultServer in settings.json should have resolve acp-servers', () => {
+		const field = getField('settings.json', 'defaultServer');
+		expect(field.resolve).toBe('acp-servers');
 	});
 });

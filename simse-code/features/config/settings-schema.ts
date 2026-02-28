@@ -15,12 +15,16 @@ import { dirname, join } from 'node:path';
 
 export type FieldType = 'string' | 'number' | 'boolean' | 'enum';
 
+export type ResolveType = 'acp-servers' | 'agents' | 'embedding-models';
+
 export interface FieldSchema {
 	readonly key: string;
 	readonly type: FieldType;
 	readonly description: string;
 	readonly default?: unknown;
 	readonly options?: readonly string[]; // for enum type
+	readonly presets?: readonly string[]; // static preset values for dropdown
+	readonly resolve?: ResolveType; // dynamic data source for dropdown
 }
 
 export interface ConfigFileSchema {
@@ -48,6 +52,7 @@ const configJsonSchema: ConfigFileSchema = Object.freeze({
 			key: 'defaultAgent',
 			type: 'string' as FieldType,
 			description: 'Default agent ID for generation',
+			resolve: 'agents' as ResolveType,
 		}),
 		Object.freeze({
 			key: 'perplexityApiKey',
@@ -70,6 +75,7 @@ const acpJsonSchema: ConfigFileSchema = Object.freeze({
 			key: 'defaultServer',
 			type: 'string' as FieldType,
 			description: 'Default ACP server name',
+			resolve: 'acp-servers' as ResolveType,
 		}),
 	]),
 });
@@ -83,6 +89,7 @@ const embedJsonSchema: ConfigFileSchema = Object.freeze({
 			type: 'string' as FieldType,
 			description: 'Hugging Face model ID for in-process embeddings',
 			default: 'nomic-ai/nomic-embed-text-v1.5',
+			resolve: 'embedding-models' as ResolveType,
 		}),
 		Object.freeze({
 			key: 'dtype',
@@ -114,12 +121,14 @@ const memoryJsonSchema: ConfigFileSchema = Object.freeze({
 			type: 'number' as FieldType,
 			description: 'Similarity threshold for library search (0-1)',
 			default: 0.7,
+			presets: Object.freeze(['0.5', '0.6', '0.7', '0.8', '0.9']),
 		}),
 		Object.freeze({
 			key: 'maxResults',
 			type: 'number' as FieldType,
 			description: 'Maximum library search results',
 			default: 10,
+			presets: Object.freeze(['5', '10', '20', '50']),
 		}),
 		Object.freeze({
 			key: 'autoSummarizeThreshold',
@@ -127,6 +136,7 @@ const memoryJsonSchema: ConfigFileSchema = Object.freeze({
 			description:
 				'Max notes per topic before auto-summarizing oldest entries (0 = disabled)',
 			default: 20,
+			presets: Object.freeze(['0', '10', '20', '50']),
 		}),
 		Object.freeze({
 			key: 'duplicateThreshold',
@@ -134,6 +144,7 @@ const memoryJsonSchema: ConfigFileSchema = Object.freeze({
 			description:
 				'Cosine similarity threshold for duplicate detection (0-1, 0 = disabled)',
 			default: 0,
+			presets: Object.freeze(['0', '0.8', '0.85', '0.9', '0.95']),
 		}),
 		Object.freeze({
 			key: 'duplicateBehavior',
@@ -153,6 +164,7 @@ const summarizeJsonSchema: ConfigFileSchema = Object.freeze({
 			key: 'server',
 			type: 'string' as FieldType,
 			description: 'ACP server name to use for summarization',
+			resolve: 'acp-servers' as ResolveType,
 		}),
 		Object.freeze({
 			key: 'command',
@@ -163,6 +175,7 @@ const summarizeJsonSchema: ConfigFileSchema = Object.freeze({
 			key: 'agent',
 			type: 'string' as FieldType,
 			description: 'Agent ID for the summarization ACP server',
+			resolve: 'agents' as ResolveType,
 		}),
 	]),
 });
@@ -175,6 +188,7 @@ const settingsJsonSchema: ConfigFileSchema = Object.freeze({
 			key: 'defaultAgent',
 			type: 'string' as FieldType,
 			description: 'Default agent ID',
+			resolve: 'agents' as ResolveType,
 		}),
 		Object.freeze({
 			key: 'logLevel',
@@ -191,6 +205,7 @@ const settingsJsonSchema: ConfigFileSchema = Object.freeze({
 			key: 'defaultServer',
 			type: 'string' as FieldType,
 			description: 'ACP server name override',
+			resolve: 'acp-servers' as ResolveType,
 		}),
 		Object.freeze({
 			key: 'conversationTopic',

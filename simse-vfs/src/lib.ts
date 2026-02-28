@@ -5,7 +5,14 @@
 export type { VFSError, VFSErrorOptions } from './errors.js';
 // ---- Errors ----------------------------------------------------------------
 export { createVFSError, isVFSError, toError } from './errors.js';
-
+// ---- Exec (command passthrough) --------------------------------------------
+export type {
+	ExecBackend,
+	ExecOptions,
+	ExecResult,
+	VFSExecutor,
+} from './exec.js';
+export { createVFSExecutor } from './exec.js';
 // ---- Logger / EventBus ----------------------------------------------------
 export type { EventBus, Logger } from './logger.js';
 export { createNoopLogger } from './logger.js';
@@ -52,7 +59,6 @@ export type {
 	VFSWriteEvent,
 	VFSWriteOptions,
 } from './types.js';
-
 // ---- Validators ------------------------------------------------------------
 export type {
 	VFSValidationIssue,
@@ -69,11 +75,9 @@ export {
 	createTrailingWhitespaceValidator,
 	validateSnapshot,
 } from './validators.js';
-
 // ---- VFS (in-memory) -------------------------------------------------------
 export type { VirtualFS, VirtualFSOptions } from './vfs.js';
 export { createVirtualFS } from './vfs.js';
-
 // ---- VFS Disk (commit / load) ----------------------------------------------
 export type { VFSDisk, VFSDiskOptions } from './vfs-disk.js';
 export { createVFSDisk } from './vfs-disk.js';

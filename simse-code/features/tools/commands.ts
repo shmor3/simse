@@ -33,7 +33,9 @@ export function createToolsCommands(
 			usage: '/agents',
 			description: 'List available agents',
 			category: 'tools',
-			execute: () => ({ text: 'No agents configured. Use /setup to connect an ACP server.' }),
+			execute: () => ({
+				text: 'No agents configured. Use /setup to connect an ACP server.',
+			}),
 		},
 		{
 			name: 'skills',

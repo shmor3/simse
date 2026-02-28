@@ -209,8 +209,7 @@ function parseBlocks(text: string): BlockNode[] {
 			const rows: string[][] = [];
 			let j = i;
 			while (j < lines.length && lines[j]!.includes('|')) {
-				const row = lines[j]!
-					.replace(/^\|/, '')
+				const row = lines[j]!.replace(/^\|/, '')
 					.replace(/\|$/, '')
 					.split('|')
 					.map((cell) => cell.trim());
@@ -338,7 +337,8 @@ function highlightLine(line: string, lang: HighlightLang): string {
 	}
 
 	// Keywords
-	const keywords = lang === 'py' ? PY_KEYWORDS : lang === 'bash' ? BASH_KEYWORDS : JS_KEYWORDS;
+	const keywords =
+		lang === 'py' ? PY_KEYWORDS : lang === 'bash' ? BASH_KEYWORDS : JS_KEYWORDS;
 	result = result.replace(keywords, (m) => chalk.magenta(m));
 
 	// Numbers
@@ -392,11 +392,16 @@ function NumberedListItem({
 	content,
 	level = 0,
 	number = 1,
-}: { content: string; level?: number; number?: number }) {
+}: {
+	content: string;
+	level?: number;
+	number?: number;
+}) {
 	const indent = '  '.repeat(level);
 	return (
 		<Text>
-			{indent}{number}. {parseInline(content)}
+			{indent}
+			{number}. {parseInline(content)}
 		</Text>
 	);
 }
@@ -405,12 +410,18 @@ function TaskListItem({
 	content,
 	level = 0,
 	checked = false,
-}: { content: string; level?: number; checked?: boolean }) {
+}: {
+	content: string;
+	level?: number;
+	checked?: boolean;
+}) {
 	const indent = '  '.repeat(level);
 	const checkbox = checked ? '\u2611' : '\u2610';
 	return (
 		<Text>
-			{indent}{checkbox} {checked ? <Text dimColor>{content}</Text> : parseInline(content)}
+			{indent}
+			{checkbox}{' '}
+			{checked ? <Text dimColor>{content}</Text> : parseInline(content)}
 		</Text>
 	);
 }
@@ -487,9 +498,21 @@ function BlockView({ block }: { block: BlockNode }) {
 		case 'list-item':
 			return <ListItem content={block.content} level={block.level} />;
 		case 'numbered-list-item':
-			return <NumberedListItem content={block.content} level={block.level} number={block.number} />;
+			return (
+				<NumberedListItem
+					content={block.content}
+					level={block.level}
+					number={block.number}
+				/>
+			);
 		case 'task-list-item':
-			return <TaskListItem content={block.content} level={block.level} checked={block.checked} />;
+			return (
+				<TaskListItem
+					content={block.content}
+					level={block.level}
+					checked={block.checked}
+				/>
+			);
 		case 'blockquote':
 			return <Blockquote content={block.content} />;
 		case 'table':

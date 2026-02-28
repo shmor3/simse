@@ -80,10 +80,7 @@ describe('PromptInput', () => {
 		};
 
 		const { lastFrame, stdin } = render(
-			<PromptInput
-				onSubmit={() => {}}
-				onCompleteAtMention={completer}
-			/>,
+			<PromptInput onSubmit={() => {}} onCompleteAtMention={completer} />,
 		);
 
 		// Type "describe @src"
@@ -100,10 +97,7 @@ describe('PromptInput', () => {
 		const completer = () => ['utils/helper.ts'];
 
 		const { lastFrame, stdin } = render(
-			<PromptInput
-				onSubmit={() => {}}
-				onCompleteAtMention={completer}
-			/>,
+			<PromptInput onSubmit={() => {}} onCompleteAtMention={completer} />,
 		);
 
 		stdin.write('@u');

@@ -8,13 +8,13 @@ import { join } from 'node:path';
 import { toError } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
 import type { ACPConnection } from '../acp/acp-connection.js';
+import { createLibrarian } from './librarian.js';
 import {
 	loadAllDefinitions,
 	matchesTopic,
 	saveDefinition,
 	validateDefinition,
 } from './librarian-definition.js';
-import { createLibrarian } from './librarian.js';
 import type {
 	ArbitrationResult,
 	Librarian,
@@ -39,13 +39,21 @@ export interface ManagedLibrarian {
 export interface LibrarianRegistry {
 	readonly initialize: () => Promise<void>;
 	readonly dispose: () => Promise<void>;
-	readonly register: (definition: LibrarianDefinition) => Promise<ManagedLibrarian>;
+	readonly register: (
+		definition: LibrarianDefinition,
+	) => Promise<ManagedLibrarian>;
 	readonly unregister: (name: string) => Promise<void>;
 	readonly get: (name: string) => ManagedLibrarian | undefined;
 	readonly list: () => readonly ManagedLibrarian[];
 	readonly defaultLibrarian: ManagedLibrarian;
-	readonly resolveLibrarian: (topic: string, content: string) => Promise<ArbitrationResult>;
-	readonly spawnSpecialist: (topic: string, volumes: readonly Volume[]) => Promise<ManagedLibrarian>;
+	readonly resolveLibrarian: (
+		topic: string,
+		content: string,
+	) => Promise<ArbitrationResult>;
+	readonly spawnSpecialist: (
+		topic: string,
+		volumes: readonly Volume[],
+	) => Promise<ManagedLibrarian>;
 }
 
 export interface LibrarianRegistryOptions {
@@ -67,7 +75,8 @@ export interface LibrarianRegistryOptions {
 const DEFAULT_DEFINITION: LibrarianDefinition = Object.freeze({
 	name: 'default',
 	description: 'General-purpose head librarian that manages all topics.',
-	purpose: 'General-purpose head librarian for routing, arbitration, and fallback.',
+	purpose:
+		'General-purpose head librarian for routing, arbitration, and fallback.',
 	topics: ['**'],
 	permissions: { add: true, delete: true, reorganize: true },
 	thresholds: { topicComplexity: 100, escalateAt: 500 },
@@ -80,14 +89,11 @@ const DEFAULT_DEFINITION: LibrarianDefinition = Object.freeze({
 export function createLibrarianRegistry(
 	options: LibrarianRegistryOptions,
 ): LibrarianRegistry {
-	const {
-		librariansDir,
-		library,
-		defaultProvider,
-		createConnection,
-	} = options;
+	const { librariansDir, library, defaultProvider, createConnection } = options;
 	const selfResolutionGap = options.selfResolutionGap ?? 0.3;
-	const logger = (options.logger ?? getDefaultLogger()).child('librarian-registry');
+	const logger = (options.logger ?? getDefaultLogger()).child(
+		'librarian-registry',
+	);
 
 	const librarians = new Map<string, ManagedLibrarian>();
 	let initialized = false;
@@ -147,7 +153,9 @@ export function createLibrarianRegistry(
 			}
 
 			initialized = true;
-			logger.info(`Librarian registry initialized (${librarians.size} librarians)`);
+			logger.info(
+				`Librarian registry initialized (${librarians.size} librarians)`,
+			);
 		})().finally(() => {
 			initPromise = null;
 		});
@@ -170,9 +178,7 @@ export function createLibrarianRegistry(
 		}
 
 		if (librarians.has(definition.name)) {
-			throw new Error(
-				`Librarian "${definition.name}" is already registered`,
-			);
+			throw new Error(`Librarian "${definition.name}" is already registered`);
 		}
 
 		const managed = await buildManaged(definition);
@@ -295,17 +301,21 @@ Choose the best librarian. Return ONLY valid JSON:
 			) {
 				return Object.freeze({
 					winner: parsed.winner,
-					reason: typeof parsed.reason === 'string'
-						? parsed.reason
-						: 'Arbitration by default librarian.',
+					reason:
+						typeof parsed.reason === 'string'
+							? parsed.reason
+							: 'Arbitration by default librarian.',
 					bids: sorted,
 				});
 			}
 
 			// Winner not in candidates — fall back to highest bidder
-			logger.warn('Arbitration returned unknown winner; falling back to highest bidder', {
-				parsedWinner: parsed.winner,
-			});
+			logger.warn(
+				'Arbitration returned unknown winner; falling back to highest bidder',
+				{
+					parsedWinner: parsed.winner,
+				},
+			);
 		} catch (err) {
 			logger.warn('Arbitration failed; falling back to highest bidder', {
 				error: toError(err).message,
@@ -333,7 +343,10 @@ Choose the best librarian. Return ONLY valid JSON:
 There are currently ${volumes.length} volumes in this topic.
 
 Volume samples:
-${volumes.slice(0, 5).map((v) => `- ${v.text.slice(0, 100)}`).join('\n')}
+${volumes
+	.slice(0, 5)
+	.map((v) => `- ${v.text.slice(0, 100)}`)
+	.join('\n')}
 
 Return ONLY valid JSON: {"shouldSpawn": true/false, "reason": "brief explanation"}`;
 
@@ -434,7 +447,9 @@ Return ONLY valid JSON matching this schema:
 		get defaultLibrarian() {
 			const d = librarians.get('default');
 			if (!d) {
-				throw new Error('Registry not initialized: default librarian not available');
+				throw new Error(
+					'Registry not initialized: default librarian not available',
+				);
 			}
 			return d;
 		},

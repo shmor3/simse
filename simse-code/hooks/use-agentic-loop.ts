@@ -241,10 +241,7 @@ export function useAgenticLoop(
 					const { permissionManager } = optionsRef.current;
 					if (!permissionManager) return 'allow';
 
-					const decision = permissionManager.check(
-						call.name,
-						call.arguments,
-					);
+					const decision = permissionManager.check(call.name, call.arguments);
 					if (decision === 'allow') return 'allow';
 					if (decision === 'deny') return 'deny';
 
@@ -265,8 +262,7 @@ export function useAgenticLoop(
 				onTokenUsage: (usage) => {
 					setTokenUsage((prev) => ({
 						promptTokens: prev.promptTokens + usage.promptTokens,
-						completionTokens:
-							prev.completionTokens + usage.completionTokens,
+						completionTokens: prev.completionTokens + usage.completionTokens,
 						totalTokens: prev.totalTokens + usage.totalTokens,
 					}));
 				},

@@ -2,8 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import React from 'react';
 import { ContextGrid, HelpView } from '../features/meta/components.js';
-import { createMetaCommands } from '../features/meta/index.js';
 import type { MetaCommandContext } from '../features/meta/index.js';
+import { createMetaCommands } from '../features/meta/index.js';
 
 function createMockContext(
 	overrides?: Partial<MetaCommandContext>,

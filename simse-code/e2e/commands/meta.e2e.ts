@@ -25,162 +25,130 @@ async function submitCommand(
 	term.pressKey('enter');
 }
 
-describe(
-	'Meta Commands E2E',
-	() => {
-		let term: SimseTerminal | undefined;
+describe('Meta Commands E2E', () => {
+	let term: SimseTerminal | undefined;
 
-		afterEach(async () => {
-			await term?.kill();
-			term = undefined;
+	afterEach(async () => {
+		await term?.kill();
+		term = undefined;
+	});
+
+	// -----------------------------------------------------------------
+	// /help
+	// -----------------------------------------------------------------
+	it('/help lists command categories and commands', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
+
+		await submitCommand(term, '/help');
+
+		// The help view renders category labels. "General" is the
+		// meta commands category header.
+		await term.waitForText('General', { timeout: 10_000 });
+
+		const screen = term.getScreen();
+		expect(screen).toContain('General');
+		// Should show command entries (usage strings)
+		expect(screen).toContain('/clear');
+		expect(screen).toContain('/exit');
+	}, 30_000);
+
+	// -----------------------------------------------------------------
+	// /help search (with argument)
+	// -----------------------------------------------------------------
+	it('/help search shows help output even with argument', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
+
+		await submitCommand(term, '/help search');
+
+		// The help command ignores the argument and shows all commands
+		await term.waitForText('General', { timeout: 10_000 });
+
+		const screen = term.getScreen();
+		expect(screen).toContain('General');
+	}, 30_000);
+
+	// -----------------------------------------------------------------
+	// /clear
+	// -----------------------------------------------------------------
+	it('/clear clears conversation history', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
+
+		await submitCommand(term, '/clear');
+
+		await term.waitForText('Conversation cleared', {
+			timeout: 10_000,
 		});
 
-		// -----------------------------------------------------------------
-		// /help
-		// -----------------------------------------------------------------
-		it(
-			'/help lists command categories and commands',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
+		const screen = term.getScreen();
+		expect(screen).toContain('Conversation cleared');
+	}, 30_000);
 
-				await submitCommand(term, '/help');
+	// -----------------------------------------------------------------
+	// /verbose
+	// -----------------------------------------------------------------
+	it('/verbose toggles verbose mode', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
 
-				// The help view renders category labels. "General" is the
-				// meta commands category header.
-				await term.waitForText('General', { timeout: 10_000 });
+		await submitCommand(term, '/verbose');
 
-				const screen = term.getScreen();
-				expect(screen).toContain('General');
-				// Should show command entries (usage strings)
-				expect(screen).toContain('/clear');
-				expect(screen).toContain('/exit');
-			},
-			30_000,
-		);
+		await term.waitForText('Verbose mode', { timeout: 10_000 });
 
-		// -----------------------------------------------------------------
-		// /help search (with argument)
-		// -----------------------------------------------------------------
-		it(
-			'/help search shows help output even with argument',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
+		const screen = term.getScreen();
+		expect(screen).toContain('Verbose mode');
+		expect(screen).toContain('toggled');
+	}, 30_000);
 
-				await submitCommand(term, '/help search');
+	// -----------------------------------------------------------------
+	// /plan
+	// -----------------------------------------------------------------
+	it('/plan toggles plan mode', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
 
-				// The help command ignores the argument and shows all commands
-				await term.waitForText('General', { timeout: 10_000 });
+		await submitCommand(term, '/plan');
 
-				const screen = term.getScreen();
-				expect(screen).toContain('General');
-			},
-			30_000,
-		);
+		await term.waitForText('Plan mode', { timeout: 10_000 });
 
-		// -----------------------------------------------------------------
-		// /clear
-		// -----------------------------------------------------------------
-		it(
-			'/clear clears conversation history',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
+		const screen = term.getScreen();
+		expect(screen).toContain('Plan mode');
+		expect(screen).toContain('toggled');
+	}, 30_000);
 
-				await submitCommand(term, '/clear');
+	// -----------------------------------------------------------------
+	// /context
+	// -----------------------------------------------------------------
+	it('/context shows context stats', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
 
-				await term.waitForText('Conversation cleared', {
-					timeout: 10_000,
-				});
+		await submitCommand(term, '/context');
 
-				const screen = term.getScreen();
-				expect(screen).toContain('Conversation cleared');
-			},
-			30_000,
-		);
+		await term.waitForText('Context usage', { timeout: 10_000 });
 
-		// -----------------------------------------------------------------
-		// /verbose
-		// -----------------------------------------------------------------
-		it(
-			'/verbose toggles verbose mode',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
+		const screen = term.getScreen();
+		expect(screen).toContain('Context usage');
+		// The context grid shows percentage
+		expect(screen).toContain('%');
+	}, 30_000);
 
-				await submitCommand(term, '/verbose');
+	// -----------------------------------------------------------------
+	// /exit
+	// -----------------------------------------------------------------
+	it('/exit is a recognized command', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
 
-				await term.waitForText('Verbose mode', { timeout: 10_000 });
+		await submitCommand(term, '/exit');
 
-				const screen = term.getScreen();
-				expect(screen).toContain('Verbose mode');
-				expect(screen).toContain('toggled');
-			},
-			30_000,
-		);
+		// /exit returns undefined (no output), so we verify it does NOT
+		// produce an "Unknown command" error message.
+		await new Promise((r) => setTimeout(r, 2_000));
 
-		// -----------------------------------------------------------------
-		// /plan
-		// -----------------------------------------------------------------
-		it(
-			'/plan toggles plan mode',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
-
-				await submitCommand(term, '/plan');
-
-				await term.waitForText('Plan mode', { timeout: 10_000 });
-
-				const screen = term.getScreen();
-				expect(screen).toContain('Plan mode');
-				expect(screen).toContain('toggled');
-			},
-			30_000,
-		);
-
-		// -----------------------------------------------------------------
-		// /context
-		// -----------------------------------------------------------------
-		it(
-			'/context shows context stats',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
-
-				await submitCommand(term, '/context');
-
-				await term.waitForText('Context usage', { timeout: 10_000 });
-
-				const screen = term.getScreen();
-				expect(screen).toContain('Context usage');
-				// The context grid shows percentage
-				expect(screen).toContain('%');
-			},
-			30_000,
-		);
-
-		// -----------------------------------------------------------------
-		// /exit
-		// -----------------------------------------------------------------
-		it(
-			'/exit is a recognized command',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
-
-				await submitCommand(term, '/exit');
-
-				// /exit returns undefined (no output), so we verify it does NOT
-				// produce an "Unknown command" error message.
-				await new Promise((r) => setTimeout(r, 2_000));
-
-				const screen = term.getScreen();
-				expect(screen).not.toContain('Unknown command');
-			},
-			30_000,
-		);
-	},
-	120_000,
-);
+		const screen = term.getScreen();
+		expect(screen).not.toContain('Unknown command');
+	}, 30_000);
+}, 120_000);

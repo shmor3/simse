@@ -13,10 +13,7 @@ export interface MetaCommandContext {
 	readonly getContextUsage: () => { usedChars: number; maxChars: number };
 }
 
-function parseBoolArg(
-	args: string,
-	current: boolean,
-): boolean {
+function parseBoolArg(args: string, current: boolean): boolean {
 	const trimmed = args.trim().toLowerCase();
 	if (trimmed === 'on' || trimmed === 'true' || trimmed === '1') return true;
 	if (trimmed === 'off' || trimmed === 'false' || trimmed === '0') return false;

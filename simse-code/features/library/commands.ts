@@ -10,7 +10,9 @@ export const libraryCommands: readonly CommandDefinition[] = [
 			if (!args.trim()) return { text: 'Usage: /add <topic> <text>' };
 			const spaceIdx = args.indexOf(' ');
 			if (spaceIdx === -1) return { text: 'Usage: /add <topic> <text>' };
-			return { text: 'Library not connected. Run /setup to configure an ACP server with library support.' };
+			return {
+				text: 'Library not connected. Run /setup to configure an ACP server with library support.',
+			};
 		},
 	},
 	{
@@ -21,7 +23,9 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		category: 'library',
 		execute: (args) => {
 			if (!args.trim()) return { text: 'Usage: /search <query>' };
-			return { text: 'Library not connected. Run /setup to configure an ACP server with library support.' };
+			return {
+				text: 'Library not connected. Run /setup to configure an ACP server with library support.',
+			};
 		},
 	},
 	{
@@ -32,7 +36,9 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		category: 'library',
 		execute: (args) => {
 			if (!args.trim()) return { text: 'Usage: /recommend <query>' };
-			return { text: 'Library not connected. Run /setup to configure an ACP server with library support.' };
+			return {
+				text: 'Library not connected. Run /setup to configure an ACP server with library support.',
+			};
 		},
 	},
 	{
@@ -40,7 +46,9 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		usage: '/topics',
 		description: 'List all topics',
 		category: 'library',
-		execute: () => ({ text: 'Library not connected. Run /setup to configure an ACP server with library support.' }),
+		execute: () => ({
+			text: 'Library not connected. Run /setup to configure an ACP server with library support.',
+		}),
 	},
 	{
 		name: 'notes',
@@ -59,7 +67,9 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		category: 'library',
 		execute: (args) => {
 			if (!args.trim()) return { text: 'Usage: /get <id>' };
-			return { text: 'Library not connected. Run /setup to configure an ACP server with library support.' };
+			return {
+				text: 'Library not connected. Run /setup to configure an ACP server with library support.',
+			};
 		},
 	},
 	{
@@ -70,7 +80,9 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		category: 'library',
 		execute: (args) => {
 			if (!args.trim()) return { text: 'Usage: /delete <id>' };
-			return { text: 'Library not connected. Run /setup to configure an ACP server with library support.' };
+			return {
+				text: 'Library not connected. Run /setup to configure an ACP server with library support.',
+			};
 		},
 	},
 ];

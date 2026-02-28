@@ -336,11 +336,7 @@ describe('bid', () => {
 			purpose: 'Will fail to parse.',
 		});
 		const library = createMockLibrary();
-		const result = await librarian.bid(
-			'some content',
-			'any/topic',
-			library,
-		);
+		const result = await librarian.bid('some content', 'any/topic', library);
 		expect(result.librarianName).toBe('broken-librarian');
 		expect(result.argument).toBe('');
 		expect(result.confidence).toBe(0);
@@ -376,11 +372,7 @@ describe('bid', () => {
 			purpose: 'Returns inflated confidence.',
 		});
 		const library = createMockLibrary();
-		const result = await librarian.bid(
-			'some content',
-			'any/topic',
-			library,
-		);
+		const result = await librarian.bid('some content', 'any/topic', library);
 		expect(result.confidence).toBe(1);
 	});
 });

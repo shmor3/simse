@@ -1,7 +1,7 @@
-import React from 'react';
 import { Box, Text } from 'ink';
+import React from 'react';
 import type { CommandDefinition } from '../../ink-types.js';
-import type { SessionStore, SessionMeta } from '../../session-store.js';
+import type { SessionMeta, SessionStore } from '../../session-store.js';
 
 /** State accessors for session commands. */
 export interface SessionCommandContext {
@@ -20,11 +20,7 @@ function SessionListView({
 	currentId: string;
 }) {
 	if (sessions.length === 0) {
-		return React.createElement(
-			Text,
-			{ dimColor: true },
-			'No saved sessions.',
-		);
+		return React.createElement(Text, { dimColor: true }, 'No saved sessions.');
 	}
 
 	return React.createElement(
@@ -44,11 +40,7 @@ function SessionListView({
 					},
 					s.id === currentId ? '\u25CF' : ' ',
 				),
-				React.createElement(
-					Text,
-					{ dimColor: true },
-					s.id.slice(0, 12),
-				),
+				React.createElement(Text, { dimColor: true }, s.id.slice(0, 12)),
 				React.createElement(Text, null, s.title),
 				React.createElement(
 					Text,

@@ -1,7 +1,7 @@
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import type { ACPConnection } from '../src/ai/acp/acp-connection.js';
 import { saveDefinition } from '../src/ai/library/librarian-definition.js';
 import {
@@ -96,12 +96,16 @@ describe('LibrarianRegistry', () => {
 
 			expect(registry.list()).toHaveLength(2); // default + code-patterns
 			expect(registry.get('code-patterns')).toBeDefined();
-			expect(registry.get('code-patterns')!.definition.name).toBe('code-patterns');
+			expect(registry.get('code-patterns')!.definition.name).toBe(
+				'code-patterns',
+			);
 		});
 
 		it('deduplicates concurrent initialize calls', async () => {
 			const provider = createMockProvider('{}');
-			const registry = createLibrarianRegistry(makeOptions({ defaultProvider: provider }));
+			const registry = createLibrarianRegistry(
+				makeOptions({ defaultProvider: provider }),
+			);
 
 			// Fire two concurrent initializations
 			const [r1, r2] = await Promise.all([
@@ -216,7 +220,10 @@ describe('LibrarianRegistry', () => {
 			};
 			await registry.register(designDef);
 
-			const result = await registry.resolveLibrarian('devops/ci', 'CI pipeline config');
+			const result = await registry.resolveLibrarian(
+				'devops/ci',
+				'CI pipeline config',
+			);
 
 			expect(result.winner).toBe('default');
 			expect(result.bids).toHaveLength(0);
@@ -245,7 +252,10 @@ describe('LibrarianRegistry', () => {
 			// Actually, the default always has ['*'] so it always matches.
 			// Single match case occurs when ONLY the default matches (no other specialist).
 			// Let's verify that path by querying a topic no specialist covers but default does.
-			const result = await registry.resolveLibrarian('random-topic', 'some content');
+			const result = await registry.resolveLibrarian(
+				'random-topic',
+				'some content',
+			);
 
 			// Only default matches 'random-topic' (it has ['*']).
 			// code-specialist has ['code/*'] which doesn't match 'random-topic'.
@@ -299,7 +309,10 @@ describe('LibrarianRegistry', () => {
 			};
 			await registry.register(archDef);
 
-			const result = await registry.resolveLibrarian('code/react', 'React component patterns');
+			const result = await registry.resolveLibrarian(
+				'code/react',
+				'React component patterns',
+			);
 
 			// Two specialists match: code-specialist and arch-specialist
 			// Large gap (0.9 - 0.3 = 0.6 > 0.3) → self-resolution
@@ -312,7 +325,10 @@ describe('LibrarianRegistry', () => {
 				generate: mock(async () => {
 					bidCall++;
 					if (bidCall === 1) {
-						return JSON.stringify({ argument: 'I am the best', confidence: 0.95 });
+						return JSON.stringify({
+							argument: 'I am the best',
+							confidence: 0.95,
+						});
 					}
 					if (bidCall === 2) {
 						return JSON.stringify({ argument: 'I can try', confidence: 0.4 });
@@ -341,13 +357,18 @@ describe('LibrarianRegistry', () => {
 			await registry.register(spec1);
 			await registry.register(spec2);
 
-			const result = await registry.resolveLibrarian('data/analytics', 'Analytics pipeline');
+			const result = await registry.resolveLibrarian(
+				'data/analytics',
+				'Analytics pipeline',
+			);
 
 			expect(result.reason).toContain('Self-resolved');
 			// 3 bids: 2 specialists + default (which matches ** on all topics)
 			expect(result.bids).toHaveLength(3);
 			// Winner should be the one with 0.95 confidence
-			const sorted = [...result.bids].sort((a, b) => b.confidence - a.confidence);
+			const sorted = [...result.bids].sort(
+				(a, b) => b.confidence - a.confidence,
+			);
 			expect(sorted[0].confidence).toBe(0.95);
 			expect(result.winner).toBe(sorted[0].librarianName);
 		});
@@ -359,10 +380,16 @@ describe('LibrarianRegistry', () => {
 					bidCall++;
 					if (bidCall <= 3) {
 						// 3 bids: specialist-a, specialist-b, default (all close)
-						return JSON.stringify({ argument: 'Good at this', confidence: 0.7 });
+						return JSON.stringify({
+							argument: 'Good at this',
+							confidence: 0.7,
+						});
 					}
 					// Arbitration call (bidCall === 4)
-					return JSON.stringify({ winner: 'specialist-b', reason: 'Better expertise match' });
+					return JSON.stringify({
+						winner: 'specialist-b',
+						reason: 'Better expertise match',
+					});
 				}),
 			};
 
@@ -386,7 +413,10 @@ describe('LibrarianRegistry', () => {
 			await registry.register(spec1);
 			await registry.register(spec2);
 
-			const result = await registry.resolveLibrarian('infra/k8s', 'Kubernetes deployment');
+			const result = await registry.resolveLibrarian(
+				'infra/k8s',
+				'Kubernetes deployment',
+			);
 
 			// Gap is 0.10 < 0.3 → arbitration runs
 			expect(result.winner).toBe('specialist-b');
@@ -401,10 +431,16 @@ describe('LibrarianRegistry', () => {
 					bidCall++;
 					if (bidCall <= 3) {
 						// 3 bids: specialist-x, specialist-y, default
-						return JSON.stringify({ argument: 'Bid response', confidence: 0.7 });
+						return JSON.stringify({
+							argument: 'Bid response',
+							confidence: 0.7,
+						});
 					}
 					// Arbitration returns an unknown winner name
-					return JSON.stringify({ winner: 'nonexistent-librarian', reason: 'oops' });
+					return JSON.stringify({
+						winner: 'nonexistent-librarian',
+						reason: 'oops',
+					});
 				}),
 			};
 
@@ -428,7 +464,10 @@ describe('LibrarianRegistry', () => {
 			await registry.register(spec1);
 			await registry.register(spec2);
 
-			const result = await registry.resolveLibrarian('infra/k8s', 'Kubernetes deployment');
+			const result = await registry.resolveLibrarian(
+				'infra/k8s',
+				'Kubernetes deployment',
+			);
 
 			// Unknown winner → falls back to default
 			expect(result.winner).toBe('default');
@@ -447,7 +486,10 @@ describe('LibrarianRegistry', () => {
 					callCount++;
 					if (callCount === 1) {
 						// Assessment: yes, spawn
-						return JSON.stringify({ shouldSpawn: true, reason: 'Topic is complex enough' });
+						return JSON.stringify({
+							shouldSpawn: true,
+							reason: 'Topic is complex enough',
+						});
 					}
 					// Generation: return a valid definition
 					return JSON.stringify({
@@ -467,8 +509,20 @@ describe('LibrarianRegistry', () => {
 			await registry.initialize();
 
 			const volumes = [
-				{ id: 'v1', text: 'Neural network basics', embedding: [0.1], metadata: {}, timestamp: 1 },
-				{ id: 'v2', text: 'Training loop patterns', embedding: [0.2], metadata: {}, timestamp: 2 },
+				{
+					id: 'v1',
+					text: 'Neural network basics',
+					embedding: [0.1],
+					metadata: {},
+					timestamp: 1,
+				},
+				{
+					id: 'v2',
+					text: 'Training loop patterns',
+					embedding: [0.2],
+					metadata: {},
+					timestamp: 2,
+				},
 			];
 
 			const managed = await registry.spawnSpecialist('ml/training', volumes);
@@ -491,9 +545,9 @@ describe('LibrarianRegistry', () => {
 			);
 			await registry.initialize();
 
-			await expect(
-				registry.spawnSpecialist('tiny-topic', []),
-			).rejects.toThrow('Specialist not needed');
+			await expect(registry.spawnSpecialist('tiny-topic', [])).rejects.toThrow(
+				'Specialist not needed',
+			);
 		});
 	});
 

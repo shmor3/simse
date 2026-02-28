@@ -8,8 +8,8 @@
 
 import { existsSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { appendJsonLine, readJsonFile, writeJsonFile } from './json-io.js';
 import type { ConversationMessage, ConversationRole } from './conversation.js';
+import { appendJsonLine, readJsonFile, writeJsonFile } from './json-io.js';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -126,9 +126,7 @@ export function createSessionStore(dataDir: string): SessionStore {
 
 		try {
 			const raw = readFileSync(filePath, 'utf-8');
-			const lines = raw
-				.split('\n')
-				.filter((line) => line.trim().length > 0);
+			const lines = raw.split('\n').filter((line) => line.trim().length > 0);
 
 			return lines
 				.map((line) => {
@@ -137,12 +135,8 @@ export function createSessionStore(dataDir: string): SessionStore {
 						const msg: ConversationMessage = {
 							role: entry.role,
 							content: entry.content,
-							...(entry.toolCallId
-								? { toolCallId: entry.toolCallId }
-								: {}),
-							...(entry.toolName
-								? { toolName: entry.toolName }
-								: {}),
+							...(entry.toolCallId ? { toolCallId: entry.toolCallId } : {}),
+							...(entry.toolName ? { toolName: entry.toolName } : {}),
 						};
 						return Object.freeze(msg);
 					} catch {

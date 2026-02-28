@@ -7,10 +7,10 @@ import type { ACPClient, ACPPermissionRequestInfo } from 'simse';
 import { createACPClient, toError } from 'simse';
 import { App } from './app-ink.js';
 import { createCLIConfig } from './config.js';
-import { createPermissionManager } from './permission-manager.js';
-import { createSessionStore } from './session-store.js';
 import type { Conversation } from './conversation.js';
 import { createConversation } from './conversation.js';
+import { createPermissionManager } from './permission-manager.js';
+import { createSessionStore } from './session-store.js';
 import type { ToolRegistry } from './tool-registry.js';
 import { createToolRegistry } from './tool-registry.js';
 

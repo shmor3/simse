@@ -20,123 +20,99 @@ async function submitCommand(
 	term.pressKey('enter');
 }
 
-describe(
-	'Config Commands E2E',
-	() => {
-		let term: SimseTerminal | undefined;
+describe('Config Commands E2E', () => {
+	let term: SimseTerminal | undefined;
 
-		afterEach(async () => {
-			await term?.kill();
-			term = undefined;
+	afterEach(async () => {
+		await term?.kill();
+		term = undefined;
+	});
+
+	// -----------------------------------------------------------------
+	// /config
+	// -----------------------------------------------------------------
+	it('/config shows current configuration', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
+
+		await submitCommand(term, '/config');
+
+		await term.waitForText('Showing configuration', {
+			timeout: 10_000,
 		});
 
-		// -----------------------------------------------------------------
-		// /config
-		// -----------------------------------------------------------------
-		it(
-			'/config shows current configuration',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
+		const screen = term.getScreen();
+		expect(screen).toContain('Showing configuration');
+		expect(screen).not.toContain('Unknown command');
+	}, 30_000);
 
-				await submitCommand(term, '/config');
+	// -----------------------------------------------------------------
+	// /settings
+	// -----------------------------------------------------------------
+	it('/settings shows all settings', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
 
-				await term.waitForText('Showing configuration', {
-					timeout: 10_000,
-				});
+		await submitCommand(term, '/settings');
 
-				const screen = term.getScreen();
-				expect(screen).toContain('Showing configuration');
-				expect(screen).not.toContain('Unknown command');
-			},
-			30_000,
-		);
+		await term.waitForText('Showing all settings', {
+			timeout: 10_000,
+		});
 
-		// -----------------------------------------------------------------
-		// /settings
-		// -----------------------------------------------------------------
-		it(
-			'/settings shows all settings',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
+		const screen = term.getScreen();
+		expect(screen).toContain('Showing all settings');
+		expect(screen).not.toContain('Unknown command');
+	}, 30_000);
 
-				await submitCommand(term, '/settings');
+	// -----------------------------------------------------------------
+	// /settings <key> <value>
+	// -----------------------------------------------------------------
+	it('/settings with key value sets a setting', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
 
-				await term.waitForText('Showing all settings', {
-					timeout: 10_000,
-				});
+		await submitCommand(term, '/settings verbose true');
 
-				const screen = term.getScreen();
-				expect(screen).toContain('Showing all settings');
-				expect(screen).not.toContain('Unknown command');
-			},
-			30_000,
-		);
+		await term.waitForText('Setting:', { timeout: 10_000 });
 
-		// -----------------------------------------------------------------
-		// /settings <key> <value>
-		// -----------------------------------------------------------------
-		it(
-			'/settings with key value sets a setting',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
+		const screen = term.getScreen();
+		expect(screen).toContain('Setting:');
+		expect(screen).toContain('verbose true');
+	}, 30_000);
 
-				await submitCommand(term, '/settings verbose true');
+	// -----------------------------------------------------------------
+	// /init
+	// -----------------------------------------------------------------
+	it('/init shows setup instructions', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
 
-				await term.waitForText('Setting:', { timeout: 10_000 });
+		await submitCommand(term, '/init');
 
-				const screen = term.getScreen();
-				expect(screen).toContain('Setting:');
-				expect(screen).toContain('verbose true');
-			},
-			30_000,
-		);
+		await term.waitForText('/setup', { timeout: 10_000 });
 
-		// -----------------------------------------------------------------
-		// /init
-		// -----------------------------------------------------------------
-		it(
-			'/init shows setup instructions',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
+		const screen = term.getScreen();
+		expect(screen).toContain('/setup');
+		expect(screen).not.toContain('Unknown command');
+	}, 30_000);
 
-				await submitCommand(term, '/init');
+	// -----------------------------------------------------------------
+	// /setup (no args — lists presets)
+	// -----------------------------------------------------------------
+	it('/setup lists available presets', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
 
-				await term.waitForText('/setup', { timeout: 10_000 });
+		await submitCommand(term, '/setup');
 
-				const screen = term.getScreen();
-				expect(screen).toContain('/setup');
-				expect(screen).not.toContain('Unknown command');
-			},
-			30_000,
-		);
+		await term.waitForText('Available presets', {
+			timeout: 10_000,
+		});
 
-		// -----------------------------------------------------------------
-		// /setup (no args — lists presets)
-		// -----------------------------------------------------------------
-		it(
-			'/setup lists available presets',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
-
-				await submitCommand(term, '/setup');
-
-				await term.waitForText('Available presets', {
-					timeout: 10_000,
-				});
-
-				const screen = term.getScreen();
-				expect(screen).toContain('Available presets');
-				expect(screen).toContain('claude-code');
-				expect(screen).toContain('ollama');
-				expect(screen).toContain('copilot');
-			},
-			30_000,
-		);
-	},
-	180_000,
-);
+		const screen = term.getScreen();
+		expect(screen).toContain('Available presets');
+		expect(screen).toContain('claude-code');
+		expect(screen).toContain('ollama');
+		expect(screen).toContain('copilot');
+	}, 30_000);
+}, 180_000);

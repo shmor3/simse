@@ -20,77 +20,61 @@ async function submitCommand(
 	term.pressKey('enter');
 }
 
-describe(
-	'AI Commands E2E',
-	() => {
-		let term: SimseTerminal | undefined;
+describe('AI Commands E2E', () => {
+	let term: SimseTerminal | undefined;
 
-		afterEach(async () => {
-			await term?.kill();
-			term = undefined;
+	afterEach(async () => {
+		await term?.kill();
+		term = undefined;
+	});
+
+	// -----------------------------------------------------------------
+	// /prompts
+	// -----------------------------------------------------------------
+	it('/prompts lists prompt templates', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
+
+		await submitCommand(term, '/prompts');
+
+		await term.waitForText('Listing prompt templates', {
+			timeout: 10_000,
 		});
 
-		// -----------------------------------------------------------------
-		// /prompts
-		// -----------------------------------------------------------------
-		it(
-			'/prompts lists prompt templates',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
+		const screen = term.getScreen();
+		expect(screen).toContain('Listing prompt templates');
+		expect(screen).not.toContain('Unknown command');
+	}, 30_000);
 
-				await submitCommand(term, '/prompts');
+	// -----------------------------------------------------------------
+	// /chain without args shows usage
+	// -----------------------------------------------------------------
+	it('/chain without args shows usage', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
 
-				await term.waitForText('Listing prompt templates', {
-					timeout: 10_000,
-				});
+		await submitCommand(term, '/chain');
 
-				const screen = term.getScreen();
-				expect(screen).toContain('Listing prompt templates');
-				expect(screen).not.toContain('Unknown command');
-			},
-			30_000,
-		);
+		await term.waitForText('Usage:', { timeout: 10_000 });
 
-		// -----------------------------------------------------------------
-		// /chain without args shows usage
-		// -----------------------------------------------------------------
-		it(
-			'/chain without args shows usage',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
+		const screen = term.getScreen();
+		expect(screen).toContain('Usage:');
+		expect(screen).toContain('/chain');
+	}, 30_000);
 
-				await submitCommand(term, '/chain');
+	// -----------------------------------------------------------------
+	// /chain <name> runs a chain
+	// -----------------------------------------------------------------
+	it('/chain with name runs the chain', async () => {
+		term = await createSimseTerminal({ acpBackend: 'none' });
+		await waitForReady(term);
 
-				await term.waitForText('Usage:', { timeout: 10_000 });
+		await submitCommand(term, '/chain my-chain');
 
-				const screen = term.getScreen();
-				expect(screen).toContain('Usage:');
-				expect(screen).toContain('/chain');
-			},
-			30_000,
-		);
+		await term.waitForText('Running chain', { timeout: 10_000 });
 
-		// -----------------------------------------------------------------
-		// /chain <name> runs a chain
-		// -----------------------------------------------------------------
-		it(
-			'/chain with name runs the chain',
-			async () => {
-				term = await createSimseTerminal({ acpBackend: 'none' });
-				await waitForReady(term);
-
-				await submitCommand(term, '/chain my-chain');
-
-				await term.waitForText('Running chain', { timeout: 10_000 });
-
-				const screen = term.getScreen();
-				expect(screen).toContain('Running chain');
-				expect(screen).toContain('my-chain');
-			},
-			30_000,
-		);
-	},
-	120_000,
-);
+		const screen = term.getScreen();
+		expect(screen).toContain('Running chain');
+		expect(screen).toContain('my-chain');
+	}, 30_000);
+}, 120_000);

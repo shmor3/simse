@@ -2,9 +2,7 @@ import { Box, Text } from 'ink';
 import React from 'react';
 
 export function formatTokens(tokens: number): string {
-	return tokens >= 1000
-		? `${(tokens / 1000).toFixed(1)}k`
-		: `${tokens}`;
+	return tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : `${tokens}`;
 }
 
 interface StatusBarProps {
@@ -62,9 +60,7 @@ export function StatusBar({
 	return (
 		<Box paddingX={1} justifyContent="space-between">
 			<Text dimColor>{hints.join(SEP)}</Text>
-			{stats.length > 0 && (
-				<Text dimColor>{stats.join(SEP)}</Text>
-			)}
+			{stats.length > 0 && <Text dimColor>{stats.join(SEP)}</Text>}
 		</Box>
 	);
 }

@@ -196,9 +196,7 @@ export function formatMentionsAsContext(
 				`<note id="${mention.path}"${mention.topic ? ` topic="${mention.topic}"` : ''}>\n${mention.content}\n</note>`,
 			);
 		} else {
-			parts.push(
-				`<file path="${mention.path}">\n${mention.content}\n</file>`,
-			);
+			parts.push(`<file path="${mention.path}">\n${mention.content}\n</file>`);
 		}
 	}
 	return parts.join('\n\n');

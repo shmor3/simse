@@ -330,10 +330,7 @@ export function Banner({
 						<Text color={PRIMARY}> {'\u2502'} </Text>
 						<Text>
 							{row.rightStyle.color ? (
-								<Text
-									bold={row.rightStyle.isBold}
-									color={row.rightStyle.color}
-								>
+								<Text bold={row.rightStyle.isBold} color={row.rightStyle.color}>
 									{row.rightText}
 								</Text>
 							) : row.rightStyle.isBold ? (

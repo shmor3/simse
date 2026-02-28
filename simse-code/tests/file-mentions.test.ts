@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import type { FileMention } from '../file-mentions.js';
 import {
 	completeAtMention,
 	formatMentionsAsContext,
 	resolveFileMentions,
 } from '../file-mentions.js';
-import type { FileMention } from '../file-mentions.js';
 
 describe('resolveFileMentions', () => {
 	test('resolves VFS mentions when resolver is provided', () => {
@@ -68,17 +68,14 @@ describe('resolveFileMentions', () => {
 	});
 
 	test('deduplicates VFS mentions', () => {
-		const result = resolveFileMentions(
-			'@vfs://a.py and @vfs://a.py again',
-			{
-				resolveVFS: (path) => {
-					if (path === 'a.py') {
-						return { content: 'code', size: 4 };
-					}
-					return undefined;
-				},
+		const result = resolveFileMentions('@vfs://a.py and @vfs://a.py again', {
+			resolveVFS: (path) => {
+				if (path === 'a.py') {
+					return { content: 'code', size: 4 };
+				}
+				return undefined;
 			},
-		);
+		});
 		expect(result.mentions).toHaveLength(1);
 	});
 

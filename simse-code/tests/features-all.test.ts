@@ -3,8 +3,8 @@ import { aiCommands } from '../features/ai/index.js';
 import { configCommands } from '../features/config/index.js';
 import { filesCommands } from '../features/files/index.js';
 import { libraryCommands } from '../features/library/index.js';
-import { createSessionCommands } from '../features/session/index.js';
 import type { SessionCommandContext } from '../features/session/index.js';
+import { createSessionCommands } from '../features/session/index.js';
 import { createToolsCommands } from '../features/tools/index.js';
 
 /** Minimal mock context for session commands. */
@@ -39,7 +39,9 @@ function mockToolRegistry() {
 }
 
 const sessionCommands = createSessionCommands(mockSessionCtx());
-const toolsCommands = createToolsCommands({ getToolRegistry: () => mockToolRegistry() });
+const toolsCommands = createToolsCommands({
+	getToolRegistry: () => mockToolRegistry(),
+});
 
 describe('all feature modules', () => {
 	test('library module exports commands with correct category', () => {

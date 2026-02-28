@@ -1,8 +1,8 @@
 // simse-code/e2e/harness/simse-terminal.ts
 import { resolve } from 'node:path';
 import { type ACPBackend, createTempConfig } from './config.js';
-import { KEYS, type KeyName, ctrlKey } from './keys.js';
-import { type PtyTerminal, createPtyTerminal } from './terminal.js';
+import { ctrlKey, KEYS, type KeyName } from './keys.js';
+import { createPtyTerminal, type PtyTerminal } from './terminal.js';
 
 export interface SimseTerminalOptions {
 	cols?: number;

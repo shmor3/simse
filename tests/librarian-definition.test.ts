@@ -1,12 +1,7 @@
-import { mkdtemp, rm } from 'node:fs/promises';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import type {
-	ArbitrationResult,
-	LibrarianBid,
-	LibrarianDefinition,
-} from '../src/ai/library/types.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
 	loadAllDefinitions,
 	loadDefinition,
@@ -14,6 +9,11 @@ import {
 	saveDefinition,
 	validateDefinition,
 } from '../src/ai/library/librarian-definition.js';
+import type {
+	ArbitrationResult,
+	LibrarianBid,
+	LibrarianDefinition,
+} from '../src/ai/library/types.js';
 
 describe('LibrarianDefinition types', () => {
 	it('allows constructing a valid LibrarianDefinition', () => {

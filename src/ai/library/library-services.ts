@@ -7,8 +7,8 @@
 // ---------------------------------------------------------------------------
 
 import type { Logger } from '../../logger.js';
-import type { Library } from './library.js';
 import type { LibrarianRegistry } from './librarian-registry.js';
+import type { Library } from './library.js';
 import {
 	formatMemoryContext,
 	type PromptInjectionOptions,

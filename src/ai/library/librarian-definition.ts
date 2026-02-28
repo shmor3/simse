@@ -37,7 +37,9 @@ export function validateDefinition(input: unknown): ValidationResult {
 	if (typeof input.name !== 'string' || input.name.length === 0) {
 		errors.push('name must be a non-empty string');
 	} else if (!NAME_PATTERN.test(input.name)) {
-		errors.push('name must be kebab-case (lowercase alphanumeric and hyphens, starting with alphanumeric)');
+		errors.push(
+			'name must be kebab-case (lowercase alphanumeric and hyphens, starting with alphanumeric)',
+		);
 	}
 
 	// description
@@ -59,7 +61,9 @@ export function validateDefinition(input: unknown): ValidationResult {
 
 	// permissions
 	if (!isRecord(input.permissions)) {
-		errors.push('permissions must be an object with boolean add, delete, reorganize');
+		errors.push(
+			'permissions must be an object with boolean add, delete, reorganize',
+		);
 	} else {
 		if (typeof input.permissions.add !== 'boolean') {
 			errors.push('permissions.add must be a boolean');
@@ -74,12 +78,20 @@ export function validateDefinition(input: unknown): ValidationResult {
 
 	// thresholds
 	if (!isRecord(input.thresholds)) {
-		errors.push('thresholds must be an object with positive numbers topicComplexity, escalateAt');
+		errors.push(
+			'thresholds must be an object with positive numbers topicComplexity, escalateAt',
+		);
 	} else {
-		if (typeof input.thresholds.topicComplexity !== 'number' || input.thresholds.topicComplexity <= 0) {
+		if (
+			typeof input.thresholds.topicComplexity !== 'number' ||
+			input.thresholds.topicComplexity <= 0
+		) {
 			errors.push('thresholds.topicComplexity must be a positive number');
 		}
-		if (typeof input.thresholds.escalateAt !== 'number' || input.thresholds.escalateAt <= 0) {
+		if (
+			typeof input.thresholds.escalateAt !== 'number' ||
+			input.thresholds.escalateAt <= 0
+		) {
 			errors.push('thresholds.escalateAt must be a positive number');
 		}
 	}
@@ -88,7 +100,10 @@ export function validateDefinition(input: unknown): ValidationResult {
 	if (input.acp !== undefined) {
 		if (!isRecord(input.acp)) {
 			errors.push('acp must be an object with a non-empty command string');
-		} else if (typeof input.acp.command !== 'string' || input.acp.command.length === 0) {
+		} else if (
+			typeof input.acp.command !== 'string' ||
+			input.acp.command.length === 0
+		) {
 			errors.push('acp.command must be a non-empty string');
 		}
 	}
@@ -107,7 +122,10 @@ export function validateDefinition(input: unknown): ValidationResult {
  * - `code/*` matches `code/react`.
  * - `code/**` matches `code/react/hooks`.
  */
-export function matchesTopic(patterns: readonly string[], topic: string): boolean {
+export function matchesTopic(
+	patterns: readonly string[],
+	topic: string,
+): boolean {
 	return picomatch.isMatch(topic, patterns as string[]);
 }
 
@@ -125,7 +143,11 @@ export async function saveDefinition(
 ): Promise<void> {
 	await mkdir(librariansDir, { recursive: true });
 	const filePath = join(librariansDir, `${definition.name}.json`);
-	await writeFile(filePath, JSON.stringify(definition, null, '\t') + '\n', 'utf-8');
+	await writeFile(
+		filePath,
+		JSON.stringify(definition, null, '\t') + '\n',
+		'utf-8',
+	);
 }
 
 /**

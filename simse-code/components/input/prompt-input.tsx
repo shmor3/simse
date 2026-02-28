@@ -216,9 +216,7 @@ export function PromptInput({
 					return;
 				}
 				if (key.downArrow) {
-					setSelectedIndex((i) =>
-						Math.min(atCandidates.length - 1, i + 1),
-					);
+					setSelectedIndex((i) => Math.min(atCandidates.length - 1, i + 1));
 					return;
 				}
 			}

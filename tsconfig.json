@@ -18,7 +18,8 @@
 		"resolveJsonModule": true,
 		"types": ["@types/bun"],
 		"paths": {
-			"simse-vector": ["./simse-vector/src/lib.ts"]
+			"simse-vector": ["./simse-vector/src/lib.ts"],
+			"simse-vfs": ["./simse-vfs/src/lib.ts"]
 		}
 	},
 	"include": ["src/**/*"],

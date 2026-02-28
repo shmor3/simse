@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
 import type { Library } from 'simse-vector';
+import { createVirtualFS } from 'simse-vfs';
 import type { TaskList } from '../src/ai/tasks/types.js';
 import {
 	registerLibraryTools,
@@ -8,7 +9,6 @@ import {
 } from '../src/ai/tools/builtin-tools.js';
 import { createToolRegistry } from '../src/ai/tools/tool-registry.js';
 import type { ToolRegistry } from '../src/ai/tools/types.js';
-import { createVirtualFS } from '../src/ai/vfs/index.js';
 import { createSilentLogger } from './utils/mocks.js';
 
 // ---------------------------------------------------------------------------

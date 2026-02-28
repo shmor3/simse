@@ -3,10 +3,11 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createVirtualFS } from '../src/ai/vfs/vfs.js';
-import { createVFSDisk } from '../src/ai/vfs/vfs-disk.js';
-import { isVFSError } from '../src/errors/vfs.js';
-import { createLogger, type Logger } from '../src/logger.js';
+import { isVFSError } from '../src/errors.js';
+import type { Logger } from '../src/logger.js';
+import { createNoopLogger } from '../src/logger.js';
+import { createVirtualFS } from '../src/vfs.js';
+import { createVFSDisk } from '../src/vfs-disk.js';
 import { expectGuardedThrow } from './utils/error-helpers';
 
 // ---------------------------------------------------------------------------
@@ -14,7 +15,7 @@ import { expectGuardedThrow } from './utils/error-helpers';
 // ---------------------------------------------------------------------------
 
 function createSilentLogger(): Logger {
-	return createLogger({ context: 'test', level: 'none', transports: [] });
+	return createNoopLogger();
 }
 
 let tempDir: string;

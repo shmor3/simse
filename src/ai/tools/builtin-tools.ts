@@ -6,9 +6,9 @@
 // ---------------------------------------------------------------------------
 
 import type { Library } from 'simse-vector';
+import type { VirtualFS } from 'simse-vfs';
 import { toError } from '../../errors/base.js';
 import type { TaskList } from '../tasks/types.js';
-import type { VirtualFS } from '../vfs/index.js';
 import type { ToolDefinition, ToolHandler, ToolRegistry } from './types.js';
 
 // ---------------------------------------------------------------------------

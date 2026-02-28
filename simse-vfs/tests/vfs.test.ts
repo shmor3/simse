@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { isVFSError } from '../src/errors.js';
+import type { Logger } from '../src/logger.js';
+import { createNoopLogger } from '../src/logger.js';
 import {
 	ancestorPaths,
 	baseName,
@@ -9,11 +12,9 @@ import {
 	VFS_ROOT,
 	VFS_SCHEME,
 	validatePath,
-} from '../src/ai/vfs/path-utils.js';
-import type { VirtualFS } from '../src/ai/vfs/vfs.js';
-import { createVirtualFS } from '../src/ai/vfs/vfs.js';
-import { isVFSError } from '../src/errors/vfs.js';
-import { createLogger, type Logger } from '../src/logger.js';
+} from '../src/path-utils.js';
+import type { VirtualFS } from '../src/vfs.js';
+import { createVirtualFS } from '../src/vfs.js';
 import { expectGuardedThrow } from './utils/error-helpers';
 
 // ---------------------------------------------------------------------------
@@ -21,7 +22,7 @@ import { expectGuardedThrow } from './utils/error-helpers';
 // ---------------------------------------------------------------------------
 
 function createSilentLogger(): Logger {
-	return createLogger({ context: 'test', level: 'none', transports: [] });
+	return createNoopLogger();
 }
 
 function createFS(

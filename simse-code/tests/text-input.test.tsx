@@ -276,6 +276,22 @@ describe('Home/End navigation', () => {
 	});
 });
 
+describe('selection rendering', () => {
+	test('selected text is still visible after Ctrl+A', async () => {
+		const { lastFrame, stdin } = render(<SelectionHarness />);
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Select all with Ctrl+A
+		stdin.write('\x01');
+		await new Promise((r) => setTimeout(r, 50));
+
+		const frame = lastFrame() ?? '';
+		// Text should still be present (rendered with highlight)
+		expect(frame).toContain('hello');
+		expect(frame).toContain('world');
+	});
+});
+
 describe('word boundary helpers', () => {
 	test('findWordBoundaryLeft from middle of word', () => {
 		expect(findWordBoundaryLeft('hello world', 8)).toBe(6);

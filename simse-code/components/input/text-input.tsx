@@ -4,6 +4,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 const IS_MAC = process.platform === 'darwin';
 
+/** Render a single character with cursor or selection highlight. */
+function renderChar(ch: string, isCursor: boolean, isSelected: boolean): string {
+	if (isCursor) return chalk.inverse(ch);
+	if (isSelected) return chalk.bgCyan.black(ch);
+	return ch;
+}
+
 /** Scan left to find the start of the previous word. */
 export function findWordBoundaryLeft(text: string, pos: number): number {
 	let i = pos;
@@ -451,15 +458,26 @@ export function TextInput({
 
 	// Single-line fast path
 	if (!value.includes('\n')) {
+		const selStart =
+			selectionAnchor !== null
+				? Math.min(selectionAnchor, cursorOffset)
+				: -1;
+		const selEnd =
+			selectionAnchor !== null
+				? Math.max(selectionAnchor, cursorOffset)
+				: -1;
 		let rendered = '';
 		for (let i = 0; i < value.length; i++) {
 			const ch = value[i] ?? '';
-			rendered += i === cursorOffset ? chalk.inverse(ch) : ch;
+			const isCursor = i === cursorOffset;
+			const isSelected =
+				selStart !== -1 && i >= selStart && i < selEnd;
+			rendered += renderChar(ch, isCursor, isSelected);
 		}
 		if (cursorOffset === value.length) {
 			rendered += chalk.inverse(' ');
-			// Show ghost suggestion after cursor when at end of input
-			if (suggestion) {
+			// Only show ghost suggestion when no selection is active
+			if (suggestion && selectionAnchor === null) {
 				rendered += chalk.gray(suggestion);
 			}
 		}
@@ -472,6 +490,14 @@ export function TextInput({
 		lines,
 		cursorOffset,
 	);
+	const selStart =
+		selectionAnchor !== null
+			? Math.min(selectionAnchor, cursorOffset)
+			: -1;
+	const selEnd =
+		selectionAnchor !== null
+			? Math.max(selectionAnchor, cursorOffset)
+			: -1;
 
 	return (
 		<Box flexDirection="column">
@@ -479,10 +505,22 @@ export function TextInput({
 				const isCursorLine = i === cursorLine;
 				const indent = i > 0 ? '  ' : '';
 
+				// Compute flat offset of the start of this line
+				let lineStartOffset = 0;
+				for (let li = 0; li < i; li++) {
+					lineStartOffset += (lines[li] ?? '').length + 1; // +1 for '\n'
+				}
+
 				let rendered = '';
 				for (let j = 0; j < line.length; j++) {
 					const ch = line[j] ?? '';
-					rendered += isCursorLine && j === cursorCol ? chalk.inverse(ch) : ch;
+					const flatOffset = lineStartOffset + j;
+					const isCursor = isCursorLine && j === cursorCol;
+					const isSelected =
+						selStart !== -1 &&
+						flatOffset >= selStart &&
+						flatOffset < selEnd;
+					rendered += renderChar(ch, isCursor, isSelected);
 				}
 				// Cursor at end of this line
 				if (isCursorLine && cursorCol === line.length) {

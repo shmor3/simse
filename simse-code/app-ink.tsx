@@ -32,6 +32,7 @@ import { createSetupCommands } from './features/config/setup.js';
 import { filesCommands } from './features/files/index.js';
 import { libraryCommands } from './features/library/index.js';
 import { createMetaCommands } from './features/meta/index.js';
+import type { MetaCommandContext } from './features/meta/index.js';
 import { sessionCommands } from './features/session/index.js';
 import { toolsCommands } from './features/tools/index.js';
 import { useAgenticLoop } from './hooks/use-agentic-loop.js';
@@ -179,9 +180,33 @@ export function App({
 		}
 	}, [dataDir]);
 
+	// Refs for meta command state access (commands are created once but execute later)
+	const verboseRef = useRef(verbose);
+	verboseRef.current = verbose;
+	const planModeRef = useRef(planMode);
+	planModeRef.current = planMode;
+	const bannerRef = useRef(bannerElement);
+
 	const registry = useMemo(() => {
 		const reg = createCommandRegistry();
-		const meta = createMetaCommands(() => reg.getAll());
+		const metaCtx: MetaCommandContext = {
+			getCommands: () => reg.getAll(),
+			setVerbose: (on) => setVerbose(on),
+			getVerbose: () => verboseRef.current,
+			setPlanMode: (on) => setPlanMode(on),
+			getPlanMode: () => planModeRef.current,
+			clearConversation: () => {
+				conversationRef.current.clear();
+				setItems([
+					{ kind: 'command-result', element: bannerRef.current },
+				]);
+			},
+			getContextUsage: () => ({
+				usedChars: conversationRef.current.estimatedChars,
+				maxChars: 200_000,
+			}),
+		};
+		const meta = createMetaCommands(metaCtx);
 		reg.registerAll(meta);
 		reg.registerAll(libraryCommands);
 		reg.registerAll(toolsCommands);

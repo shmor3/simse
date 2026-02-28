@@ -152,7 +152,7 @@ bootstrap()
 			hasACP,
 			permissionManager,
 		}) => {
-			render(
+			const inkInstance = render(
 				<App
 					dataDir={dataDir}
 					serverName={serverName}
@@ -165,6 +165,17 @@ bootstrap()
 				/>,
 				{ exitOnCtrlC: false },
 			);
+
+			// Work around Ink resize bug: Ink erases previous output by counting
+			// newline-delimited lines, but doesn't account for terminal line wrapping.
+			// When width changes, old rendered lines reflow into different row counts,
+			// so eraseLines() misses rows → ghost content accumulates.
+			// Fix: clear the visible screen before Ink's handler fires.
+			// Static (conversation) content remains in scrollback buffer.
+			process.stdout.prependListener('resize', () => {
+				inkInstance.clear();
+				process.stdout.write('\x1b[2J\x1b[H');
+			});
 		},
 	)
 	.catch((err) => {

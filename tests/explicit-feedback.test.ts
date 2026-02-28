@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { createLearningEngine } from '../src/ai/library/patron-learning.js';
+import { createLearningEngine } from 'simse-vector';
 
 describe('explicit relevance feedback', () => {
 	it('positive feedback boosts relevance score', () => {

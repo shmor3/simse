@@ -1,6 +1,6 @@
 export { aiCommands } from './ai/index.js';
 export type { InitCommandContext } from './config/index.js';
-export { createSettingsCommands, createInitCommands } from './config/index.js';
+export { createInitCommands, createSettingsCommands } from './config/index.js';
 export { filesCommands } from './files/index.js';
 export {
 	libraryCommands,

@@ -1,5 +1,6 @@
 use clap::Parser;
 
+/// Command-line arguments for the simse-engine ACP server.
 #[derive(Parser, Debug)]
 #[command(name = "simse-engine", about = "ACP-compatible ML inference server using Candle")]
 pub struct CliArgs {
@@ -19,6 +20,10 @@ pub struct CliArgs {
     /// Embedding model (HuggingFace repo ID or local path)
     #[arg(long, default_value = "nomic-ai/nomic-embed-text-v1.5", env = "SIMSE_ENGINE_EMBEDDING_MODEL")]
     pub embedding_model: String,
+
+    /// TEI server URL for remote embeddings (e.g., http://localhost:8080)
+    #[arg(long, env = "SIMSE_ENGINE_TEI_URL")]
+    pub tei_url: Option<String>,
 
     /// Device: "cpu", "cuda", "metal"
     #[arg(long, default_value = "cpu", env = "SIMSE_ENGINE_DEVICE")]
@@ -55,6 +60,10 @@ pub struct CliArgs {
     /// Disable streaming (send full response only)
     #[arg(long)]
     pub no_streaming: bool,
+
+    /// Generation timeout in seconds (wall-clock limit per request)
+    #[arg(long, default_value = "300", env = "SIMSE_ENGINE_GENERATION_TIMEOUT")]
+    pub generation_timeout: u64,
 
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, default_value = "info", env = "SIMSE_ENGINE_LOG_LEVEL")]

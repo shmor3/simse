@@ -1,15 +1,15 @@
-import { Box, Text, useInput } from 'ink';
 import { join } from 'node:path';
+import { Box, Text, useInput } from 'ink';
 import { useCallback, useEffect, useState } from 'react';
+import type {
+	ConfigFileSchema,
+	FieldSchema,
+} from '../../features/config/settings-schema.js';
 import {
 	getAllConfigSchemas,
 	loadConfigFile,
 	resolveFieldOptions,
 	saveConfigField,
-} from '../../features/config/settings-schema.js';
-import type {
-	ConfigFileSchema,
-	FieldSchema,
 } from '../../features/config/settings-schema.js';
 import {
 	buildPresetServer,
@@ -92,10 +92,7 @@ function buildDropdownOptions(
 /**
  * Find the index of the current value in dropdown options.
  */
-function findCurrentIndex(
-	value: unknown,
-	options: readonly string[],
-): number {
+function findCurrentIndex(value: unknown, options: readonly string[]): number {
 	if (value === undefined || value === null) {
 		const unsetIdx = options.indexOf('(unset)');
 		return unsetIdx >= 0 ? unsetIdx : 0;
@@ -155,9 +152,7 @@ export function SettingsExplorer({
 	const [savedKey, setSavedKey] = useState<string | null>(null);
 
 	// Dropdown state
-	const [dropdownOptions, setDropdownOptions] = useState<readonly string[]>(
-		[],
-	);
+	const [dropdownOptions, setDropdownOptions] = useState<readonly string[]>([]);
 	const [dropdownIndex, setDropdownIndex] = useState(0);
 
 	const selectedSchema = schemas[fileIndex] as ConfigFileSchema | undefined;
@@ -201,9 +196,7 @@ export function SettingsExplorer({
 				return;
 			}
 			if (key.downArrow) {
-				setFileIndex((prev) =>
-					prev < schemas.length - 1 ? prev + 1 : prev,
-				);
+				setFileIndex((prev) => (prev < schemas.length - 1 ? prev + 1 : prev));
 				return;
 			}
 			if (key.return || key.rightArrow) {
@@ -234,9 +227,7 @@ export function SettingsExplorer({
 				return;
 			}
 			if (key.downArrow) {
-				setFieldIndex((prev) =>
-					prev < fields.length - 1 ? prev + 1 : prev,
-				);
+				setFieldIndex((prev) => (prev < fields.length - 1 ? prev + 1 : prev));
 				return;
 			}
 			if (key.return) {
@@ -247,18 +238,14 @@ export function SettingsExplorer({
 				if (options.length > 0) {
 					// Open dropdown selector for any field with options
 					setDropdownOptions(options);
-					setDropdownIndex(
-						findCurrentIndex(fileData[field.key], options),
-					);
+					setDropdownIndex(findCurrentIndex(fileData[field.key], options));
 					setEditMode('selecting');
 					return;
 				}
 				// Fallback: plain text input for fields without dropdown options
 				const current = fileData[field.key];
 				setEditValue(
-					current !== undefined && current !== null
-						? String(current)
-						: '',
+					current !== undefined && current !== null ? String(current) : '',
 				);
 				setEditMode('text-input');
 			}
@@ -295,9 +282,7 @@ export function SettingsExplorer({
 				) {
 					const current = fileData[field.key];
 					setEditValue(
-						current !== undefined && current !== null
-							? String(current)
-							: '',
+						current !== undefined && current !== null ? String(current) : '',
 					);
 					setEditMode('text-input');
 					return;
@@ -403,10 +388,7 @@ export function SettingsExplorer({
 							<Text color={isSelected ? 'cyan' : undefined}>
 								{isSelected ? '  \u276F ' : '    '}
 							</Text>
-							<Text
-								bold={isSelected}
-								color={isSelected ? 'cyan' : undefined}
-							>
+							<Text bold={isSelected} color={isSelected ? 'cyan' : undefined}>
 								{schema.filename.padEnd(22)}
 							</Text>
 							<Text dimColor>{schema.description}</Text>
@@ -446,28 +428,17 @@ export function SettingsExplorer({
 					{fields.map((field, i) => {
 						const isSelected = i === fieldIndex;
 						const value = fileData[field.key];
-						const isTextEditing =
-							isSelected && editMode === 'text-input';
-						const isDropdownOpen =
-							isSelected && editMode === 'selecting';
+						const isTextEditing = isSelected && editMode === 'text-input';
+						const isDropdownOpen = isSelected && editMode === 'selecting';
 						const isSaved = savedKey === field.key;
 
 						return (
 							<Box key={field.key} flexDirection="column">
 								<Box>
-									<Text
-										color={
-											isSelected ? 'cyan' : undefined
-										}
-									>
+									<Text color={isSelected ? 'cyan' : undefined}>
 										{isSelected ? '  \u276F ' : '    '}
 									</Text>
-									<Text
-										bold={isSelected}
-										color={
-											isSelected ? 'cyan' : undefined
-										}
-									>
+									<Text bold={isSelected} color={isSelected ? 'cyan' : undefined}>
 										{field.key}
 										{': '}
 									</Text>
@@ -476,24 +447,13 @@ export function SettingsExplorer({
 											value={editValue}
 											onChange={setEditValue}
 											onSubmit={handleEditSubmit}
-											placeholder={
-												field.type === 'number'
-													? 'number'
-													: 'value'
-											}
+											placeholder={field.type === 'number' ? 'number' : 'value'}
 										/>
 									) : (
 										<>
 											<Text
-												dimColor={
-													value === undefined ||
-													value === null
-												}
-												color={
-													isSelected
-														? 'cyan'
-														: undefined
-												}
+												dimColor={value === undefined || value === null}
+												color={isSelected ? 'cyan' : undefined}
 											>
 												{formatValue(value)}
 											</Text>
@@ -503,56 +463,28 @@ export function SettingsExplorer({
 													{field.description}
 												</Text>
 											)}
-											{isSaved && (
-												<Text color="green">
-													{' Saved'}
-												</Text>
-											)}
+											{isSaved && <Text color="green">{' Saved'}</Text>}
 										</>
 									)}
 								</Box>
-								{/* Inline dropdown for enum/boolean fields */}
+								{/* Inline dropdown for fields with options */}
 								{isDropdownOpen && (
-									<Box
-										flexDirection="column"
-										paddingLeft={6}
-										marginBottom={0}
-									>
+									<Box flexDirection="column" paddingLeft={6} marginBottom={0}>
 										{dropdownOptions.map((opt, oi) => {
-											const isOptSelected =
-												oi === dropdownIndex;
+											const isOptSelected = oi === dropdownIndex;
 											return (
 												<Box key={opt}>
-													<Text
-														color={
-															isOptSelected
-																? 'cyan'
-																: undefined
-														}
-													>
-														{isOptSelected
-															? '\u276F '
-															: '  '}
+													<Text color={isOptSelected ? 'cyan' : undefined}>
+														{isOptSelected ? '\u276F ' : '  '}
 													</Text>
 													<Text
 														bold={isOptSelected}
-														color={
-															isOptSelected
-																? 'cyan'
-																: undefined
-														}
-														dimColor={
-															opt ===
-																'(unset)' &&
-															!isOptSelected
-														}
+														color={isOptSelected ? 'cyan' : undefined}
+														dimColor={opt === '(unset)' && !isOptSelected}
 														italic={
-															opt ===
-																'Custom value...' ||
-															opt ===
-																'Custom model...' ||
-															opt ===
-																'Add new server...'
+															opt === 'Custom value...' ||
+															opt === 'Custom model...' ||
+															opt === 'Add new server...'
 														}
 													>
 														{opt}
@@ -567,22 +499,16 @@ export function SettingsExplorer({
 					})}
 					<Text> </Text>
 					{editMode === 'text-input' && (
-						<Text dimColor>
-							{'  \u21B5 save  esc cancel'}
-						</Text>
+						<Text dimColor>{'  \u21B5 save  esc cancel'}</Text>
 					)}
 					{editMode === 'selecting' && (
 						<Text dimColor>
-							{
-								'  \u2191\u2193 navigate  \u21B5 select  esc cancel'
-							}
+							{'  \u2191\u2193 navigate  \u21B5 select  esc cancel'}
 						</Text>
 					)}
 					{editMode === 'none' && (
 						<Text dimColor>
-							{
-								'  \u2191\u2193 navigate  \u21B5 edit  \u2190/esc back'
-							}
+							{'  \u2191\u2193 navigate  \u21B5 edit  \u2190/esc back'}
 						</Text>
 					)}
 				</>

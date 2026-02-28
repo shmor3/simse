@@ -84,34 +84,31 @@ export function OllamaWizard({
 	// Connection test
 	// -----------------------------------------------------------------------
 
-	const runConnectionTest = useCallback(
-		(targetUrl: string) => {
-			setStep('testing');
-			setSpinnerFrame(0);
+	const runConnectionTest = useCallback((targetUrl: string) => {
+		setStep('testing');
+		setSpinnerFrame(0);
 
-			(async () => {
-				const result = await testOllamaConnection(targetUrl);
+		(async () => {
+			const result = await testOllamaConnection(targetUrl);
 
-				if (!result.ok) {
-					setErrorMessage(result.error);
-					setFailOptionIndex(0);
-					setStep('test-failed');
-					return;
-				}
+			if (!result.ok) {
+				setErrorMessage(result.error);
+				setFailOptionIndex(0);
+				setStep('test-failed');
+				return;
+			}
 
-				const discovered = await listOllamaModels(targetUrl);
+			const discovered = await listOllamaModels(targetUrl);
 
-				if (discovered.length > 0) {
-					setModels(discovered);
-					setSelectedIndex(0);
-					setStep('model-select');
-				} else {
-					setStep('model-manual');
-				}
-			})();
-		},
-		[],
-	);
+			if (discovered.length > 0) {
+				setModels(discovered);
+				setSelectedIndex(0);
+				setStep('model-select');
+			} else {
+				setStep('model-manual');
+			}
+		})();
+	}, []);
 
 	// -----------------------------------------------------------------------
 	// Input handlers per step
@@ -260,10 +257,7 @@ export function OllamaWizard({
 							<Text color={isSelected ? 'cyan' : undefined}>
 								{isSelected ? '\u276F ' : '  '}
 							</Text>
-							<Text
-								bold={isSelected}
-								color={isSelected ? 'cyan' : undefined}
-							>
+							<Text bold={isSelected} color={isSelected ? 'cyan' : undefined}>
 								{option}
 							</Text>
 						</Box>
@@ -289,10 +283,7 @@ export function OllamaWizard({
 							<Text color={isSelected ? 'cyan' : undefined}>
 								{isSelected ? '\u276F ' : '  '}
 							</Text>
-							<Text
-								bold={isSelected}
-								color={isSelected ? 'cyan' : undefined}
-							>
+							<Text bold={isSelected} color={isSelected ? 'cyan' : undefined}>
 								{model.name}
 							</Text>
 							<Text dimColor> ({model.size})</Text>

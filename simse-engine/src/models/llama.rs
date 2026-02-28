@@ -10,6 +10,9 @@ use super::tokenizer::TokenOutputStream;
 use super::{GenerationResult, ModelConfig, SamplingParams, TextGenerator};
 use super::weights;
 
+/// Maximum model file size (10 GB).
+const MAX_MODEL_FILE_SIZE: u64 = 10 * 1024 * 1024 * 1024;
+
 /// Llama text generation model using quantized GGUF weights via Candle.
 pub struct LlamaGenerator {
     model: ModelWeights,
@@ -22,6 +25,16 @@ impl LlamaGenerator {
     /// Load from a local GGUF file.
     pub fn from_gguf(model_path: &Path, tokenizer: Tokenizer, device: &Device) -> Result<Self> {
         tracing::info!(path = %model_path.display(), "Loading GGUF model");
+
+        let metadata = std::fs::metadata(model_path)
+            .map_err(|e| anyhow::anyhow!("Cannot stat model file '{}': {}", model_path.display(), e))?;
+        if metadata.len() > MAX_MODEL_FILE_SIZE {
+            anyhow::bail!(
+                "Model file too large: {} MB (max {} MB). Use a smaller quantization.",
+                metadata.len() / (1024 * 1024),
+                MAX_MODEL_FILE_SIZE / (1024 * 1024)
+            );
+        }
 
         let mut file = std::fs::File::open(model_path)?;
         let model_content = candle_core::quantized::gguf_file::Content::read(&mut file)?;
@@ -139,10 +152,33 @@ impl TextGenerator for LlamaGenerator {
             on_token(&text);
         }
 
-        // Continue generating
-        let eos_reached = next_token == self.eos_token_id.unwrap_or(u32::MAX);
+        // Continue generating with wall-clock timeout
+        let mut eos_reached = next_token == self.eos_token_id.unwrap_or(u32::MAX);
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(params.generation_timeout_secs);
+        let mut stop_reason = if eos_reached { "end_turn" } else { "max_tokens" };
+
+        // Check stop sequences after first token
+        let mut hit_stop = false;
+        for seq in &params.stop_sequences {
+            if full_text.ends_with(seq) {
+                full_text.truncate(full_text.len() - seq.len());
+                hit_stop = true;
+                break;
+            }
+        }
+        if hit_stop {
+            eos_reached = true;
+            stop_reason = "stop_sequence";
+        }
 
         while !eos_reached && (generated_count as usize) < params.max_tokens {
+            if start.elapsed() > timeout {
+                tracing::warn!(elapsed = ?start.elapsed(), "Generation timeout reached");
+                stop_reason = "timeout";
+                break;
+            }
+
             let input = Tensor::new(&[next_token], &self.device)?.unsqueeze(0)?;
             let logits = self.model.forward(&input, prompt_tokens.len() + generated_count as usize - 1)?;
             let logits = logits.squeeze(0)?.squeeze(0)?;
@@ -162,27 +198,25 @@ impl TextGenerator for LlamaGenerator {
 
             // Check EOS
             if Some(next_token) == self.eos_token_id {
+                stop_reason = "end_turn";
                 break;
             }
 
-            // Check stop sequences
             if let Some(text) = token_stream.next_token(next_token)? {
                 full_text.push_str(&text);
 
-                // Check if any stop sequence is present
-                let should_stop = params
-                    .stop_sequences
-                    .iter()
-                    .any(|seq| full_text.contains(seq));
-
-                if should_stop {
-                    // Trim the stop sequence from output
-                    for seq in &params.stop_sequences {
-                        if let Some(pos) = full_text.find(seq) {
-                            full_text.truncate(pos);
-                        }
+                // Check stop sequences after each token
+                let mut hit_stop = false;
+                for seq in &params.stop_sequences {
+                    if full_text.ends_with(seq) {
+                        full_text.truncate(full_text.len() - seq.len());
+                        hit_stop = true;
+                        break;
                     }
+                }
+                if hit_stop {
                     on_token(&text);
+                    stop_reason = "stop_sequence";
                     break;
                 }
 
@@ -206,6 +240,7 @@ impl TextGenerator for LlamaGenerator {
             full_text,
             prompt_tokens: prompt_token_count,
             completion_tokens: generated_count,
+            stop_reason: stop_reason.to_string(),
         })
     }
 

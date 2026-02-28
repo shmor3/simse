@@ -2,11 +2,11 @@
 // Tool Registry Types
 // ---------------------------------------------------------------------------
 
+import type { Library } from 'simse-vector';
+import type { VirtualFS } from 'simse-vfs';
 import type { EventBus } from '../../events/types.js';
 import type { Logger } from '../../logger.js';
-import type { Library } from '../library/library.js';
 import type { MCPClient } from '../mcp/mcp-client.js';
-import type { VirtualFS } from '../vfs/index.js';
 
 // ---------------------------------------------------------------------------
 // Tool Definitions

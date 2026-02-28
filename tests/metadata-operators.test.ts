@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { matchesMetadataFilter } from '../src/ai/library/text-search.js';
-import type { MetadataFilter } from '../src/ai/library/types.js';
+import type { MetadataFilter } from 'simse-vector';
+import { matchesMetadataFilter } from 'simse-vector';
 
 describe('new metadata operators', () => {
 	it('gt: matches when value is greater', () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { createTextCache } from '../src/ai/library/text-cache.js';
+import { createTextCache } from 'simse-vector';
 
 describe('createTextCache', () => {
 	it('returns a frozen object', () => {

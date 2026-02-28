@@ -4,7 +4,7 @@ import {
 	frequencyScore,
 	normalizeWeights,
 	recencyScore,
-} from '../src/ai/library/recommendation.js';
+} from 'simse-vector';
 
 // ---------------------------------------------------------------------------
 // normalizeWeights

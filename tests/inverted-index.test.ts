@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import {
-	createInvertedIndex,
-	tokenizeForIndex,
-} from '../src/ai/library/inverted-index.js';
-import type { Volume } from '../src/ai/library/types.js';
+import type { Volume } from 'simse-vector';
+import { createInvertedIndex, tokenizeForIndex } from 'simse-vector';
 
 function makeEntry(id: string, text: string): Volume {
 	return {

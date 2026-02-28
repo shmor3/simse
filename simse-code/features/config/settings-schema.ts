@@ -222,8 +222,7 @@ const settingsJsonSchema: ConfigFileSchema = Object.freeze({
 		Object.freeze({
 			key: 'chainTopic',
 			type: 'string' as FieldType,
-			description:
-				'Topic name used when storing chain results in the library',
+			description: 'Topic name used when storing chain results in the library',
 		}),
 	]),
 });
@@ -362,7 +361,11 @@ export function loadConfigFile(
 		if (!existsSync(filePath)) return {};
 		const raw = readFileSync(filePath, 'utf-8');
 		const parsed = JSON.parse(raw);
-		if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+		if (
+			typeof parsed === 'object' &&
+			parsed !== null &&
+			!Array.isArray(parsed)
+		) {
 			return parsed as Record<string, unknown>;
 		}
 		return {};

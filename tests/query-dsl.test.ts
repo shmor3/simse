@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { parseQuery } from '../src/ai/library/query-dsl.js';
+import { parseQuery } from 'simse-vector';
 
 describe('query DSL parser', () => {
 	it('parses plain text as BM25 query', () => {

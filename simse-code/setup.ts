@@ -16,8 +16,8 @@ import type {
 	SummarizeFileConfig,
 } from './config.js';
 import {
-	testOllamaConnection,
 	listOllamaModels,
+	testOllamaConnection,
 } from './features/config/ollama-test.js';
 
 // ---------------------------------------------------------------------------
@@ -204,18 +204,14 @@ const presets: readonly Preset[] = [
 			// URL + connection test loop
 			while (true) {
 				url =
-					(await askOptional(
-						rl,
-						'  Ollama URL [http://127.0.0.1:11434]: ',
-					)) ?? 'http://127.0.0.1:11434';
+					(await askOptional(rl, '  Ollama URL [http://127.0.0.1:11434]: ')) ??
+					'http://127.0.0.1:11434';
 
 				console.log(`\n  Testing connection to ${url}...`);
 				const result = await testOllamaConnection(url);
 
 				if (result.ok) {
-					const versionInfo = result.version
-						? ` (v${result.version})`
-						: '';
+					const versionInfo = result.version ? ` (v${result.version})` : '';
 					console.log(`  Connected to Ollama${versionInfo}\n`);
 					connected = true;
 					break;
@@ -244,13 +240,9 @@ const presets: readonly Preset[] = [
 				if (models.length > 0) {
 					console.log('  Available models:\n');
 					for (let i = 0; i < models.length; i++) {
-						console.log(
-							`    ${i + 1}) ${models[i].name}  (${models[i].size})`,
-						);
+						console.log(`    ${i + 1}) ${models[i].name}  (${models[i].size})`);
 					}
-					console.log(
-						`    ${models.length + 1}) Enter custom model name\n`,
-					);
+					console.log(`    ${models.length + 1}) Enter custom model name\n`);
 
 					let modelChoice = -1;
 					const maxChoice = models.length + 1;
@@ -266,20 +258,14 @@ const presets: readonly Preset[] = [
 						model = models[modelChoice - 1].name;
 					} else {
 						model =
-							(await askOptional(
-								rl,
-								'  Model name [llama3.2]: ',
-							)) ?? 'llama3.2';
+							(await askOptional(rl, '  Model name [llama3.2]: ')) ??
+							'llama3.2';
 					}
 				} else {
-					model =
-						(await askOptional(rl, '  Model [llama3.2]: ')) ??
-						'llama3.2';
+					model = (await askOptional(rl, '  Model [llama3.2]: ')) ?? 'llama3.2';
 				}
 			} else {
-				model =
-					(await askOptional(rl, '  Model [llama3.2]: ')) ??
-					'llama3.2';
+				model = (await askOptional(rl, '  Model [llama3.2]: ')) ?? 'llama3.2';
 			}
 
 			return {

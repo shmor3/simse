@@ -6,6 +6,285 @@
 // need to configure, build, and run chains programmatically.
 // ---------------------------------------------------------------------------
 
+// ---- Library / Vector Store (from simse-vector) ----------------------------
+export type {
+	// Stacks serialization
+	AccessStats,
+	// Types
+	AdvancedLookup,
+	ArbitrationResult,
+	// Inverted index
+	BM25Options,
+	BM25Result,
+	CirculationDesk,
+	// Circulation desk
+	CirculationDeskOptions,
+	CirculationDeskThresholds,
+	ClassificationResult,
+	CompendiumOptions,
+	CompendiumResult,
+	// Preservation
+	CompressionOptions,
+	// Stacks persistence
+	CorrelatedPair,
+	CorrelationEntry,
+	DateRange,
+	DeserializedData,
+	// Librarian registry
+	DisposableConnection,
+	DuplicateCheckResult,
+	DuplicateVolumes,
+	EmbeddingProvider,
+	ExplicitFeedbackEntry,
+	ExtractionMemory,
+	ExtractionResult,
+	FeedbackEntry,
+	// Text search
+	FuzzyScoreOptions,
+	FuzzyScoreWeights,
+	IndexEntry,
+	IndexFile,
+	InvertedIndex,
+	// Patron learning
+	LearningEngine,
+	LearningOptions,
+	LearningState,
+	Librarian,
+	LibrarianBid,
+	LibrarianDefinition,
+	LibrarianLibraryAccess,
+	// Librarian
+	LibrarianOptions,
+	LibrarianRegistry,
+	LibrarianRegistryOptions,
+	// Library
+	Library,
+	LibraryConfig,
+	// Library services
+	LibraryContext,
+	LibraryOptions,
+	LibraryServices,
+	LibraryServicesOptions,
+	Lookup,
+	// Cataloging
+	MagnitudeCache,
+	ManagedLibrarian,
+	MetadataFilter,
+	MetadataIndex,
+	MetadataMatchMode,
+	OptimizationResult,
+	// Query DSL
+	ParsedQuery,
+	PatronProfile,
+	// Prompt injection
+	PromptInjectionOptions,
+	QueryRecord,
+	// Recommendation
+	RecencyOptions,
+	Recommendation,
+	RecommendationScoreInput,
+	RecommendationScoreResult,
+	RecommendOptions,
+	RelatedTopic,
+	RelevanceFeedback,
+	ReorganizationPlan,
+	SearchOptions,
+	SerializedData,
+	SerializedQueryRecord,
+	Shelf,
+	// Stacks
+	Stacks,
+	StacksOptions,
+	// Stacks search
+	StacksSearchConfig,
+	// Storage
+	StorageBackend,
+	// Text cache
+	TextCache,
+	TextCacheOptions,
+	TextGenerationProvider,
+	TextLookup,
+	TextSearchMode,
+	TextSearchOptions,
+	TopicCatalog,
+	// Topic catalog
+	TopicCatalogOptions,
+	TopicCatalogSection,
+	TopicIndex,
+	TopicIndexOptions,
+	TopicInfo,
+	TopicProfileEntry,
+	TurnContext,
+	// Librarian definition
+	ValidationResult as LibrarianValidationResult,
+	// Errors (vector-specific types)
+	VectorError,
+	VectorErrorOptions,
+	Volume,
+	WeightProfile,
+} from 'simse-vector';
+export {
+	// Stacks search
+	advancedStacksSearch,
+	// Deduplication
+	checkDuplicate,
+	// Preservation
+	compressText,
+	// Cataloging
+	computeMagnitude,
+	// Recommendation
+	computeRecommendationScore,
+	// Stacks recommendation
+	computeRecommendations,
+	// Cosine similarity
+	cosineSimilarity,
+	// Circulation desk
+	createCirculationDesk,
+	// Librarian
+	createDefaultLibrarian,
+	// Errors (library errors from simse-vector)
+	createEmbeddingError,
+	// Inverted index
+	createInvertedIndex,
+	// Patron learning
+	createLearningEngine,
+	createLibrarian,
+	// Librarian registry
+	createLibrarianRegistry,
+	// Library
+	createLibrary,
+	createLibraryError,
+	// Library services
+	createLibraryServices,
+	createMagnitudeCache,
+	createMetadataIndex,
+	createNoopLogger,
+	// Shelf
+	createShelf,
+	// Stacks
+	createStacks,
+	createStacksCorruptionError,
+	createStacksError,
+	createStacksIOError,
+	// Text cache
+	createTextCache,
+	// Topic catalog
+	createTopicCatalog,
+	createTopicIndex,
+	createVectorError,
+	decodeEmbedding,
+	decompressText,
+	// Stacks serialization
+	deserializeEntry,
+	deserializeFromStorage,
+	encodeEmbedding,
+	filterVolumesByDateRange,
+	filterVolumesByMetadata,
+	findDuplicateVolumes,
+	// Prompt injection
+	formatMemoryContext,
+	frequencyScore,
+	// Text search
+	fuzzyScore,
+	isEmbeddingError,
+	isGzipped,
+	isLibraryError,
+	isStacksCorruptionError,
+	isStacksError,
+	isStacksIOError,
+	// Stacks persistence
+	isValidIndexEntry,
+	isValidIndexFile,
+	isValidLearningState,
+	isVectorError,
+	LEARNING_KEY,
+	levenshteinDistance,
+	levenshteinSimilarity,
+	// Librarian definition
+	loadAllDefinitions,
+	loadDefinition,
+	matchesAllMetadataFilters,
+	matchesMetadataFilter,
+	matchesTopic,
+	ngramSimilarity,
+	ngrams,
+	normalizeWeights,
+	// Query DSL
+	parseQuery,
+	recencyScore,
+	saveDefinition,
+	serializeEntry,
+	serializeToStorage,
+	stacksSearch,
+	textSearchVolumes,
+	tokenize,
+	tokenizeForIndex,
+	tokenOverlapScore,
+	validateDefinition,
+} from 'simse-vector';
+// ---- Virtual Filesystem (from simse-vfs) ----------------------------------
+export type {
+	VFSCommitOperation,
+	VFSCommitOptions,
+	VFSCommitResult,
+	VFSContentType,
+	VFSCopyOptions,
+	VFSDeleteOptions,
+	VFSDiffHunk,
+	VFSDiffLine,
+	VFSDiffOptions,
+	VFSDiffResult,
+	VFSDirEntry,
+	VFSDisk,
+	VFSDiskOptions,
+	VFSError,
+	VFSErrorOptions,
+	VFSHistoryEntry,
+	VFSHistoryOptions,
+	VFSLimits,
+	VFSLoadOptions,
+	VFSMkdirOptions,
+	VFSNodeType,
+	VFSReaddirOptions,
+	VFSReadResult,
+	VFSSearchOptions,
+	VFSSearchResult,
+	VFSSnapshot,
+	VFSSnapshotDirectory,
+	VFSSnapshotFile,
+	VFSStat,
+	VFSValidationIssue,
+	VFSValidationResult,
+	VFSValidator,
+	VFSWriteEvent,
+	VFSWriteOptions,
+	VirtualFS,
+	VirtualFSOptions,
+} from 'simse-vfs';
+export {
+	ancestorPaths,
+	baseName,
+	createDefaultValidators,
+	createEmptyFileValidator,
+	createJSONSyntaxValidator,
+	createMissingTrailingNewlineValidator,
+	createMixedIndentationValidator,
+	createMixedLineEndingsValidator,
+	createTrailingWhitespaceValidator,
+	createVFSDisk,
+	createVFSError,
+	createVirtualFS,
+	isVFSError,
+	normalizePath,
+	parentPath,
+	pathDepth,
+	toLocalPath,
+	VFS_ROOT,
+	VFS_SCHEME,
+	validatePath,
+	validateSegment,
+	validateSnapshot,
+} from 'simse-vfs';
 export type {
 	ACPEmbedderOptions,
 	ACPGeneratorOptions,
@@ -33,10 +312,6 @@ export {
 	extractToolCall,
 	extractToolCallUpdate,
 } from './ai/acp/acp-results.js';
-export type { LocalEmbedderOptions } from './ai/acp/local-embedder.js';
-export { createLocalEmbedder } from './ai/acp/local-embedder.js';
-export type { TEIEmbedderOptions } from './ai/acp/tei-bridge.js';
-export { createTEIEmbedder } from './ai/acp/tei-bridge.js';
 export type {
 	ACPAgentCapabilities,
 	ACPAgentInfo,
@@ -124,112 +399,6 @@ export {
 	createContextPruner,
 	createConversation,
 } from './ai/conversation/index.js';
-export type { TopicIndexOptions } from './ai/library/cataloging.js';
-export type { CirculationDeskOptions } from './ai/library/circulation-desk.js';
-export { createCirculationDesk } from './ai/library/circulation-desk.js';
-export { cosineSimilarity } from './ai/library/cosine.js';
-export type {
-	BM25Options,
-	BM25Result,
-	InvertedIndex,
-} from './ai/library/inverted-index.js';
-export {
-	createInvertedIndex,
-	tokenizeForIndex,
-} from './ai/library/inverted-index.js';
-export {
-	createDefaultLibrarian,
-	createLibrarian,
-} from './ai/library/librarian.js';
-export type {
-	Library,
-	LibraryOptions,
-} from './ai/library/library.js';
-export { createLibrary } from './ai/library/library.js';
-export type {
-	LibraryContext,
-	LibraryServices,
-	LibraryServicesOptions,
-} from './ai/library/library-services.js';
-export { createLibraryServices } from './ai/library/library-services.js';
-export type { LearningEngine } from './ai/library/patron-learning.js';
-export { createLearningEngine } from './ai/library/patron-learning.js';
-// ---- Library (was Memory / Vector Store) -----------------------------------
-export type { CompressionOptions } from './ai/library/preservation.js';
-export type { PromptInjectionOptions } from './ai/library/prompt-injection.js';
-export { formatMemoryContext } from './ai/library/prompt-injection.js';
-export type { ParsedQuery } from './ai/library/query-dsl.js';
-export { parseQuery } from './ai/library/query-dsl.js';
-export type { RecencyOptions } from './ai/library/recommendation.js';
-export { createShelf } from './ai/library/shelf.js';
-export type {
-	Stacks,
-	StacksOptions,
-} from './ai/library/stacks.js';
-export { createStacks } from './ai/library/stacks.js';
-export { computeRecommendations } from './ai/library/stacks-recommend.js';
-export type { StacksSearchConfig } from './ai/library/stacks-search.js';
-export {
-	advancedStacksSearch,
-	filterVolumesByDateRange,
-	filterVolumesByMetadata,
-	stacksSearch,
-	textSearchVolumes,
-} from './ai/library/stacks-search.js';
-export type {
-	AccessStats,
-	DeserializedData,
-	SerializedData,
-} from './ai/library/stacks-serialize.js';
-export {
-	deserializeFromStorage,
-	serializeToStorage,
-} from './ai/library/stacks-serialize.js';
-export type { StorageBackend } from './ai/library/storage.js';
-export type { TextCache, TextCacheOptions } from './ai/library/text-cache.js';
-export { createTextCache } from './ai/library/text-cache.js';
-export type { TopicCatalogOptions } from './ai/library/topic-catalog.js';
-export { createTopicCatalog } from './ai/library/topic-catalog.js';
-export type {
-	AdvancedLookup,
-	CirculationDesk,
-	CirculationDeskThresholds,
-	ClassificationResult,
-	CompendiumOptions,
-	CompendiumResult,
-	DateRange,
-	DuplicateCheckResult,
-	DuplicateVolumes,
-	EmbeddingProvider,
-	ExtractionMemory,
-	ExtractionResult,
-	LearningOptions,
-	Librarian,
-	LibraryConfig,
-	Lookup,
-	MetadataFilter,
-	MetadataMatchMode,
-	OptimizationResult,
-	PatronProfile,
-	QueryRecord,
-	Recommendation,
-	RecommendOptions,
-	RelatedTopic,
-	RelevanceFeedback,
-	ReorganizationPlan,
-	SearchOptions,
-	Shelf,
-	TextGenerationProvider,
-	TextLookup,
-	TextSearchMode,
-	TextSearchOptions,
-	TopicCatalog,
-	TopicCatalogSection,
-	TopicInfo,
-	TurnContext,
-	Volume,
-	WeightProfile,
-} from './ai/library/types.js';
 // ---- Agentic Loop ---------------------------------------------------------
 export type {
 	AgenticLoop,
@@ -341,55 +510,6 @@ export type {
 	ToolPermissionRule,
 } from './ai/tools/permissions.js';
 export { createToolPermissionResolver } from './ai/tools/permissions.js';
-// ---- Virtual Filesystem ---------------------------------------------------
-export type {
-	VFSCommitOperation,
-	VFSCommitOptions,
-	VFSCommitResult,
-	VFSContentType,
-	VFSCopyOptions,
-	VFSDeleteOptions,
-	VFSDiffHunk,
-	VFSDiffLine,
-	VFSDiffOptions,
-	VFSDiffResult,
-	VFSDirEntry,
-	VFSDisk,
-	VFSDiskOptions,
-	VFSHistoryEntry,
-	VFSHistoryOptions,
-	VFSLimits,
-	VFSLoadOptions,
-	VFSMkdirOptions,
-	VFSNodeType,
-	VFSReaddirOptions,
-	VFSReadResult,
-	VFSSearchOptions,
-	VFSSearchResult,
-	VFSSnapshot,
-	VFSSnapshotDirectory,
-	VFSSnapshotFile,
-	VFSStat,
-	VFSValidationIssue,
-	VFSValidationResult,
-	VFSValidator,
-	VFSWriteEvent,
-	VFSWriteOptions,
-	VirtualFS,
-	VirtualFSOptions,
-} from './ai/vfs/index.js';
-export {
-	createDefaultValidators,
-	createEmptyFileValidator,
-	createJSONSyntaxValidator,
-	createMissingTrailingNewlineValidator,
-	createMixedIndentationValidator,
-	createMixedLineEndingsValidator,
-	createTrailingWhitespaceValidator,
-	createVFSDisk,
-	createVirtualFS,
-	validateSnapshot,
-} from './ai/vfs/index.js';
 // ---- Configuration --------------------------------------------------------
 export type {
 	ACPServerInput,
@@ -416,9 +536,6 @@ export {
 	createConfigNotFoundError,
 	createConfigParseError,
 	createConfigValidationError,
-	createEmbeddingError,
-	// Library (was Memory)
-	createLibraryError,
 	// Loop
 	createLoopAbortedError,
 	createLoopError,
@@ -437,10 +554,6 @@ export {
 	createProviderUnavailableError,
 	// Base
 	createSimseError,
-	// Stacks errors
-	createStacksCorruptionError,
-	createStacksError,
-	createStacksIOError,
 	// Tasks
 	createTaskCircularDependencyError,
 	createTaskError,
@@ -453,8 +566,6 @@ export {
 	createToolError,
 	createToolExecutionError,
 	createToolNotFoundError,
-	// VFS
-	createVFSError,
 	isChainError,
 	isChainNotFoundError,
 	isChainStepError,
@@ -463,8 +574,6 @@ export {
 	isConfigNotFoundError,
 	isConfigParseError,
 	isConfigValidationError,
-	isEmbeddingError,
-	isLibraryError,
 	isLoopAbortedError,
 	isLoopError,
 	isLoopTurnLimitError,
@@ -479,9 +588,6 @@ export {
 	isProviderTimeoutError,
 	isProviderUnavailableError,
 	isSimseError,
-	isStacksCorruptionError,
-	isStacksError,
-	isStacksIOError,
 	isTaskCircularDependencyError,
 	isTaskError,
 	isTaskNotFoundError,
@@ -491,7 +597,6 @@ export {
 	isToolError,
 	isToolExecutionError,
 	isToolNotFoundError,
-	isVFSError,
 	toError,
 	wrapError,
 } from './errors/index.js';

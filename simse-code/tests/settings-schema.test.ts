@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FieldSchema } from '../features/config/settings-schema.js';
 import {
 	getAllConfigSchemas,
@@ -16,7 +16,10 @@ import {
 // ---------------------------------------------------------------------------
 
 function makeTempDir(): string {
-	const dir = join(tmpdir(), `simse-schema-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+	const dir = join(
+		tmpdir(),
+		`simse-schema-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+	);
 	mkdirSync(dir, { recursive: true });
 	return dir;
 }
@@ -29,26 +32,26 @@ describe('getConfigSchema', () => {
 	it('should return schema for config.json', () => {
 		const schema = getConfigSchema('config.json');
 		expect(schema).toBeDefined();
-		expect(schema!.filename).toBe('config.json');
-		expect(schema!.fields.length).toBeGreaterThan(0);
+		expect(schema?.filename).toBe('config.json');
+		expect(schema?.fields.length).toBeGreaterThan(0);
 	});
 
 	it('should return schema for embed.json', () => {
 		const schema = getConfigSchema('embed.json');
 		expect(schema).toBeDefined();
-		expect(schema!.filename).toBe('embed.json');
+		expect(schema?.filename).toBe('embed.json');
 	});
 
 	it('should return schema for memory.json', () => {
 		const schema = getConfigSchema('memory.json');
 		expect(schema).toBeDefined();
-		expect(schema!.filename).toBe('memory.json');
+		expect(schema?.filename).toBe('memory.json');
 	});
 
 	it('should return schema for acp.json', () => {
 		const schema = getConfigSchema('acp.json');
 		expect(schema).toBeDefined();
-		expect(schema!.filename).toBe('acp.json');
+		expect(schema?.filename).toBe('acp.json');
 	});
 
 	it('should return undefined for mcp.json (excluded, no editable fields)', () => {
@@ -59,13 +62,13 @@ describe('getConfigSchema', () => {
 	it('should return schema for summarize.json', () => {
 		const schema = getConfigSchema('summarize.json');
 		expect(schema).toBeDefined();
-		expect(schema!.filename).toBe('summarize.json');
+		expect(schema?.filename).toBe('summarize.json');
 	});
 
 	it('should return schema for settings.json (workspace)', () => {
 		const schema = getConfigSchema('settings.json');
 		expect(schema).toBeDefined();
-		expect(schema!.filename).toBe('settings.json');
+		expect(schema?.filename).toBe('settings.json');
 	});
 
 	it('should return undefined for unknown files', () => {
@@ -114,36 +117,36 @@ describe('getAllConfigSchemas', () => {
 describe('field types', () => {
 	it('should identify string fields', () => {
 		const schema = getConfigSchema('config.json');
-		const defaultAgent = schema!.fields.find((f) => f.key === 'defaultAgent');
+		const defaultAgent = schema?.fields.find((f) => f.key === 'defaultAgent');
 		expect(defaultAgent).toBeDefined();
-		expect(defaultAgent!.type).toBe('string');
+		expect(defaultAgent?.type).toBe('string');
 	});
 
 	it('should identify enum fields with options', () => {
 		const schema = getConfigSchema('config.json');
-		const logLevel = schema!.fields.find((f) => f.key === 'logLevel');
+		const logLevel = schema?.fields.find((f) => f.key === 'logLevel');
 		expect(logLevel).toBeDefined();
-		expect(logLevel!.type).toBe('enum');
-		expect(logLevel!.options).toBeDefined();
-		expect(logLevel!.options!.length).toBeGreaterThan(0);
-		expect(logLevel!.options).toContain('debug');
-		expect(logLevel!.options).toContain('error');
+		expect(logLevel?.type).toBe('enum');
+		expect(logLevel?.options).toBeDefined();
+		expect(logLevel?.options?.length).toBeGreaterThan(0);
+		expect(logLevel?.options).toContain('debug');
+		expect(logLevel?.options).toContain('error');
 	});
 
 	it('should identify boolean fields', () => {
 		const schema = getConfigSchema('memory.json');
-		const enabled = schema!.fields.find((f) => f.key === 'enabled');
+		const enabled = schema?.fields.find((f) => f.key === 'enabled');
 		expect(enabled).toBeDefined();
-		expect(enabled!.type).toBe('boolean');
+		expect(enabled?.type).toBe('boolean');
 	});
 
 	it('should identify number fields', () => {
 		const schema = getConfigSchema('memory.json');
-		const threshold = schema!.fields.find(
+		const threshold = schema?.fields.find(
 			(f) => f.key === 'similarityThreshold',
 		);
 		expect(threshold).toBeDefined();
-		expect(threshold!.type).toBe('number');
+		expect(threshold?.type).toBe('number');
 	});
 
 	it('should have descriptions for all fields', () => {
@@ -162,29 +165,35 @@ describe('field types', () => {
 
 describe('config.json schema', () => {
 	it('should have logLevel with correct options', () => {
-		const schema = getConfigSchema('config.json')!;
-		const logLevel = schema.fields.find((f) => f.key === 'logLevel')!;
-		expect(logLevel.type).toBe('enum');
-		expect(logLevel.options).toEqual(['debug', 'info', 'warn', 'error', 'none']);
-		expect(logLevel.default).toBe('warn');
+		const schema = getConfigSchema('config.json');
+		const logLevel = schema?.fields.find((f) => f.key === 'logLevel');
+		expect(logLevel?.type).toBe('enum');
+		expect(logLevel?.options).toEqual([
+			'debug',
+			'info',
+			'warn',
+			'error',
+			'none',
+		]);
+		expect(logLevel?.default).toBe('warn');
 	});
 
 	it('should have defaultAgent as string', () => {
-		const schema = getConfigSchema('config.json')!;
-		const field = schema.fields.find((f) => f.key === 'defaultAgent')!;
-		expect(field.type).toBe('string');
+		const schema = getConfigSchema('config.json');
+		const field = schema?.fields.find((f) => f.key === 'defaultAgent');
+		expect(field?.type).toBe('string');
 	});
 
 	it('should have perplexityApiKey as string', () => {
-		const schema = getConfigSchema('config.json')!;
-		const field = schema.fields.find((f) => f.key === 'perplexityApiKey')!;
-		expect(field.type).toBe('string');
+		const schema = getConfigSchema('config.json');
+		const field = schema?.fields.find((f) => f.key === 'perplexityApiKey');
+		expect(field?.type).toBe('string');
 	});
 
 	it('should have githubToken as string', () => {
-		const schema = getConfigSchema('config.json')!;
-		const field = schema.fields.find((f) => f.key === 'githubToken')!;
-		expect(field.type).toBe('string');
+		const schema = getConfigSchema('config.json');
+		const field = schema?.fields.find((f) => f.key === 'githubToken');
+		expect(field?.type).toBe('string');
 	});
 });
 
@@ -194,46 +203,48 @@ describe('config.json schema', () => {
 
 describe('memory.json schema', () => {
 	it('should have enabled with default true', () => {
-		const schema = getConfigSchema('memory.json')!;
-		const field = schema.fields.find((f) => f.key === 'enabled')!;
-		expect(field.type).toBe('boolean');
-		expect(field.default).toBe(true);
+		const schema = getConfigSchema('memory.json');
+		const field = schema?.fields.find((f) => f.key === 'enabled');
+		expect(field?.type).toBe('boolean');
+		expect(field?.default).toBe(true);
 	});
 
 	it('should have similarityThreshold with default 0.7', () => {
-		const schema = getConfigSchema('memory.json')!;
-		const field = schema.fields.find((f) => f.key === 'similarityThreshold')!;
-		expect(field.type).toBe('number');
-		expect(field.default).toBe(0.7);
+		const schema = getConfigSchema('memory.json');
+		const field = schema?.fields.find((f) => f.key === 'similarityThreshold');
+		expect(field?.type).toBe('number');
+		expect(field?.default).toBe(0.7);
 	});
 
 	it('should have maxResults with default 10', () => {
-		const schema = getConfigSchema('memory.json')!;
-		const field = schema.fields.find((f) => f.key === 'maxResults')!;
-		expect(field.type).toBe('number');
-		expect(field.default).toBe(10);
+		const schema = getConfigSchema('memory.json');
+		const field = schema?.fields.find((f) => f.key === 'maxResults');
+		expect(field?.type).toBe('number');
+		expect(field?.default).toBe(10);
 	});
 
 	it('should have autoSummarizeThreshold with default 20', () => {
-		const schema = getConfigSchema('memory.json')!;
-		const field = schema.fields.find((f) => f.key === 'autoSummarizeThreshold')!;
-		expect(field.type).toBe('number');
-		expect(field.default).toBe(20);
+		const schema = getConfigSchema('memory.json');
+		const field = schema?.fields.find(
+			(f) => f.key === 'autoSummarizeThreshold',
+		);
+		expect(field?.type).toBe('number');
+		expect(field?.default).toBe(20);
 	});
 
 	it('should have duplicateThreshold with default 0', () => {
-		const schema = getConfigSchema('memory.json')!;
-		const field = schema.fields.find((f) => f.key === 'duplicateThreshold')!;
-		expect(field.type).toBe('number');
-		expect(field.default).toBe(0);
+		const schema = getConfigSchema('memory.json');
+		const field = schema?.fields.find((f) => f.key === 'duplicateThreshold');
+		expect(field?.type).toBe('number');
+		expect(field?.default).toBe(0);
 	});
 
 	it('should have duplicateBehavior as enum with default skip', () => {
-		const schema = getConfigSchema('memory.json')!;
-		const field = schema.fields.find((f) => f.key === 'duplicateBehavior')!;
-		expect(field.type).toBe('enum');
-		expect(field.options).toEqual(['skip', 'warn', 'error']);
-		expect(field.default).toBe('skip');
+		const schema = getConfigSchema('memory.json');
+		const field = schema?.fields.find((f) => f.key === 'duplicateBehavior');
+		expect(field?.type).toBe('enum');
+		expect(field?.options).toEqual(['skip', 'warn', 'error']);
+		expect(field?.default).toBe('skip');
 	});
 });
 
@@ -243,23 +254,23 @@ describe('memory.json schema', () => {
 
 describe('embed.json schema', () => {
 	it('should have embeddingModel with default', () => {
-		const schema = getConfigSchema('embed.json')!;
-		const field = schema.fields.find((f) => f.key === 'embeddingModel')!;
-		expect(field.type).toBe('string');
-		expect(field.default).toBe('nomic-ai/nomic-embed-text-v1.5');
+		const schema = getConfigSchema('embed.json');
+		const field = schema?.fields.find((f) => f.key === 'embeddingModel');
+		expect(field?.type).toBe('string');
+		expect(field?.default).toBe('nomic-ai/nomic-embed-text-v1.5');
 	});
 
 	it('should have dtype as enum', () => {
-		const schema = getConfigSchema('embed.json')!;
-		const field = schema.fields.find((f) => f.key === 'dtype')!;
-		expect(field.type).toBe('enum');
-		expect(field.options).toEqual(['fp32', 'fp16', 'q8', 'q4']);
+		const schema = getConfigSchema('embed.json');
+		const field = schema?.fields.find((f) => f.key === 'dtype');
+		expect(field?.type).toBe('enum');
+		expect(field?.options).toEqual(['fp32', 'fp16', 'q8', 'q4']);
 	});
 
 	it('should have teiUrl as string', () => {
-		const schema = getConfigSchema('embed.json')!;
-		const field = schema.fields.find((f) => f.key === 'teiUrl')!;
-		expect(field.type).toBe('string');
+		const schema = getConfigSchema('embed.json');
+		const field = schema?.fields.find((f) => f.key === 'teiUrl');
+		expect(field?.type).toBe('string');
 	});
 });
 
@@ -331,10 +342,7 @@ describe('saveConfigField', () => {
 
 	it('should update existing field in existing file', () => {
 		const initial = { logLevel: 'warn', defaultAgent: 'agent1' };
-		writeFileSync(
-			join(tempDir, 'config.json'),
-			JSON.stringify(initial),
-		);
+		writeFileSync(join(tempDir, 'config.json'), JSON.stringify(initial));
 
 		saveConfigField(tempDir, 'config.json', 'logLevel', 'error');
 
@@ -345,10 +353,7 @@ describe('saveConfigField', () => {
 
 	it('should add new field to existing file', () => {
 		const initial = { logLevel: 'warn' };
-		writeFileSync(
-			join(tempDir, 'config.json'),
-			JSON.stringify(initial),
-		);
+		writeFileSync(join(tempDir, 'config.json'), JSON.stringify(initial));
 
 		saveConfigField(tempDir, 'config.json', 'defaultAgent', 'new-agent');
 

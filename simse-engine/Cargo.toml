@@ -52,3 +52,9 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 # Error handling
 thiserror = "2"
 anyhow = "1"
+
+# PRNG for sampling
+rand = "0.9"
+
+# HTTP client (for TEI bridge)
+ureq = { version = "3", features = ["json"] }

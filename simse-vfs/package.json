@@ -1,0 +1,28 @@
+{
+	"name": "simse-vfs",
+	"version": "1.0.0",
+	"type": "module",
+	"main": "dist/lib.js",
+	"types": "dist/lib.d.ts",
+	"exports": {
+		".": {
+			"bun": "./src/lib.ts",
+			"import": "./dist/lib.js",
+			"types": "./dist/lib.d.ts"
+		}
+	},
+	"engines": {
+		"bun": ">=1.0.0"
+	},
+	"scripts": {
+		"build": "bun build ./src/lib.ts --outdir ./dist --target bun && tsc --project tsconfig.build.json",
+		"test": "bun test",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"typecheck": "bun x tsc --noEmit"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"typescript": "^5.7.0"
+	}
+}

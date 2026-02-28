@@ -1,15 +1,11 @@
 // tests/librarian.test.ts
 import { describe, expect, it, mock } from 'bun:test';
-import type { ACPClient } from '../src/ai/acp/acp-client.js';
-import {
-	createDefaultLibrarian,
-	createLibrarian,
-} from '../src/ai/library/librarian.js';
 import type {
 	LibrarianLibraryAccess,
 	TextGenerationProvider,
 	Volume,
-} from '../src/ai/library/types.js';
+} from 'simse-vector';
+import { createDefaultLibrarian, createLibrarian } from 'simse-vector';
 
 function createMockGenerator(response: string): TextGenerationProvider {
 	return {
@@ -228,56 +224,15 @@ describe('Librarian optimize', () => {
 // createDefaultLibrarian
 // ---------------------------------------------------------------------------
 
-function createMockACPClientForLibrarian(): ACPClient {
-	return {
-		initialize: mock(() => Promise.resolve()),
-		dispose: mock(() => Promise.resolve()),
-		listAgents: mock(() => Promise.resolve([])),
-		getAgent: mock(() => Promise.resolve({ id: 'test', name: 'test' })),
-		generate: mock(() =>
-			Promise.resolve({
-				content: JSON.stringify({ memories: [] }),
-				agentId: 'agent-1',
-				serverName: 'server-1',
-				sessionId: 'sess-1',
-			}),
-		),
-		chat: mock(() =>
-			Promise.resolve({
-				content: 'chat',
-				agentId: 'agent-1',
-				serverName: 'server-1',
-				sessionId: 'sess-1',
-			}),
-		),
-		generateStream: mock(async function* () {
-			yield { type: 'delta' as const, text: 'chunk' };
-		}),
-		embed: mock(() =>
-			Promise.resolve({
-				embeddings: [[0.1]],
-				agentId: 'agent-1',
-				serverName: 'server-1',
-			}),
-		),
-		isAvailable: mock(() => Promise.resolve(true)),
-		setPermissionPolicy: mock(() => {}),
-		listSessions: mock(() => Promise.resolve([])),
-		loadSession: mock(() => Promise.resolve({} as any)),
-		deleteSession: mock(() => Promise.resolve()),
-		setSessionMode: mock(() => Promise.resolve()),
-		setSessionModel: mock(() => Promise.resolve()),
-		serverNames: ['server-1'],
-		serverCount: 1,
-		defaultServerName: 'server-1',
-		defaultAgent: 'agent-1',
-	} as ACPClient;
-}
-
 describe('createDefaultLibrarian', () => {
-	it('creates a Librarian from an ACP client', async () => {
-		const client = createMockACPClientForLibrarian();
-		const librarian = createDefaultLibrarian(client);
+	it('creates a Librarian from a TextGenerationProvider', async () => {
+		const generateMock = mock(() =>
+			Promise.resolve(JSON.stringify({ memories: [] })),
+		);
+		const provider: TextGenerationProvider = {
+			generate: generateMock,
+		};
+		const librarian = createDefaultLibrarian(provider);
 		expect(typeof librarian.extract).toBe('function');
 		expect(typeof librarian.optimize).toBe('function');
 		const result = await librarian.extract({
@@ -285,7 +240,7 @@ describe('createDefaultLibrarian', () => {
 			response: 'world',
 		});
 		expect(result.memories).toEqual([]);
-		expect(client.generate).toHaveBeenCalled();
+		expect(generateMock).toHaveBeenCalled();
 	});
 });
 

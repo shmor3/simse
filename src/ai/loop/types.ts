@@ -2,6 +2,7 @@
 // Agentic Loop Types
 // ---------------------------------------------------------------------------
 
+import type { LibraryServices, TextGenerationProvider } from 'simse-vector';
 import type { EventBus } from '../../events/types.js';
 import type { Logger } from '../../logger.js';
 import type { ACPClient } from '../acp/acp-client.js';
@@ -12,8 +13,6 @@ import type {
 } from '../acp/types.js';
 import type { ContextPruner } from '../conversation/context-pruner.js';
 import type { Conversation } from '../conversation/types.js';
-import type { LibraryServices } from '../library/library-services.js';
-import type { TextGenerationProvider } from '../library/types.js';
 import type { SystemPromptBuilder } from '../prompts/types.js';
 import type {
 	ToolCallRequest,

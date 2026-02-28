@@ -30,6 +30,10 @@
 		"typescript",
 		"bun"
 	],
+	"workspaces": [
+		"simse-vector",
+		"simse-vfs"
+	],
 	"license": "MIT",
 	"scripts": {
 		"build": "bun build ./src/lib.ts --outdir ./dist --target bun && tsc --project tsconfig.build.json",
@@ -41,6 +45,8 @@
 		"typecheck": "bun x tsc --noEmit"
 	},
 	"dependencies": {
+		"simse-vector": "workspace:*",
+		"simse-vfs": "workspace:*",
 		"@modelcontextprotocol/sdk": "^1.12.0",
 		"hono": "^4.12.2",
 		"ink": "^6.8.0",
@@ -49,9 +55,6 @@
 		"picomatch": "^4.0.3",
 		"react": "^19.2.4",
 		"zod": "^3.24.0"
-	},
-	"optionalDependencies": {
-		"@huggingface/transformers": "^3.8.1"
 	},
 	"devDependencies": {
 		"@types/bun": "latest",
@@ -64,7 +67,6 @@
 	},
 	"trustedDependencies": [
 		"node-pty",
-		"onnxruntime-node",
 		"protobufjs"
 	]
 }

@@ -3,9 +3,9 @@
 // ---------------------------------------------------------------------------
 
 import { mock } from 'bun:test';
+import type { StorageBackend } from 'simse-vector';
 import type { ACPClient } from '../../src/ai/acp/acp-client.js';
 import type { ACPGenerateResult } from '../../src/ai/acp/types.js';
-import type { StorageBackend } from '../../src/ai/library/storage.js';
 import type { Logger } from '../../src/logger.js';
 import { createLogger } from '../../src/logger.js';
 

@@ -40,8 +40,8 @@ fn main() -> Result<()> {
     registry.load_generator(
         &args.model,
         &ModelConfig {
-            filename: args.model_file.clone(),
-            tokenizer: args.tokenizer.clone(),
+            filename: args.model_file,
+            tokenizer: args.tokenizer,
             ..Default::default()
         },
     )?;
@@ -53,12 +53,25 @@ fn main() -> Result<()> {
         &ModelConfig::default(),
     )?;
 
+    // Load TEI bridge if configured
+    if let Some(ref tei_url) = args.tei_url {
+        tracing::info!(url = %tei_url, "Loading TEI bridge embedder");
+        registry.load_tei_embedder(
+            "tei://default",
+            simse_engine::models::tei::TeiConfig {
+                base_url: tei_url.clone(),
+                ..Default::default()
+            },
+        )?;
+    }
+
     // Create server config
     let config = ServerConfig {
         server_name: args.server_name,
         server_version: args.server_version,
         default_model: args.model,
         embedding_model: args.embedding_model,
+        tei_url: args.tei_url,
         streaming: !args.no_streaming,
         default_sampling: SamplingParams {
             temperature: args.temperature,
@@ -68,6 +81,7 @@ fn main() -> Result<()> {
             repeat_penalty: args.repeat_penalty,
             repeat_last_n: 64,
             stop_sequences: vec![],
+            generation_timeout_secs: args.generation_timeout,
         },
     };
 

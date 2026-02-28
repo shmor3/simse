@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import type { Library, Lookup } from 'simse-vector';
 import type { ACPClient } from '../src/ai/acp/acp-client.js';
 import type { ACPGenerateResult } from '../src/ai/acp/types.js';
 import type { ChainCallbacks } from '../src/ai/chain/index.js';
@@ -8,8 +9,6 @@ import {
 	createPromptTemplate,
 	runNamedChain,
 } from '../src/ai/chain/index.js';
-import type { Library } from '../src/ai/library/library.js';
-import type { Lookup } from '../src/ai/library/types.js';
 import type { MCPClient } from '../src/ai/mcp/mcp-client.js';
 import type { MCPToolResult } from '../src/ai/mcp/types.js';
 import type { AppConfig, ChainDefinition } from '../src/config/settings.js';

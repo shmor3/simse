@@ -5,7 +5,6 @@ import {
 	testOllamaConnection,
 } from '../features/config/ollama-test.js';
 
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -126,20 +125,14 @@ describe('testOllamaConnection', () => {
 					if (init?.signal) {
 						init.signal.addEventListener('abort', () => {
 							reject(
-								new DOMException(
-									'The operation was aborted.',
-									'AbortError',
-								),
+								new DOMException('The operation was aborted.', 'AbortError'),
 							);
 						});
 					}
 				}),
 		);
 
-		const result = await testOllamaConnection(
-			'http://127.0.0.1:11434',
-			50,
-		);
+		const result = await testOllamaConnection('http://127.0.0.1:11434', 50);
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
 			expect(result.error.toLowerCase()).toContain('timed out');
@@ -225,18 +218,14 @@ describe('listOllamaModels', () => {
 	});
 
 	it('should return empty array on non-200 status', async () => {
-		mockFetch(() =>
-			Promise.resolve(new Response('Error', { status: 500 })),
-		);
+		mockFetch(() => Promise.resolve(new Response('Error', { status: 500 })));
 
 		const models = await listOllamaModels('http://127.0.0.1:11434');
 		expect(models).toEqual([]);
 	});
 
 	it('should return empty array on invalid JSON', async () => {
-		mockFetch(() =>
-			Promise.resolve(new Response('not json', { status: 200 })),
-		);
+		mockFetch(() => Promise.resolve(new Response('not json', { status: 200 })));
 
 		const models = await listOllamaModels('http://127.0.0.1:11434');
 		expect(models).toEqual([]);
@@ -244,9 +233,7 @@ describe('listOllamaModels', () => {
 
 	it('should return empty array when models field is missing', async () => {
 		mockFetch(() =>
-			Promise.resolve(
-				new Response(JSON.stringify({}), { status: 200 }),
-			),
+			Promise.resolve(new Response(JSON.stringify({}), { status: 200 })),
 		);
 
 		const models = await listOllamaModels('http://127.0.0.1:11434');

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { createTopicIndex } from '../src/ai/library/cataloging.js';
-import type { Volume } from '../src/ai/library/types.js';
+import type { Volume } from 'simse-vector';
+import { createTopicIndex } from 'simse-vector';
 
 function makeEntry(
 	id: string,

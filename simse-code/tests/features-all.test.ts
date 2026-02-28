@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { aiCommands } from '../features/ai/index.js';
-import { configCommands } from '../features/config/index.js';
+import { createSettingsCommands } from '../features/config/index.js';
 import { filesCommands } from '../features/files/index.js';
 import { libraryCommands } from '../features/library/index.js';
 import type { SessionCommandContext } from '../features/session/index.js';
@@ -38,6 +38,7 @@ function mockToolRegistry() {
 	};
 }
 
+const configCommands = createSettingsCommands('/tmp/test-data');
 const sessionCommands = createSessionCommands(mockSessionCtx());
 const toolsCommands = createToolsCommands({
 	getToolRegistry: () => mockToolRegistry(),

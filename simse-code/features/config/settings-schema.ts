@@ -140,7 +140,7 @@ const memoryJsonSchema: ConfigFileSchema = Object.freeze({
 			key: 'autoSummarizeThreshold',
 			type: 'number' as FieldType,
 			description:
-				'Max notes per topic before auto-summarizing oldest entries (0 = disabled)',
+				'Max volumes per topic before auto-summarizing oldest entries (0 = disabled)',
 			default: 20,
 			presets: Object.freeze(['0', '10', '20', '50']),
 		}),

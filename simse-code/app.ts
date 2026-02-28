@@ -31,7 +31,7 @@ import { createToolService, type ToolService } from './tools.js';
 // View types — UI-friendly projections of internal data
 // ---------------------------------------------------------------------------
 
-export interface NoteView {
+export interface VolumeView {
 	readonly id: string;
 	readonly text: string;
 	readonly topic: string;
@@ -40,13 +40,13 @@ export interface NoteView {
 }
 
 export interface SearchResultView {
-	readonly note: NoteView;
+	readonly volume: VolumeView;
 	readonly score: number;
 }
 
 export interface TopicView {
 	readonly topic: string;
-	readonly noteCount: number;
+	readonly volumeCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -72,7 +72,7 @@ export interface GenerateResult {
 	/** Library volumes injected as context (empty if skipLibrary). */
 	readonly libraryContext: readonly SearchResultView[];
 	/** ID of the stored volume (undefined if skipLibrary or storage failed). */
-	readonly storedNoteId?: string;
+	readonly storedVolumeId?: string;
 	/** The full ACP result for advanced consumers. */
 	readonly raw: ACPGenerateResult;
 }
@@ -149,15 +149,15 @@ export interface KnowledgeBaseApp {
 	readonly initialize: () => Promise<void>;
 	readonly dispose: () => Promise<void>;
 
-	// Notes
-	readonly addNote: (
+	// Volumes
+	readonly addVolume: (
 		text: string,
 		topic: string,
 		metadata?: Record<string, string>,
 	) => Promise<string>;
-	readonly deleteNote: (id: string) => Promise<boolean>;
-	readonly getNote: (id: string) => NoteView | undefined;
-	readonly getAllNotes: () => readonly NoteView[];
+	readonly deleteVolume: (id: string) => Promise<boolean>;
+	readonly getVolume: (id: string) => VolumeView | undefined;
+	readonly getAllVolumes: () => readonly VolumeView[];
 
 	// Search & discovery
 	readonly search: (
@@ -169,7 +169,7 @@ export interface KnowledgeBaseApp {
 		maxResults?: number,
 	) => Promise<readonly SearchResultView[]>;
 	readonly getTopics: () => readonly TopicView[];
-	readonly getNotesByTopic: (topic: string) => readonly NoteView[];
+	readonly getVolumesByTopic: (topic: string) => readonly VolumeView[];
 
 	// Generation — library-aware by default
 	readonly generate: (
@@ -219,19 +219,19 @@ export interface KnowledgeBaseApp {
 	readonly tasks: TaskList;
 
 	// Stats
-	readonly noteCount: number;
+	readonly volumeCount: number;
 }
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function toNoteView(entry: {
+function toVolumeView(entry: {
 	id: string;
 	text: string;
 	metadata: Record<string, string>;
 	timestamp: number;
-}): NoteView {
+}): VolumeView {
 	return Object.freeze({
 		id: entry.id,
 		text: entry.text,
@@ -281,7 +281,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 
 	const initialize = async (): Promise<void> => {
 		await library.initialize();
-		logger.info(`Knowledge base ready (${library.size} existing notes)`);
+		logger.info(`Knowledge base ready (${library.size} existing volumes)`);
 	};
 
 	const dispose = async (): Promise<void> => {
@@ -289,18 +289,18 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		await library.dispose();
 	};
 
-	// -- Notes ----------------------------------------------------------------
+	// -- Volumes --------------------------------------------------------------
 
 	const autoSummarizeThreshold = appOptions.autoSummarizeThreshold ?? 0;
 
 	const autoSummarizeTopic = async (topic: string): Promise<void> => {
 		if (autoSummarizeThreshold <= 0 || !textGenerator) return;
 
-		const topicNotes = library.filterByTopic([topic]);
-		if (topicNotes.length <= autoSummarizeThreshold) return;
+		const topicVolumes = library.filterByTopic([topic]);
+		if (topicVolumes.length <= autoSummarizeThreshold) return;
 
 		// Summarize the oldest half, keep the newest half fresh
-		const sorted = [...topicNotes].sort((a, b) => a.timestamp - b.timestamp);
+		const sorted = [...topicVolumes].sort((a, b) => a.timestamp - b.timestamp);
 		const cutoff = Math.floor(sorted.length / 2);
 		const toSummarize = sorted.slice(0, cutoff);
 
@@ -313,7 +313,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 				metadata: { topic },
 			});
 			logger.debug(
-				`Auto-summarized ${toSummarize.length} oldest notes in topic "${topic}"`,
+				`Auto-summarized ${toSummarize.length} oldest volumes in topic "${topic}"`,
 			);
 		} catch (err) {
 			logger.warn('Auto-summarization failed', {
@@ -323,7 +323,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		}
 	};
 
-	const addNote = async (
+	const addVolume = async (
 		text: string,
 		topic: string,
 		metadata?: Record<string, string>,
@@ -333,15 +333,15 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		return id;
 	};
 
-	const deleteNote = (id: string): Promise<boolean> => library.delete(id);
+	const deleteVolume = (id: string): Promise<boolean> => library.delete(id);
 
-	const getNote = (id: string): NoteView | undefined => {
+	const getVolume = (id: string): VolumeView | undefined => {
 		const entry = library.getById(id);
-		return entry ? toNoteView(entry) : undefined;
+		return entry ? toVolumeView(entry) : undefined;
 	};
 
-	const getAllNotes = (): readonly NoteView[] =>
-		Object.freeze(library.getAll().map(toNoteView));
+	const getAllVolumes = (): readonly VolumeView[] =>
+		Object.freeze(library.getAll().map(toVolumeView));
 
 	// -- Search & discovery ---------------------------------------------------
 
@@ -355,7 +355,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		);
 		return Object.freeze(
 			results.map((r) =>
-				Object.freeze({ note: toNoteView(r.volume), score: r.score }),
+				Object.freeze({ volume: toVolumeView(r.volume), score: r.score }),
 			),
 		);
 	};
@@ -369,7 +369,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		});
 		return Object.freeze(
 			results.map((r) =>
-				Object.freeze({ note: toNoteView(r.volume), score: r.score }),
+				Object.freeze({ volume: toVolumeView(r.volume), score: r.score }),
 			),
 		);
 	};
@@ -378,12 +378,12 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		return Object.freeze(
 			library
 				.getTopics()
-				.map((t) => Object.freeze({ topic: t.topic, noteCount: t.entryCount })),
+				.map((t) => Object.freeze({ topic: t.topic, volumeCount: t.entryCount })),
 		);
 	};
 
-	const getNotesByTopic = (topic: string): readonly NoteView[] => {
-		return Object.freeze(library.filterByTopic([topic]).map(toNoteView));
+	const getVolumesByTopic = (topic: string): readonly VolumeView[] => {
+		return Object.freeze(library.filterByTopic([topic]).map(toVolumeView));
 	};
 
 	// -- Generate (library-aware) ----------------------------------------------
@@ -406,14 +406,14 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 				const results = await library.search(prompt, maxResults, threshold);
 
 				libraryContext = results.map((r) =>
-					Object.freeze({ note: toNoteView(r.volume), score: r.score }),
+					Object.freeze({ volume: toVolumeView(r.volume), score: r.score }),
 				);
 
 				if (libraryContext.length > 0) {
 					const contextBlock = libraryContext
 						.map(
 							(r) =>
-								`[${r.note.topic}] (relevance: ${r.score.toFixed(2)}) ${r.note.text}`,
+								`[${r.volume.topic}] (relevance: ${r.score.toFixed(2)}) ${r.volume.text}`,
 						)
 						.join('\n');
 
@@ -443,16 +443,16 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		});
 
 		// 3. Store the Q&A pair in the library
-		let storedNoteId: string | undefined;
+		let storedVolumeId: string | undefined;
 		if (!options?.skipLibrary) {
 			try {
 				const convTopic = appOptions.conversationTopic ?? 'conversation';
-				storedNoteId = await library.add(`Q: ${prompt}\nA: ${result.content}`, {
+				storedVolumeId = await library.add(`Q: ${prompt}\nA: ${result.content}`, {
 					topic: convTopic,
 					source: 'generate',
 				});
 				logger.debug('Stored generation result in library', {
-					noteId: storedNoteId,
+					volumeId: storedVolumeId,
 				});
 				await autoSummarizeTopic(convTopic);
 			} catch (err) {
@@ -467,7 +467,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 			agentId: result.agentId,
 			serverName: result.serverName,
 			libraryContext: Object.freeze(libraryContext),
-			storedNoteId,
+			storedVolumeId,
 			raw: result,
 		});
 	};
@@ -501,14 +501,14 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 				const results = await library.search(prompt, maxResults, threshold);
 
 				libraryContext = results.map((r) =>
-					Object.freeze({ note: toNoteView(r.volume), score: r.score }),
+					Object.freeze({ volume: toVolumeView(r.volume), score: r.score }),
 				);
 
 				if (libraryContext.length > 0) {
 					const contextBlock = libraryContext
 						.map(
 							(r) =>
-								`[${r.note.topic}] (relevance: ${r.score.toFixed(2)}) ${r.note.text}`,
+								`[${r.volume.topic}] (relevance: ${r.score.toFixed(2)}) ${r.volume.text}`,
 						)
 						.join('\n');
 
@@ -548,7 +548,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 					topic: convTopic,
 					source: 'generate',
 				});
-				logger.debug('Stored streamed result in library', { noteId: id });
+				logger.debug('Stored streamed result in library', { volumeId: id });
 				await autoSummarizeTopic(convTopic);
 				return id;
 			} catch (err) {
@@ -707,14 +707,14 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 	return Object.freeze({
 		initialize,
 		dispose,
-		addNote,
-		deleteNote,
-		getNote,
-		getAllNotes,
+		addVolume,
+		deleteVolume,
+		getVolume,
+		getAllVolumes,
 		search,
 		recommend,
 		getTopics,
-		getNotesByTopic,
+		getVolumesByTopic,
 		generate,
 		generateStream,
 		generateLibraryStream,
@@ -726,7 +726,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		tools,
 		library,
 		tasks,
-		get noteCount() {
+		get volumeCount() {
 			return library.size;
 		},
 	});

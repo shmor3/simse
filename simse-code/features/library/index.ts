@@ -1,2 +1,2 @@
 export { libraryCommands } from './commands.js';
-export { NoteList, SearchResults, TopicList } from './components.js';
+export { VolumeList, SearchResults, TopicList } from './components.js';

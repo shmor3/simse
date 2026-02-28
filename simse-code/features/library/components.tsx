@@ -42,8 +42,8 @@ export function SearchResults({ results, query }: SearchResultsProps) {
 	);
 }
 
-interface NoteListProps {
-	readonly notes: readonly {
+interface VolumeListProps {
+	readonly volumes: readonly {
 		id: string;
 		text: string;
 		topic: string;
@@ -52,11 +52,11 @@ interface NoteListProps {
 	readonly topic?: string;
 }
 
-export function NoteList({ notes, topic }: NoteListProps) {
-	if (notes.length === 0) {
+export function VolumeList({ volumes, topic }: VolumeListProps) {
+	if (volumes.length === 0) {
 		return (
 			<Box paddingLeft={2}>
-				<Text dimColor>{topic ? `No notes in "${topic}"` : 'No notes'}</Text>
+				<Text dimColor>{topic ? `No volumes in "${topic}"` : 'No volumes'}</Text>
 			</Box>
 		);
 	}
@@ -64,10 +64,10 @@ export function NoteList({ notes, topic }: NoteListProps) {
 	return (
 		<Box flexDirection="column" paddingLeft={2}>
 			<Text bold>
-				{notes.length} note{notes.length === 1 ? '' : 's'}
+				{volumes.length} volume{volumes.length === 1 ? '' : 's'}
 				{topic ? ` in "${topic}"` : ''}
 			</Text>
-			{notes.map((n) => (
+			{volumes.map((n) => (
 				<Box key={n.id} gap={2}>
 					<Text dimColor>[{n.id.slice(0, 8)}]</Text>
 					<Text wrap="truncate-end">{n.text.slice(0, 100)}</Text>

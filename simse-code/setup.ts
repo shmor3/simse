@@ -418,7 +418,7 @@ export async function runSetup(options: SetupOptions): Promise<SetupResult> {
 		console.log('  summarize.json already exists, skipping.');
 	} else {
 		console.log(
-			'\n  Configure summarization? (uses a separate LLM for auto-summarizing notes)\n',
+			'\n  Configure summarization? (uses a separate LLM for auto-summarizing volumes)\n',
 		);
 		console.log('    1) Same as above  —  Reuse main ACP server');
 		console.log(

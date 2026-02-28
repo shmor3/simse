@@ -21,7 +21,7 @@ function createMockLibrary() {
 				.slice(0, max)
 				.map((e) => ({
 					score: 0.9,
-					entry: {
+					volume: {
 						text: e.text,
 						metadata: { topic: e.topic },
 					},
@@ -130,7 +130,7 @@ describe('createToolRegistry', () => {
 		});
 
 		expect(result.isError).toBe(false);
-		expect(result.output).toContain('No matching entries found');
+		expect(result.output).toContain('No matching volumes found');
 	});
 
 	it('should execute library_shelve', async () => {
@@ -146,7 +146,7 @@ describe('createToolRegistry', () => {
 		});
 
 		expect(result.isError).toBe(false);
-		expect(result.output).toContain('Stored note with ID');
+		expect(result.output).toContain('Shelved volume with ID');
 	});
 
 	// -- Built-in VFS tools ----------------------------------------------------

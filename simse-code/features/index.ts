@@ -4,7 +4,7 @@ export { createInitCommands, createSettingsCommands } from './config/index.js';
 export { filesCommands } from './files/index.js';
 export {
 	libraryCommands,
-	NoteList,
+	VolumeList,
 	SearchResults,
 	TopicList,
 } from './library/index.js';

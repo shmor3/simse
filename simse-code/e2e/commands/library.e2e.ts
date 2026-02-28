@@ -31,11 +31,11 @@ describe('Library Commands E2E', () => {
 	// -----------------------------------------------------------------
 	// /add <topic> <text>
 	// -----------------------------------------------------------------
-	it('/add adds a note to a topic', async () => {
+	it('/add adds a volume to a topic', async () => {
 		term = await createSimseTerminal({ acpBackend: 'none' });
 		await waitForReady(term);
 
-		await submitCommand(term, '/add testing Some note text');
+		await submitCommand(term, '/add testing Some volume text');
 
 		await term.waitForText('Adding to', { timeout: 10_000 });
 
@@ -108,49 +108,49 @@ describe('Library Commands E2E', () => {
 	}, 30_000);
 
 	// -----------------------------------------------------------------
-	// /notes
+	// /volumes
 	// -----------------------------------------------------------------
-	it('/notes lists all notes', async () => {
+	it('/volumes lists all volumes', async () => {
 		term = await createSimseTerminal({ acpBackend: 'none' });
 		await waitForReady(term);
 
-		await submitCommand(term, '/notes');
+		await submitCommand(term, '/volumes');
 
-		await term.waitForText('Listing all notes', { timeout: 10_000 });
+		await term.waitForText('Listing all volumes', { timeout: 10_000 });
 
 		const screen = term.getScreen();
-		expect(screen).toContain('Listing all notes');
+		expect(screen).toContain('Listing all volumes');
 	}, 30_000);
 
 	// -----------------------------------------------------------------
-	// /notes <topic>
+	// /volumes <topic>
 	// -----------------------------------------------------------------
-	it('/notes with topic filters by topic', async () => {
+	it('/volumes with topic filters by topic', async () => {
 		term = await createSimseTerminal({ acpBackend: 'none' });
 		await waitForReady(term);
 
-		await submitCommand(term, '/notes testing');
+		await submitCommand(term, '/volumes testing');
 
-		await term.waitForText('Notes in', { timeout: 10_000 });
+		await term.waitForText('Volumes in', { timeout: 10_000 });
 
 		const screen = term.getScreen();
-		expect(screen).toContain('Notes in');
+		expect(screen).toContain('Volumes in');
 		expect(screen).toContain('testing');
 	}, 30_000);
 
 	// -----------------------------------------------------------------
 	// /get <id>
 	// -----------------------------------------------------------------
-	it('/get retrieves a note by ID', async () => {
+	it('/get retrieves a volume by ID', async () => {
 		term = await createSimseTerminal({ acpBackend: 'none' });
 		await waitForReady(term);
 
 		await submitCommand(term, '/get 1');
 
-		await term.waitForText('Getting note', { timeout: 10_000 });
+		await term.waitForText('Getting volume', { timeout: 10_000 });
 
 		const screen = term.getScreen();
-		expect(screen).toContain('Getting note');
+		expect(screen).toContain('Getting volume');
 		expect(screen).toContain('1');
 	}, 30_000);
 
@@ -173,16 +173,16 @@ describe('Library Commands E2E', () => {
 	// -----------------------------------------------------------------
 	// /delete <id>
 	// -----------------------------------------------------------------
-	it('/delete deletes a note by ID', async () => {
+	it('/delete deletes a volume by ID', async () => {
 		term = await createSimseTerminal({ acpBackend: 'none' });
 		await waitForReady(term);
 
 		await submitCommand(term, '/delete 1');
 
-		await term.waitForText('Deleting note', { timeout: 10_000 });
+		await term.waitForText('Deleting volume', { timeout: 10_000 });
 
 		const screen = term.getScreen();
-		expect(screen).toContain('Deleting note');
+		expect(screen).toContain('Deleting volume');
 		expect(screen).toContain('1');
 	}, 30_000);
 

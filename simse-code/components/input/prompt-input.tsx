@@ -4,14 +4,14 @@ import type { CommandDefinition } from '../../ink-types.js';
 import { TextInput } from './text-input.js';
 
 const PLACEHOLDER_TIPS: readonly string[] = [
-	'Try "add a note about today\'s meeting"',
-	'Try "search for deployment notes"',
-	'Try "summarize my recent notes"',
+	'Try "add a volume about today\'s meeting"',
+	'Try "search for deployment volumes"',
+	'Try "summarize my recent volumes"',
 	'Try "help me write a changelog"',
-	'Try "find notes about authentication"',
+	'Try "find volumes about authentication"',
 	'Try "create a checklist for release"',
 	'Try "what did I save last week?"',
-	'Try "organize my project notes"',
+	'Try "organize my project volumes"',
 	'Try "draft a quick status update"',
 	'Try "list everything about the API"',
 ];

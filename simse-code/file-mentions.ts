@@ -1,7 +1,7 @@
 /**
  * SimSE Code — @-Mentions with Autocomplete
  *
- * Detects @path, @vfs://path, and @noteId mentions in user input,
+ * Detects @path, @vfs://path, and @volumeId mentions in user input,
  * resolves them to content, and provides Tab autocomplete.
  * No external deps.
  */
@@ -17,8 +17,8 @@ export interface FileMention {
 	readonly path: string;
 	readonly content: string;
 	readonly size: number;
-	readonly kind: 'file' | 'vfs' | 'note';
-	/** For note mentions: topic label. */
+	readonly kind: 'file' | 'vfs' | 'volume';
+	/** For volume mentions: topic label. */
 	readonly topic?: string;
 }
 
@@ -40,8 +40,8 @@ export interface FileMentionResolverOptions {
 	readonly resolveVFS?: (
 		path: string,
 	) => { content: string; size: number } | undefined;
-	/** Resolve a library note by 8-char ID prefix. */
-	readonly resolveNote?: (
+	/** Resolve a library volume by 8-char ID prefix. */
+	readonly resolveVolume?: (
 		idPrefix: string,
 	) => { id: string; text: string; topic: string } | undefined;
 }
@@ -49,8 +49,8 @@ export interface FileMentionResolverOptions {
 export interface AtMentionCompleteOptions extends FileMentionResolverOptions {
 	/** Complete VFS paths given a partial (after `vfs://`). */
 	readonly completeVFS?: (partial: string) => readonly string[];
-	/** Complete note IDs given a partial prefix. */
-	readonly completeNote?: (partial: string) => readonly string[];
+	/** Complete volume IDs given a partial prefix. */
+	readonly completeVolume?: (partial: string) => readonly string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -79,14 +79,14 @@ const DEFAULT_EXCLUDE_DIRS = new Set([
 // Mention resolution
 // ---------------------------------------------------------------------------
 
-/** Matches @vfs://path, @file/path.ext, and @hexid */
+/** Matches @vfs://path, @file/path.ext, and @volumeid */
 const MENTION_PATTERN = /@(vfs:\/\/[\w./-]+|[\w./-]+(?:\.\w+)?)/g;
 
-/** 8-char lowercase alphanumeric — note ID prefix. */
-const NOTE_ID_RE = /^[a-f0-9]{8}$/;
+/** 8-char lowercase alphanumeric — volume ID prefix. */
+const VOLUME_ID_RE = /^[a-f0-9]{8}$/;
 
-function isNoteIdPrefix(s: string): boolean {
-	return NOTE_ID_RE.test(s);
+function isVolumeIdPrefix(s: string): boolean {
+	return VOLUME_ID_RE.test(s);
 }
 
 /**
@@ -125,20 +125,20 @@ export function resolveFileMentions(
 				}
 			}
 		} else if (
-			isNoteIdPrefix(raw) &&
+			isVolumeIdPrefix(raw) &&
 			!raw.includes('/') &&
 			!raw.includes('.')
 		) {
-			// Note ID mention
-			if (!seen.has(raw) && options?.resolveNote) {
-				const resolved = options.resolveNote(raw);
+			// Volume ID mention
+			if (!seen.has(raw) && options?.resolveVolume) {
+				const resolved = options.resolveVolume(raw);
 				if (resolved) {
 					mentions.push(
 						Object.freeze({
 							path: raw,
 							content: resolved.text,
 							size: resolved.text.length,
-							kind: 'note' as const,
+							kind: 'volume' as const,
 							topic: resolved.topic,
 						}),
 					);
@@ -191,9 +191,9 @@ export function formatMentionsAsContext(
 
 	const parts: string[] = [];
 	for (const mention of mentions) {
-		if (mention.kind === 'note') {
+		if (mention.kind === 'volume') {
 			parts.push(
-				`<note id="${mention.path}"${mention.topic ? ` topic="${mention.topic}"` : ''}>\n${mention.content}\n</note>`,
+				`<volume id="${mention.path}"${mention.topic ? ` topic="${mention.topic}"` : ''}>\n${mention.content}\n</volume>`,
 			);
 		} else {
 			parts.push(`<file path="${mention.path}">\n${mention.content}\n</file>`);
@@ -208,7 +208,7 @@ export function formatMentionsAsContext(
 
 /**
  * Provide Tab-completion candidates for @-mentions.
- * Dispatches to VFS, note, or filesystem completion based on prefix.
+ * Dispatches to VFS, volume, or filesystem completion based on prefix.
  */
 export function completeAtMention(
 	partial: string,
@@ -219,13 +219,13 @@ export function completeAtMention(
 		return options?.completeVFS?.(vfsPartial) ?? [];
 	}
 
-	// Short alphanum → note ID prefix
+	// Short alphanum → volume ID prefix
 	if (/^[a-f0-9]+$/.test(partial) && partial.length <= 8) {
-		const noteResults = options?.completeNote?.(partial) ?? [];
+		const volumeResults = options?.completeVolume?.(partial) ?? [];
 		// Also try filesystem as fallback
 		const fileResults = completeFilePath(partial, options);
-		// Combine, notes first
-		const combined = [...noteResults, ...fileResults];
+		// Combine, volumes first
+		const combined = [...volumeResults, ...fileResults];
 		return [...new Set(combined)];
 	}
 

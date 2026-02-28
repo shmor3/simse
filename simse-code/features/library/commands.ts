@@ -4,7 +4,7 @@ export const libraryCommands: readonly CommandDefinition[] = [
 	{
 		name: 'add',
 		usage: '/add <topic> <text>',
-		description: 'Add a note to a topic',
+		description: 'Add a volume to a topic',
 		category: 'library',
 		execute: (args) => {
 			if (!args.trim()) return { text: 'Usage: /add <topic> <text>' };
@@ -51,10 +51,10 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		}),
 	},
 	{
-		name: 'notes',
+		name: 'volumes',
 		aliases: ['ls'],
-		usage: '/notes [topic]',
-		description: 'List notes (optionally filtered by topic)',
+		usage: '/volumes [topic]',
+		description: 'List volumes (optionally filtered by topic)',
 		category: 'library',
 		execute: () => ({
 			text: 'Library not connected. Run /setup to configure an ACP server with library support.',
@@ -63,7 +63,7 @@ export const libraryCommands: readonly CommandDefinition[] = [
 	{
 		name: 'get',
 		usage: '/get <id>',
-		description: 'Get a note by ID',
+		description: 'Get a volume by ID',
 		category: 'library',
 		execute: (args) => {
 			if (!args.trim()) return { text: 'Usage: /get <id>' };
@@ -76,7 +76,7 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		name: 'delete',
 		aliases: ['rm'],
 		usage: '/delete <id>',
-		description: 'Delete a note by ID',
+		description: 'Delete a volume by ID',
 		category: 'library',
 		execute: (args) => {
 			if (!args.trim()) return { text: 'Usage: /delete <id>' };

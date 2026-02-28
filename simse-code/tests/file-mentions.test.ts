@@ -25,22 +25,22 @@ describe('resolveFileMentions', () => {
 		expect(result.cleanInput).toBe('check  please');
 	});
 
-	test('resolves note ID mentions when resolver is provided', () => {
+	test('resolves volume ID mentions when resolver is provided', () => {
 		const result = resolveFileMentions('explain @a1b2c3d4', {
-			resolveNote: (idPrefix) => {
+			resolveVolume: (idPrefix) => {
 				if (idPrefix === 'a1b2c3d4') {
-					return { id: 'a1b2c3d4-full', text: 'note content', topic: 'dev' };
+					return { id: 'a1b2c3d4-full', text: 'volume content', topic: 'dev' };
 				}
 				return undefined;
 			},
 		});
 
 		expect(result.mentions).toHaveLength(1);
-		const noteMention = result.mentions[0];
-		expect(noteMention?.kind).toBe('note');
-		expect(noteMention?.path).toBe('a1b2c3d4');
-		expect(noteMention?.content).toBe('note content');
-		expect(noteMention?.topic).toBe('dev');
+		const volumeMention = result.mentions[0];
+		expect(volumeMention?.kind).toBe('volume');
+		expect(volumeMention?.path).toBe('a1b2c3d4');
+		expect(volumeMention?.content).toBe('volume content');
+		expect(volumeMention?.topic).toBe('dev');
 		expect(result.cleanInput).toBe('explain');
 	});
 
@@ -49,23 +49,23 @@ describe('resolveFileMentions', () => {
 		expect(result.mentions).toHaveLength(0);
 	});
 
-	test('ignores note IDs when no resolver provided', () => {
+	test('ignores volume IDs when no resolver provided', () => {
 		const result = resolveFileMentions('explain @a1b2c3d4');
 		expect(result.mentions).toHaveLength(0);
 	});
 
-	test('does not treat paths with / or . as note IDs', () => {
+	test('does not treat paths with / or . as volume IDs', () => {
 		const result = resolveFileMentions('look at @src/main.ts', {
-			resolveNote: () => ({
+			resolveVolume: () => ({
 				id: 'fake',
 				text: 'fake',
 				topic: 'fake',
 			}),
 		});
-		// src/main.ts contains / and .ts, so it should NOT match as a note
-		// It may match as a file (filesystem), but not as a note
+		// src/main.ts contains / and .ts, so it should NOT match as a volume
+		// It may match as a file (filesystem), but not as a volume
 		for (const m of result.mentions) {
-			expect(m.kind).not.toBe('note');
+			expect(m.kind).not.toBe('volume');
 		}
 	});
 
@@ -83,7 +83,7 @@ describe('resolveFileMentions', () => {
 
 	test('handles multiple mention types in one input', () => {
 		const result = resolveFileMentions(
-			'compare @vfs://draft.py with note @abcd1234',
+			'compare @vfs://draft.py with volume @abcd1234',
 			{
 				resolveVFS: (path) => {
 					if (path === 'draft.py') {
@@ -91,9 +91,9 @@ describe('resolveFileMentions', () => {
 					}
 					return undefined;
 				},
-				resolveNote: (id) => {
+				resolveVolume: (id) => {
 					if (id === 'abcd1234') {
-						return { id: 'abcd1234-full', text: 'note text', topic: 'misc' };
+						return { id: 'abcd1234-full', text: 'volume text', topic: 'misc' };
 					}
 					return undefined;
 				},
@@ -103,7 +103,7 @@ describe('resolveFileMentions', () => {
 		expect(result.mentions).toHaveLength(2);
 		const kinds = result.mentions.map((m) => m.kind);
 		expect(kinds).toContain('vfs');
-		expect(kinds).toContain('note');
+		expect(kinds).toContain('volume');
 	});
 });
 
@@ -118,20 +118,20 @@ describe('formatMentionsAsContext', () => {
 		expect(ctx).toContain('</file>');
 	});
 
-	test('formats note mentions with topic', () => {
+	test('formats volume mentions with topic', () => {
 		const mentions: FileMention[] = [
 			{
 				path: 'a1b2c3d4',
-				content: 'note body',
-				size: 9,
-				kind: 'note',
+				content: 'volume body',
+				size: 11,
+				kind: 'volume',
 				topic: 'design',
 			},
 		];
 		const ctx = formatMentionsAsContext(mentions);
-		expect(ctx).toContain('<note id="a1b2c3d4" topic="design">');
-		expect(ctx).toContain('note body');
-		expect(ctx).toContain('</note>');
+		expect(ctx).toContain('<volume id="a1b2c3d4" topic="design">');
+		expect(ctx).toContain('volume body');
+		expect(ctx).toContain('</volume>');
 	});
 
 	test('formats VFS mentions as file tags', () => {
@@ -158,9 +158,9 @@ describe('completeAtMention', () => {
 		expect(result).toEqual(['test.py', 'temp.txt']);
 	});
 
-	test('dispatches hex prefix to completeNote callback', () => {
+	test('dispatches hex prefix to completeVolume callback', () => {
 		const result = completeAtMention('a1b2', {
-			completeNote: (partial) => {
+			completeVolume: (partial) => {
 				if (partial === 'a1b2') return ['a1b2c3d4'];
 				return [];
 			},

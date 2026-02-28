@@ -96,7 +96,7 @@ export interface LibraryFileConfig {
 	readonly compressionLevel?: number;
 	/** Whether to use atomic writes for storage. */
 	readonly atomicWrite?: boolean;
-	/** Max notes per topic before auto-summarizing oldest entries (0 = disabled). */
+	/** Max volumes per topic before auto-summarizing oldest entries (0 = disabled). */
 	readonly autoSummarizeThreshold?: number;
 }
 

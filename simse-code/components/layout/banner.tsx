@@ -12,8 +12,8 @@ const DIVIDER = '\u2500';
 
 const DEFAULT_TIPS: readonly string[] = [
 	'Run /help for all commands',
-	'Use /add <text> to save a note',
-	'Use /search <query> to find notes',
+	'Use /add <text> to save a volume',
+	'Use /search <query> to find volumes',
 ];
 
 interface BannerProps {

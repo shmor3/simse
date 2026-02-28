@@ -517,10 +517,8 @@ export function createCLIConfig(options?: CLIConfigOptions): CLIConfigResult {
 				memory: {
 					enabled: libraryConfig.enabled ?? true,
 					embeddingAgent:
-						embedConfig.embeddingModel ??
-						'nomic-ai/nomic-embed-text-v1.5',
-					similarityThreshold:
-						libraryConfig.similarityThreshold ?? 0.7,
+						embedConfig.embeddingModel ?? 'nomic-ai/nomic-embed-text-v1.5',
+					similarityThreshold: libraryConfig.similarityThreshold ?? 0.7,
 					maxResults: libraryConfig.maxResults ?? 10,
 				},
 				chains: {},
@@ -547,10 +545,8 @@ export function createCLIConfig(options?: CLIConfigOptions): CLIConfigResult {
 				memory: Object.freeze({
 					enabled: libraryConfig.enabled ?? true,
 					embeddingAgent:
-						embedConfig.embeddingModel ??
-						'nomic-ai/nomic-embed-text-v1.5',
-					similarityThreshold:
-						libraryConfig.similarityThreshold ?? 0.7,
+						embedConfig.embeddingModel ?? 'nomic-ai/nomic-embed-text-v1.5',
+					similarityThreshold: libraryConfig.similarityThreshold ?? 0.7,
 					maxResults: libraryConfig.maxResults ?? 10,
 				}),
 				chains: Object.freeze({}),

@@ -49,8 +49,7 @@ export async function createTempConfig(
 			}),
 		);
 	} else if (backend === 'ollama') {
-		const ollamaUrl =
-			process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
+		const ollamaUrl = process.env.OLLAMA_URL ?? 'http://127.0.0.1:11434';
 		const ollamaModel = process.env.OLLAMA_MODEL ?? 'llama3.2';
 		await writeFile(
 			join(dataDir, 'acp.json'),

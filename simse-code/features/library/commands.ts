@@ -47,7 +47,9 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		usage: '/notes [topic]',
 		description: 'List notes (optionally filtered by topic)',
 		category: 'library',
-		execute: (args) => ({ text: args ? `Notes in "${args}"...` : 'Listing all notes...' }),
+		execute: (args) => ({
+			text: args ? `Notes in "${args}"...` : 'Listing all notes...',
+		}),
 	},
 	{
 		name: 'get',

@@ -63,6 +63,8 @@ export interface LoopCallbacks {
 	readonly onAgentToolCall?: (toolCall: ACPToolCall) => void;
 	/** Called when the ACP agent updates a tool call (agentManagesTools mode). */
 	readonly onAgentToolCallUpdate?: (update: ACPToolCallUpdate) => void;
+	/** Called when the loop detects consecutive identical tool calls (doom loop). */
+	readonly onDoomLoop?: (toolName: string, count: number) => void;
 }
 
 export interface AgenticLoopResult {
@@ -156,15 +158,8 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 		callbacks?: LoopCallbacks,
 		images?: readonly ImageAttachment[],
 	): Promise<AgenticLoopResult> => {
-		// Build user message: text + optional image content blocks
-		if (images && images.length > 0) {
-			const imageContext = images
-				.map((img) => `[Image: ${img.path} (${img.mimeType})]`)
-				.join('\n');
-			conversation.addUser(`${userInput}\n\n${imageContext}`);
-		} else {
-			conversation.addUser(userInput);
-		}
+		// Add user message to conversation (images sent separately via ACP content blocks)
+		conversation.addUser(userInput);
 
 		// Build system prompt: tool definitions + user-provided system prompt.
 		// When agentManagesTools is true, skip injecting tool definitions —
@@ -182,6 +177,11 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 
 		const turns: LoopTurn[] = [];
 		let lastText = '';
+
+		// Doom loop detection: track consecutive identical tool calls
+		const maxIdenticalToolCalls = 3;
+		let lastToolKey = '';
+		let identicalCount = 0;
 
 		for (let turn = 1; turn <= maxTurns; turn++) {
 			// Check for abort before each turn
@@ -212,6 +212,15 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 					onToolCallUpdate: agentManagesTools
 						? (update) => callbacks?.onAgentToolCallUpdate?.(update)
 						: undefined,
+					// Only send images on the first turn (when the user just provided them)
+					...(turn === 1 && images && images.length > 0
+						? {
+								images: images.map((img) => ({
+									mimeType: img.mimeType,
+									base64: img.base64,
+								})),
+							}
+						: {}),
 				});
 
 				for await (const chunk of stream) {
@@ -275,6 +284,25 @@ export function createAgenticLoop(options: AgenticLoopOptions): AgenticLoop {
 					hitTurnLimit: false,
 					aborted: false,
 				});
+			}
+
+			// Doom loop detection
+			const toolKey = parsed.toolCalls
+				.map((tc) => `${tc.name}:${JSON.stringify(tc.arguments)}`)
+				.join('|');
+			if (toolKey === lastToolKey) {
+				identicalCount++;
+				if (identicalCount >= maxIdenticalToolCalls) {
+					const firstTool = parsed.toolCalls[0]?.name ?? 'unknown';
+					callbacks?.onDoomLoop?.(firstTool, identicalCount);
+					// Inject a warning into the conversation to break the loop
+					conversation.addUser(
+						'[System] You are repeating the same tool calls. Please try a different approach or respond with your findings so far.',
+					);
+				}
+			} else {
+				lastToolKey = toolKey;
+				identicalCount = 1;
 			}
 
 			// Execute tool calls

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { Buffer } from 'node:buffer';
-import { encodeEmbedding } from '../src/ai/library/preservation.js';
 import { cosineSimilarity } from '../src/ai/library/cosine.js';
+import { encodeEmbedding } from '../src/ai/library/preservation.js';
+import type { Stacks } from '../src/ai/library/stacks.js';
 import type { StorageBackend } from '../src/ai/library/storage.js';
 import {
 	fuzzyScore,
@@ -14,7 +15,6 @@ import {
 	tokenOverlapScore,
 } from '../src/ai/library/text-search.js';
 import type { Volume } from '../src/ai/library/types.js';
-import type { Stacks } from '../src/ai/library/stacks.js';
 import {
 	isLibraryError,
 	isStacksCorruptionError,

@@ -398,7 +398,11 @@ export function createMCPServer(
 				},
 				async ({ query, maxResults }) => {
 					try {
-						sendLog('info', `Searching library for: ${query}`, 'library-search');
+						sendLog(
+							'info',
+							`Searching library for: ${query}`,
+							'library-search',
+						);
 						const results = await library.search(
 							query as string,
 							(maxResults as number | undefined) ?? 10,
@@ -447,11 +451,17 @@ export function createMCPServer(
 						);
 						const id = await library.add(text as string, meta);
 						return {
-							content: [{ type: 'text' as const, text: `Shelved volume: ${id}` }],
+							content: [
+								{ type: 'text' as const, text: `Shelved volume: ${id}` },
+							],
 						};
 					} catch (error) {
 						const message = toError(error).message;
-						sendLog('error', `Library shelve failed: ${message}`, 'library-shelve');
+						sendLog(
+							'error',
+							`Library shelve failed: ${message}`,
+							'library-shelve',
+						);
 						return {
 							content: [{ type: 'text' as const, text: `Error: ${message}` }],
 							isError: true,
@@ -516,10 +526,8 @@ export function createMCPServer(
 					description: 'Read a file from the virtual filesystem sandbox',
 					inputSchema: {
 						path: z
-						.string()
-						.describe(
-							'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
-						),
+							.string()
+							.describe('VFS path using vfs:// scheme (e.g. vfs:///hello.js)'),
 					},
 				},
 				async ({ path }) => {
@@ -555,10 +563,8 @@ export function createMCPServer(
 					description: 'Write a file to the virtual filesystem sandbox',
 					inputSchema: {
 						path: z
-						.string()
-						.describe(
-							'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
-						),
+							.string()
+							.describe('VFS path using vfs:// scheme (e.g. vfs:///hello.js)'),
 						content: z.string().describe('The file content'),
 					},
 				},
@@ -595,9 +601,7 @@ export function createMCPServer(
 						path: z
 							.string()
 							.optional()
-							.describe(
-							'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
-						),
+							.describe('VFS path using vfs:// scheme (e.g. vfs:///hello.js)'),
 					},
 				},
 				async ({ path }) => {
@@ -635,9 +639,7 @@ export function createMCPServer(
 						path: z
 							.string()
 							.optional()
-							.describe(
-							'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
-						),
+							.describe('VFS path using vfs:// scheme (e.g. vfs:///hello.js)'),
 					},
 				},
 				async ({ path }) => {

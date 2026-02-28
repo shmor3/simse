@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import {
-	createLibraryError,
-	createStacksError,
-	createStacksCorruptionError,
-	createStacksIOError,
 	createEmbeddingError,
-	isLibraryError,
-	isStacksError,
+	createLibraryError,
+	createStacksCorruptionError,
+	createStacksError,
+	createStacksIOError,
 	isEmbeddingError,
+	isLibraryError,
 	isStacksCorruptionError,
+	isStacksError,
 	isStacksIOError,
 } from '../src/errors/index.js';
 

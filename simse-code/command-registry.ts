@@ -5,7 +5,9 @@ export interface CommandRegistry {
 	readonly registerAll: (commands: readonly CommandDefinition[]) => void;
 	readonly get: (nameOrAlias: string) => CommandDefinition | undefined;
 	readonly getAll: () => readonly CommandDefinition[];
-	readonly getByCategory: (category: CommandCategory) => readonly CommandDefinition[];
+	readonly getByCategory: (
+		category: CommandCategory,
+	) => readonly CommandDefinition[];
 }
 
 export function createCommandRegistry(): CommandRegistry {
@@ -26,14 +28,18 @@ export function createCommandRegistry(): CommandRegistry {
 	}
 
 	function get(nameOrAlias: string): CommandDefinition | undefined {
-		return commands.get(nameOrAlias) ?? commands.get(aliases.get(nameOrAlias) ?? '');
+		return (
+			commands.get(nameOrAlias) ?? commands.get(aliases.get(nameOrAlias) ?? '')
+		);
 	}
 
 	function getAll(): readonly CommandDefinition[] {
 		return [...commands.values()];
 	}
 
-	function getByCategory(category: CommandCategory): readonly CommandDefinition[] {
+	function getByCategory(
+		category: CommandCategory,
+	): readonly CommandDefinition[] {
 		return [...commands.values()].filter((c) => c.category === category);
 	}
 

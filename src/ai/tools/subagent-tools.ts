@@ -7,8 +7,8 @@
 
 import { toError } from '../../errors/base.js';
 import type { ACPClient } from '../acp/acp-client.js';
-import type { Library } from '../library/library.js';
 import { createConversation } from '../conversation/conversation.js';
+import type { Library } from '../library/library.js';
 import { createAgenticLoop } from '../loop/agentic-loop.js';
 import type { SubagentInfo, SubagentResult } from '../loop/types.js';
 import { createToolRegistry } from './tool-registry.js';
@@ -208,12 +208,9 @@ export function registerSubagentTools(
 						async (args) => {
 							const query = String(args.query ?? '');
 							const maxResults =
-								typeof args.maxResults === 'number'
-									? args.maxResults
-									: 5;
+								typeof args.maxResults === 'number' ? args.maxResults : 5;
 							const results = await shelf.search(query, maxResults);
-							if (results.length === 0)
-								return 'No matching volumes found.';
+							if (results.length === 0) return 'No matching volumes found.';
 							return results
 								.map(
 									(r, i) =>
@@ -252,8 +249,7 @@ export function registerSubagentTools(
 					childRegistry.register(
 						{
 							name: 'library_search_global',
-							description:
-								'Search the entire library across all shelves.',
+							description: 'Search the entire library across all shelves.',
 							parameters: {
 								query: {
 									type: 'string',
@@ -271,15 +267,9 @@ export function registerSubagentTools(
 						async (args) => {
 							const query = String(args.query ?? '');
 							const maxResults =
-								typeof args.maxResults === 'number'
-									? args.maxResults
-									: 5;
-							const results = await shelf.searchGlobal(
-								query,
-								maxResults,
-							);
-							if (results.length === 0)
-								return 'No matching volumes found.';
+								typeof args.maxResults === 'number' ? args.maxResults : 5;
+							const results = await shelf.searchGlobal(query, maxResults);
+							if (results.length === 0) return 'No matching volumes found.';
 							return results
 								.map(
 									(r, i) =>

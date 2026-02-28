@@ -6,13 +6,13 @@ import { createVFSError } from '../../errors/vfs.js';
 import type { Logger } from '../../logger.js';
 import { getDefaultLogger } from '../../logger.js';
 import {
-	VFS_ROOT,
 	ancestorPaths,
 	baseName,
 	normalizePath,
 	parentPath,
 	pathDepth,
 	toLocalPath,
+	VFS_ROOT,
 	validatePath,
 } from './path-utils.js';
 import type {
@@ -162,7 +162,9 @@ const matchSegment = (segment: string, pattern: string): boolean => {
 const matchGlob = (filePath: string, pattern: string): boolean => {
 	const normalizedPattern = normalizePath(pattern);
 	const pathParts = toLocalPath(filePath).split('/').filter(Boolean);
-	const patternParts = toLocalPath(normalizedPattern).split('/').filter(Boolean);
+	const patternParts = toLocalPath(normalizedPattern)
+		.split('/')
+		.filter(Boolean);
 
 	return matchParts(pathParts, 0, patternParts, 0);
 };

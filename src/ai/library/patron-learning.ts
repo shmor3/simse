@@ -18,15 +18,8 @@
 // compressed JSON format.
 // ---------------------------------------------------------------------------
 
-import { decodeEmbedding, encodeEmbedding } from './preservation.js';
 import { cosineSimilarity } from './cosine.js';
-import type {
-	LearningOptions,
-	PatronProfile,
-	QueryRecord,
-	RelevanceFeedback,
-	WeightProfile,
-} from './types.js';
+import { decodeEmbedding, encodeEmbedding } from './preservation.js';
 import type {
 	CorrelationEntry,
 	ExplicitFeedbackEntry,
@@ -35,6 +28,13 @@ import type {
 	SerializedQueryRecord,
 	TopicProfileEntry,
 } from './stacks-persistence.js';
+import type {
+	LearningOptions,
+	PatronProfile,
+	QueryRecord,
+	RelevanceFeedback,
+	WeightProfile,
+} from './types.js';
 
 // ---------------------------------------------------------------------------
 // LearningEngine interface

@@ -7,8 +7,8 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { Interface as ReadlineInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
 import type {
 	ACPFileConfig,
 	ACPServerConfig,
@@ -20,9 +20,10 @@ import type {
 // simse-engine resolution — find bundled WASM or native binary
 // ---------------------------------------------------------------------------
 
-const __dir = typeof import.meta.dirname === 'string'
-	? import.meta.dirname
-	: dirname(fileURLToPath(import.meta.url));
+const __dir =
+	typeof import.meta.dirname === 'string'
+		? import.meta.dirname
+		: dirname(fileURLToPath(import.meta.url));
 
 /**
  * Resolve the simse-engine binary, preferring:
@@ -35,25 +36,55 @@ const __dir = typeof import.meta.dirname === 'string'
 function resolveSimseEngine(): { command: string; args: string[] } | undefined {
 	// Check for local native build
 	const nativeExt = process.platform === 'win32' ? '.exe' : '';
-	const nativePath = resolve(__dir, '..', 'simse-engine', 'target', 'release', `simse-engine${nativeExt}`);
+	const nativePath = resolve(
+		__dir,
+		'..',
+		'simse-engine',
+		'target',
+		'release',
+		`simse-engine${nativeExt}`,
+	);
 	if (existsSync(nativePath)) {
 		return { command: nativePath, args: [] };
 	}
 
 	// Check for debug native build
-	const debugPath = resolve(__dir, '..', 'simse-engine', 'target', 'debug', `simse-engine${nativeExt}`);
+	const debugPath = resolve(
+		__dir,
+		'..',
+		'simse-engine',
+		'target',
+		'debug',
+		`simse-engine${nativeExt}`,
+	);
 	if (existsSync(debugPath)) {
 		return { command: debugPath, args: [] };
 	}
 
 	// Check for WASM build (run via bun)
-	const wasmPath = resolve(__dir, '..', 'simse-engine', 'target', 'wasm32-wasip1', 'release', 'simse-engine.wasm');
+	const wasmPath = resolve(
+		__dir,
+		'..',
+		'simse-engine',
+		'target',
+		'wasm32-wasip1',
+		'release',
+		'simse-engine.wasm',
+	);
 	if (existsSync(wasmPath)) {
 		return { command: 'bun', args: ['run', wasmPath] };
 	}
 
 	// Debug WASM build
-	const wasmDebugPath = resolve(__dir, '..', 'simse-engine', 'target', 'wasm32-wasip1', 'debug', 'simse-engine.wasm');
+	const wasmDebugPath = resolve(
+		__dir,
+		'..',
+		'simse-engine',
+		'target',
+		'wasm32-wasip1',
+		'debug',
+		'simse-engine.wasm',
+	);
 	if (existsSync(wasmDebugPath)) {
 		return { command: 'bun', args: ['run', wasmDebugPath] };
 	}
@@ -122,9 +153,9 @@ const presets: readonly Preset[] = [
 			if (!resolved) {
 				console.log(
 					'\n  simse-engine not found. Build it first:\n' +
-					'    cd simse-engine && cargo build --release\n' +
-					'  Or for WASM:\n' +
-					'    cd simse-engine && cargo build --release --target wasm32-wasip1\n',
+						'    cd simse-engine && cargo build --release\n' +
+						'  Or for WASM:\n' +
+						'    cd simse-engine && cargo build --release --target wasm32-wasip1\n',
 				);
 				throw new Error('simse-engine binary not found');
 			}
@@ -139,8 +170,7 @@ const presets: readonly Preset[] = [
 					rl,
 					'  Model file [Llama-3.2-3B-Instruct-Q4_K_M.gguf]: ',
 				)) ?? 'Llama-3.2-3B-Instruct-Q4_K_M.gguf';
-			const device =
-				(await askOptional(rl, '  Device [cpu]: ')) ?? 'cpu';
+			const device = (await askOptional(rl, '  Device [cpu]: ')) ?? 'cpu';
 
 			const engineArgs = [
 				...resolved.args,

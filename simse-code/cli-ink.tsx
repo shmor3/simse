@@ -8,6 +8,7 @@ import { createACPClient, toError } from 'simse';
 import { App } from './app-ink.js';
 import { createCLIConfig } from './config.js';
 import { createPermissionManager } from './permission-manager.js';
+import { createSessionStore } from './session-store.js';
 import type { Conversation } from './conversation.js';
 import { createConversation } from './conversation.js';
 import type { ToolRegistry } from './tool-registry.js';
@@ -17,10 +18,14 @@ function parseArgs(): {
 	dataDir: string;
 	serverName?: string;
 	bypassPermissions?: boolean;
+	continueSession?: boolean;
+	resumeId?: string;
 } {
 	const args = process.argv.slice(2);
 	let dataDir = join(homedir(), '.simse');
 	let bypassPermissions = false;
+	let continueSession = false;
+	let resumeId: string | undefined;
 
 	for (let i = 0; i < args.length; i++) {
 		if (args[i] === '--data-dir' && args[i + 1]) {
@@ -30,12 +35,19 @@ function parseArgs(): {
 		if (args[i] === '--bypass-permissions' || args[i] === '-y') {
 			bypassPermissions = true;
 		}
+		if (args[i] === '--continue' || args[i] === '-c') {
+			continueSession = true;
+		}
+		if (args[i] === '--resume' && args[i + 1]) {
+			resumeId = args[i + 1]!;
+			i++;
+		}
 	}
 
-	return { dataDir, bypassPermissions };
+	return { dataDir, bypassPermissions, continueSession, resumeId };
 }
 
-const { dataDir, bypassPermissions } = parseArgs();
+const { dataDir, bypassPermissions, continueSession, resumeId } = parseArgs();
 
 if (!process.stdin.isTTY) {
 	console.error(
@@ -57,6 +69,8 @@ async function bootstrap(): Promise<{
 	modelName?: string;
 	hasACP: boolean;
 	permissionManager: ReturnType<typeof createPermissionManager>;
+	sessionStore: ReturnType<typeof createSessionStore>;
+	sessionId: string;
 }> {
 	const configResult = createCLIConfig({ dataDir });
 	const { config, logger } = configResult;
@@ -129,6 +143,35 @@ async function bootstrap(): Promise<{
 		initialMode: bypassPermissions ? 'dontAsk' : undefined,
 	});
 
+	// Session store + ID
+	const sessionStore = createSessionStore(dataDir);
+	let sessionId: string;
+
+	if (resumeId) {
+		// --resume <id-prefix>: find matching session
+		const sessions = sessionStore.list();
+		const match = sessions.find((s) => s.id.startsWith(resumeId));
+		if (!match) {
+			console.error(`No session found matching "${resumeId}".`);
+			process.exit(1);
+		}
+		sessionId = match.id;
+		const messages = sessionStore.load(sessionId);
+		conversation.loadMessages(messages);
+	} else if (continueSession) {
+		// --continue: resume most recent session for this workDir
+		const latest = sessionStore.latest(process.cwd());
+		if (latest) {
+			sessionId = latest;
+			const messages = sessionStore.load(sessionId);
+			conversation.loadMessages(messages);
+		} else {
+			sessionId = sessionStore.create(process.cwd());
+		}
+	} else {
+		sessionId = sessionStore.create(process.cwd());
+	}
+
 	return {
 		acpClient,
 		conversation,
@@ -137,6 +180,8 @@ async function bootstrap(): Promise<{
 		modelName,
 		hasACP: hasServers,
 		permissionManager,
+		sessionStore,
+		sessionId,
 	};
 }
 
@@ -151,6 +196,8 @@ bootstrap()
 			modelName,
 			hasACP,
 			permissionManager,
+			sessionStore,
+			sessionId,
 		}) => {
 			const inkInstance = render(
 				<App
@@ -161,6 +208,8 @@ bootstrap()
 					conversation={conversation}
 					toolRegistry={toolRegistry}
 					permissionManager={permissionManager}
+					sessionStore={sessionStore}
+					sessionId={sessionId}
 					hasACP={hasACP}
 				/>,
 				{ exitOnCtrlC: false },

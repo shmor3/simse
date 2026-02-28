@@ -8,7 +8,9 @@ interface ErrorBoxProps {
 export function ErrorBox({ message }: ErrorBoxProps) {
 	return (
 		<Box paddingLeft={2}>
-			<Text color="red">{'\u25cf'} {message}</Text>
+			<Text color="red">
+				{'\u25cf'} {message}
+			</Text>
 		</Box>
 	);
 }

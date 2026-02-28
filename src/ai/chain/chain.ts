@@ -17,9 +17,9 @@ import type { ACPTokenUsage } from '../acp/types.js';
 import type { AgentExecutor } from '../agent/agent-executor.js';
 import { createAgentExecutor } from '../agent/agent-executor.js';
 import type { ParallelSubResult } from '../agent/types.js';
+import type { Library } from '../library/library.js';
 import type { MCPClient } from '../mcp/mcp-client.js';
 import type { MCPToolCallMetrics } from '../mcp/types.js';
-import type { Library } from '../library/library.js';
 import { createPromptTemplate } from './prompt-template.js';
 import type {
 	ChainCallbacks,

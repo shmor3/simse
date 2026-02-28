@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { KEYS, ctrlKey } from './keys.js';
+import { ctrlKey, KEYS } from './keys.js';
 
 describe('keys', () => {
 	it('has enter as carriage return', () => {

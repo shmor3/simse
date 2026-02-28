@@ -11,8 +11,8 @@ import { join } from 'node:path';
 import type {
 	ACPFileConfig,
 	EmbedFileConfig,
-	MCPFileConfig,
 	LibraryFileConfig,
+	MCPFileConfig,
 	UserConfig,
 } from '../config.js';
 import { createCLIConfig } from '../config.js';

@@ -100,4 +100,50 @@ describe('TextInput', () => {
 		expect(outputLines[1]).toMatch(/^ {2}/);
 		expect(outputLines[1]).toContain('world');
 	});
+
+	test('renders ghost suggestion text after cursor', () => {
+		const { lastFrame } = render(
+			<TextInput value="/hel" onChange={() => {}} suggestion="p" />,
+		);
+		const frame = lastFrame()!;
+		expect(frame).toContain('hel');
+		expect(frame).toContain('p');
+	});
+
+	test('does not render suggestion when value is empty (placeholder shown)', () => {
+		const { lastFrame } = render(
+			<TextInput
+				value=""
+				onChange={() => {}}
+				placeholder="Type here"
+				suggestion="help"
+			/>,
+		);
+		const frame = lastFrame()!;
+		expect(frame).toContain('Type here');
+	});
+
+	test('accepts suggestion with Right Arrow', async () => {
+		function SuggestionHarness() {
+			const [value, setValue] = useState('/hel');
+			return (
+				<>
+					<TextInput
+						value={value}
+						onChange={setValue}
+						suggestion={value === '/hel' ? 'p' : undefined}
+					/>
+					<Text>VALUE:{value}</Text>
+				</>
+			);
+		}
+
+		const { lastFrame, stdin } = render(<SuggestionHarness />);
+
+		// Press Right Arrow (escape sequence)
+		stdin.write('\u001B[C');
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(lastFrame()).toContain('VALUE:/help');
+	});
 });

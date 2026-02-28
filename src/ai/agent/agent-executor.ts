@@ -8,8 +8,8 @@ import type { ACPClient } from '../acp/acp-client.js';
 import type { ACPGenerateResult } from '../acp/types.js';
 import { formatSearchResults } from '../chain/format.js';
 import type { Provider } from '../chain/types.js';
-import type { MCPClient } from '../mcp/mcp-client.js';
 import type { Library } from '../library/library.js';
+import type { MCPClient } from '../mcp/mcp-client.js';
 import type { AgentResult, AgentStepConfig } from './types.js';
 
 // ---------------------------------------------------------------------------

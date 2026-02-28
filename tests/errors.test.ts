@@ -9,6 +9,7 @@ import {
 	createConfigParseError,
 	createConfigValidationError,
 	createEmbeddingError,
+	createLibraryError,
 	// Loop
 	createLoopAbortedError,
 	createLoopError,
@@ -18,7 +19,6 @@ import {
 	createMCPServerNotConnectedError,
 	createMCPToolError,
 	createMCPTransportConfigError,
-	createLibraryError,
 	createProviderError,
 	createProviderGenerationError,
 	createProviderHTTPError,
@@ -26,6 +26,8 @@ import {
 	createProviderUnavailableError,
 	// Factory functions
 	createSimseError,
+	createStacksCorruptionError,
+	createStacksIOError,
 	// Tasks
 	createTaskCircularDependencyError,
 	createTaskError,
@@ -36,8 +38,6 @@ import {
 	createToolError,
 	createToolExecutionError,
 	createToolNotFoundError,
-	createStacksCorruptionError,
-	createStacksIOError,
 	isChainError,
 	isChainNotFoundError,
 	isChainStepError,
@@ -45,6 +45,7 @@ import {
 	isConfigNotFoundError,
 	isConfigValidationError,
 	isEmbeddingError,
+	isLibraryError,
 	isLoopAbortedError,
 	isLoopError,
 	isLoopTurnLimitError,
@@ -53,7 +54,6 @@ import {
 	isMCPServerNotConnectedError,
 	isMCPToolError,
 	isMCPTransportConfigError,
-	isLibraryError,
 	isProviderError,
 	isProviderGenerationError,
 	isProviderHTTPError,
@@ -61,6 +61,8 @@ import {
 	isProviderUnavailableError,
 	// Type guards
 	isSimseError,
+	isStacksCorruptionError,
+	isStacksIOError,
 	isTaskCircularDependencyError,
 	isTaskError,
 	isTaskNotFoundError,
@@ -69,8 +71,6 @@ import {
 	isToolError,
 	isToolExecutionError,
 	isToolNotFoundError,
-	isStacksCorruptionError,
-	isStacksIOError,
 	// Utility
 	toError,
 	wrapError,
@@ -928,12 +928,8 @@ describe('Error hierarchy', () => {
 		);
 		expect(createLibraryError('').name).toBe('LibraryError');
 		expect(createEmbeddingError('').name).toBe('EmbeddingError');
-		expect(createStacksCorruptionError('').name).toBe(
-			'StacksCorruptionError',
-		);
-		expect(createStacksIOError('', 'read').name).toBe(
-			'StacksIOError',
-		);
+		expect(createStacksCorruptionError('').name).toBe('StacksCorruptionError');
+		expect(createStacksIOError('', 'read').name).toBe('StacksIOError');
 
 		// New error types
 		expect(createProviderHTTPError('', 500, '').name).toBe('ProviderHTTPError');

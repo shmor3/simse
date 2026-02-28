@@ -208,11 +208,7 @@ describe('createACPGenerator generateWithModel', () => {
 			client,
 			systemPromptPrefix: 'prefix',
 		});
-		await generator.generateWithModel!(
-			'prompt',
-			'model-id',
-			'system',
-		);
+		await generator.generateWithModel!('prompt', 'model-id', 'system');
 		expect(client.generate).toHaveBeenCalledWith('prompt', {
 			agentId: undefined,
 			serverName: undefined,

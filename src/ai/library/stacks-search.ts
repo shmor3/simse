@@ -19,11 +19,11 @@ import {
 import type {
 	AdvancedLookup,
 	DateRange,
+	Lookup,
 	MetadataFilter,
 	SearchOptions,
-	Lookup,
-	TextSearchOptions,
 	TextLookup,
+	TextSearchOptions,
 	Volume,
 } from './types.js';
 

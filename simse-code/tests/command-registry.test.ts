@@ -52,7 +52,10 @@ describe('createCommandRegistry', () => {
 
 	test('registerAll registers multiple commands', () => {
 		const registry = createCommandRegistry();
-		registry.registerAll([testCommand, { ...testCommand, name: 'test2', aliases: [] }]);
+		registry.registerAll([
+			testCommand,
+			{ ...testCommand, name: 'test2', aliases: [] },
+		]);
 		expect(registry.getAll()).toHaveLength(2);
 	});
 });

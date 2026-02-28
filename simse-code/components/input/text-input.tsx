@@ -8,6 +8,8 @@ interface TextInputProps {
 	readonly onSubmit?: (value: string) => void;
 	readonly isActive?: boolean;
 	readonly placeholder?: string;
+	/** Ghost text shown after cursor when at end of input. Accepted with Right Arrow. */
+	readonly suggestion?: string;
 }
 
 /**
@@ -38,6 +40,7 @@ export function TextInput({
 	onSubmit,
 	isActive = true,
 	placeholder = '',
+	suggestion,
 }: TextInputProps) {
 	const [cursorOffset, setCursorOffset] = useState(value.length);
 
@@ -47,12 +50,14 @@ export function TextInput({
 	const cursorRef = useRef(cursorOffset);
 	const onChangeRef = useRef(onChange);
 	const onSubmitRef = useRef(onSubmit);
+	const suggestionRef = useRef(suggestion);
 
 	// Sync from props each render
 	valueRef.current = value;
 	cursorRef.current = cursorOffset;
 	onChangeRef.current = onChange;
 	onSubmitRef.current = onSubmit;
+	suggestionRef.current = suggestion;
 
 	// Clamp cursor when value changes externally (e.g., autocomplete fill)
 	useEffect(() => {
@@ -131,9 +136,21 @@ export function TextInput({
 			}
 
 			if (key.rightArrow) {
-				const c = Math.min(valueRef.current.length, cursorRef.current + 1);
-				cursorRef.current = c;
-				setCursorOffset(c);
+				const v = valueRef.current;
+				const c = cursorRef.current;
+				// Accept suggestion when cursor is at end and suggestion exists
+				if (c === v.length && suggestionRef.current) {
+					const next = v + suggestionRef.current;
+					const newCursor = next.length;
+					valueRef.current = next;
+					cursorRef.current = newCursor;
+					setCursorOffset(newCursor);
+					onChangeRef.current(next);
+					return;
+				}
+				const nc = Math.min(v.length, c + 1);
+				cursorRef.current = nc;
+				setCursorOffset(nc);
 				return;
 			}
 
@@ -193,6 +210,10 @@ export function TextInput({
 		}
 		if (cursorOffset === value.length) {
 			rendered += chalk.inverse(' ');
+			// Show ghost suggestion after cursor when at end of input
+			if (suggestion) {
+				rendered += chalk.gray(suggestion);
+			}
 		}
 		return <Text>{rendered}</Text>;
 	}

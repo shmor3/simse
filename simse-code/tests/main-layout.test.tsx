@@ -1,7 +1,7 @@
+import { describe, expect, test } from 'bun:test';
+import { Text } from 'ink';
 import { render } from 'ink-testing-library';
 import React from 'react';
-import { Text } from 'ink';
-import { describe, expect, test } from 'bun:test';
 import { MainLayout } from '../components/layout/main-layout.js';
 
 describe('MainLayout', () => {

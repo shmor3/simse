@@ -7,7 +7,7 @@ import { join, relative, resolve, sep } from 'node:path';
 import { createVFSError } from '../../errors/vfs.js';
 import type { Logger } from '../../logger.js';
 import { getDefaultLogger } from '../../logger.js';
-import { VFS_SCHEME, toLocalPath } from './path-utils.js';
+import { toLocalPath, VFS_SCHEME } from './path-utils.js';
 import type {
 	VFSCommitOperation,
 	VFSCommitOptions,

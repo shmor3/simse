@@ -154,7 +154,7 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 						path: {
 							type: 'string',
 							description:
-							'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
+								'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
 							required: true,
 						},
 					},
@@ -177,7 +177,7 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 						path: {
 							type: 'string',
 							description:
-							'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
+								'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
 							required: true,
 						},
 						content: {
@@ -204,7 +204,7 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 						path: {
 							type: 'string',
 							description:
-							'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
+								'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
 						},
 					},
 				},
@@ -226,7 +226,7 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 						path: {
 							type: 'string',
 							description:
-							'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
+								'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
 						},
 					},
 				},

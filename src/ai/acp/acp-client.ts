@@ -89,6 +89,11 @@ export interface ACPStreamOptions {
 	readonly onToolCallUpdate?: (update: ACPToolCallUpdate) => void;
 	/** AbortSignal to cancel the stream early. Stops yielding chunks when aborted. */
 	readonly signal?: AbortSignal;
+	/** Image content blocks to include alongside the text prompt. */
+	readonly images?: readonly {
+		readonly mimeType: string;
+		readonly base64: string;
+	}[];
 }
 
 // ---------------------------------------------------------------------------
@@ -704,6 +709,20 @@ export function createACPClient(
 
 			const sessionId = await createSession(connection);
 			const content = buildTextContent(prompt, streamOptions?.systemPrompt);
+
+			// Append image content blocks if provided
+			if (streamOptions?.images && streamOptions.images.length > 0) {
+				for (const img of streamOptions.images) {
+					content.push({
+						type: 'resource',
+						resource: {
+							uri: `data:${img.mimeType};base64`,
+							mimeType: img.mimeType,
+							blob: img.base64,
+						},
+					});
+				}
+			}
 
 			// Collect streaming chunks via notification handler
 			type ChunkItem =

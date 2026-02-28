@@ -1,5 +1,5 @@
-import InkSpinner from 'ink-spinner';
 import { Box, Text } from 'ink';
+import InkSpinner from 'ink-spinner';
 import React from 'react';
 
 // ---------------------------------------------------------------------------
@@ -113,9 +113,7 @@ function formatDuration(ms: number): string {
 // Status indicator
 // ---------------------------------------------------------------------------
 
-function StatusIndicator({
-	status,
-}: { status: ToolCallBoxProps['status'] }) {
+function StatusIndicator({ status }: { status: ToolCallBoxProps['status'] }) {
 	switch (status) {
 		case 'active':
 			return (
@@ -143,9 +141,7 @@ function DiffLines({ diff }: { diff: string }) {
 					return (
 						<Text key={i}>
 							{'    '}
-							<Text dimColor>{'⎿'}</Text>
-							{' '}
-							<Text color="green">{line}</Text>
+							<Text dimColor>{'⎿'}</Text> <Text color="green">{line}</Text>
 						</Text>
 					);
 				}
@@ -153,18 +149,14 @@ function DiffLines({ diff }: { diff: string }) {
 					return (
 						<Text key={i}>
 							{'    '}
-							<Text dimColor>{'⎿'}</Text>
-							{' '}
-							<Text color="red">{line}</Text>
+							<Text dimColor>{'⎿'}</Text> <Text color="red">{line}</Text>
 						</Text>
 					);
 				}
 				return (
 					<Text key={i}>
 						{'    '}
-						<Text dimColor>{'⎿'}</Text>
-						{' '}
-						{line}
+						<Text dimColor>{'⎿'}</Text> {line}
 					</Text>
 				);
 			})}
@@ -187,16 +179,13 @@ export function ToolCallBox({
 }: ToolCallBoxProps) {
 	const displayName = getToolDisplayName(name);
 	const primaryArg = extractPrimaryArg(args);
-	const toolLabel = primaryArg
-		? `${displayName}(${primaryArg})`
-		: displayName;
+	const toolLabel = primaryArg ? `${displayName}(${primaryArg})` : displayName;
 
 	// Build result meta parts for the ⎿ line
 	const resultParts: string[] = [];
 	if (summary) resultParts.push(summary);
 	if (duration !== undefined) resultParts.push(formatDuration(duration));
-	const resultText =
-		resultParts.length > 0 ? resultParts.join(' ') : undefined;
+	const resultText = resultParts.length > 0 ? resultParts.join(' ') : undefined;
 
 	return (
 		<Box flexDirection="column" paddingLeft={2}>

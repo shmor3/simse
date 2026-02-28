@@ -29,6 +29,18 @@ export {
 	isConfigValidationError,
 } from './config.js';
 export {
+	createEmbeddingError,
+	createLibraryError,
+	createStacksCorruptionError,
+	createStacksError,
+	createStacksIOError,
+	isEmbeddingError,
+	isLibraryError,
+	isStacksCorruptionError,
+	isStacksError,
+	isStacksIOError,
+} from './library.js';
+export {
 	createLoopAbortedError,
 	createLoopError,
 	createLoopTurnLimitError,
@@ -48,18 +60,6 @@ export {
 	isMCPToolError,
 	isMCPTransportConfigError,
 } from './mcp.js';
-export {
-	createEmbeddingError,
-	createLibraryError,
-	createStacksCorruptionError,
-	createStacksError,
-	createStacksIOError,
-	isEmbeddingError,
-	isLibraryError,
-	isStacksCorruptionError,
-	isStacksError,
-	isStacksIOError,
-} from './library.js';
 export {
 	createProviderError,
 	createProviderGenerationError,

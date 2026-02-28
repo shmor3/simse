@@ -9,7 +9,11 @@
 // This module is pure — no side effects, no access tracking, no dirty flags.
 // ---------------------------------------------------------------------------
 
-import type { MagnitudeCache, MetadataIndex, TopicIndex } from './cataloging.js';
+import type {
+	MagnitudeCache,
+	MetadataIndex,
+	TopicIndex,
+} from './cataloging.js';
 import { computeMagnitude } from './cataloging.js';
 import type { LearningEngine } from './patron-learning.js';
 import {

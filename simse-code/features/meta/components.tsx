@@ -59,11 +59,17 @@ export function ContextGrid({ usedChars, maxChars }: ContextGridProps) {
 	return (
 		<Box flexDirection="column" paddingLeft={2}>
 			<Text>
-				Context usage: <Text color={color} bold>{pct}%</Text>{' '}
-				<Text dimColor>({usedChars.toLocaleString()} / {maxChars.toLocaleString()} chars)</Text>
+				Context usage:{' '}
+				<Text color={color} bold>
+					{pct}%
+				</Text>{' '}
+				<Text dimColor>
+					({usedChars.toLocaleString()} / {maxChars.toLocaleString()} chars)
+				</Text>
 			</Text>
 			<Text color={color}>
-				{'█'.repeat(filled)}{'░'.repeat(width - filled)}
+				{'█'.repeat(filled)}
+				{'░'.repeat(width - filled)}
 			</Text>
 		</Box>
 	);

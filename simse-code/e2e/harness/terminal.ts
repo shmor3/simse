@@ -1,6 +1,7 @@
 // simse-code/e2e/harness/terminal.ts
-import { Terminal } from '@xterm/headless';
+
 import { resolve } from 'node:path';
+import { Terminal } from '@xterm/headless';
 
 export interface PtyTerminalOptions {
 	command: string;
@@ -16,14 +17,8 @@ export interface PtyTerminal {
 	getScreen(): string;
 	getLine(row: number): string;
 	getCursorPosition(): { row: number; col: number };
-	waitForText(
-		text: string,
-		opts?: { timeout?: number },
-	): Promise<void>;
-	waitForNoText(
-		text: string,
-		opts?: { timeout?: number },
-	): Promise<void>;
+	waitForText(text: string, opts?: { timeout?: number }): Promise<void>;
+	waitForNoText(text: string, opts?: { timeout?: number }): Promise<void>;
 	kill(): Promise<void>;
 }
 
@@ -52,10 +47,7 @@ export async function createPtyTerminal(
 	let exited = false;
 
 	if (useBridge) {
-		const bridgePath = resolve(
-			import.meta.dir,
-			'pty-bridge.cjs',
-		);
+		const bridgePath = resolve(import.meta.dir, 'pty-bridge.cjs');
 
 		const config = JSON.stringify({
 			command: options.command,
@@ -156,10 +148,7 @@ export async function createPtyTerminal(
 			cols,
 			rows,
 			cwd: options.cwd,
-			env: { ...process.env, ...options.env } as Record<
-				string,
-				string
-			>,
+			env: { ...process.env, ...options.env } as Record<string, string>,
 		});
 
 		proc.onData((data: string) => {

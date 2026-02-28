@@ -59,7 +59,11 @@ process.stdin.on('data', (chunk) => {
 			if (msg.type === 'write') {
 				proc.write(msg.data);
 			} else if (msg.type === 'kill') {
-				try { proc.kill(); } catch { /* ignore */ }
+				try {
+					proc.kill();
+				} catch {
+					/* ignore */
+				}
 				setTimeout(() => process.exit(0), 100);
 			} else if (msg.type === 'resize') {
 				proc.resize(msg.cols, msg.rows);

@@ -39,6 +39,8 @@ export interface Conversation {
 		content: string,
 	) => void;
 	readonly setSystemPrompt: (prompt: string) => void;
+	/** Load messages from a saved session (replays into conversation buffer). */
+	readonly loadMessages: (msgs: readonly ConversationMessage[]) => void;
 	readonly toMessages: () => readonly ConversationMessage[];
 	readonly serialize: () => string;
 	readonly clear: () => void;
@@ -105,6 +107,17 @@ export function createConversation(
 		systemPrompt = prompt;
 	};
 
+	const loadMessages = (msgs: readonly ConversationMessage[]): void => {
+		messages.length = 0;
+		for (const msg of msgs) {
+			if (msg.role === 'system') {
+				systemPrompt = msg.content;
+			} else {
+				messages.push(Object.freeze({ ...msg }));
+			}
+		}
+	};
+
 	const toMessages = (): readonly ConversationMessage[] => {
 		const result: ConversationMessage[] = [];
 		if (systemPrompt) {
@@ -159,6 +172,7 @@ export function createConversation(
 		addAssistant,
 		addToolResult,
 		setSystemPrompt,
+		loadMessages,
 		toMessages,
 		serialize,
 		clear,

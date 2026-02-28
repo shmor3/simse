@@ -33,7 +33,8 @@ import { filesCommands } from './features/files/index.js';
 import { libraryCommands } from './features/library/index.js';
 import { createMetaCommands } from './features/meta/index.js';
 import type { MetaCommandContext } from './features/meta/index.js';
-import { sessionCommands } from './features/session/index.js';
+import { createSessionCommands } from './features/session/index.js';
+import type { SessionCommandContext } from './features/session/index.js';
 import { toolsCommands } from './features/tools/index.js';
 import { useAgenticLoop } from './hooks/use-agentic-loop.js';
 import { useCommandDispatch } from './hooks/use-command-dispatch.js';
@@ -45,6 +46,7 @@ import {
 import { detectImages, formatImageIndicator } from './image-input.js';
 import type { OutputItem } from './ink-types.js';
 import type { PermissionManager } from './permission-manager.js';
+import type { SessionStore } from './session-store.js';
 import type { ToolRegistry } from './tool-registry.js';
 import { createToolRegistry } from './tool-registry.js';
 
@@ -56,6 +58,8 @@ interface AppProps {
 	readonly conversation: Conversation;
 	readonly toolRegistry: ToolRegistry;
 	readonly permissionManager: PermissionManager;
+	readonly sessionStore: SessionStore;
+	readonly sessionId: string;
 	readonly hasACP?: boolean;
 }
 
@@ -67,6 +71,8 @@ export function App({
 	conversation: initialConversation,
 	toolRegistry: initialToolRegistry,
 	permissionManager,
+	sessionStore,
+	sessionId: initialSessionId,
 	hasACP: initialHasACP = true,
 }: AppProps) {
 	const bannerElement: ReactNode = (
@@ -84,6 +90,7 @@ export function App({
 	const [isProcessing, setIsProcessing] = useState(false);
 	const [planMode, setPlanMode] = useState(false);
 	const [verbose, setVerbose] = useState(false);
+	const sessionIdRef = useRef(initialSessionId);
 	const [promptMode, setPromptMode] = useState<PromptMode>('normal');
 	const [ctrlCWarning, setCtrlCWarning] = useState(false);
 
@@ -187,6 +194,35 @@ export function App({
 	planModeRef.current = planMode;
 	const bannerRef = useRef(bannerElement);
 
+	// Resume a session: load messages into conversation and rebuild items
+	const resumeSession = useCallback(
+		(id: string) => {
+			const messages = sessionStore.load(id);
+			if (messages.length === 0) return;
+
+			conversationRef.current.loadMessages(messages);
+			sessionIdRef.current = id;
+
+			// Rebuild items from saved messages
+			const restored: OutputItem[] = [
+				{ kind: 'command-result', element: bannerRef.current },
+			];
+			for (const msg of messages) {
+				if (msg.role === 'user') {
+					restored.push({ kind: 'message', role: 'user', text: msg.content });
+				} else if (msg.role === 'assistant') {
+					restored.push({
+						kind: 'message',
+						role: 'assistant',
+						text: msg.content,
+					});
+				}
+			}
+			setItems(restored);
+		},
+		[sessionStore],
+	);
+
 	const registry = useMemo(() => {
 		const reg = createCommandRegistry();
 		const metaCtx: MetaCommandContext = {
@@ -206,17 +242,24 @@ export function App({
 				maxChars: 200_000,
 			}),
 		};
+		const sessionCtx: SessionCommandContext = {
+			sessionStore,
+			getSessionId: () => sessionIdRef.current,
+			getServerName: () => currentServerName,
+			getModelName: () => currentModelName,
+			resumeSession,
+		};
 		const meta = createMetaCommands(metaCtx);
 		reg.registerAll(meta);
 		reg.registerAll(libraryCommands);
 		reg.registerAll(toolsCommands);
-		reg.registerAll(sessionCommands);
+		reg.registerAll(createSessionCommands(sessionCtx));
 		reg.registerAll(filesCommands);
 		reg.registerAll(configCommands);
 		reg.registerAll(createSetupCommands(dataDir, handleSetupComplete));
 		reg.registerAll(aiCommands);
 		return reg;
-	}, [dataDir, handleSetupComplete]);
+	}, [dataDir, handleSetupComplete, sessionStore, currentServerName, currentModelName, resumeSession]);
 
 	const { dispatch, isCommand } = useCommandDispatch(registry);
 
@@ -258,9 +301,27 @@ export function App({
 		[],
 	);
 
+	// Auto-save message to session (crash-safe, sync write)
+	const saveMessage = useCallback(
+		(role: 'user' | 'assistant', content: string) => {
+			try {
+				sessionStore.append(sessionIdRef.current, {
+					role,
+					content,
+				});
+			} catch {
+				// Best-effort: don't break the UI if save fails
+			}
+		},
+		[sessionStore],
+	);
+
 	const handleSubmit = useCallback(
 		async (input: string) => {
 			setIsProcessing(true);
+
+			// Save user message to session immediately (crash-safe)
+			saveMessage('user', input);
 
 			setItems((prev) => [
 				...prev,
@@ -329,12 +390,20 @@ export function App({
 					processedInput,
 					images.length > 0 ? images : undefined,
 				);
+
+				// Save assistant messages to session (crash-safe)
+				for (const item of completedItems) {
+					if (item.kind === 'message' && item.role === 'assistant') {
+						saveMessage('assistant', item.text);
+					}
+				}
+
 				setItems((prev) => [...prev, ...completedItems]);
 			}
 
 			setIsProcessing(false);
 		},
-		[dispatch, isCommand, submitToLoop, hasACP],
+		[dispatch, isCommand, submitToLoop, hasACP, saveMessage],
 	);
 
 	return (

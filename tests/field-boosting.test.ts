@@ -4,11 +4,11 @@ import {
 	createMetadataIndex,
 } from '../src/ai/library/cataloging.js';
 import { createInvertedIndex } from '../src/ai/library/inverted-index.js';
-import type { Volume } from '../src/ai/library/types.js';
 import {
 	advancedStacksSearch,
 	type StacksSearchConfig,
 } from '../src/ai/library/stacks-search.js';
+import type { Volume } from '../src/ai/library/types.js';
 
 function makeEntry(
 	id: string,

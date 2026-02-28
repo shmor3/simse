@@ -8,12 +8,12 @@
 // ---------------------------------------------------------------------------
 
 import type { ACPConfig, ACPServerEntry } from '../ai/acp/types.js';
+import type { LibraryConfig } from '../ai/library/types.js';
 import type {
 	MCPClientConfig,
 	MCPServerConfig,
 	MCPServerConnection,
 } from '../ai/mcp/types.js';
-import type { LibraryConfig } from '../ai/library/types.js';
 import { createConfigValidationError } from '../errors/index.js';
 import {
 	type ACPConfigInput,

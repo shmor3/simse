@@ -37,15 +37,12 @@ export const createStacksCorruptionError = (
 	storePath: string,
 	options: { cause?: unknown } = {},
 ): SimseError & { readonly storePath: string } => {
-	const err = createLibraryError(
-		`Stacks file is corrupted: ${storePath}`,
-		{
-			name: 'StacksCorruptionError',
-			code: 'STACKS_CORRUPT',
-			cause: options.cause,
-			metadata: { storePath },
-		},
-	) as SimseError & { readonly storePath: string };
+	const err = createLibraryError(`Stacks file is corrupted: ${storePath}`, {
+		name: 'StacksCorruptionError',
+		code: 'STACKS_CORRUPT',
+		cause: options.cause,
+		metadata: { storePath },
+	}) as SimseError & { readonly storePath: string };
 
 	Object.defineProperty(err, 'storePath', {
 		value: storePath,

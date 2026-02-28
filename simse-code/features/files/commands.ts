@@ -16,7 +16,9 @@ export const filesCommands: readonly CommandDefinition[] = [
 		description: 'Save VFS files to disk',
 		category: 'files',
 		execute: (args) => ({
-			text: args ? `Saving "${args}" to disk...` : 'Saving all files to disk...',
+			text: args
+				? `Saving "${args}" to disk...`
+				: 'Saving all files to disk...',
 		}),
 	},
 	{
@@ -34,7 +36,9 @@ export const filesCommands: readonly CommandDefinition[] = [
 		description: 'Discard VFS changes',
 		category: 'files',
 		execute: (args) => ({
-			text: args ? `Discarding changes to "${args}"...` : 'Discarding all changes...',
+			text: args
+				? `Discarding changes to "${args}"...`
+				: 'Discarding all changes...',
 		}),
 	},
 	{

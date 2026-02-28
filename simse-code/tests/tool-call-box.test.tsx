@@ -1,6 +1,6 @@
+import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import React from 'react';
-import { describe, expect, test } from 'bun:test';
 import { ToolCallBox } from '../components/chat/tool-call-box.js';
 
 describe('ToolCallBox', () => {
@@ -81,11 +81,7 @@ describe('ToolCallBox', () => {
 
 		for (const [toolName, expectedDisplay] of cases) {
 			const { lastFrame } = render(
-				<ToolCallBox
-					name={toolName}
-					args="{}"
-					status="completed"
-				/>,
+				<ToolCallBox name={toolName} args="{}" status="completed" />,
 			);
 			const frame = lastFrame()!;
 			expect(frame).toContain(expectedDisplay);
@@ -203,11 +199,7 @@ describe('ToolCallBox', () => {
 
 	test('unknown tool name gets capitalized', () => {
 		const { lastFrame } = render(
-			<ToolCallBox
-				name="custom_tool"
-				args="{}"
-				status="completed"
-			/>,
+			<ToolCallBox name="custom_tool" args="{}" status="completed" />,
 		);
 		const frame = lastFrame()!;
 		expect(frame).toContain('Custom_tool');

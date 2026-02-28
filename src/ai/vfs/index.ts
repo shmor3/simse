@@ -3,14 +3,14 @@
 // ---------------------------------------------------------------------------
 
 export {
-	VFS_ROOT,
-	VFS_SCHEME,
 	ancestorPaths,
 	baseName,
 	normalizePath,
 	parentPath,
 	pathDepth,
 	toLocalPath,
+	VFS_ROOT,
+	VFS_SCHEME,
 	validatePath,
 	validateSegment,
 } from './path-utils.js';

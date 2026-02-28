@@ -2,9 +2,9 @@ import { describe, expect, it, mock } from 'bun:test';
 import type { ACPClient } from '../src/ai/acp/acp-client.js';
 import type { ACPGenerateResult } from '../src/ai/acp/types.js';
 import { createAgentExecutor } from '../src/ai/agent/agent-executor.js';
-import type { MCPClient } from '../src/ai/mcp/mcp-client.js';
 import type { Library } from '../src/ai/library/library.js';
 import type { Lookup } from '../src/ai/library/types.js';
+import type { MCPClient } from '../src/ai/mcp/mcp-client.js';
 import { isChainError, isMCPToolError } from '../src/errors/index.js';
 import { createLogger, type Logger } from '../src/logger.js';
 
@@ -76,9 +76,7 @@ function createMockMCPClient(overrides: Partial<MCPClient> = {}): MCPClient {
 	} as unknown as MCPClient;
 }
 
-function createMockLibrary(
-	overrides: Partial<Library> = {},
-): Library {
+function createMockLibrary(overrides: Partial<Library> = {}): Library {
 	return {
 		initialize: mock((..._: any[]): any => {}),
 		dispose: mock((..._: any[]): any => {}),

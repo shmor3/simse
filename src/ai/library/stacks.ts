@@ -5,18 +5,34 @@ import {
 } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
 import {
-	checkDuplicate as checkDuplicateImpl,
-	findDuplicateVolumes,
-} from './deduplication.js';
-import {
 	createMagnitudeCache,
 	createMetadataIndex,
 	createTopicIndex,
 	type TopicIndexOptions,
 } from './cataloging.js';
+import {
+	checkDuplicate as checkDuplicateImpl,
+	findDuplicateVolumes,
+} from './deduplication.js';
 import { createInvertedIndex } from './inverted-index.js';
-import { createLearningEngine, type LearningEngine } from './patron-learning.js';
+import {
+	createLearningEngine,
+	type LearningEngine,
+} from './patron-learning.js';
 import type { RecencyOptions } from './recommendation.js';
+import { computeRecommendations } from './stacks-recommend.js';
+import {
+	advancedStacksSearch,
+	filterVolumesByDateRange,
+	filterVolumesByMetadata,
+	type StacksSearchConfig,
+	stacksSearch,
+	textSearchVolumes,
+} from './stacks-search.js';
+import {
+	deserializeFromStorage,
+	serializeToStorage,
+} from './stacks-serialize.js';
 import type { StorageBackend } from './storage.js';
 import type {
 	AdvancedLookup,
@@ -24,30 +40,17 @@ import type {
 	DuplicateCheckResult,
 	DuplicateVolumes,
 	LearningOptions,
-	PatronProfile,
+	Lookup,
 	MetadataFilter,
+	PatronProfile,
 	Recommendation,
 	RecommendOptions,
 	SearchOptions,
-	Lookup,
-	TextSearchOptions,
 	TextLookup,
+	TextSearchOptions,
 	TopicInfo,
 	Volume,
 } from './types.js';
-import { computeRecommendations } from './stacks-recommend.js';
-import {
-	advancedStacksSearch,
-	filterVolumesByDateRange,
-	filterVolumesByMetadata,
-	textSearchVolumes,
-	type StacksSearchConfig,
-	stacksSearch,
-} from './stacks-search.js';
-import {
-	deserializeFromStorage,
-	serializeToStorage,
-} from './stacks-serialize.js';
 
 // ---------------------------------------------------------------------------
 // Configuration
@@ -152,9 +155,7 @@ export interface Stacks {
 		threshold: number,
 	) => Lookup[];
 	readonly textSearch: (options: TextSearchOptions) => TextLookup[];
-	readonly filterByMetadata: (
-		filters: readonly MetadataFilter[],
-	) => Volume[];
+	readonly filterByMetadata: (filters: readonly MetadataFilter[]) => Volume[];
 	readonly filterByDateRange: (range: DateRange) => Volume[];
 	readonly advancedSearch: (options: SearchOptions) => AdvancedLookup[];
 	readonly getAll: () => Volume[];
@@ -437,9 +438,12 @@ export function createStacks(options: StacksOptions): Stacks {
 		}
 
 		if (embedding.length === 0) {
-			throw createLibraryError('Cannot add volume with empty embedding vector', {
-				code: 'STACKS_EMPTY_EMBEDDING',
-			});
+			throw createLibraryError(
+				'Cannot add volume with empty embedding vector',
+				{
+					code: 'STACKS_EMPTY_EMBEDDING',
+				},
+			);
 		}
 
 		const doAdd = async (): Promise<string> => {
@@ -517,10 +521,9 @@ export function createStacks(options: StacksOptions): Stacks {
 		// Validate ALL entries before mutating state
 		for (const entry of batchEntries) {
 			if (entry.text.length === 0) {
-				throw createLibraryError(
-					'Cannot add empty text to stacks (in batch)',
-					{ code: 'STACKS_EMPTY_TEXT' },
-				);
+				throw createLibraryError('Cannot add empty text to stacks (in batch)', {
+					code: 'STACKS_EMPTY_TEXT',
+				});
 			}
 
 			if (entry.embedding.length === 0) {
@@ -742,9 +745,7 @@ export function createStacks(options: StacksOptions): Stacks {
 	// Metadata Filtering
 	// -----------------------------------------------------------------------
 
-	const filterByMetadata = (
-		filters: readonly MetadataFilter[],
-	): Volume[] => {
+	const filterByMetadata = (filters: readonly MetadataFilter[]): Volume[] => {
 		ensureLoaded();
 		return filterVolumesByMetadata(volumes, filters, metadataIdx);
 	};
@@ -762,9 +763,7 @@ export function createStacks(options: StacksOptions): Stacks {
 	// Advanced / Combined Search
 	// -----------------------------------------------------------------------
 
-	const advancedSearch = (
-		searchOptions: SearchOptions,
-	): AdvancedLookup[] => {
+	const advancedSearch = (searchOptions: SearchOptions): AdvancedLookup[] => {
 		ensureLoaded();
 
 		const topResults = advancedStacksSearch(
@@ -859,9 +858,7 @@ export function createStacks(options: StacksOptions): Stacks {
 	// Recommendation
 	// -----------------------------------------------------------------------
 
-	const recommend = (
-		recommendOptions?: RecommendOptions,
-	): Recommendation[] => {
+	const recommend = (recommendOptions?: RecommendOptions): Recommendation[] => {
 		ensureLoaded();
 
 		// Delegate to the pure recommendation function.

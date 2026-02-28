@@ -1,8 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
-import {
-	createLibrary,
-	type Library,
-} from '../src/ai/library/library.js';
+import { createLibrary, type Library } from '../src/ai/library/library.js';
 import type {
 	EmbeddingProvider,
 	LibraryConfig,

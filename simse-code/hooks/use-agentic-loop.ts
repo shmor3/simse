@@ -241,6 +241,12 @@ export function useAgenticLoop(
 						}));
 					});
 				},
+				onDoomLoop: (toolName: string, count: number) => {
+					completedItems.push({
+						kind: 'info',
+						text: `Warning: detected repeated "${toolName}" calls (${count}x). Asking model to try a different approach.`,
+					});
+				},
 				onError: (error: Error) => {
 					completedItems.push({
 						kind: 'error',
@@ -263,6 +269,14 @@ export function useAgenticLoop(
 						kind: 'message',
 						role: 'assistant',
 						text: finalText,
+					});
+				}
+
+				// Notify when turn limit is reached
+				if (result.hitTurnLimit) {
+					completedItems.push({
+						kind: 'info',
+						text: `Reached turn limit (${result.totalTurns} turns). Use /continue or send another message to keep going.`,
 					});
 				}
 			} catch (err) {

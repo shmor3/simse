@@ -34,8 +34,7 @@ describe('Librarian', () => {
 		const librarian = createLibrarian(generator);
 		const result = await librarian.extract({
 			userInput: 'What PK type should we use?',
-			response:
-				'We decided to use UUID primary keys for the users table.',
+			response: 'We decided to use UUID primary keys for the users table.',
 		});
 		expect(result.memories.length).toBe(1);
 		expect(result.memories[0].topic).toBe('architecture/database/schema');
@@ -86,10 +85,10 @@ describe('Librarian', () => {
 			}),
 		);
 		const librarian = createLibrarian(generator);
-		const result = await librarian.classifyTopic(
-			'Users table uses UUID PKs',
-			['architecture/database', 'bugs/open'],
-		);
+		const result = await librarian.classifyTopic('Users table uses UUID PKs', [
+			'architecture/database',
+			'bugs/open',
+		]);
 		expect(result.topic).toBe('architecture/database/schema');
 	});
 
@@ -116,14 +115,9 @@ describe('Librarian', () => {
 				timestamp: 1,
 			},
 		];
-		const result = await librarian.reorganize(
-			'architecture/database',
-			volumes,
-		);
+		const result = await librarian.reorganize('architecture/database', volumes);
 		expect(result.moves.length).toBe(1);
-		expect(result.moves[0].newTopic).toBe(
-			'architecture/database/optimization',
-		);
+		expect(result.moves[0].newTopic).toBe('architecture/database/optimization');
 	});
 });
 

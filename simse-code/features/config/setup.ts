@@ -28,7 +28,10 @@ interface ACPFileConfig {
 	readonly defaultServer?: string;
 }
 
-const PRESETS: Record<string, { description: string; build: (args: string) => ACPServerEntry }> = {
+const PRESETS: Record<
+	string,
+	{ description: string; build: (args: string) => ACPServerEntry }
+> = {
 	'claude-code': {
 		description: 'Anthropic Claude via claude-code-acp',
 		build: () => ({
@@ -46,7 +49,14 @@ const PRESETS: Record<string, { description: string; build: (args: string) => AC
 			return {
 				name: 'ollama',
 				command: 'bun',
-				args: ['run', 'acp-ollama-bridge.ts', '--ollama', url, '--model', model],
+				args: [
+					'run',
+					'acp-ollama-bridge.ts',
+					'--ollama',
+					url,
+					'--model',
+					model,
+				],
 			};
 		},
 	},
@@ -67,7 +77,8 @@ const PRESETS: Record<string, { description: string; build: (args: string) => AC
 			}
 			const command = parts[0]!;
 			const cmdArgs = parts.slice(1);
-			const name = command.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase() || 'custom';
+			const name =
+				command.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase() || 'custom';
 			return {
 				name,
 				command,
@@ -93,10 +104,7 @@ function writeJsonIfMissing(path: string, data: unknown): boolean {
 	return true;
 }
 
-function writeSetupFiles(
-	dataDir: string,
-	server: ACPServerEntry,
-): string[] {
+function writeSetupFiles(dataDir: string, server: ACPServerEntry): string[] {
 	ensureDir(dataDir);
 	const created: string[] = [];
 
@@ -208,10 +216,7 @@ export function createSetupCommands(
 					return { text: lines.join('\n') };
 				} catch (err) {
 					return {
-						text:
-							err instanceof Error
-								? err.message
-								: 'Setup failed.',
+						text: err instanceof Error ? err.message : 'Setup failed.',
 					};
 				}
 			},

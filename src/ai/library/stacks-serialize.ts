@@ -10,9 +10,9 @@
 
 import { Buffer } from 'node:buffer';
 import { decodeEmbedding, encodeEmbedding } from './preservation.js';
-import type { Volume } from './types.js';
 import type { LearningState } from './stacks-persistence.js';
 import { isValidLearningState } from './stacks-persistence.js';
+import type { Volume } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Types

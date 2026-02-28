@@ -1,16 +1,16 @@
 import { describe, expect, it } from 'bun:test';
 import type {
-	Volume,
-	Lookup,
-	TextLookup,
 	AdvancedLookup,
-	DuplicateVolumes,
 	CompendiumOptions,
 	CompendiumResult,
-	PatronProfile,
-	LibraryConfig,
-	Recommendation,
 	DuplicateCheckResult,
+	DuplicateVolumes,
+	LibraryConfig,
+	Lookup,
+	PatronProfile,
+	Recommendation,
+	TextLookup,
+	Volume,
 } from '../src/ai/library/types.js';
 
 describe('Library types', () => {

@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import {
-	VFS_ROOT,
-	VFS_SCHEME,
 	ancestorPaths,
 	baseName,
 	normalizePath,
 	parentPath,
 	pathDepth,
 	toLocalPath,
+	VFS_ROOT,
+	VFS_SCHEME,
 	validatePath,
 } from '../src/ai/vfs/path-utils.js';
 import type { VirtualFS } from '../src/ai/vfs/vfs.js';
@@ -120,9 +120,7 @@ describe('path-utils', () => {
 		});
 
 		it('throws on empty string', () => {
-			expect(() => normalizePath('')).toThrow(
-				'Path must start with vfs://',
-			);
+			expect(() => normalizePath('')).toThrow('Path must start with vfs://');
 		});
 	});
 
@@ -576,7 +574,11 @@ describe('createVirtualFS', () => {
 			const vfs = createFS();
 			vfs.mkdir('vfs:///dir');
 			vfs.writeFile('vfs:///dir/f.txt', 'data');
-			expectGuardedThrow(() => vfs.rmdir('vfs:///dir'), isVFSError, 'VFS_NOT_EMPTY');
+			expectGuardedThrow(
+				() => vfs.rmdir('vfs:///dir'),
+				isVFSError,
+				'VFS_NOT_EMPTY',
+			);
 		});
 
 		it('removes non-empty directory with recursive', () => {
@@ -1047,7 +1049,10 @@ describe('createVirtualFS', () => {
 			vfs.mkdir('vfs:///dst');
 			vfs.writeFile('vfs:///dst/stale.txt', 'should-be-removed');
 
-			vfs.copy('vfs:///src', 'vfs:///dst', { overwrite: true, recursive: true });
+			vfs.copy('vfs:///src', 'vfs:///dst', {
+				overwrite: true,
+				recursive: true,
+			});
 
 			expect(vfs.readFile('vfs:///dst/a.txt').text).toBe('source-a');
 			expect(vfs.exists('vfs:///dst/stale.txt')).toBe(false);
@@ -1057,7 +1062,10 @@ describe('createVirtualFS', () => {
 			const vfs = createFS();
 			vfs.mkdir('vfs:///src');
 			vfs.writeFile('vfs:///src/a.txt', 'data');
-			vfs.copy('vfs:///src', 'vfs:///dst', { overwrite: true, recursive: true });
+			vfs.copy('vfs:///src', 'vfs:///dst', {
+				overwrite: true,
+				recursive: true,
+			});
 			expect(vfs.readFile('vfs:///dst/a.txt').text).toBe('data');
 		});
 	});
@@ -1280,7 +1288,11 @@ describe('createVirtualFS', () => {
 			vfs.writeFile('vfs:///a/b/c/f.txt', '3');
 
 			const results = vfs.glob('vfs:///**/f.txt');
-			expect(results).toEqual(['vfs:///a/b/c/f.txt', 'vfs:///a/b/f.txt', 'vfs:///a/f.txt']);
+			expect(results).toEqual([
+				'vfs:///a/b/c/f.txt',
+				'vfs:///a/b/f.txt',
+				'vfs:///a/f.txt',
+			]);
 		});
 
 		it('matches with ? for single character', () => {
@@ -1303,7 +1315,11 @@ describe('createVirtualFS', () => {
 			vfs.writeFile('vfs:///c.txt', 'c');
 			vfs.writeFile('vfs:///a.txt', 'a');
 			vfs.writeFile('vfs:///b.txt', 'b');
-			expect(vfs.glob('vfs:///*.txt')).toEqual(['vfs:///a.txt', 'vfs:///b.txt', 'vfs:///c.txt']);
+			expect(vfs.glob('vfs:///*.txt')).toEqual([
+				'vfs:///a.txt',
+				'vfs:///b.txt',
+				'vfs:///c.txt',
+			]);
 		});
 
 		it('only matches files, not directories', () => {
@@ -1406,7 +1422,11 @@ describe('createVirtualFS', () => {
 
 		it('throws VFS_NOT_FOUND for non-existent path', () => {
 			const vfs = createFS();
-			expectGuardedThrow(() => vfs.du('vfs:///missing'), isVFSError, 'VFS_NOT_FOUND');
+			expectGuardedThrow(
+				() => vfs.du('vfs:///missing'),
+				isVFSError,
+				'VFS_NOT_FOUND',
+			);
 		});
 	});
 
@@ -1541,7 +1561,11 @@ describe('createVirtualFS', () => {
 		it('throws VFS_NOT_FILE for a directory', () => {
 			const vfs = createFS();
 			vfs.mkdir('vfs:///dir');
-			expectGuardedThrow(() => vfs.history('vfs:///dir'), isVFSError, 'VFS_NOT_FILE');
+			expectGuardedThrow(
+				() => vfs.history('vfs:///dir'),
+				isVFSError,
+				'VFS_NOT_FILE',
+			);
 		});
 	});
 
@@ -1859,7 +1883,10 @@ describe('createVirtualFS', () => {
 
 		it('skips binary files', () => {
 			const vfs = createFS();
-			vfs.writeFile('vfs:///bin.dat', new Uint8Array([104, 101, 108, 108, 111]));
+			vfs.writeFile(
+				'vfs:///bin.dat',
+				new Uint8Array([104, 101, 108, 108, 111]),
+			);
 			vfs.writeFile('vfs:///f.txt', 'hello');
 			const results = vfs.search('hello');
 			expect(results.length).toBe(1);

@@ -8,10 +8,10 @@ import {
 	createPromptTemplate,
 	runNamedChain,
 } from '../src/ai/chain/index.js';
-import type { MCPClient } from '../src/ai/mcp/mcp-client.js';
-import type { MCPToolResult } from '../src/ai/mcp/types.js';
 import type { Library } from '../src/ai/library/library.js';
 import type { Lookup } from '../src/ai/library/types.js';
+import type { MCPClient } from '../src/ai/mcp/mcp-client.js';
+import type { MCPToolResult } from '../src/ai/mcp/types.js';
 import type { AppConfig, ChainDefinition } from '../src/config/settings.js';
 import type { SimseError } from '../src/errors/index.js';
 import {
@@ -95,9 +95,7 @@ function createMockMCPClient(overrides: Partial<MCPClient> = {}): MCPClient {
 	} as unknown as MCPClient;
 }
 
-function createMockLibrary(
-	overrides: Partial<Library> = {},
-): Library {
+function createMockLibrary(overrides: Partial<Library> = {}): Library {
 	return {
 		initialize: mock((..._: any[]): any => {}),
 		dispose: mock((..._: any[]): any => {}),

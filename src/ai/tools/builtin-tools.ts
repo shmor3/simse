@@ -120,9 +120,7 @@ export function registerLibraryTools(
 			try {
 				const id = String(args.id ?? '');
 				const deleted = await library.delete(id);
-				return deleted
-					? `Withdrew volume: ${id}`
-					: `Volume not found: ${id}`;
+				return deleted ? `Withdrew volume: ${id}` : `Volume not found: ${id}`;
 			} catch (err) {
 				throw toError(err);
 			}
@@ -162,9 +160,7 @@ export function registerLibraryTools(
 
 				return filtered
 					.map((t) => {
-						const indent = '  '.repeat(
-							(t.topic.match(/\//g) || []).length,
-						);
+						const indent = '  '.repeat((t.topic.match(/\//g) || []).length);
 						return `${indent}${t.topic} (${t.entryCount} volumes)`;
 					})
 					.join('\n');
@@ -220,8 +216,7 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 			parameters: {
 				path: {
 					type: 'string',
-					description:
-						'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
+					description: 'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
 					required: true,
 				},
 			},
@@ -250,8 +245,7 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 			parameters: {
 				path: {
 					type: 'string',
-					description:
-						'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
+					description: 'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
 					required: true,
 				},
 				content: {
@@ -283,8 +277,7 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 			parameters: {
 				path: {
 					type: 'string',
-					description:
-						'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
+					description: 'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
 				},
 			},
 			category: 'vfs',
@@ -312,8 +305,7 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 			parameters: {
 				path: {
 					type: 'string',
-					description:
-						'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
+					description: 'VFS path using vfs:// scheme (e.g. vfs:///hello.js)',
 				},
 			},
 			category: 'vfs',

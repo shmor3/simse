@@ -1,10 +1,33 @@
 import { describe, expect, test } from 'bun:test';
-import { libraryCommands } from '../features/library/index.js';
-import { toolsCommands } from '../features/tools/index.js';
-import { sessionCommands } from '../features/session/index.js';
-import { filesCommands } from '../features/files/index.js';
-import { configCommands } from '../features/config/index.js';
 import { aiCommands } from '../features/ai/index.js';
+import { configCommands } from '../features/config/index.js';
+import { filesCommands } from '../features/files/index.js';
+import { libraryCommands } from '../features/library/index.js';
+import { createSessionCommands } from '../features/session/index.js';
+import type { SessionCommandContext } from '../features/session/index.js';
+import { toolsCommands } from '../features/tools/index.js';
+
+/** Minimal mock context for session commands. */
+function mockSessionCtx(): SessionCommandContext {
+	return {
+		sessionStore: {
+			create: () => 'test-id',
+			append: () => {},
+			load: () => [],
+			list: () => [],
+			get: () => undefined,
+			rename: () => {},
+			remove: () => {},
+			latest: () => undefined,
+		},
+		getSessionId: () => 'test-id',
+		getServerName: () => undefined,
+		getModelName: () => undefined,
+		resumeSession: () => {},
+	};
+}
+
+const sessionCommands = createSessionCommands(mockSessionCtx());
 
 describe('all feature modules', () => {
 	test('library module exports commands with correct category', () => {
@@ -39,8 +62,12 @@ describe('all feature modules', () => {
 
 	test('no duplicate command names across modules', () => {
 		const allNames = [
-			...libraryCommands, ...toolsCommands, ...sessionCommands,
-			...filesCommands, ...configCommands, ...aiCommands,
+			...libraryCommands,
+			...toolsCommands,
+			...sessionCommands,
+			...filesCommands,
+			...configCommands,
+			...aiCommands,
 		].map((c) => c.name);
 		const unique = new Set(allNames);
 		expect(unique.size).toBe(allNames.length);

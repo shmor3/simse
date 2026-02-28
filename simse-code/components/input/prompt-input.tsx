@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from 'ink';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import type { CommandDefinition } from '../../ink-types.js';
 import { TextInput } from './text-input.js';
 
@@ -108,6 +108,36 @@ export function PromptInput({
 		return undefined;
 	}, [value, commands, mode, atCandidates, atQuery]);
 
+	// Command history — up/down arrow navigation in normal mode
+	const historyRef = useRef<string[]>([]);
+	const [historyIndex, setHistoryIndex] = useState(-1);
+	const draftRef = useRef('');
+
+	// Handle up/down arrow in normal mode for history navigation
+	useInput(
+		(_input, key) => {
+			const history = historyRef.current;
+			if (history.length === 0) return;
+
+			if (key.upArrow) {
+				const nextIdx = Math.min(historyIndex + 1, history.length - 1);
+				if (nextIdx !== historyIndex) {
+					if (historyIndex === -1) draftRef.current = value;
+					setHistoryIndex(nextIdx);
+					setValue(history[nextIdx]!);
+				}
+				return;
+			}
+			if (key.downArrow) {
+				const nextIdx = historyIndex - 1;
+				if (nextIdx < -1) return;
+				setHistoryIndex(nextIdx);
+				setValue(nextIdx === -1 ? draftRef.current : history[nextIdx]!);
+			}
+		},
+		{ isActive: !disabled && mode === 'normal' },
+	);
+
 	const handleChange = (newValue: string) => {
 		// Intercept `?` on empty input to show shortcuts
 		if (newValue === '?' && value === '') {
@@ -136,6 +166,14 @@ export function PromptInput({
 
 	const handleSubmit = (input: string) => {
 		if (!input.trim()) return;
+		// Save to history (dedup consecutive identical entries)
+		if (historyRef.current[0] !== input) {
+			historyRef.current.unshift(input);
+			// Cap at 100 entries
+			if (historyRef.current.length > 100) historyRef.current.length = 100;
+		}
+		setHistoryIndex(-1);
+		draftRef.current = '';
 		onSubmit(input);
 		setValue('');
 		setMode('normal');

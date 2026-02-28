@@ -132,22 +132,24 @@ export async function listOllamaModels(
 		const response = await fetch(endpoint, { signal: controller.signal });
 
 		if (!response.ok) {
-			return [];
+			return Object.freeze([]);
 		}
 
 		const data = (await response.json()) as OllamaTagsResponse;
 		if (!data.models || !Array.isArray(data.models)) {
-			return [];
+			return Object.freeze([]);
 		}
 
-		return data.models.map((model) =>
-			Object.freeze({
-				name: model.name,
-				size: formatBytes(model.size),
-			}),
+		return Object.freeze(
+			data.models.map((model) =>
+				Object.freeze({
+					name: model.name,
+					size: formatBytes(model.size),
+				}),
+			),
 		);
 	} catch {
-		return [];
+		return Object.freeze([]);
 	} finally {
 		clearTimeout(timer);
 	}

@@ -61,6 +61,8 @@ pub struct SamplingParams {
     pub repeat_penalty: f32,
     pub repeat_last_n: usize,
     pub stop_sequences: Vec<String>,
+    /// Wall-clock timeout for generation in seconds (default: 300 = 5 minutes).
+    pub generation_timeout_secs: u64,
 }
 
 impl Default for SamplingParams {
@@ -73,6 +75,7 @@ impl Default for SamplingParams {
             repeat_penalty: 1.1,
             repeat_last_n: 64,
             stop_sequences: vec![],
+            generation_timeout_secs: 300,
         }
     }
 }

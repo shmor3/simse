@@ -81,6 +81,7 @@ fn main() -> Result<()> {
             repeat_penalty: args.repeat_penalty,
             repeat_last_n: 64,
             stop_sequences: vec![],
+            generation_timeout_secs: args.generation_timeout,
         },
     };
 

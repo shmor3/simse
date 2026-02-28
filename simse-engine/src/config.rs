@@ -60,6 +60,10 @@ pub struct CliArgs {
     #[arg(long)]
     pub no_streaming: bool,
 
+    /// Generation timeout in seconds (wall-clock limit per request)
+    #[arg(long, default_value = "300", env = "SIMSE_ENGINE_GENERATION_TIMEOUT")]
+    pub generation_timeout: u64,
+
     /// Log level (trace, debug, info, warn, error)
     #[arg(long, default_value = "info", env = "SIMSE_ENGINE_LOG_LEVEL")]
     pub log_level: String,

@@ -66,6 +66,8 @@ impl AcpServer {
                 Ok(m) => m,
                 Err(e) => {
                     tracing::warn!("Parse error: {}", e);
+                    // For parse errors, we don't have an id at all. Use 0 as fallback
+                    // per JSON-RPC 2.0 spec (id MUST be null for parse errors).
                     self.transport.write_error(0, PARSE_ERROR, "Parse error: invalid JSON");
                     continue;
                 }
@@ -78,11 +80,20 @@ impl AcpServer {
     }
 
     fn handle_message(&mut self, msg: JsonRpcIncoming) {
-        let id = msg.id.unwrap_or(0);
         let method = match msg.method {
             Some(m) => m,
             None => {
                 // Response to something we sent (e.g., permission) — ignore
+                return;
+            }
+        };
+
+        // JSON-RPC notifications (no id) should not receive responses.
+        let id = match msg.id {
+            Some(id) => id,
+            None => {
+                // It's a notification — process but don't respond
+                tracing::debug!(method = %method, "Received notification (no id)");
                 return;
             }
         };
@@ -112,7 +123,10 @@ impl AcpServer {
             },
             agent_capabilities: Some(serde_json::json!({})),
         };
-        self.transport.write_response(id, serde_json::to_value(result).unwrap());
+        match serde_json::to_value(result) {
+            Ok(v) => self.transport.write_response(id, v),
+            Err(e) => self.transport.write_error(id, INTERNAL_ERROR, format!("Serialization error: {}", e)),
+        }
     }
 
     fn handle_session_new(&mut self, id: u64) {
@@ -139,7 +153,10 @@ impl AcpServer {
             }),
         };
 
-        self.transport.write_response(id, serde_json::to_value(result).unwrap());
+        match serde_json::to_value(result) {
+            Ok(v) => self.transport.write_response(id, v),
+            Err(e) => self.transport.write_error(id, INTERNAL_ERROR, format!("Serialization error: {}", e)),
+        }
     }
 
     fn handle_session_prompt(&mut self, id: u64, params: Option<serde_json::Value>) -> Result<()> {
@@ -260,8 +277,9 @@ impl AcpServer {
         false
     }
 
-    /// Extract texts from an embed request.
+    /// Extract texts from an embed request with batch size limiting.
     fn extract_embed_texts(content: &[AcpContentBlock]) -> Vec<String> {
+        let mut texts = Vec::new();
         for block in content {
             let value = match block {
                 AcpContentBlock::Text { text } => serde_json::from_str::<serde_json::Value>(text).ok(),
@@ -270,33 +288,57 @@ impl AcpServer {
             };
 
             if let Some(v) = value {
-                if let Some(texts) = v.get("texts").and_then(|t| t.as_array()) {
-                    return texts
+                if let Some(text_array) = v.get("texts").and_then(|t| t.as_array()) {
+                    texts = text_array
                         .iter()
                         .filter_map(|t| t.as_str().map(String::from))
                         .collect();
+                    break;
                 }
             }
         }
-        vec![]
+
+        const MAX_BATCH_SIZE: usize = 256;
+        if texts.len() > MAX_BATCH_SIZE {
+            tracing::warn!(count = texts.len(), max = MAX_BATCH_SIZE, "Truncating embed batch");
+            texts.truncate(MAX_BATCH_SIZE);
+        }
+
+        texts
     }
 
-    /// Extract sampling params from session/prompt metadata.
+    /// Extract sampling params from session/prompt metadata with bounds validation.
     fn extract_sampling_params(&self, metadata: &Option<serde_json::Value>) -> SamplingParams {
         let mut params = self.config.default_sampling.clone();
 
         if let Some(meta) = metadata {
             if let Some(temp) = meta.get("temperature").and_then(|v| v.as_f64()) {
-                params.temperature = temp;
+                if temp.is_finite() && (0.0..=10.0).contains(&temp) {
+                    params.temperature = temp;
+                } else {
+                    tracing::warn!(temperature = temp, "Invalid temperature, using default");
+                }
             }
             if let Some(max) = meta.get("max_tokens").and_then(|v| v.as_u64()) {
-                params.max_tokens = max as usize;
+                if max > 0 && max <= 1_000_000 {
+                    params.max_tokens = max as usize;
+                } else {
+                    tracing::warn!(max_tokens = max, "Invalid max_tokens, using default");
+                }
             }
             if let Some(top_p) = meta.get("top_p").and_then(|v| v.as_f64()) {
-                params.top_p = Some(top_p);
+                if top_p.is_finite() && (0.0..=1.0).contains(&top_p) {
+                    params.top_p = Some(top_p);
+                } else {
+                    tracing::warn!(top_p = top_p, "Invalid top_p, using default");
+                }
             }
             if let Some(top_k) = meta.get("top_k").and_then(|v| v.as_u64()) {
-                params.top_k = Some(top_k as usize);
+                if top_k > 0 {
+                    params.top_k = Some(top_k as usize);
+                } else {
+                    tracing::warn!(top_k = top_k, "Invalid top_k, using default");
+                }
             }
             if let Some(stops) = meta.get("stop_sequences").and_then(|v| v.as_array()) {
                 params.stop_sequences = stops

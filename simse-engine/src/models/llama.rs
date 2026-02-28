@@ -139,10 +139,30 @@ impl TextGenerator for LlamaGenerator {
             on_token(&text);
         }
 
-        // Continue generating
-        let eos_reached = next_token == self.eos_token_id.unwrap_or(u32::MAX);
+        // Continue generating with wall-clock timeout
+        let mut eos_reached = next_token == self.eos_token_id.unwrap_or(u32::MAX);
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(params.generation_timeout_secs);
+
+        // Check stop sequences after first token
+        let mut hit_stop = false;
+        for seq in &params.stop_sequences {
+            if full_text.ends_with(seq) {
+                full_text.truncate(full_text.len() - seq.len());
+                hit_stop = true;
+                break;
+            }
+        }
+        if hit_stop {
+            eos_reached = true;
+        }
 
         while !eos_reached && (generated_count as usize) < params.max_tokens {
+            if start.elapsed() > timeout {
+                tracing::warn!(elapsed = ?start.elapsed(), "Generation timeout reached");
+                break;
+            }
+
             let input = Tensor::new(&[next_token], &self.device)?.unsqueeze(0)?;
             let logits = self.model.forward(&input, prompt_tokens.len() + generated_count as usize - 1)?;
             let logits = logits.squeeze(0)?.squeeze(0)?;
@@ -165,23 +185,19 @@ impl TextGenerator for LlamaGenerator {
                 break;
             }
 
-            // Check stop sequences
             if let Some(text) = token_stream.next_token(next_token)? {
                 full_text.push_str(&text);
 
-                // Check if any stop sequence is present
-                let should_stop = params
-                    .stop_sequences
-                    .iter()
-                    .any(|seq| full_text.contains(seq));
-
-                if should_stop {
-                    // Trim the stop sequence from output
-                    for seq in &params.stop_sequences {
-                        if let Some(pos) = full_text.find(seq) {
-                            full_text.truncate(pos);
-                        }
+                // Check stop sequences after each token
+                let mut hit_stop = false;
+                for seq in &params.stop_sequences {
+                    if full_text.ends_with(seq) {
+                        full_text.truncate(full_text.len() - seq.len());
+                        hit_stop = true;
+                        break;
                     }
+                }
+                if hit_stop {
                     on_token(&text);
                     break;
                 }

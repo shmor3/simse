@@ -115,6 +115,9 @@ export function TextInput({
 		const end = value.length;
 		setCursorOffset(end);
 		cursorRef.current = end;
+		// Clear selection on external value change (e.g. history navigation, autocomplete fill)
+		setSelectionAnchor(null);
+		anchorRef.current = null;
 	}, [value]);
 
 	/** Delete the selected range and return { newValue, newCursor }. */

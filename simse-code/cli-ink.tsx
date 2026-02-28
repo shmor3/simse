@@ -163,6 +163,7 @@ bootstrap()
 					permissionManager={permissionManager}
 					hasACP={hasACP}
 				/>,
+				{ exitOnCtrlC: false },
 			);
 		},
 	)

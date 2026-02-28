@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { existsSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type ACPBackend, createTempConfig } from './config.js';
+import { createTempConfig } from './config.js';
 
 describe('createTempConfig', () => {
 	let cleanup: (() => Promise<void>) | undefined;

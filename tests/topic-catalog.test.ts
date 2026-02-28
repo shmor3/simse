@@ -1,9 +1,6 @@
 // tests/topic-catalog.test.ts
 import { describe, expect, it } from 'bun:test';
-import {
-	createTopicCatalog,
-	type TopicCatalog,
-} from '../src/ai/library/topic-catalog.js';
+import { createTopicCatalog } from '../src/ai/library/topic-catalog.js';
 
 describe('TopicCatalog', () => {
 	it('resolve() registers a new topic', () => {

@@ -1,12 +1,11 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
-import React from 'react';
 import { PromptInput } from '../components/input/prompt-input.js';
 
 describe('PromptInput', () => {
 	test('renders prompt character inside bordered box', () => {
 		const { lastFrame } = render(<PromptInput onSubmit={() => {}} />);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('\u276F');
 		// Round border characters
 		expect(frame).toContain('\u256D');
@@ -15,13 +14,13 @@ describe('PromptInput', () => {
 
 	test('renders in plan mode without error', () => {
 		const { lastFrame } = render(<PromptInput onSubmit={() => {}} planMode />);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('\u276F');
 	});
 
 	test('shows placeholder tip when disabled', () => {
 		const { lastFrame } = render(<PromptInput onSubmit={() => {}} disabled />);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('\u276F');
 		expect(frame).toContain('Try');
 	});
@@ -67,7 +66,7 @@ describe('PromptInput', () => {
 		stdin.write('/hel');
 		await new Promise((r) => setTimeout(r, 50));
 
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		// The ghost text "p" should appear in the rendered output
 		expect(frame).toContain('hel');
 		expect(frame).toContain('p');
@@ -87,7 +86,7 @@ describe('PromptInput', () => {
 		stdin.write('describe @src');
 		await new Promise((r) => setTimeout(r, 50));
 
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		// Should show @-mention candidates
 		expect(frame).toContain('src/main.ts');
 		expect(frame).toContain('src/lib.ts');
@@ -103,7 +102,7 @@ describe('PromptInput', () => {
 		stdin.write('@u');
 		await new Promise((r) => setTimeout(r, 50));
 
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('@utils/helper.ts');
 	});
 
@@ -133,7 +132,7 @@ describe('PromptInput', () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		// Frame should show the input but no ghost text completion
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('h');
 	});
 });

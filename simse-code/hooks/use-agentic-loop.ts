@@ -13,7 +13,7 @@ import type { PermissionManager } from '../permission-manager.js';
 import type { ToolCallRequest, ToolRegistry } from '../tool-registry.js';
 
 export function deriveToolSummary(
-	name: string,
+	_name: string,
 	output: string,
 ): string | undefined {
 	if (!output) return undefined;

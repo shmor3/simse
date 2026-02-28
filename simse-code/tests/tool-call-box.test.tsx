@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
-import React from 'react';
 import { ToolCallBox } from '../components/chat/tool-call-box.js';
 
 describe('ToolCallBox', () => {
@@ -12,7 +11,7 @@ describe('ToolCallBox', () => {
 				status="active"
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		// Should show mapped display name, not raw tool name
 		expect(frame).toContain('Read');
 		expect(frame).toContain('/src/main.ts');
@@ -33,7 +32,7 @@ describe('ToolCallBox', () => {
 				summary="150 lines"
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('Read');
 		expect(frame).toContain('/src/main.ts');
 		expect(frame).toContain('150 lines');
@@ -53,7 +52,7 @@ describe('ToolCallBox', () => {
 				error="Permission denied"
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('Write');
 		expect(frame).toContain('Permission denied');
 		// Error uses tree connector
@@ -83,7 +82,7 @@ describe('ToolCallBox', () => {
 			const { lastFrame } = render(
 				<ToolCallBox name={toolName} args="{}" status="completed" />,
 			);
-			const frame = lastFrame()!;
+			const frame = lastFrame() ?? '';
 			expect(frame).toContain(expectedDisplay);
 		}
 	});
@@ -97,7 +96,7 @@ describe('ToolCallBox', () => {
 				status="completed"
 			/>,
 		);
-		expect(f1()!).toContain('Read(/src/lib.ts)');
+		expect(f1() ?? '').toContain('Read(/src/lib.ts)');
 
 		// file_path
 		const { lastFrame: f2 } = render(
@@ -107,7 +106,7 @@ describe('ToolCallBox', () => {
 				status="completed"
 			/>,
 		);
-		expect(f2()!).toContain('Update(/src/app.ts)');
+		expect(f2() ?? '').toContain('Update(/src/app.ts)');
 
 		// command
 		const { lastFrame: f3 } = render(
@@ -117,7 +116,7 @@ describe('ToolCallBox', () => {
 				status="completed"
 			/>,
 		);
-		expect(f3()!).toContain('Bash(ls -la)');
+		expect(f3() ?? '').toContain('Bash(ls -la)');
 
 		// query
 		const { lastFrame: f4 } = render(
@@ -127,7 +126,7 @@ describe('ToolCallBox', () => {
 				status="completed"
 			/>,
 		);
-		expect(f4()!).toContain('Search(find something)');
+		expect(f4() ?? '').toContain('Search(find something)');
 	});
 
 	test('formats duration correctly', () => {
@@ -141,7 +140,7 @@ describe('ToolCallBox', () => {
 				summary="10 lines"
 			/>,
 		);
-		expect(f1()!).toContain('42ms');
+		expect(f1() ?? '').toContain('42ms');
 
 		// >= 1000ms < 60s → X.Xs
 		const { lastFrame: f2 } = render(
@@ -153,7 +152,7 @@ describe('ToolCallBox', () => {
 				summary="50 lines"
 			/>,
 		);
-		expect(f2()!).toContain('2.5s');
+		expect(f2() ?? '').toContain('2.5s');
 
 		// >= 60s → XmYs
 		const { lastFrame: f3 } = render(
@@ -165,7 +164,7 @@ describe('ToolCallBox', () => {
 				summary="1000 lines"
 			/>,
 		);
-		expect(f3()!).toContain('2m5s');
+		expect(f3() ?? '').toContain('2m5s');
 	});
 
 	test('diff lines show with tree connector, + green / - red', () => {
@@ -177,7 +176,7 @@ describe('ToolCallBox', () => {
 				diff={'+added line\n-removed line'}
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('⎿');
 		expect(frame).toContain('+added line');
 		expect(frame).toContain('-removed line');
@@ -192,7 +191,7 @@ describe('ToolCallBox', () => {
 				summary="3 tasks"
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('TaskList');
 		expect(frame).toContain('3 tasks');
 	});
@@ -201,7 +200,7 @@ describe('ToolCallBox', () => {
 		const { lastFrame } = render(
 			<ToolCallBox name="custom_tool" args="{}" status="completed" />,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('Custom_tool');
 	});
 });

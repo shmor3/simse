@@ -6,7 +6,7 @@
  * On load, lines are replayed to reconstruct the conversation.
  */
 
-import { existsSync, readdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ConversationMessage, ConversationRole } from './conversation.js';
 import { appendJsonLine, readJsonFile, writeJsonFile } from './json-io.js';

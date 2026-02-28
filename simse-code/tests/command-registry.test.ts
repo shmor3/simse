@@ -34,7 +34,7 @@ describe('createCommandRegistry', () => {
 		registry.register(testCommand);
 		const all = registry.getAll();
 		expect(all).toHaveLength(1);
-		expect(all[0]!.name).toBe('test');
+		expect(all[0]?.name).toBe('test');
 	});
 
 	test('lists commands by category', () => {

@@ -32,7 +32,7 @@ function cursorToLineCol(
 	}
 	// Fallback: cursor at end of last line
 	const last = lines.length - 1;
-	return { lineIndex: last, col: lines[last]!.length };
+	return { lineIndex: last, col: (lines[last] ?? '').length };
 }
 
 export function TextInput({

@@ -115,7 +115,7 @@ function ensureDir(dir: string): void {
 
 function writeJsonIfMissing(path: string, data: unknown): boolean {
 	if (existsSync(path)) return false;
-	writeFileSync(path, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+	writeFileSync(path, `${JSON.stringify(data, null, 2)}\n`, 'utf-8');
 	return true;
 }
 
@@ -129,7 +129,7 @@ function writeSetupFiles(dataDir: string, server: ACPServerEntry): string[] {
 		defaultServer: server.name,
 	};
 	const acpPath = join(dataDir, 'acp.json');
-	writeFileSync(acpPath, JSON.stringify(acpConfig, null, 2) + '\n', 'utf-8');
+	writeFileSync(acpPath, `${JSON.stringify(acpConfig, null, 2)}\n`, 'utf-8');
 	created.push('acp.json');
 
 	// Create default config files if they don't exist
@@ -210,7 +210,7 @@ export function createSetupCommands(
 
 							const lines = [
 								`Configured ACP server: ${server.name}`,
-								`  Command: ${server.command}${server.args ? ' ' + server.args.join(' ') : ''}`,
+								`  Command: ${server.command}${server.args ? ` ${server.args.join(' ')}` : ''}`,
 								'',
 								`Files written to ${dataDir}:`,
 								...created.map((f) => `  ${f}`),
@@ -270,7 +270,7 @@ export function createSetupCommands(
 
 					const lines = [
 						`Configured ACP server: ${server.name}`,
-						`  Command: ${server.command}${server.args ? ' ' + server.args.join(' ') : ''}`,
+						`  Command: ${server.command}${server.args ? ` ${server.args.join(' ')}` : ''}`,
 						'',
 						`Files written to ${dataDir}:`,
 						...created.map((f) => `  ${f}`),

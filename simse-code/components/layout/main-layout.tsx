@@ -1,6 +1,5 @@
 import { Box } from 'ink';
 import type { ReactNode } from 'react';
-import React from 'react';
 
 interface MainLayoutProps {
 	readonly children: ReactNode;

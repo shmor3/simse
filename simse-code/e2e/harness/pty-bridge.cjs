@@ -30,7 +30,7 @@ const proc = pty.spawn(config.command || 'cmd.exe', config.args || [], {
 });
 
 function send(msg) {
-	process.stdout.write(JSON.stringify(msg) + '\n');
+	process.stdout.write(`${JSON.stringify(msg)}\n`);
 }
 
 proc.onData((data) => {
@@ -68,7 +68,7 @@ process.stdin.on('data', (chunk) => {
 			} else if (msg.type === 'resize') {
 				proc.resize(msg.cols, msg.rows);
 			}
-		} catch (e) {
+		} catch {
 			// Ignore parse errors
 		}
 		nl = buf.indexOf('\n');

@@ -18,9 +18,10 @@ describe('resolveFileMentions', () => {
 		});
 
 		expect(result.mentions).toHaveLength(1);
-		expect(result.mentions[0]!.kind).toBe('vfs');
-		expect(result.mentions[0]!.path).toBe('vfs://test.py');
-		expect(result.mentions[0]!.content).toBe('print("hello")');
+		const mention = result.mentions[0];
+		expect(mention?.kind).toBe('vfs');
+		expect(mention?.path).toBe('vfs://test.py');
+		expect(mention?.content).toBe('print("hello")');
 		expect(result.cleanInput).toBe('check  please');
 	});
 
@@ -35,10 +36,11 @@ describe('resolveFileMentions', () => {
 		});
 
 		expect(result.mentions).toHaveLength(1);
-		expect(result.mentions[0]!.kind).toBe('note');
-		expect(result.mentions[0]!.path).toBe('a1b2c3d4');
-		expect(result.mentions[0]!.content).toBe('note content');
-		expect(result.mentions[0]!.topic).toBe('dev');
+		const noteMention = result.mentions[0];
+		expect(noteMention?.kind).toBe('note');
+		expect(noteMention?.path).toBe('a1b2c3d4');
+		expect(noteMention?.content).toBe('note content');
+		expect(noteMention?.topic).toBe('dev');
 		expect(result.cleanInput).toBe('explain');
 	});
 

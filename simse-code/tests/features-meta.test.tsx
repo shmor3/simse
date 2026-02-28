@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
-import React from 'react';
 import { ContextGrid, HelpView } from '../features/meta/components.js';
 import type { MetaCommandContext } from '../features/meta/index.js';
 import { createMetaCommands } from '../features/meta/index.js';
@@ -44,7 +43,7 @@ describe('meta feature module', () => {
 	test('includes help command with alias', () => {
 		const help = metaCommands.find((c) => c.name === 'help');
 		expect(help).toBeDefined();
-		expect(help!.aliases).toContain('?');
+		expect(help?.aliases).toContain('?');
 	});
 
 	test('includes clear command', () => {
@@ -54,8 +53,8 @@ describe('meta feature module', () => {
 	test('includes exit command with aliases', () => {
 		const exit = metaCommands.find((c) => c.name === 'exit');
 		expect(exit).toBeDefined();
-		expect(exit!.aliases).toContain('quit');
-		expect(exit!.aliases).toContain('q');
+		expect(exit?.aliases).toContain('quit');
+		expect(exit?.aliases).toContain('q');
 	});
 
 	test('includes compact command', () => {
@@ -67,28 +66,30 @@ describe('meta command state wiring', () => {
 	test('/verbose toggles state', () => {
 		const ctx = createMockContext();
 		const cmds = createMetaCommands(ctx);
-		const verbose = cmds.find((c) => c.name === 'verbose')!;
+		const verbose = cmds.find((c) => c.name === 'verbose');
+		expect(verbose).toBeDefined();
 
 		expect(ctx.getVerbose()).toBe(false);
-		verbose.execute('');
+		verbose?.execute('');
 		expect(ctx.getVerbose()).toBe(true);
-		verbose.execute('');
+		verbose?.execute('');
 		expect(ctx.getVerbose()).toBe(false);
-		verbose.execute('on');
+		verbose?.execute('on');
 		expect(ctx.getVerbose()).toBe(true);
-		verbose.execute('off');
+		verbose?.execute('off');
 		expect(ctx.getVerbose()).toBe(false);
 	});
 
 	test('/plan toggles state', () => {
 		const ctx = createMockContext();
 		const cmds = createMetaCommands(ctx);
-		const plan = cmds.find((c) => c.name === 'plan')!;
+		const plan = cmds.find((c) => c.name === 'plan');
+		expect(plan).toBeDefined();
 
 		expect(ctx.getPlanMode()).toBe(false);
-		plan.execute('');
+		plan?.execute('');
 		expect(ctx.getPlanMode()).toBe(true);
-		plan.execute('off');
+		plan?.execute('off');
 		expect(ctx.getPlanMode()).toBe(false);
 	});
 
@@ -100,7 +101,7 @@ describe('meta command state wiring', () => {
 			},
 		});
 		const cmds = createMetaCommands(ctx);
-		cmds.find((c) => c.name === 'clear')!.execute('');
+		cmds.find((c) => c.name === 'clear')?.execute('');
 		expect(cleared).toBe(true);
 	});
 
@@ -109,9 +110,11 @@ describe('meta command state wiring', () => {
 			getContextUsage: () => ({ usedChars: 80000, maxChars: 200000 }),
 		});
 		const cmds = createMetaCommands(ctx);
-		const result = cmds.find((c) => c.name === 'context')!.execute('');
+		const contextCmd = cmds.find((c) => c.name === 'context');
+		expect(contextCmd).toBeDefined();
+		const result = contextCmd?.execute('');
 		expect(result).toBeDefined();
-		expect(result!.element).toBeDefined();
+		expect(result?.element).toBeDefined();
 	});
 });
 
@@ -127,7 +130,7 @@ describe('ContextGrid', () => {
 describe('HelpView', () => {
 	test('renders command list', () => {
 		const { lastFrame } = render(<HelpView commands={metaCommands} />);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('/help');
 		expect(frame).toContain('/exit');
 	});

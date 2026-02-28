@@ -7,7 +7,7 @@ describe('Banner', () => {
 		const { lastFrame } = render(
 			<Banner version="1.0.0" workDir="/projects/test" dataDir="~/.simse" />,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('simse-code');
 		expect(frame).toContain('1.0.0');
 		// Uses horizontal rule, not rounded box
@@ -18,7 +18,7 @@ describe('Banner', () => {
 		const { lastFrame } = render(
 			<Banner version="1.0.0" workDir="/projects/test" dataDir="~/.simse" />,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('╭──╮');
 		expect(frame).toContain('╰─╮│');
 		expect(frame).toContain('╰╯');
@@ -28,7 +28,7 @@ describe('Banner', () => {
 		const { lastFrame } = render(
 			<Banner version="1.0.0" workDir="/projects/test" dataDir="~/.simse" />,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('│');
 		expect(frame).toContain('Tips for getting started');
 		expect(frame).toContain('Recent activity');
@@ -58,10 +58,10 @@ describe('Banner', () => {
 		const { lastFrame } = render(
 			<Banner version="1.0.0" workDir="/projects/test" dataDir="~/.simse" />,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		// Bottom border is a full-width line of ─
 		const lines = frame.split('\n');
-		const lastNonEmpty = lines.filter((l: string) => l.trim()).pop()!;
+		const lastNonEmpty = lines.filter((l: string) => l.trim()).pop() ?? '';
 		expect(lastNonEmpty).toContain('─');
 	});
 
@@ -81,7 +81,7 @@ describe('Banner', () => {
 		const { lastFrame } = render(
 			<Banner version="1.0.0" workDir="/projects/test" dataDir="~/.simse" />,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		// Should NOT contain junction characters ├ or ┤
 		expect(frame).not.toContain('\u251C');
 		expect(frame).not.toContain('\u2524');
@@ -96,7 +96,7 @@ describe('Banner', () => {
 				tips={['Custom tip one', 'Custom tip two']}
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('Custom tip one');
 		expect(frame).toContain('Custom tip two');
 	});

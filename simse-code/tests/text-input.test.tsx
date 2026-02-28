@@ -72,7 +72,7 @@ describe('TextInput', () => {
 		const { lastFrame } = render(
 			<TextInput value={'line one\nline two'} onChange={() => {}} />,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('line one');
 		expect(frame).toContain('line two');
 	});
@@ -81,7 +81,7 @@ describe('TextInput', () => {
 		const { lastFrame } = render(
 			<TextInput value={'first\nsecond'} onChange={() => {}} />,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		const outputLines = frame.split('\n');
 		// First line should not have leading spaces (beyond cursor rendering)
 		expect(outputLines[0]).toContain('first');
@@ -94,7 +94,7 @@ describe('TextInput', () => {
 		const { lastFrame } = render(
 			<TextInput value={'hello\nworld'} onChange={() => {}} isActive={false} />,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		const outputLines = frame.split('\n');
 		expect(outputLines[0]).toContain('hello');
 		expect(outputLines[1]).toMatch(/^ {2}/);
@@ -105,7 +105,7 @@ describe('TextInput', () => {
 		const { lastFrame } = render(
 			<TextInput value="/hel" onChange={() => {}} suggestion="p" />,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('hel');
 		expect(frame).toContain('p');
 	});
@@ -119,7 +119,7 @@ describe('TextInput', () => {
 				suggestion="help"
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('Type here');
 	});
 

@@ -145,7 +145,7 @@ export async function saveDefinition(
 	const filePath = join(librariansDir, `${definition.name}.json`);
 	await writeFile(
 		filePath,
-		JSON.stringify(definition, null, '\t') + '\n',
+		`${JSON.stringify(definition, null, '\t')}\n`,
 		'utf-8',
 	);
 }

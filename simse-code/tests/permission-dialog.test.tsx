@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
-import React from 'react';
 import { PermissionDialog } from '../components/input/permission-dialog.js';
 
 describe('PermissionDialog', () => {
@@ -13,7 +12,7 @@ describe('PermissionDialog', () => {
 				onDeny={() => {}}
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('⚠');
 	});
 
@@ -26,7 +25,7 @@ describe('PermissionDialog', () => {
 				onDeny={() => {}}
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('Bash');
 		expect(frame).toContain('rm -rf node_modules');
 	});
@@ -40,7 +39,7 @@ describe('PermissionDialog', () => {
 				onDeny={() => {}}
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('custom_tool');
 	});
 
@@ -53,7 +52,7 @@ describe('PermissionDialog', () => {
 				onDeny={() => {}}
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).not.toContain('╭');
 	});
 
@@ -66,7 +65,7 @@ describe('PermissionDialog', () => {
 				onDeny={() => {}}
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('[y]');
 		expect(frame).toContain('[n]');
 	});
@@ -81,7 +80,7 @@ describe('PermissionDialog', () => {
 				onAllowAlways={() => {}}
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('[a]');
 	});
 
@@ -94,7 +93,7 @@ describe('PermissionDialog', () => {
 				onDeny={() => {}}
 			/>,
 		);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).not.toContain('[a]');
 	});
 
@@ -114,7 +113,7 @@ describe('PermissionDialog', () => {
 					onDeny={() => {}}
 				/>,
 			);
-			const frame = lastFrame()!;
+			const frame = lastFrame() ?? '';
 			expect(frame).toContain(`SomeTool(${value})`);
 		}
 	});

@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
-import React from 'react';
 import { formatTokens, StatusBar } from '../components/layout/status-bar.js';
 
 describe('formatTokens', () => {
@@ -20,7 +19,7 @@ describe('formatTokens', () => {
 describe('StatusBar', () => {
 	test('renders default hints without interrupt when idle', () => {
 		const { lastFrame } = render(<StatusBar />);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).not.toContain('esc to interrupt');
 		expect(frame).toContain('? for shortcuts');
 	});
@@ -32,7 +31,7 @@ describe('StatusBar', () => {
 
 	test('shows bypass permissions hint when enabled', () => {
 		const { lastFrame } = render(<StatusBar bypassPermissions />);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('bypass permissions on');
 		expect(frame).toContain('shift+tab to cycle');
 	});
@@ -49,7 +48,7 @@ describe('StatusBar', () => {
 
 	test('joins hints with middot separator', () => {
 		const { lastFrame } = render(<StatusBar planMode verbose />);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('\u00b7');
 	});
 });

@@ -1,5 +1,5 @@
 import { Box, Text, useInput } from 'ink';
-import React, { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import type { CommandDefinition } from '../../ink-types.js';
 import { TextInput } from './text-input.js';
 
@@ -104,8 +104,8 @@ export function PromptInput({
 		const matches = commands.filter((cmd) =>
 			cmd.name.toLowerCase().startsWith(prefix),
 		);
-		if (matches.length === 1 && matches[0]!.name.toLowerCase() !== prefix) {
-			return matches[0]!.name.slice(prefix.length);
+		if (matches.length === 1 && matches[0]?.name.toLowerCase() !== prefix) {
+			return matches[0]?.name.slice(prefix.length);
 		}
 		return undefined;
 	}, [value, commands, mode, atCandidates, atQuery]);

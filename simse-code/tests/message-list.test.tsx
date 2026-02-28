@@ -10,7 +10,7 @@ describe('MessageList', () => {
 		];
 
 		const { lastFrame } = render(<MessageList items={items} />);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('\u276F'); // ❯
 		expect(frame).toContain('Hello');
 	});
@@ -21,7 +21,7 @@ describe('MessageList', () => {
 		];
 
 		const { lastFrame } = render(<MessageList items={items} />);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		// Markdown component parses **bold** into bold text nodes
 		expect(frame).toContain('bold');
 		expect(frame).toContain('text');
@@ -42,7 +42,7 @@ describe('MessageList', () => {
 		];
 
 		const { lastFrame } = render(<MessageList items={items} />);
-		const frame = lastFrame()!;
+		const frame = lastFrame() ?? '';
 		expect(frame).toContain('Bash');
 		expect(frame).toContain('ls');
 	});

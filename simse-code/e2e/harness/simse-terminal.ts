@@ -2,7 +2,7 @@
 import { resolve } from 'node:path';
 import { type ACPBackend, createTempConfig } from './config.js';
 import { ctrlKey, KEYS, type KeyName } from './keys.js';
-import { createPtyTerminal, type PtyTerminal } from './terminal.js';
+import { createPtyTerminal } from './terminal.js';
 
 export interface SimseTerminalOptions {
 	cols?: number;

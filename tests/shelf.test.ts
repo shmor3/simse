@@ -3,7 +3,6 @@ import { createLibrary, type Library } from '../src/ai/library/library.js';
 import type {
 	EmbeddingProvider,
 	LibraryConfig,
-	Shelf,
 } from '../src/ai/library/types.js';
 import { createMemoryStorage, createSilentLogger } from './utils/mocks.js';
 
@@ -58,7 +57,7 @@ describe('Shelf', () => {
 		const id = await shelf.add('finding about APIs', { topic: 'api' });
 		const volume = library.getById(id);
 		expect(volume).toBeDefined();
-		expect(volume!.metadata.shelf).toBe('researcher');
+		expect(volume?.metadata.shelf).toBe('researcher');
 	});
 
 	it('shelf.search() returns only volumes from that shelf', async () => {

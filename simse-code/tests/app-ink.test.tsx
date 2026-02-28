@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
-import React from 'react';
 import { App } from '../app-ink.js';
 import { createConversation } from '../conversation.js';
 import type { PermissionManager } from '../permission-manager.js';
@@ -31,6 +30,7 @@ function createMockACPClient() {
 		serverCount: 0,
 		defaultServerName: undefined,
 		defaultAgent: undefined,
+		// biome-ignore lint/suspicious/noExplicitAny: partial mock for testing
 	} as any;
 }
 
@@ -46,6 +46,7 @@ function createMockToolRegistry() {
 			isError: false,
 		}),
 		toolCount: 0,
+		// biome-ignore lint/suspicious/noExplicitAny: partial mock for testing
 	} as any;
 }
 

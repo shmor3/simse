@@ -121,7 +121,7 @@ export async function createPtyTerminal(
 		writeFn = (data: string) => {
 			if (exited) return;
 			try {
-				proc.stdin.write(JSON.stringify({ type: 'write', data }) + '\n');
+				proc.stdin.write(`${JSON.stringify({ type: 'write', data })}\n`);
 			} catch {
 				// Stdin may be closed
 			}
@@ -130,7 +130,7 @@ export async function createPtyTerminal(
 		killFn = async () => {
 			if (!exited) {
 				try {
-					proc.stdin.write(JSON.stringify({ type: 'kill' }) + '\n');
+					proc.stdin.write(`${JSON.stringify({ type: 'kill' })}\n`);
 				} catch {
 					// Ignore
 				}

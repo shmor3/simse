@@ -18,7 +18,7 @@ import type { CommandDefinition } from '../../ink-types.js';
 // Preset configs
 // ---------------------------------------------------------------------------
 
-interface ACPServerEntry {
+export interface ACPServerEntry {
 	readonly name: string;
 	readonly command: string;
 	readonly args?: readonly string[];
@@ -102,6 +102,37 @@ const PRESETS: Record<
 		},
 	},
 };
+
+// ---------------------------------------------------------------------------
+// Preset helpers (used by settings-explorer inline setup flow)
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds an ACP server entry from a preset key and optional args.
+ * Returns null if the preset is unknown or build fails.
+ */
+export function buildPresetServer(
+	presetKey: string,
+	customArgs: string,
+): ACPServerEntry | null {
+	const preset = PRESETS[presetKey];
+	if (!preset) return null;
+	try {
+		return preset.build(customArgs);
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Writes ACP setup files for the given server and returns the list of created filenames.
+ */
+export function writeSetupToDataDir(
+	dataDir: string,
+	server: ACPServerEntry,
+): string[] {
+	return writeSetupFiles(dataDir, server);
+}
 
 // ---------------------------------------------------------------------------
 // File writers

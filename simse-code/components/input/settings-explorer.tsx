@@ -11,6 +11,12 @@ import type {
 	ConfigFileSchema,
 	FieldSchema,
 } from '../../features/config/settings-schema.js';
+import {
+	buildPresetServer,
+	writeSetupToDataDir,
+} from '../../features/config/setup.js';
+import type { SetupPresetOption } from './setup-selector.js';
+import { SetupSelector } from './setup-selector.js';
 import { TextInput } from './text-input.js';
 
 // ---------------------------------------------------------------------------
@@ -97,6 +103,37 @@ function findCurrentIndex(
 	const idx = options.indexOf(String(value));
 	return idx >= 0 ? idx : 0;
 }
+
+// ---------------------------------------------------------------------------
+// Setup presets (mirrors PRESETS in setup.ts as SetupPresetOption objects)
+// ---------------------------------------------------------------------------
+
+const SETUP_PRESETS: readonly SetupPresetOption[] = Object.freeze([
+	Object.freeze({
+		key: 'claude-code',
+		label: 'Claude Code',
+		description: 'Anthropic Claude via claude-code-acp',
+		needsInput: false,
+	}),
+	Object.freeze({
+		key: 'ollama',
+		label: 'Ollama',
+		description: 'Local AI via Ollama + ACP bridge',
+		needsInput: false,
+	}),
+	Object.freeze({
+		key: 'copilot',
+		label: 'GitHub Copilot',
+		description: 'GitHub Copilot CLI',
+		needsInput: false,
+	}),
+	Object.freeze({
+		key: 'custom',
+		label: 'Custom',
+		description: 'Enter a custom ACP server command',
+		needsInput: true,
+	}),
+]);
 
 // ---------------------------------------------------------------------------
 // Component
@@ -324,6 +361,32 @@ export function SettingsExplorer({
 		[selectedSchema, fieldIndex, saveField],
 	);
 
+	// --- Setup flow completion handler ---
+	const handleSetupComplete = useCallback(
+		(selection: { presetKey: string; customArgs: string }) => {
+			const server = buildPresetServer(
+				selection.presetKey,
+				selection.customArgs,
+			);
+			if (server) {
+				writeSetupToDataDir(dataDir, server);
+				// Reload file data to pick up new server
+				if (selectedSchema) {
+					loadFile(selectedSchema);
+				}
+				// Auto-select the new server as the field value
+				if (selectedSchema) {
+					const field = selectedSchema.fields[fieldIndex];
+					if (field) {
+						saveField(selectedSchema, field.key, server.name);
+					}
+				}
+			}
+			setEditMode('none');
+		},
+		[dataDir, selectedSchema, fieldIndex, loadFile, saveField],
+	);
+
 	// -----------------------------------------------------------------------
 	// Render: Files panel
 	// -----------------------------------------------------------------------
@@ -372,134 +435,157 @@ export function SettingsExplorer({
 				<Text color="cyan">{selectedSchema.filename}</Text>
 			</Text>
 			<Text> </Text>
-			{fields.map((field, i) => {
-				const isSelected = i === fieldIndex;
-				const value = fileData[field.key];
-				const isTextEditing =
-					isSelected && editMode === 'text-input';
-				const isDropdownOpen =
-					isSelected && editMode === 'selecting';
-				const isSaved = savedKey === field.key;
+			{editMode === 'setup-flow' ? (
+				<SetupSelector
+					presets={[...SETUP_PRESETS]}
+					onSelect={handleSetupComplete}
+					onDismiss={() => setEditMode('none')}
+				/>
+			) : (
+				<>
+					{fields.map((field, i) => {
+						const isSelected = i === fieldIndex;
+						const value = fileData[field.key];
+						const isTextEditing =
+							isSelected && editMode === 'text-input';
+						const isDropdownOpen =
+							isSelected && editMode === 'selecting';
+						const isSaved = savedKey === field.key;
 
-				return (
-					<Box key={field.key} flexDirection="column">
-						<Box>
-							<Text color={isSelected ? 'cyan' : undefined}>
-								{isSelected ? '  \u276F ' : '    '}
-							</Text>
-							<Text
-								bold={isSelected}
-								color={isSelected ? 'cyan' : undefined}
-							>
-								{field.key}
-								{': '}
-							</Text>
-							{isTextEditing ? (
-								<TextInput
-									value={editValue}
-									onChange={setEditValue}
-									onSubmit={handleEditSubmit}
-									placeholder={
-										field.type === 'number'
-											? 'number'
-											: 'value'
-									}
-								/>
-							) : (
-								<>
+						return (
+							<Box key={field.key} flexDirection="column">
+								<Box>
 									<Text
-										dimColor={
-											value === undefined ||
-											value === null
-										}
 										color={
 											isSelected ? 'cyan' : undefined
 										}
 									>
-										{formatValue(value)}
+										{isSelected ? '  \u276F ' : '    '}
 									</Text>
-									{!isDropdownOpen && (
-										<Text dimColor>
-											{'  '}
-											{field.description}
-										</Text>
-									)}
-									{isSaved && (
-										<Text color="green">{' Saved'}</Text>
-									)}
-								</>
-							)}
-						</Box>
-						{/* Inline dropdown for enum/boolean fields */}
-						{isDropdownOpen && (
-							<Box
-								flexDirection="column"
-								paddingLeft={6}
-								marginBottom={0}
-							>
-								{dropdownOptions.map((opt, oi) => {
-									const isOptSelected =
-										oi === dropdownIndex;
-									return (
-										<Box key={opt}>
+									<Text
+										bold={isSelected}
+										color={
+											isSelected ? 'cyan' : undefined
+										}
+									>
+										{field.key}
+										{': '}
+									</Text>
+									{isTextEditing ? (
+										<TextInput
+											value={editValue}
+											onChange={setEditValue}
+											onSubmit={handleEditSubmit}
+											placeholder={
+												field.type === 'number'
+													? 'number'
+													: 'value'
+											}
+										/>
+									) : (
+										<>
 											<Text
-												color={
-													isOptSelected
-														? 'cyan'
-														: undefined
-												}
-											>
-												{isOptSelected
-													? '\u276F '
-													: '  '}
-											</Text>
-											<Text
-												bold={isOptSelected}
-												color={
-													isOptSelected
-														? 'cyan'
-														: undefined
-												}
 												dimColor={
-													opt === '(unset)' &&
-													!isOptSelected
+													value === undefined ||
+													value === null
 												}
-												italic={
-													opt ===
-														'Custom value...' ||
-													opt ===
-														'Custom model...' ||
-													opt ===
-														'Add new server...'
+												color={
+													isSelected
+														? 'cyan'
+														: undefined
 												}
 											>
-												{opt}
+												{formatValue(value)}
 											</Text>
-										</Box>
-									);
-								})}
+											{!isDropdownOpen && (
+												<Text dimColor>
+													{'  '}
+													{field.description}
+												</Text>
+											)}
+											{isSaved && (
+												<Text color="green">
+													{' Saved'}
+												</Text>
+											)}
+										</>
+									)}
+								</Box>
+								{/* Inline dropdown for enum/boolean fields */}
+								{isDropdownOpen && (
+									<Box
+										flexDirection="column"
+										paddingLeft={6}
+										marginBottom={0}
+									>
+										{dropdownOptions.map((opt, oi) => {
+											const isOptSelected =
+												oi === dropdownIndex;
+											return (
+												<Box key={opt}>
+													<Text
+														color={
+															isOptSelected
+																? 'cyan'
+																: undefined
+														}
+													>
+														{isOptSelected
+															? '\u276F '
+															: '  '}
+													</Text>
+													<Text
+														bold={isOptSelected}
+														color={
+															isOptSelected
+																? 'cyan'
+																: undefined
+														}
+														dimColor={
+															opt ===
+																'(unset)' &&
+															!isOptSelected
+														}
+														italic={
+															opt ===
+																'Custom value...' ||
+															opt ===
+																'Custom model...' ||
+															opt ===
+																'Add new server...'
+														}
+													>
+														{opt}
+													</Text>
+												</Box>
+											);
+										})}
+									</Box>
+								)}
 							</Box>
-						)}
-					</Box>
-				);
-			})}
-			<Text> </Text>
-			{editMode === 'text-input' && (
-				<Text dimColor>
-					{'  \u21B5 save  esc cancel'}
-				</Text>
-			)}
-			{editMode === 'selecting' && (
-				<Text dimColor>
-					{'  \u2191\u2193 navigate  \u21B5 select  esc cancel'}
-				</Text>
-			)}
-			{editMode === 'none' && (
-				<Text dimColor>
-					{
-						'  \u2191\u2193 navigate  \u21B5 edit  \u2190/esc back'
-					}
-				</Text>
+						);
+					})}
+					<Text> </Text>
+					{editMode === 'text-input' && (
+						<Text dimColor>
+							{'  \u21B5 save  esc cancel'}
+						</Text>
+					)}
+					{editMode === 'selecting' && (
+						<Text dimColor>
+							{
+								'  \u2191\u2193 navigate  \u21B5 select  esc cancel'
+							}
+						</Text>
+					)}
+					{editMode === 'none' && (
+						<Text dimColor>
+							{
+								'  \u2191\u2193 navigate  \u21B5 edit  \u2190/esc back'
+							}
+						</Text>
+					)}
+				</>
 			)}
 		</Box>
 	);

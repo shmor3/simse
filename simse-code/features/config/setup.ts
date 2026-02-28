@@ -11,6 +11,7 @@
 
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { SetupPresetOption } from '../../components/input/setup-selector.js';
 import type { CommandDefinition } from '../../ink-types.js';
 
 // ---------------------------------------------------------------------------
@@ -30,10 +31,17 @@ interface ACPFileConfig {
 
 const PRESETS: Record<
 	string,
-	{ description: string; build: (args: string) => ACPServerEntry }
+	{
+		label: string;
+		description: string;
+		needsInput: boolean;
+		build: (args: string) => ACPServerEntry;
+	}
 > = {
 	'claude-code': {
+		label: 'Claude Code',
 		description: 'Anthropic Claude via claude-code-acp',
+		needsInput: false,
 		build: () => ({
 			name: 'claude',
 			command: 'bunx',
@@ -41,7 +49,9 @@ const PRESETS: Record<
 		}),
 	},
 	ollama: {
+		label: 'Ollama',
 		description: 'Local AI via Ollama + ACP bridge',
+		needsInput: false,
 		build: (args) => {
 			const parts = args.split(/\s+/).filter(Boolean);
 			const url = parts[0] || 'http://127.0.0.1:11434';
@@ -61,7 +71,9 @@ const PRESETS: Record<
 		},
 	},
 	copilot: {
+		label: 'GitHub Copilot',
 		description: 'GitHub Copilot CLI',
+		needsInput: false,
 		build: () => ({
 			name: 'copilot',
 			command: 'copilot',
@@ -69,7 +81,9 @@ const PRESETS: Record<
 		}),
 	},
 	custom: {
-		description: 'Any ACP-compatible server command',
+		label: 'Custom',
+		description: 'Enter a custom ACP server command',
+		needsInput: true,
 		build: (args) => {
 			const parts = args.split(/\s+/).filter(Boolean);
 			if (parts.length === 0) {
@@ -150,6 +164,9 @@ function writeSetupFiles(dataDir: string, server: ACPServerEntry): string[] {
 export function createSetupCommands(
 	dataDir: string,
 	onComplete?: () => Promise<void>,
+	onShowSelector?: (
+		presets: SetupPresetOption[],
+	) => Promise<{ presetKey: string; customArgs: string } | null>,
 ): readonly CommandDefinition[] {
 	return [
 		{
@@ -160,8 +177,56 @@ export function createSetupCommands(
 			execute: async (args) => {
 				const trimmed = args.trim();
 
-				// No args — show available presets
+				// No args — show interactive selector or text listing
 				if (!trimmed) {
+					if (onShowSelector) {
+						const presetOptions: SetupPresetOption[] = Object.entries(
+							PRESETS,
+						).map(([key, preset]) => ({
+							key,
+							label: preset.label,
+							description: preset.description,
+							needsInput: preset.needsInput,
+						}));
+
+						const selection = await onShowSelector(presetOptions);
+						if (!selection) {
+							return { text: 'Setup cancelled.' };
+						}
+
+						const preset = PRESETS[selection.presetKey];
+						if (!preset) {
+							return { text: `Unknown preset: "${selection.presetKey}".` };
+						}
+
+						try {
+							const server = preset.build(selection.customArgs);
+							const created = writeSetupFiles(dataDir, server);
+
+							if (onComplete) {
+								await onComplete();
+							}
+
+							const lines = [
+								`Configured ACP server: ${server.name}`,
+								`  Command: ${server.command}${server.args ? ' ' + server.args.join(' ') : ''}`,
+								'',
+								`Files written to ${dataDir}:`,
+								...created.map((f) => `  ${f}`),
+								'',
+								onComplete
+									? 'Connected to the new server.'
+									: 'Restart simse to connect to the new server.',
+							];
+							return { text: lines.join('\n') };
+						} catch (err) {
+							return {
+								text: err instanceof Error ? err.message : 'Setup failed.',
+							};
+						}
+					}
+
+					// Fallback: text listing when no selector available
 					const lines = [
 						'Available presets:',
 						'',

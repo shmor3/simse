@@ -15,35 +15,38 @@ import { createCommandRegistry } from './command-registry.js';
 import { Markdown } from './components/chat/markdown.js';
 import { MessageList } from './components/chat/message-list.js';
 import { ToolCallBox } from './components/chat/tool-call-box.js';
+import { PermissionDialog } from './components/input/permission-dialog.js';
 import {
 	PromptInput,
 	type PromptMode,
 } from './components/input/prompt-input.js';
+import type { SetupPresetOption } from './components/input/setup-selector.js';
+import { SetupSelector } from './components/input/setup-selector.js';
 import { Banner } from './components/layout/banner.js';
 import { MainLayout } from './components/layout/main-layout.js';
 import { StatusBar } from './components/layout/status-bar.js';
-import { PermissionDialog } from './components/input/permission-dialog.js';
 import { ThinkingSpinner } from './components/shared/spinner.js';
 import { createCLIConfig } from './config.js';
 import type { Conversation } from './conversation.js';
 import { createConversation } from './conversation.js';
 import { aiCommands } from './features/ai/index.js';
 import { configCommands } from './features/config/index.js';
+import { createInitCommands } from './features/config/init.js';
 import { createSetupCommands } from './features/config/setup.js';
 import { filesCommands } from './features/files/index.js';
 import { libraryCommands } from './features/library/index.js';
-import { createMetaCommands } from './features/meta/index.js';
 import type { MetaCommandContext } from './features/meta/index.js';
-import { createSessionCommands } from './features/session/index.js';
+import { createMetaCommands } from './features/meta/index.js';
 import type { SessionCommandContext } from './features/session/index.js';
+import { createSessionCommands } from './features/session/index.js';
 import { createToolsCommands } from './features/tools/index.js';
-import { useAgenticLoop } from './hooks/use-agentic-loop.js';
-import { useCommandDispatch } from './hooks/use-command-dispatch.js';
 import {
 	completeAtMention,
 	formatMentionsAsContext,
 	resolveFileMentions,
 } from './file-mentions.js';
+import { useAgenticLoop } from './hooks/use-agentic-loop.js';
+import { useCommandDispatch } from './hooks/use-command-dispatch.js';
 import { detectImages, formatImageIndicator } from './image-input.js';
 import type { OutputItem } from './ink-types.js';
 import type { PermissionManager } from './permission-manager.js';
@@ -191,6 +194,23 @@ export function App({
 		}
 	}, [dataDir]);
 
+	// Interactive setup selector — Promise-based active-area dialog
+	const [pendingSetup, setPendingSetup] = useState<{
+		presets: SetupPresetOption[];
+		resolve: (result: { presetKey: string; customArgs: string } | null) => void;
+	} | null>(null);
+
+	const handleShowSetupSelector = useCallback(
+		(
+			presets: SetupPresetOption[],
+		): Promise<{ presetKey: string; customArgs: string } | null> => {
+			return new Promise((resolve) => {
+				setPendingSetup({ presets, resolve });
+			});
+		},
+		[],
+	);
+
 	// Refs for meta command state access (commands are created once but execute later)
 	const verboseRef = useRef(verbose);
 	verboseRef.current = verbose;
@@ -237,9 +257,7 @@ export function App({
 			getPlanMode: () => planModeRef.current,
 			clearConversation: () => {
 				conversationRef.current.clear();
-				setItems([
-					{ kind: 'command-result', element: bannerRef.current },
-				]);
+				setItems([{ kind: 'command-result', element: bannerRef.current }]);
 			},
 			getContextUsage: () => ({
 				usedChars: conversationRef.current.estimatedChars,
@@ -256,14 +274,38 @@ export function App({
 		const meta = createMetaCommands(metaCtx);
 		reg.registerAll(meta);
 		reg.registerAll(libraryCommands);
-		reg.registerAll(createToolsCommands({ getToolRegistry: () => toolRegistryRef.current }));
+		reg.registerAll(
+			createToolsCommands({ getToolRegistry: () => toolRegistryRef.current }),
+		);
 		reg.registerAll(createSessionCommands(sessionCtx));
 		reg.registerAll(filesCommands);
 		reg.registerAll(configCommands);
-		reg.registerAll(createSetupCommands(dataDir, handleSetupComplete));
+		reg.registerAll(
+			createSetupCommands(
+				dataDir,
+				handleSetupComplete,
+				handleShowSetupSelector,
+			),
+		);
+		reg.registerAll(
+			createInitCommands({
+				getAcpClient: () => acpClientRef.current,
+				getServerName: () => currentServerName,
+				hasACP: () => hasACP,
+			}),
+		);
 		reg.registerAll(aiCommands);
 		return reg;
-	}, [dataDir, handleSetupComplete, sessionStore, currentServerName, currentModelName, resumeSession]);
+	}, [
+		dataDir,
+		handleSetupComplete,
+		handleShowSetupSelector,
+		sessionStore,
+		currentServerName,
+		currentModelName,
+		resumeSession,
+		hasACP,
+	]);
 
 	const { dispatch, isCommand } = useCommandDispatch(registry);
 
@@ -290,9 +332,10 @@ export function App({
 	} = useAgenticLoop(loopOptions);
 
 	// Escape key interrupts the agentic loop when processing
+	// (but not when setup selector is active — it handles its own Escape)
 	useInput(
 		(_input, key) => {
-			if (key.escape) {
+			if (key.escape && !pendingSetup) {
 				abortLoop();
 				setIsProcessing(false);
 				setItems((prev) => [...prev, { kind: 'info', text: 'Interrupted.' }]);
@@ -358,8 +401,7 @@ export function App({
 				// Bash mode: execute shell command directly
 				const cmd = input.slice(1).trim();
 				try {
-					const shell =
-						process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
+					const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
 					const shellArgs =
 						process.platform === 'win32' ? ['/c', cmd] : ['-c', cmd];
 					const output = execFileSync(shell, shellArgs, {
@@ -485,12 +527,24 @@ export function App({
 				</Box>
 			)}
 
+			{pendingSetup && (
+				<SetupSelector
+					presets={pendingSetup.presets}
+					onSelect={(selection) => {
+						pendingSetup.resolve(selection);
+						setPendingSetup(null);
+					}}
+					onDismiss={() => {
+						pendingSetup.resolve(null);
+						setPendingSetup(null);
+					}}
+				/>
+			)}
+
 			{pendingPermission && (
 				<PermissionDialog
 					toolName={pendingPermission.call.name}
-					args={
-						pendingPermission.call.arguments as Record<string, unknown>
-					}
+					args={pendingPermission.call.arguments as Record<string, unknown>}
 					onAllow={() => resolvePermission('allow')}
 					onDeny={() => resolvePermission('deny')}
 					onAllowAlways={() => resolvePermission('allow', true)}

@@ -3,6 +3,7 @@
  */
 
 import type { ReactNode } from 'react';
+import type { ImageAttachment } from './image-input.js';
 
 // ---------------------------------------------------------------------------
 // Command System
@@ -45,6 +46,7 @@ export type OutputItem =
 			readonly kind: 'message';
 			readonly role: 'user' | 'assistant';
 			readonly text: string;
+			readonly images?: readonly ImageAttachment[];
 	  }
 	| {
 			readonly kind: 'tool-call';
@@ -91,5 +93,3 @@ export interface PermissionOption {
 	readonly id: string;
 	readonly label: string;
 }
-
-export type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'dontAsk';

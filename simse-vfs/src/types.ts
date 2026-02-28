@@ -208,3 +208,34 @@ export interface VFSSnapshot {
 	readonly files: readonly VFSSnapshotFile[];
 	readonly directories: readonly VFSSnapshotDirectory[];
 }
+
+// ---------------------------------------------------------------------------
+// Transactions
+// ---------------------------------------------------------------------------
+
+export type VFSOp =
+	| {
+			readonly type: 'writeFile';
+			readonly path: string;
+			readonly content: string | Uint8Array;
+	  }
+	| { readonly type: 'deleteFile'; readonly path: string }
+	| { readonly type: 'mkdir'; readonly path: string }
+	| { readonly type: 'rmdir'; readonly path: string }
+	| {
+			readonly type: 'rename';
+			readonly oldPath: string;
+			readonly newPath: string;
+	  }
+	| { readonly type: 'copy'; readonly src: string; readonly dest: string };
+
+// ---------------------------------------------------------------------------
+// File Change Callbacks
+// ---------------------------------------------------------------------------
+
+export interface VFSCallbacks {
+	readonly onWrite?: (path: string, size: number) => void;
+	readonly onDelete?: (path: string) => void;
+	readonly onRename?: (oldPath: string, newPath: string) => void;
+	readonly onMkdir?: (path: string) => void;
+}

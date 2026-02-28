@@ -31,6 +31,7 @@ export {
 } from './path-utils.js';
 // ---- Types -----------------------------------------------------------------
 export type {
+	VFSCallbacks,
 	VFSCommitOperation,
 	VFSCommitOptions,
 	VFSCommitResult,
@@ -48,6 +49,7 @@ export type {
 	VFSLoadOptions,
 	VFSMkdirOptions,
 	VFSNodeType,
+	VFSOp,
 	VFSReaddirOptions,
 	VFSReadResult,
 	VFSSearchOptions,

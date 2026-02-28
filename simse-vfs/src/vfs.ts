@@ -16,6 +16,7 @@ import {
 	validatePath,
 } from './path-utils.js';
 import type {
+	VFSCallbacks,
 	VFSContentType,
 	VFSCopyOptions,
 	VFSDeleteOptions,
@@ -29,6 +30,7 @@ import type {
 	VFSLimits,
 	VFSMkdirOptions,
 	VFSNodeType,
+	VFSOp,
 	VFSReaddirOptions,
 	VFSReadResult,
 	VFSSearchOptions,
@@ -48,6 +50,7 @@ export interface VirtualFSOptions {
 	readonly history?: VFSHistoryOptions;
 	readonly logger?: Logger;
 	readonly onFileWrite?: (event: VFSWriteEvent) => void;
+	readonly callbacks?: VFSCallbacks;
 }
 
 // ---------------------------------------------------------------------------
@@ -101,6 +104,7 @@ export interface VirtualFS {
 	readonly snapshot: () => VFSSnapshot;
 	readonly restore: (snapshot: VFSSnapshot) => void;
 	readonly clear: () => void;
+	readonly transaction: (ops: readonly VFSOp[]) => void;
 
 	readonly totalSize: number;
 	readonly nodeCount: number;
@@ -252,6 +256,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 
 	const maxEntriesPerFile = options.history?.maxEntriesPerFile ?? 50;
 	const onFileWrite = options.onFileWrite;
+	const callbacks = options.callbacks;
 
 	const fileHistory = new Map<string, VFSHistoryEntry[]>();
 
@@ -564,6 +569,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 			size: newSize,
 			isNew: !existing,
 		});
+		callbacks?.onWrite?.(normalized, newSize);
 
 		logger.debug(`Wrote file "${normalized}" (${newSize} bytes)`);
 	};
@@ -605,6 +611,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 			size: newSize,
 			isNew: false,
 		});
+		callbacks?.onWrite?.(normalized, newSize);
 	};
 
 	const deleteFile = (path: string): boolean => {
@@ -617,6 +624,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 		currentFileCount--;
 		nodes.delete(normalized);
 		fileHistory.delete(normalized);
+		callbacks?.onDelete?.(normalized);
 		logger.debug(`Deleted file "${normalized}"`);
 		return true;
 	};
@@ -654,6 +662,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 			modifiedAt: ts,
 		});
 		currentDirCount++;
+		callbacks?.onMkdir?.(normalized);
 
 		logger.debug(`Created directory "${normalized}"`);
 	};
@@ -725,6 +734,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 
 		currentDirCount--;
 		nodes.delete(normalized);
+		callbacks?.onDelete?.(normalized);
 		logger.debug(`Deleted directory "${normalized}"`);
 		return true;
 	};
@@ -813,6 +823,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 			fileHistory.delete(normalizedOld);
 		}
 
+		callbacks?.onRename?.(normalizedOld, normalizedNew);
 		logger.debug(`Renamed "${normalizedOld}" -> "${normalizedNew}"`);
 	};
 
@@ -1664,6 +1675,39 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 		logger.debug('Cleared VFS');
 	};
 
+	// -- Transaction ------------------------------------------------------
+
+	const transaction = (ops: readonly VFSOp[]): void => {
+		const snap = snapshot();
+		try {
+			for (const op of ops) {
+				switch (op.type) {
+					case 'writeFile':
+						writeFile(op.path, op.content);
+						break;
+					case 'deleteFile':
+						deleteFile(op.path);
+						break;
+					case 'mkdir':
+						mkdir(op.path, { recursive: true });
+						break;
+					case 'rmdir':
+						rmdir(op.path, { recursive: true });
+						break;
+					case 'rename':
+						rename(op.oldPath, op.newPath);
+						break;
+					case 'copy':
+						copy(op.src, op.dest);
+						break;
+				}
+			}
+		} catch (err) {
+			restore(snap);
+			throw err;
+		}
+	};
+
 	// -- Return frozen interface ------------------------------------------
 
 	return Object.freeze({
@@ -1689,6 +1733,7 @@ export function createVirtualFS(options: VirtualFSOptions = {}): VirtualFS {
 		snapshot,
 		restore,
 		clear: doClear,
+		transaction,
 		get totalSize() {
 			return currentTotalSize;
 		},

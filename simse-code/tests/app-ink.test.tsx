@@ -1,8 +1,9 @@
+import { describe, expect, test } from 'bun:test';
 import { render } from 'ink-testing-library';
 import React from 'react';
-import { describe, expect, test } from 'bun:test';
 import { App } from '../app-ink.js';
 import { createConversation } from '../conversation.js';
+import type { PermissionManager } from '../permission-manager.js';
 
 // Minimal mock ACPClient for testing
 function createMockACPClient() {
@@ -48,6 +49,21 @@ function createMockToolRegistry() {
 	} as any;
 }
 
+function createMockPermissionManager(): PermissionManager {
+	return {
+		check: () => 'allow',
+		getMode: () => 'default',
+		setMode: () => {},
+		cycleMode: () => 'default',
+		addRule: () => {},
+		removeRule: () => {},
+		getRules: () => [],
+		save: () => {},
+		load: () => {},
+		formatMode: () => 'Default — Ask for writes & bash',
+	};
+}
+
 describe('App', () => {
 	test('renders without crashing', () => {
 		const { lastFrame } = render(
@@ -56,6 +72,7 @@ describe('App', () => {
 				acpClient={createMockACPClient()}
 				conversation={createConversation()}
 				toolRegistry={createMockToolRegistry()}
+				permissionManager={createMockPermissionManager()}
 			/>,
 		);
 		expect(lastFrame()).toBeDefined();
@@ -68,6 +85,7 @@ describe('App', () => {
 				acpClient={createMockACPClient()}
 				conversation={createConversation()}
 				toolRegistry={createMockToolRegistry()}
+				permissionManager={createMockPermissionManager()}
 			/>,
 		);
 		expect(lastFrame()).toContain('>');
@@ -81,6 +99,7 @@ describe('App', () => {
 				acpClient={createMockACPClient()}
 				conversation={createConversation()}
 				toolRegistry={createMockToolRegistry()}
+				permissionManager={createMockPermissionManager()}
 			/>,
 		);
 		expect(lastFrame()).toContain('simse');

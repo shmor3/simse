@@ -62,6 +62,7 @@ import { createStatusLine } from './status-line.js';
 import { createFileStorageBackend } from './storage.js';
 import { createThemeManager } from './themes.js';
 import { parseTodoCommand, renderTodoList } from './todo-ui.js';
+import type { ToolCallRequest } from './tool-registry.js';
 import { createToolRegistry } from './tool-registry.js';
 import {
 	createColors,
@@ -454,6 +455,77 @@ async function maybeAutoCompact(ctx: AppContext): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Permission check helper for agentic loop callbacks
+// ---------------------------------------------------------------------------
+
+function createPermissionCheckCallback(
+	ctx: AppContext,
+): ((call: ToolCallRequest) => Promise<'allow' | 'deny'>) | undefined {
+	const { permissionManager } = ctx;
+	if (!permissionManager) return undefined;
+
+	return async (call: ToolCallRequest): Promise<'allow' | 'deny'> => {
+		const decision = permissionManager.check(call.name, call.arguments);
+		if (decision === 'allow') return 'allow';
+		if (decision === 'deny') return 'deny';
+
+		// decision === 'ask' — prompt user via readline
+		const { colors, spinner, rl: mainRl } = ctx;
+		spinner.stop();
+
+		const primaryArg =
+			(call.arguments.command as string) ??
+			(call.arguments.path as string) ??
+			(call.arguments.file_path as string);
+		const display = primaryArg
+			? `${call.name}(${primaryArg})`
+			: call.name;
+
+		console.log(
+			`\n  ${colors.yellow('⚠')}  simse wants to run ${colors.bold(display)}`,
+		);
+
+		// Pause main readline, create temporary one for the prompt
+		mainRl.pause();
+		process.stdin.pause();
+
+		const permRl = createInterface({
+			input: process.stdin,
+			output: process.stdout,
+			terminal: true,
+		});
+
+		let answer: string;
+		try {
+			answer = await new Promise<string>((resolve) => {
+				permRl.question(
+					`  ${colors.dim('[y]es / [n]o / [a]lways')} `,
+					resolve,
+				);
+			});
+		} finally {
+			permRl.close();
+			process.stdin.resume();
+			mainRl.resume();
+			spinner.start();
+		}
+
+		const choice = answer.trim().toLowerCase();
+		if (choice === 'a' || choice === 'always') {
+			permissionManager.addRule({
+				tool: call.name,
+				policy: 'allow',
+			});
+			return 'allow';
+		}
+		if (choice === 'y' || choice === 'yes') {
+			return 'allow';
+		}
+		return 'deny';
+	};
+}
+
+// ---------------------------------------------------------------------------
 // AI — bare text handler (primary interaction mode)
 // ---------------------------------------------------------------------------
 
@@ -737,6 +809,7 @@ async function handleBareTextInput(
 				spinner.start();
 			}
 		},
+		onPermissionCheck: createPermissionCheckCallback(ctx),
 		onError: (error) => {
 			spinner.stop();
 			if (!firstChunk) {
@@ -857,6 +930,7 @@ async function handleSkillInvocation(
 	const skillToolArgs = new Map<string, string>();
 
 	const result = await loop.run(userMessage, {
+		onPermissionCheck: createPermissionCheckCallback(ctx),
 		onStreamStart: () => {},
 		onStreamDelta: (text) => {
 			if (firstChunk) {
@@ -4163,6 +4237,7 @@ async function main(): Promise<void> {
 		backgroundManager,
 		usageTracker,
 		statusLine,
+		permissionManager,
 		permissionMode: permissionManager.getMode(),
 	};
 	let shuttingDown = false;

@@ -11,6 +11,7 @@ import type { KnowledgeBaseApp } from './app.js';
 import type { CLIConfigResult } from './config.js';
 import type { Conversation } from './conversation.js';
 import type { KeybindingManager } from './keybindings.js';
+import type { PermissionManager } from './permission-manager.js';
 import type { SkillRegistry } from './skills.js';
 import type { ToolRegistry } from './tool-registry.js';
 import type { MarkdownRenderer, Spinner, TermColors } from './ui.js';
@@ -243,5 +244,6 @@ export interface AppContext {
 	readonly checkpointManager?: CheckpointManager;
 	readonly backgroundManager?: BackgroundManager;
 	readonly themeManager?: ThemeManager;
+	readonly permissionManager?: PermissionManager;
 	readonly permissionMode?: PermissionMode;
 }

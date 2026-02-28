@@ -2,6 +2,33 @@ import chalk from 'chalk';
 import { Box, Text, useInput } from 'ink';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+const IS_MAC = process.platform === 'darwin';
+
+/** Scan left to find the start of the previous word. */
+export function findWordBoundaryLeft(text: string, pos: number): number {
+	let i = pos;
+	// Skip non-word chars to the left
+	while (i > 0 && !/\w/.test(text[i - 1] ?? '')) i--;
+	// Skip word chars to the left
+	while (i > 0 && /\w/.test(text[i - 1] ?? '')) i--;
+	return i;
+}
+
+/** Scan right to find the end of the current word. */
+export function findWordBoundaryRight(text: string, pos: number): number {
+	let i = pos;
+	const len = text.length;
+	if (i < len && !/\w/.test(text[i] ?? '')) {
+		// Starting on non-word chars: skip them, then skip the next word
+		while (i < len && !/\w/.test(text[i] ?? '')) i++;
+		while (i < len && /\w/.test(text[i] ?? '')) i++;
+	} else {
+		// Starting on a word char: skip to end of current word
+		while (i < len && /\w/.test(text[i] ?? '')) i++;
+	}
+	return i;
+}
+
 interface TextInputProps {
 	readonly value: string;
 	readonly onChange: (value: string) => void;

@@ -2,7 +2,11 @@ import { describe, expect, test } from 'bun:test';
 import { Text } from 'ink';
 import { render } from 'ink-testing-library';
 import { useState } from 'react';
-import { TextInput } from '../components/input/text-input.js';
+import {
+	TextInput,
+	findWordBoundaryLeft,
+	findWordBoundaryRight,
+} from '../components/input/text-input.js';
 
 function TestHarness() {
 	const [value, setValue] = useState('');
@@ -145,5 +149,43 @@ describe('TextInput', () => {
 		await new Promise((r) => setTimeout(r, 50));
 
 		expect(lastFrame()).toContain('VALUE:/help');
+	});
+});
+
+describe('word boundary helpers', () => {
+	test('findWordBoundaryLeft from middle of word', () => {
+		expect(findWordBoundaryLeft('hello world', 8)).toBe(6);
+	});
+
+	test('findWordBoundaryLeft from start of word', () => {
+		expect(findWordBoundaryLeft('hello world', 6)).toBe(0);
+	});
+
+	test('findWordBoundaryLeft at position 0', () => {
+		expect(findWordBoundaryLeft('hello', 0)).toBe(0);
+	});
+
+	test('findWordBoundaryLeft skips multiple spaces', () => {
+		expect(findWordBoundaryLeft('hello   world', 8)).toBe(0);
+	});
+
+	test('findWordBoundaryLeft with punctuation', () => {
+		expect(findWordBoundaryLeft('foo.bar', 7)).toBe(4);
+	});
+
+	test('findWordBoundaryRight from middle of word', () => {
+		expect(findWordBoundaryRight('hello world', 3)).toBe(5);
+	});
+
+	test('findWordBoundaryRight from space', () => {
+		expect(findWordBoundaryRight('hello world', 5)).toBe(11);
+	});
+
+	test('findWordBoundaryRight at end', () => {
+		expect(findWordBoundaryRight('hello', 5)).toBe(5);
+	});
+
+	test('findWordBoundaryRight with punctuation', () => {
+		expect(findWordBoundaryRight('foo.bar', 0)).toBe(3);
 	});
 });

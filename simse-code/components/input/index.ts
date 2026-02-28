@@ -1,3 +1,5 @@
+export type { OllamaWizardResult } from './ollama-wizard.js';
+export { OllamaWizard } from './ollama-wizard.js';
 export { PermissionDialog } from './permission-dialog.js';
 export { PromptInput } from './prompt-input.js';
 export type { SetupPresetOption } from './setup-selector.js';

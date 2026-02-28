@@ -412,6 +412,12 @@ impl VirtualFs {
 				result.push(key.clone());
 			}
 		}
+		// Sort by path depth (directories before their children)
+		result.sort_by(|a, b| {
+			let depth_a = a.matches('/').count();
+			let depth_b = b.matches('/').count();
+			depth_a.cmp(&depth_b).then(a.cmp(b))
+		});
 		result
 	}
 

@@ -33,7 +33,7 @@
 	},
 	"overrides": [
 		{
-			"includes": ["tests/**", "simse-vector/tests/**"],
+			"includes": ["tests/**", "simse-vector/tests/**", "simse-vfs/tests/**"],
 			"linter": {
 				"rules": {
 					"suspicious": {

@@ -12,8 +12,16 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createVFSDisk, createVirtualFS } from 'simse-vfs';
+import { fileURLToPath } from 'node:url';
+import { createVFSDisk, createVirtualFS, type VirtualFS } from 'simse-vfs';
 import { createToolRegistry as createLibToolRegistry } from '../src/ai/tools/index.js';
+
+const ENGINE_PATH = fileURLToPath(
+	new URL(
+		'../simse-vfs/engine/target/debug/simse-vfs-engine.exe',
+		import.meta.url,
+	),
+);
 
 // ---------------------------------------------------------------------------
 // Inline tool-call helpers (matching the CLI's simse-code/loop.ts parseToolCalls)
@@ -62,8 +70,13 @@ function parseToolCalls(response: string): {
 
 describe('VFS tool → disk commit e2e', () => {
 	let tempDir: string;
+	let activeVfs: VirtualFS | undefined;
 
-	afterEach(() => {
+	afterEach(async () => {
+		if (activeVfs) {
+			await activeVfs.dispose();
+			activeVfs = undefined;
+		}
 		if (tempDir && existsSync(tempDir)) {
 			rmSync(tempDir, { recursive: true, force: true });
 		}
@@ -74,11 +87,13 @@ describe('VFS tool → disk commit e2e', () => {
 		tempDir = mkdtempSync(join(tmpdir(), 'simse-vfs-e2e-'));
 		const writeEvents: Array<{ path: string; isNew: boolean }> = [];
 
-		const vfs = createVirtualFS({
+		const vfs = await createVirtualFS({
+			enginePath: ENGINE_PATH,
 			onFileWrite: (event) => {
 				writeEvents.push({ path: event.path, isNew: event.isNew });
 			},
 		});
+		activeVfs = vfs;
 		const disk = createVFSDisk(vfs, { baseDir: tempDir });
 
 		// 2. Set up tool registry with VFS tools
@@ -100,7 +115,7 @@ describe('VFS tool → disk commit e2e', () => {
 			async (args) => {
 				const path = String(args.path ?? '');
 				const content = String(args.content ?? '');
-				vfs.writeFile(path, content, { createParents: true });
+				await vfs.writeFile(path, content, { createParents: true });
 				return `Wrote ${Buffer.byteLength(content, 'utf-8')} bytes to ${path}`;
 			},
 		);
@@ -132,8 +147,8 @@ The file has been created.`;
 		expect(result.output).toContain('vfs:///hello.txt');
 
 		// 6. Verify VFS has the file
-		expect(vfs.exists('vfs:///hello.txt')).toBe(true);
-		const vfsContent = vfs.readFile('vfs:///hello.txt');
+		expect(await vfs.exists('vfs:///hello.txt')).toBe(true);
+		const vfsContent = await vfs.readFile('vfs:///hello.txt');
 		expect(vfsContent.text).toBe('Hello from VFS!');
 		expect(writeEvents).toHaveLength(1);
 		expect(writeEvents[0].path).toBe('vfs:///hello.txt');
@@ -151,7 +166,8 @@ The file has been created.`;
 
 	it('vfs_write tool creates nested directory structure', async () => {
 		tempDir = mkdtempSync(join(tmpdir(), 'simse-vfs-e2e-'));
-		const vfs = createVirtualFS();
+		const vfs = await createVirtualFS({ enginePath: ENGINE_PATH });
+		activeVfs = vfs;
 		const disk = createVFSDisk(vfs, { baseDir: tempDir });
 
 		const registry = createLibToolRegistry({});
@@ -172,7 +188,7 @@ The file has been created.`;
 			async (args) => {
 				const path = String(args.path ?? '');
 				const content = String(args.content ?? '');
-				vfs.writeFile(path, content, { createParents: true });
+				await vfs.writeFile(path, content, { createParents: true });
 				return `Wrote ${Buffer.byteLength(content, 'utf-8')} bytes to ${path}`;
 			},
 		);
@@ -193,7 +209,7 @@ The file has been created.`;
 		expect(result.isError).toBe(false);
 
 		// Verify VFS
-		expect(vfs.exists('vfs:///src/components/Button.tsx')).toBe(true);
+		expect(await vfs.exists('vfs:///src/components/Button.tsx')).toBe(true);
 
 		// Commit and verify disk
 		const commitResult = await disk.commit(undefined, { overwrite: true });
@@ -275,11 +291,14 @@ Both files created.`;
 
 	it('commit result reports operations', async () => {
 		tempDir = mkdtempSync(join(tmpdir(), 'simse-vfs-e2e-'));
-		const vfs = createVirtualFS();
+		const vfs = await createVirtualFS({ enginePath: ENGINE_PATH });
+		activeVfs = vfs;
 		const disk = createVFSDisk(vfs, { baseDir: tempDir });
 
-		vfs.writeFile('vfs:///readme.md', '# Hello', { createParents: true });
-		vfs.writeFile('vfs:///src/index.ts', 'console.log("hi")', {
+		await vfs.writeFile('vfs:///readme.md', '# Hello', {
+			createParents: true,
+		});
+		await vfs.writeFile('vfs:///src/index.ts', 'console.log("hi")', {
 			createParents: true,
 		});
 

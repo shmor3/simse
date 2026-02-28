@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { fileURLToPath } from 'node:url';
 import type { Library } from 'simse-vector';
-import { createVirtualFS } from 'simse-vfs';
+import { createVirtualFS, type VirtualFS } from 'simse-vfs';
 import type { TaskList } from '../src/ai/tasks/types.js';
 import {
 	registerLibraryTools,
@@ -10,6 +11,13 @@ import {
 import { createToolRegistry } from '../src/ai/tools/tool-registry.js';
 import type { ToolRegistry } from '../src/ai/tools/types.js';
 import { createSilentLogger } from './utils/mocks.js';
+
+const ENGINE_PATH = fileURLToPath(
+	new URL(
+		'../simse-vfs/engine/target/debug/simse-vfs-engine.exe',
+		import.meta.url,
+	),
+);
 
 // ---------------------------------------------------------------------------
 // Mock factories
@@ -268,11 +276,16 @@ describe('registerLibraryTools', () => {
 
 describe('registerVFSTools', () => {
 	let registry: ToolRegistry;
+	let vfs: VirtualFS;
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		registry = createToolRegistry({ logger: createSilentLogger() });
-		const vfs = createVirtualFS();
+		vfs = await createVirtualFS({ enginePath: ENGINE_PATH });
 		registerVFSTools(registry, vfs);
+	});
+
+	afterEach(async () => {
+		await vfs?.dispose();
 	});
 
 	it('registers vfs_read, vfs_write, vfs_list, vfs_tree tools', () => {

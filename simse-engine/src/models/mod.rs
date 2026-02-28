@@ -43,6 +43,7 @@ pub struct GenerationResult {
     pub full_text: String,
     pub prompt_tokens: u64,
     pub completion_tokens: u64,
+    pub stop_reason: String,
 }
 
 pub struct EmbedResult {

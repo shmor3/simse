@@ -143,6 +143,7 @@ impl TextGenerator for LlamaGenerator {
         let mut eos_reached = next_token == self.eos_token_id.unwrap_or(u32::MAX);
         let start = std::time::Instant::now();
         let timeout = std::time::Duration::from_secs(params.generation_timeout_secs);
+        let mut stop_reason = if eos_reached { "end_turn" } else { "max_tokens" };
 
         // Check stop sequences after first token
         let mut hit_stop = false;
@@ -155,11 +156,13 @@ impl TextGenerator for LlamaGenerator {
         }
         if hit_stop {
             eos_reached = true;
+            stop_reason = "stop_sequence";
         }
 
         while !eos_reached && (generated_count as usize) < params.max_tokens {
             if start.elapsed() > timeout {
                 tracing::warn!(elapsed = ?start.elapsed(), "Generation timeout reached");
+                stop_reason = "timeout";
                 break;
             }
 
@@ -182,6 +185,7 @@ impl TextGenerator for LlamaGenerator {
 
             // Check EOS
             if Some(next_token) == self.eos_token_id {
+                stop_reason = "end_turn";
                 break;
             }
 
@@ -199,6 +203,7 @@ impl TextGenerator for LlamaGenerator {
                 }
                 if hit_stop {
                     on_token(&text);
+                    stop_reason = "stop_sequence";
                     break;
                 }
 
@@ -222,6 +227,7 @@ impl TextGenerator for LlamaGenerator {
             full_text,
             prompt_tokens: prompt_token_count,
             completion_tokens: generated_count,
+            stop_reason: stop_reason.to_string(),
         })
     }
 

@@ -1,3 +1,5 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use anyhow::Result;
 
 use crate::models::{ModelRegistry, SamplingParams};
@@ -48,14 +50,20 @@ pub fn run_generation(
     };
 
     let usage = TokenUsage::new(result.prompt_tokens, result.completion_tokens);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
 
     Ok(AcpSessionPromptResult {
         content: vec![AcpContentBlock::Text {
             text: result.full_text,
         }],
-        stop_reason: "end_turn".to_string(),
+        stop_reason: result.stop_reason,
         metadata: Some(serde_json::json!({
-            "usage": serde_json::to_value(usage)?
+            "usage": serde_json::to_value(&usage)?,
+            "model_id": model_id,
+            "generated_at": timestamp,
         })),
     })
 }

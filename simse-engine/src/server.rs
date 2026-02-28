@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use uuid::Uuid;
@@ -7,6 +7,14 @@ use crate::inference;
 use crate::models::{ModelRegistry, SamplingParams};
 use crate::protocol::*;
 use crate::transport::NdjsonTransport;
+
+// ── Conversation history ─────────────────────────────────────────────────
+
+#[derive(Clone)]
+struct HistoryMessage {
+    role: String,
+    content: String,
+}
 
 // ── Server configuration ──────────────────────────────────────────────────
 
@@ -27,6 +35,7 @@ pub struct AcpServer {
     registry: ModelRegistry,
     transport: NdjsonTransport,
     sessions: HashSet<String>,
+    session_history: HashMap<String, Vec<HistoryMessage>>,
     current_model: String,
 }
 
@@ -38,6 +47,7 @@ impl AcpServer {
             registry,
             transport,
             sessions: HashSet::new(),
+            session_history: HashMap::new(),
             current_model,
         }
     }
@@ -107,6 +117,7 @@ impl AcpServer {
                     self.transport.write_error(id, INTERNAL_ERROR, e.to_string());
                 }
             }
+            "session/delete" => self.handle_session_delete(id, msg.params),
             "session/set_config_option" => self.handle_set_config(id, msg.params),
             _ => {
                 self.transport.write_error(id, METHOD_NOT_FOUND, format!("Method not found: {}", method));
@@ -132,6 +143,7 @@ impl AcpServer {
     fn handle_session_new(&mut self, id: u64) {
         let session_id = Uuid::new_v4().to_string();
         self.sessions.insert(session_id.clone());
+        self.session_history.insert(session_id.clone(), Vec::new());
 
         let models = AcpModelsInfo {
             available_models: self.registry.available_models(),
@@ -172,8 +184,18 @@ impl AcpServer {
         // Extract sampling params from metadata if present
         let sampling = self.extract_sampling_params(&prompt_params.metadata);
 
+        // Check metadata-based embed detection first (preferred)
+        let is_embed = prompt_params.metadata
+            .as_ref()
+            .and_then(|m| m.get("action"))
+            .and_then(|a| a.as_str())
+            == Some("embed");
+
+        // Fall back to content-sniffing for backwards compatibility
+        let is_embed = is_embed || Self::is_embed_request(&prompt_params.prompt);
+
         // Detect embed vs generate
-        if Self::is_embed_request(&prompt_params.prompt) {
+        if is_embed {
             let texts = Self::extract_embed_texts(&prompt_params.prompt);
             // Check if prompt requests a specific embedding model via metadata
             let embed_model = prompt_params.metadata
@@ -192,20 +214,72 @@ impl AcpServer {
             // Extract prompt text
             let (user_prompt, system_prompt) = Self::extract_text_from_content(&prompt_params.prompt);
 
+            // Build conversation context from history for multi-turn
+            let history = self.session_history.get(&prompt_params.session_id).cloned().unwrap_or_default();
+            let mut context_parts: Vec<String> = Vec::new();
+            for msg in &history {
+                context_parts.push(format!("{}: {}", msg.role, msg.content));
+            }
+
+            // Prepend history to the user prompt if there is conversation context
+            let full_user_prompt = if context_parts.is_empty() {
+                user_prompt.clone()
+            } else {
+                context_parts.push(format!("user: {}", user_prompt));
+                context_parts.join("\n")
+            };
+
+            // Record user message in history
+            if let Some(hist) = self.session_history.get_mut(&prompt_params.session_id) {
+                hist.push(HistoryMessage {
+                    role: "user".to_string(),
+                    content: user_prompt.clone(),
+                });
+            }
+
             let result = inference::generation::run_generation(
                 &mut self.registry,
                 &self.current_model,
-                &user_prompt,
+                &full_user_prompt,
                 system_prompt.as_deref(),
                 &sampling,
                 &mut self.transport,
                 &prompt_params.session_id,
                 self.config.streaming,
             )?;
+
+            // Record assistant response in history
+            let response_text: String = result.content.iter().filter_map(|block| {
+                match block {
+                    AcpContentBlock::Text { text } => Some(text.clone()),
+                    _ => None,
+                }
+            }).collect::<Vec<_>>().join("");
+
+            if let Some(hist) = self.session_history.get_mut(&prompt_params.session_id) {
+                hist.push(HistoryMessage {
+                    role: "assistant".to_string(),
+                    content: response_text,
+                });
+            }
+
             self.transport.write_response(id, serde_json::to_value(result)?);
         }
 
         Ok(())
+    }
+
+    fn handle_session_delete(&mut self, id: u64, params: Option<serde_json::Value>) {
+        if let Some(params) = params {
+            if let Some(session_id) = params.get("sessionId").and_then(|v| v.as_str()) {
+                self.sessions.remove(session_id);
+                self.session_history.remove(session_id);
+                tracing::info!(session_id, "Session deleted");
+                self.transport.write_response(id, serde_json::json!({}));
+                return;
+            }
+        }
+        self.transport.write_error(id, INVALID_PARAMS, "Missing or invalid sessionId");
     }
 
     fn handle_set_config(&mut self, id: u64, params: Option<serde_json::Value>) {

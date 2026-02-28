@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { join } from 'node:path';
 import chalk from 'chalk';
 import { Box, Text, useInput } from 'ink';
 import {
@@ -22,6 +23,7 @@ import {
 	PromptInput,
 	type PromptMode,
 } from './components/input/prompt-input.js';
+import { LibrarianExplorer } from './components/input/librarian-explorer.js';
 import { SettingsExplorer } from './components/input/settings-explorer.js';
 import type { SetupPresetOption } from './components/input/setup-selector.js';
 import { SetupSelector } from './components/input/setup-selector.js';
@@ -38,7 +40,10 @@ import { createInitCommands } from './features/config/init.js';
 import { createResetCommands } from './features/config/reset.js';
 import { createSetupCommands } from './features/config/setup.js';
 import { filesCommands } from './features/files/index.js';
-import { libraryCommands } from './features/library/index.js';
+import {
+	createLibrarianCommands,
+	libraryCommands,
+} from './features/library/index.js';
 import type { MetaCommandContext } from './features/meta/index.js';
 import { createMetaCommands } from './features/meta/index.js';
 import type { SessionCommandContext } from './features/session/index.js';
@@ -239,6 +244,17 @@ export function App({
 		});
 	}, []);
 
+	// Interactive librarian explorer — Promise-based active-area dialog
+	const [pendingLibrarians, setPendingLibrarians] = useState<{
+		resolve: () => void;
+	} | null>(null);
+
+	const handleShowLibrarianExplorer = useCallback((): Promise<void> => {
+		return new Promise((resolve) => {
+			setPendingLibrarians({ resolve });
+		});
+	}, []);
+
 	// Refs for meta command state access (commands are created once but execute later)
 	const verboseRef = useRef(verbose);
 	verboseRef.current = verbose;
@@ -326,6 +342,7 @@ export function App({
 		);
 		reg.registerAll(aiCommands);
 		reg.registerAll(createResetCommands(dataDir, process.cwd(), handleConfirm));
+		reg.registerAll(createLibrarianCommands(handleShowLibrarianExplorer));
 		return reg;
 	}, [
 		dataDir,
@@ -333,6 +350,7 @@ export function App({
 		handleSetupComplete,
 		handleShowSetupSelector,
 		handleShowSettingsExplorer,
+		handleShowLibrarianExplorer,
 		sessionStore,
 		currentServerName,
 		currentModelName,
@@ -367,7 +385,7 @@ export function App({
 	// (but not when setup selector or settings explorer is active — they handle their own Escape)
 	useInput(
 		(_input, key) => {
-			if (key.escape && !pendingSetup && !pendingSettings && !pendingConfirm) {
+			if (key.escape && !pendingSetup && !pendingSettings && !pendingConfirm && !pendingLibrarians) {
 				abortLoop();
 				setIsProcessing(false);
 				setItems((prev) => [...prev, { kind: 'info', text: 'Interrupted.' }]);
@@ -583,6 +601,17 @@ export function App({
 					onDismiss={() => {
 						pendingSettings.resolve();
 						setPendingSettings(null);
+					}}
+				/>
+			)}
+
+			{pendingLibrarians && (
+				<LibrarianExplorer
+					librariansDir={join(dataDir, 'librarians')}
+					dataDir={dataDir}
+					onDismiss={() => {
+						pendingLibrarians.resolve();
+						setPendingLibrarians(null);
 					}}
 				/>
 			)}

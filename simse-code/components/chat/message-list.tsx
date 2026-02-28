@@ -68,6 +68,7 @@ export function MessageList({ items }: MessageListProps) {
 		while (cached.current.length < items.length) {
 			const idx = cached.current.length;
 			cached.current.push({
+				// biome-ignore lint/style/noNonNullAssertion: index is bounds-checked by loop condition
 				item: items[idx]!,
 				id: `msg-${nextId.current++}`,
 			});

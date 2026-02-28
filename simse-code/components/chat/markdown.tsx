@@ -113,6 +113,7 @@ function parseBlocks(text: string): BlockNode[] {
 	let blockId = 0;
 
 	while (i < lines.length) {
+		// biome-ignore lint/style/noNonNullAssertion: index is bounds-checked by while condition
 		const line = lines[i]!;
 		const key = `b${blockId++}`;
 
@@ -121,8 +122,8 @@ function parseBlocks(text: string): BlockNode[] {
 			const language = line.slice(3).trim() || undefined;
 			const codeLines: string[] = [];
 			i++;
-			while (i < lines.length && !lines[i]!.startsWith('```')) {
-				codeLines.push(lines[i]!);
+			while (i < lines.length && !lines[i]?.startsWith('```')) {
+				codeLines.push(lines[i] ?? '');
 				i++;
 			}
 			// Skip closing ```
@@ -149,8 +150,8 @@ function parseBlocks(text: string): BlockNode[] {
 			blocks.push({
 				key,
 				type: 'heading',
-				content: headingMatch[2]!,
-				level: headingMatch[1]!.length,
+				content: headingMatch[2] ?? '',
+				level: headingMatch[1]?.length ?? 1,
 			});
 			i++;
 			continue;
@@ -159,11 +160,11 @@ function parseBlocks(text: string): BlockNode[] {
 		// Task list items (- [ ] or - [x])
 		const taskMatch = line.match(/^(\s*)-\s+\[([ x])\]\s+(.+)$/);
 		if (taskMatch) {
-			const indent = Math.floor(taskMatch[1]!.length / 2);
+			const indent = Math.floor((taskMatch[1]?.length ?? 0) / 2);
 			blocks.push({
 				key,
 				type: 'task-list-item',
-				content: taskMatch[3]!,
+				content: taskMatch[3] ?? '',
 				level: indent,
 				checked: taskMatch[2] === 'x',
 			});
@@ -174,11 +175,11 @@ function parseBlocks(text: string): BlockNode[] {
 		// List items (- bullets, with optional indentation)
 		const listMatch = line.match(/^(\s*)-\s+(.+)$/);
 		if (listMatch) {
-			const indent = Math.floor(listMatch[1]!.length / 2);
+			const indent = Math.floor((listMatch[1]?.length ?? 0) / 2);
 			blocks.push({
 				key,
 				type: 'list-item',
-				content: listMatch[2]!,
+				content: listMatch[2] ?? '',
 				level: indent,
 			});
 			i++;
@@ -188,13 +189,13 @@ function parseBlocks(text: string): BlockNode[] {
 		// Numbered list items (1. 2. etc.)
 		const numMatch = line.match(/^(\s*)(\d+)\.\s+(.+)$/);
 		if (numMatch) {
-			const indent = Math.floor(numMatch[1]!.length / 2);
+			const indent = Math.floor((numMatch[1]?.length ?? 0) / 2);
 			blocks.push({
 				key,
 				type: 'numbered-list-item',
-				content: numMatch[3]!,
+				content: numMatch[3] ?? '',
 				level: indent,
-				number: Number.parseInt(numMatch[2]!, 10),
+				number: Number.parseInt(numMatch[2] ?? '1', 10),
 			});
 			i++;
 			continue;
@@ -204,12 +205,13 @@ function parseBlocks(text: string): BlockNode[] {
 		if (
 			line.includes('|') &&
 			i + 1 < lines.length &&
-			/^\|?[\s-]+(\|[\s-]+)+\|?$/.test(lines[i + 1]!)
+			/^\|?[\s-]+(\|[\s-]+)+\|?$/.test(lines[i + 1] ?? '')
 		) {
 			const rows: string[][] = [];
 			let j = i;
-			while (j < lines.length && lines[j]!.includes('|')) {
-				const row = lines[j]!.replace(/^\|/, '')
+			while (j < lines.length && (lines[j] ?? '').includes('|')) {
+				const row = (lines[j] ?? '')
+					.replace(/^\|/, '')
 					.replace(/\|$/, '')
 					.split('|')
 					.map((cell) => cell.trim());
@@ -232,7 +234,7 @@ function parseBlocks(text: string): BlockNode[] {
 			blocks.push({
 				key,
 				type: 'blockquote',
-				content: quoteMatch[1]!,
+				content: quoteMatch[1] ?? '',
 			});
 			i++;
 			continue;
@@ -344,9 +346,10 @@ function highlightLine(line: string, lang: HighlightLang): string {
 	// Numbers
 	result = result.replace(/\b(\d+\.?\d*)\b/g, (m) => chalk.yellow(m));
 
-	// Restore strings
+	// Restore strings (NUL byte placeholders used intentionally)
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: intentional NUL byte sentinel
 	result = result.replace(/\x00S(\d+)\x00/g, (_, i) =>
-		chalk.green(strings[Number.parseInt(i, 10)]!),
+		chalk.green(strings[Number.parseInt(i, 10)] ?? ''),
 	);
 
 	// Append comment
@@ -434,21 +437,22 @@ function TableBlock({ rows }: { rows: readonly string[][] }) {
 	const colWidths: number[] = Array.from({ length: colCount }, () => 0);
 	for (const row of rows) {
 		for (let c = 0; c < colCount; c++) {
-			colWidths[c] = Math.max(colWidths[c]!, (row[c] ?? '').length);
+			colWidths[c] = Math.max(colWidths[c] ?? 0, (row[c] ?? '').length);
 		}
 	}
 
 	const renderRow = (row: string[], rowIdx: number, isHeader: boolean) => {
 		const cells = Array.from({ length: colCount }, (_, c) => {
-			const cell = (row[c] ?? '').padEnd(colWidths[c]!);
+			const cell = (row[c] ?? '').padEnd(colWidths[c] ?? 0);
 			return cell;
 		});
 		return (
 			<Text key={`tr${rowIdx}`}>
 				<Text dimColor>{'\u2502'} </Text>
 				{cells.map((cell, c) => (
+					// biome-ignore lint/suspicious/noArrayIndexKey: table cells are static
 					<Text key={`tc${rowIdx}-${c}`}>
-						{isHeader ? <Text bold>{cell}</Text> : <>{parseInline(cell)}</>}
+						{isHeader ? <Text bold>{cell}</Text> : parseInline(cell)}
 						{c < colCount - 1 ? <Text dimColor> {'\u2502'} </Text> : null}
 					</Text>
 				))}
@@ -463,6 +467,7 @@ function TableBlock({ rows }: { rows: readonly string[][] }) {
 	return (
 		<Box flexDirection="column">
 			{rows.map((row, idx) => (
+				// biome-ignore lint/suspicious/noArrayIndexKey: table rows are static
 				<Box key={`tg${idx}`} flexDirection="column">
 					{renderRow(row, idx, idx === 0)}
 					{idx === 0 && (
@@ -532,8 +537,9 @@ export function Markdown({ text }: MarkdownProps) {
 	const blocks = parseBlocks(text);
 
 	// Single paragraph with no special blocks: render inline only
-	if (blocks.length === 1 && blocks[0]!.type === 'paragraph') {
-		return <Text>{parseInline(blocks[0]!.content)}</Text>;
+	const first = blocks[0];
+	if (blocks.length === 1 && first?.type === 'paragraph') {
+		return <Text>{parseInline(first.content)}</Text>;
 	}
 
 	return (

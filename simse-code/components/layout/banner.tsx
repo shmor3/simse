@@ -210,6 +210,7 @@ export function Banner({
 		for (let i = 0; i < totalRows; i++) {
 			const contentIdx = i - topPad;
 			if (contentIdx >= 0 && contentIdx < leftContent.length) {
+				// biome-ignore lint/style/noNonNullAssertion: index is bounds-checked by if condition above
 				const line = leftContent[contentIdx]!;
 				const lp = centerPad(line.text, leftColWidth);
 				leftLines.push({

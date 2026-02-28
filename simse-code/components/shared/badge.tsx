@@ -1,5 +1,4 @@
 import { Text } from 'ink';
-import React from 'react';
 
 interface BadgeProps {
 	readonly label: string;

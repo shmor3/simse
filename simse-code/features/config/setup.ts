@@ -89,7 +89,8 @@ const PRESETS: Record<
 			if (parts.length === 0) {
 				throw new Error('Usage: /setup custom <command> [args...]');
 			}
-			const command = parts[0]!;
+			// Length is checked above; parts[0] is guaranteed to exist
+			const command = parts[0] as string;
 			const cmdArgs = parts.slice(1);
 			const name =
 				command.replace(/[^a-zA-Z0-9-]/g, '').toLowerCase() || 'custom';
@@ -248,7 +249,7 @@ export function createSetupCommands(
 
 				// Parse preset name and remaining args
 				const parts = trimmed.split(/\s+/);
-				const presetName = parts[0]!.toLowerCase();
+				const presetName = (parts[0] ?? '').toLowerCase();
 				const presetArgs = parts.slice(1).join(' ');
 
 				const preset = PRESETS[presetName];

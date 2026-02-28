@@ -49,8 +49,8 @@ let buf = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', (chunk) => {
 	buf += chunk;
-	let nl;
-	while ((nl = buf.indexOf('\n')) >= 0) {
+	let nl = buf.indexOf('\n');
+	while (nl >= 0) {
 		const line = buf.slice(0, nl);
 		buf = buf.slice(nl + 1);
 		if (!line.trim()) continue;
@@ -71,6 +71,7 @@ process.stdin.on('data', (chunk) => {
 		} catch (e) {
 			// Ignore parse errors
 		}
+		nl = buf.indexOf('\n');
 	}
 });
 

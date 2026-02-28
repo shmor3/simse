@@ -10,6 +10,8 @@ import type {
 	ExtractionMemory,
 	ExtractionResult,
 	Librarian,
+	LibrarianBid,
+	LibrarianLibraryAccess,
 	OptimizationResult,
 	ReorganizationPlan,
 	TextGenerationProvider,
@@ -17,9 +19,17 @@ import type {
 	Volume,
 } from './types.js';
 
+export interface LibrarianOptions {
+	readonly name?: string;
+	readonly purpose?: string;
+}
+
 export function createLibrarian(
 	textGenerator: TextGenerationProvider,
+	options?: LibrarianOptions,
 ): Librarian {
+	const librarianName = options?.name ?? 'default';
+	const librarianPurpose = options?.purpose ?? 'General-purpose librarian';
 	const extract = async (turn: TurnContext): Promise<ExtractionResult> => {
 		const prompt = `Analyze this conversation turn and extract important information worth remembering.
 
@@ -215,12 +225,44 @@ Respond with ONLY valid JSON.`;
 		}
 	};
 
+	const bid = async (
+		content: string,
+		topic: string,
+		_library: LibrarianLibraryAccess,
+	): Promise<LibrarianBid> => {
+		const prompt = `You are a specialist librarian named "${librarianName}".
+Purpose: ${librarianPurpose}
+
+Given the following content and topic, assess how well-suited you are to manage it.
+
+Topic: ${topic}
+Content preview: ${content.slice(0, 500)}
+
+Return ONLY valid JSON:
+{"argument": "brief reason why you should manage this", "confidence": 0.0-1.0}`;
+
+		try {
+			const response = await textGenerator.generate(prompt);
+			const parsed = JSON.parse(response);
+			const rawConfidence =
+				typeof parsed.confidence === 'number' ? parsed.confidence : 0;
+			return {
+				librarianName,
+				argument: typeof parsed.argument === 'string' ? parsed.argument : '',
+				confidence: Math.max(0, Math.min(1, rawConfidence)),
+			};
+		} catch {
+			return { librarianName, argument: '', confidence: 0 };
+		}
+	};
+
 	return Object.freeze({
 		extract,
 		summarize,
 		classifyTopic,
 		reorganize,
 		optimize,
+		bid,
 	});
 }
 

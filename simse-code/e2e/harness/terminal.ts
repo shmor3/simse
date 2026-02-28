@@ -74,11 +74,14 @@ export async function createPtyTerminal(
 					const { done, value } = await reader.read();
 					if (done) break;
 					lineBuf += new TextDecoder().decode(value);
-					let nl: number;
-					while ((nl = lineBuf.indexOf('\n')) >= 0) {
+					let nl = lineBuf.indexOf('\n');
+					while (nl >= 0) {
 						const line = lineBuf.slice(0, nl);
 						lineBuf = lineBuf.slice(nl + 1);
-						if (!line.trim()) continue;
+						if (!line.trim()) {
+							nl = lineBuf.indexOf('\n');
+							continue;
+						}
 						try {
 							const msg = JSON.parse(line);
 							if (msg.type === 'data') {
@@ -89,6 +92,7 @@ export async function createPtyTerminal(
 						} catch {
 							// Ignore parse errors
 						}
+						nl = lineBuf.indexOf('\n');
 					}
 				}
 			} catch {

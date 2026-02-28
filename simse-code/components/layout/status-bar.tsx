@@ -1,5 +1,4 @@
 import { Box, Text } from 'ink';
-import React from 'react';
 
 export function formatTokens(tokens: number): string {
 	return tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : `${tokens}`;

@@ -2,7 +2,6 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { render } from 'ink';
-import React from 'react';
 import type { ACPClient, ACPPermissionRequestInfo } from 'simse';
 import { createACPClient, toError } from 'simse';
 import { App } from './app-ink.js';
@@ -28,8 +27,9 @@ function parseArgs(): {
 	let resumeId: string | undefined;
 
 	for (let i = 0; i < args.length; i++) {
-		if (args[i] === '--data-dir' && args[i + 1]) {
-			dataDir = args[i + 1]!;
+		const next = args[i + 1];
+		if (args[i] === '--data-dir' && next) {
+			dataDir = next;
 			i++;
 		}
 		if (args[i] === '--bypass-permissions' || args[i] === '-y') {
@@ -38,8 +38,8 @@ function parseArgs(): {
 		if (args[i] === '--continue' || args[i] === '-c') {
 			continueSession = true;
 		}
-		if (args[i] === '--resume' && args[i + 1]) {
-			resumeId = args[i + 1]!;
+		if (args[i] === '--resume' && next) {
+			resumeId = next;
 			i++;
 		}
 	}

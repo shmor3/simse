@@ -57,7 +57,9 @@ export function PromptInput({
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const [placeholder] = useState(
 		() =>
-			PLACEHOLDER_TIPS[Math.floor(Math.random() * PLACEHOLDER_TIPS.length)]!,
+			PLACEHOLDER_TIPS[Math.floor(Math.random() * PLACEHOLDER_TIPS.length)] ??
+			PLACEHOLDER_TIPS[0] ??
+			'',
 	);
 
 	// Extract the @partial from the end of the current value
@@ -89,7 +91,7 @@ export function PromptInput({
 	const suggestion = useMemo(() => {
 		// @ ghost text
 		if (mode === 'at-mention' && atCandidates.length === 1) {
-			const candidate = atCandidates[0]!;
+			const candidate = atCandidates[0] ?? '';
 			if (candidate.startsWith(atQuery) && candidate !== atQuery) {
 				return candidate.slice(atQuery.length);
 			}
@@ -124,7 +126,7 @@ export function PromptInput({
 				if (nextIdx !== historyIndex) {
 					if (historyIndex === -1) draftRef.current = value;
 					setHistoryIndex(nextIdx);
-					setValue(history[nextIdx]!);
+					setValue(history[nextIdx] ?? '');
 				}
 				return;
 			}
@@ -132,7 +134,7 @@ export function PromptInput({
 				const nextIdx = historyIndex - 1;
 				if (nextIdx < -1) return;
 				setHistoryIndex(nextIdx);
-				setValue(nextIdx === -1 ? draftRef.current : history[nextIdx]!);
+				setValue(nextIdx === -1 ? draftRef.current : (history[nextIdx] ?? ''));
 			}
 		},
 		{ isActive: !disabled && mode === 'normal' },

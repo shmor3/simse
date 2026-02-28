@@ -22,6 +22,7 @@ function cursorToLineCol(
 ): { lineIndex: number; col: number } {
 	let remaining = offset;
 	for (let i = 0; i < lines.length; i++) {
+		// biome-ignore lint/style/noNonNullAssertion: index is bounds-checked by loop condition
 		const lineLen = lines[i]!.length;
 		if (remaining <= lineLen) {
 			return { lineIndex: i, col: remaining };
@@ -206,7 +207,8 @@ export function TextInput({
 	if (!value.includes('\n')) {
 		let rendered = '';
 		for (let i = 0; i < value.length; i++) {
-			rendered += i === cursorOffset ? chalk.inverse(value[i]!) : value[i]!;
+			const ch = value[i] ?? '';
+			rendered += i === cursorOffset ? chalk.inverse(ch) : ch;
 		}
 		if (cursorOffset === value.length) {
 			rendered += chalk.inverse(' ');
@@ -233,10 +235,8 @@ export function TextInput({
 
 				let rendered = '';
 				for (let j = 0; j < line.length; j++) {
-					rendered +=
-						isCursorLine && j === cursorCol
-							? chalk.inverse(line[j]!)
-							: line[j]!;
+					const ch = line[j] ?? '';
+					rendered += isCursorLine && j === cursorCol ? chalk.inverse(ch) : ch;
 				}
 				// Cursor at end of this line
 				if (isCursorLine && cursorCol === line.length) {

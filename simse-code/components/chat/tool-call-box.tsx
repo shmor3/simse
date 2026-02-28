@@ -1,6 +1,5 @@
 import { Box, Text } from 'ink';
 import InkSpinner from 'ink-spinner';
-import React from 'react';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -137,9 +136,10 @@ function DiffLines({ diff }: { diff: string }) {
 	return (
 		<>
 			{lines.map((line, i) => {
+				const key = `dl${i}`;
 				if (line.startsWith('+')) {
 					return (
-						<Text key={i}>
+						<Text key={key}>
 							{'    '}
 							<Text dimColor>{'⎿'}</Text> <Text color="green">{line}</Text>
 						</Text>
@@ -147,14 +147,14 @@ function DiffLines({ diff }: { diff: string }) {
 				}
 				if (line.startsWith('-')) {
 					return (
-						<Text key={i}>
+						<Text key={key}>
 							{'    '}
 							<Text dimColor>{'⎿'}</Text> <Text color="red">{line}</Text>
 						</Text>
 					);
 				}
 				return (
-					<Text key={i}>
+					<Text key={key}>
 						{'    '}
 						<Text dimColor>{'⎿'}</Text> {line}
 					</Text>

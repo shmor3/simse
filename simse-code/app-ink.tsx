@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import chalk from 'chalk';
 import { Box, Text, useInput } from 'ink';
-import React, {
+import {
 	type ReactNode,
 	useCallback,
 	useEffect,
@@ -309,6 +309,7 @@ export function App({
 
 	const { dispatch, isCommand } = useCommandDispatch(registry);
 
+	// biome-ignore lint/correctness/useExhaustiveDependencies: hasACP triggers ref swap — intentional
 	const loopOptions = useMemo(
 		() => ({
 			acpClient: acpClientRef.current,
@@ -317,8 +318,6 @@ export function App({
 			serverName: currentServerName,
 			permissionManager,
 		}),
-		// Re-create when hasACP changes (services were swapped)
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 		[hasACP, currentServerName, permissionManager],
 	);
 
@@ -426,7 +425,8 @@ export function App({
 			} else if (isCommand(input)) {
 				const result = await dispatch(input);
 				if (result?.text) {
-					setItems((prev) => [...prev, { kind: 'info', text: result.text! }]);
+					const text = result.text;
+					setItems((prev) => [...prev, { kind: 'info', text }]);
 				} else if (result?.element) {
 					setItems((prev) => [
 						...prev,

@@ -10,6 +10,8 @@ interface TextInputProps {
 	readonly placeholder?: string;
 	/** Ghost text shown after cursor when at end of input. Accepted with Right Arrow. */
 	readonly suggestion?: string;
+	/** When true, return/tab/rightArrow are suppressed so the parent can handle them for autocomplete. */
+	readonly interceptKeys?: boolean;
 }
 
 /**
@@ -42,6 +44,7 @@ export function TextInput({
 	isActive = true,
 	placeholder = '',
 	suggestion,
+	interceptKeys = false,
 }: TextInputProps) {
 	const [cursorOffset, setCursorOffset] = useState(value.length);
 
@@ -52,6 +55,7 @@ export function TextInput({
 	const onChangeRef = useRef(onChange);
 	const onSubmitRef = useRef(onSubmit);
 	const suggestionRef = useRef(suggestion);
+	const interceptKeysRef = useRef(interceptKeys);
 
 	// Sync from props each render
 	valueRef.current = value;
@@ -59,6 +63,7 @@ export function TextInput({
 	onChangeRef.current = onChange;
 	onSubmitRef.current = onSubmit;
 	suggestionRef.current = suggestion;
+	interceptKeysRef.current = interceptKeys;
 
 	// Clamp cursor when value changes externally (e.g., autocomplete fill)
 	useEffect(() => {
@@ -94,6 +99,11 @@ export function TextInput({
 				key.tab ||
 				(key.shift && key.tab)
 			) {
+				return;
+			}
+
+			// When interceptKeys is active, let the parent handle return and rightArrow
+			if (interceptKeysRef.current && (key.return || key.rightArrow)) {
 				return;
 			}
 

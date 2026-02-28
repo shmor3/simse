@@ -50,8 +50,5 @@ export const createNoopLogger = (): Logger =>
  * simse passes its full EventBus which is a superset of this.
  */
 export interface EventBus {
-	readonly publish: <T extends string>(
-		type: T,
-		payload: unknown,
-	) => void;
+	readonly publish: <T extends string>(type: T, payload: unknown) => void;
 }

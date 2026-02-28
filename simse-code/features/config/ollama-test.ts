@@ -81,21 +81,16 @@ export async function testOllamaConnection(
 			});
 		}
 
-		const version =
-			response.headers.get('x-ollama-version') ?? undefined;
+		const version = response.headers.get('x-ollama-version') ?? undefined;
 		return Object.freeze({ ok: true as const, version });
 	} catch (err: unknown) {
-		if (
-			err instanceof DOMException &&
-			err.name === 'AbortError'
-		) {
+		if (err instanceof DOMException && err.name === 'AbortError') {
 			return Object.freeze({
 				ok: false as const,
 				error: `Connection timed out after ${timeoutMs}ms`,
 			});
 		}
-		const message =
-			err instanceof Error ? err.message : 'Unknown error';
+		const message = err instanceof Error ? err.message : 'Unknown error';
 		return Object.freeze({ ok: false as const, error: message });
 	} finally {
 		clearTimeout(timer);

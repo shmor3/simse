@@ -1,8 +1,8 @@
 import { Box, Text, useInput } from 'ink';
 import { useCallback, useState } from 'react';
 import {
-	writeOnboardingFiles,
 	type OnboardingResult,
+	writeOnboardingFiles,
 } from '../../features/config/onboarding.js';
 import { OllamaWizard } from './ollama-wizard.js';
 import { TextInput } from './text-input.js';
@@ -127,9 +127,18 @@ const STEP_LABELS: readonly string[] = [
 // ---------------------------------------------------------------------------
 
 type Step1Sub = 'select' | 'ollama-wizard' | 'custom-input';
-type Step2Sub = 'select' | 'provider-select' | 'provider-ollama' | 'provider-custom';
+type Step2Sub =
+	| 'select'
+	| 'provider-select'
+	| 'provider-ollama'
+	| 'provider-custom';
 type Step3Sub = 'select' | 'tei-input';
-type Step4Sub = 'select' | 'field-enabled' | 'field-threshold' | 'field-max' | 'field-summarize';
+type Step4Sub =
+	| 'select'
+	| 'field-enabled'
+	| 'field-threshold'
+	| 'field-max'
+	| 'field-summarize';
 
 // ---------------------------------------------------------------------------
 // ArrowSelect helper component
@@ -158,19 +167,13 @@ function ArrowSelect({
 						<Text bold={isSelected} color={isSelected ? 'cyan' : undefined}>
 							{opt.label}
 						</Text>
-						{opt.recommended ? (
-							<Text color="green"> (Recommended)</Text>
-						) : null}
-						{opt.description ? (
-							<Text dimColor> {opt.description}</Text>
-						) : null}
+						{opt.recommended ? <Text color="green"> (Recommended)</Text> : null}
+						{opt.description ? <Text dimColor> {opt.description}</Text> : null}
 					</Box>
 				);
 			})}
 			<Text> </Text>
-			<Text dimColor>
-				{'  \u2191\u2193 navigate  \u21B5 select  esc back'}
-			</Text>
+			<Text dimColor>{'  \u2191\u2193 navigate  \u21B5 select  esc back'}</Text>
 		</Box>
 	);
 }

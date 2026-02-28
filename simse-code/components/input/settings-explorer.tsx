@@ -1,14 +1,14 @@
-import { Box, Text, useInput } from 'ink';
 import { join } from 'node:path';
+import { Box, Text, useInput } from 'ink';
 import { useCallback, useEffect, useState } from 'react';
+import type {
+	ConfigFileSchema,
+	FieldSchema,
+} from '../../features/config/settings-schema.js';
 import {
 	getAllConfigSchemas,
 	loadConfigFile,
 	saveConfigField,
-} from '../../features/config/settings-schema.js';
-import type {
-	ConfigFileSchema,
-	FieldSchema,
 } from '../../features/config/settings-schema.js';
 import { TextInput } from './text-input.js';
 
@@ -151,9 +151,7 @@ export function SettingsExplorer({
 				return;
 			}
 			if (key.downArrow) {
-				setFileIndex((prev) =>
-					prev < schemas.length - 1 ? prev + 1 : prev,
-				);
+				setFileIndex((prev) => (prev < schemas.length - 1 ? prev + 1 : prev));
 				return;
 			}
 			if (key.return || key.rightArrow) {
@@ -184,9 +182,7 @@ export function SettingsExplorer({
 				return;
 			}
 			if (key.downArrow) {
-				setFieldIndex((prev) =>
-					prev < fields.length - 1 ? prev + 1 : prev,
-				);
+				setFieldIndex((prev) => (prev < fields.length - 1 ? prev + 1 : prev));
 				return;
 			}
 			if (key.return) {

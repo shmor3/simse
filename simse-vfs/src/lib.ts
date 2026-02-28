@@ -77,8 +77,11 @@ export {
 	createTrailingWhitespaceValidator,
 	validateSnapshot,
 } from './validators.js';
-// ---- VFS (in-memory) -------------------------------------------------------
-export type { VirtualFS, VirtualFSOptions } from './vfs.js';
+// ---- VFS Client (JSON-RPC transport) ---------------------------------------
+export type { VFSClient, VFSClientEvent, VFSClientOptions } from './client.js';
+export { createVFSClient } from './client.js';
+// ---- VFS (async wrapper over Rust subprocess) ------------------------------
+export type { VFSMetrics, VirtualFS, VirtualFSOptions } from './vfs.js';
 export { createVirtualFS } from './vfs.js';
 // ---- VFS Disk (commit / load) ----------------------------------------------
 export type { VFSDisk, VFSDiskOptions } from './vfs-disk.js';

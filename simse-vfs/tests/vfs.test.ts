@@ -189,6 +189,8 @@ describe('path-utils', () => {
 			maxPathLength: 20,
 			maxPathDepth: 3,
 			maxNameLength: 10,
+			maxNodeCount: 1000,
+			maxDiffLines: 5000,
 		};
 
 		it('returns undefined for a valid path', () => {

@@ -1,5 +1,6 @@
 import { Box, Text, useInput } from 'ink';
 import { useState } from 'react';
+import { OllamaWizard } from './ollama-wizard.js';
 import { TextInput } from './text-input.js';
 
 export interface SetupPresetOption {
@@ -18,7 +19,7 @@ interface SetupSelectorProps {
 	readonly onDismiss: () => void;
 }
 
-type SelectorMode = 'selecting' | 'custom-input';
+type SelectorMode = 'selecting' | 'custom-input' | 'ollama-wizard';
 
 export function SetupSelector({
 	presets,
@@ -48,7 +49,9 @@ export function SetupSelector({
 			if (key.return) {
 				const preset = presets[selectedIndex];
 				if (!preset) return;
-				if (preset.needsInput) {
+				if (preset.key === 'ollama') {
+					setMode('ollama-wizard');
+				} else if (preset.needsInput) {
 					setMode('custom-input');
 				} else {
 					onSelect({ presetKey: preset.key, customArgs: '' });
@@ -67,6 +70,19 @@ export function SetupSelector({
 		},
 		{ isActive: mode === 'custom-input' },
 	);
+
+	if (mode === 'ollama-wizard') {
+		return (
+			<OllamaWizard
+				onComplete={({ url, model }) => {
+					onSelect({ presetKey: 'ollama', customArgs: `${url} ${model}` });
+				}}
+				onDismiss={() => {
+					setMode('selecting');
+				}}
+			/>
+		);
+	}
 
 	if (mode === 'custom-input') {
 		return (

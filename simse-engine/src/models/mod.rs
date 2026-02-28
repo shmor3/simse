@@ -12,6 +12,8 @@ use anyhow::Result;
 
 use crate::protocol::AcpModelInfo;
 
+use self::tei::{TeiConfig, TeiEmbedder};
+
 // ── Traits ────────────────────────────────────────────────────────────────
 
 /// Trait for text generation models.
@@ -125,13 +127,26 @@ impl ModelRegistry {
         Ok(())
     }
 
+    /// Load a TEI bridge embedder.
+    pub fn load_tei_embedder(&mut self, key: &str, config: TeiConfig) -> Result<()> {
+        tracing::info!(key, url = %config.base_url, "Loading TEI bridge embedder");
+        let embedder = TeiEmbedder::new(config);
+        self.embedders.insert(key.to_string(), Box::new(embedder));
+        Ok(())
+    }
+
     /// Get a mutable reference to a text generator.
     pub fn get_generator(&mut self, model_id: &str) -> Option<&mut dyn TextGenerator> {
         self.generators.get_mut(model_id).map(move |g| &mut **g as &mut dyn TextGenerator)
     }
 
     /// Get a reference to an embedder.
+    /// Supports `tei://` prefix to select TEI embedder (maps to `tei://default` key).
     pub fn get_embedder(&self, model_id: &str) -> Option<&dyn Embedder> {
+        if model_id.starts_with("tei://") {
+            let key = if model_id == "tei://" { "tei://default" } else { model_id };
+            return self.embedders.get(key).map(|e| &**e as &dyn Embedder);
+        }
         self.embedders.get(model_id).map(|e| &**e as &dyn Embedder)
     }
 

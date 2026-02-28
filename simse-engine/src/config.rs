@@ -20,6 +20,10 @@ pub struct CliArgs {
     #[arg(long, default_value = "nomic-ai/nomic-embed-text-v1.5", env = "SIMSE_ENGINE_EMBEDDING_MODEL")]
     pub embedding_model: String,
 
+    /// TEI server URL for remote embeddings (e.g., http://localhost:8080)
+    #[arg(long, env = "SIMSE_ENGINE_TEI_URL")]
+    pub tei_url: Option<String>,
+
     /// Device: "cpu", "cuda", "metal"
     #[arg(long, default_value = "cpu", env = "SIMSE_ENGINE_DEVICE")]
     pub device: String,

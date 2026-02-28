@@ -15,6 +15,7 @@ pub struct ServerConfig {
     pub server_version: String,
     pub default_model: String,
     pub embedding_model: String,
+    pub tei_url: Option<String>,
     pub streaming: bool,
     pub default_sampling: SamplingParams,
 }
@@ -157,9 +158,16 @@ impl AcpServer {
         // Detect embed vs generate
         if Self::is_embed_request(&prompt_params.prompt) {
             let texts = Self::extract_embed_texts(&prompt_params.prompt);
+            // Check if prompt requests a specific embedding model via metadata
+            let embed_model = prompt_params.metadata
+                .as_ref()
+                .and_then(|m| m.get("model"))
+                .and_then(|m| m.as_str())
+                .unwrap_or(&self.config.embedding_model);
+
             let result = inference::embedding::run_embedding(
                 &self.registry,
-                &self.config.embedding_model,
+                embed_model,
                 &texts,
             )?;
             self.transport.write_response(id, serde_json::to_value(result)?);

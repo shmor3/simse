@@ -1,5 +1,6 @@
 use clap::Parser;
 
+/// Command-line arguments for the simse-engine ACP server.
 #[derive(Parser, Debug)]
 #[command(name = "simse-engine", about = "ACP-compatible ML inference server using Candle")]
 pub struct CliArgs {

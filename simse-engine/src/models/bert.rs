@@ -8,6 +8,9 @@ use tokenizers::{PaddingParams, PaddingStrategy, Tokenizer, TruncationParams};
 use super::nomic_bert::{NomicBertConfig, NomicBertModel};
 use super::{EmbedResult, Embedder};
 
+/// Maximum sequence length for tokenization.
+const MAX_SEQUENCE_LENGTH: usize = 2048;
+
 /// Pooling strategy for extracting a single embedding from token-level outputs.
 #[derive(Debug, Clone, Copy)]
 pub enum PoolingStrategy {
@@ -98,11 +101,19 @@ impl BertEmbedder {
             ..Default::default()
         }));
         tokenizer.with_truncation(Some(TruncationParams {
-            max_length: 2048,
+            max_length: MAX_SEQUENCE_LENGTH,
             ..Default::default()
         })).map_err(|e| anyhow::anyhow!("Failed to set truncation: {}", e))?;
 
-        // Load weights
+        // Pre-check that the weights file exists before memory-mapping
+        if !weights_path.exists() {
+            anyhow::bail!("Weights file not found: {}", weights_path.display());
+        }
+
+        // SAFETY: The safetensors file has been downloaded from HuggingFace Hub
+        // and verified by the hf-hub library. Memory mapping is safe here because
+        // the file is not modified during the lifetime of the model.
+        // The tensor data layout matches the expected DType::F32 format.
         let vb = unsafe {
             VarBuilder::from_mmaped_safetensors(&[weights_path.to_path_buf()], DType::F32, device)?
         };

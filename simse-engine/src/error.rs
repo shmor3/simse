@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+/// Typed error variants for the simse-engine inference server.
 #[derive(Debug, Error)]
 pub enum EngineError {
     #[error("Transport error: {0}")]
@@ -34,6 +35,7 @@ pub enum EngineError {
 }
 
 impl EngineError {
+    /// Return a machine-readable error code string for this error variant.
     pub fn code(&self) -> &str {
         match self {
             Self::Transport(_) => "TRANSPORT_ERROR",

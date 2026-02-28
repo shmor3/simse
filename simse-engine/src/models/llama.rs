@@ -10,6 +10,9 @@ use super::tokenizer::TokenOutputStream;
 use super::{GenerationResult, ModelConfig, SamplingParams, TextGenerator};
 use super::weights;
 
+/// Maximum model file size (10 GB).
+const MAX_MODEL_FILE_SIZE: u64 = 10 * 1024 * 1024 * 1024;
+
 /// Llama text generation model using quantized GGUF weights via Candle.
 pub struct LlamaGenerator {
     model: ModelWeights,
@@ -22,6 +25,16 @@ impl LlamaGenerator {
     /// Load from a local GGUF file.
     pub fn from_gguf(model_path: &Path, tokenizer: Tokenizer, device: &Device) -> Result<Self> {
         tracing::info!(path = %model_path.display(), "Loading GGUF model");
+
+        let metadata = std::fs::metadata(model_path)
+            .map_err(|e| anyhow::anyhow!("Cannot stat model file '{}': {}", model_path.display(), e))?;
+        if metadata.len() > MAX_MODEL_FILE_SIZE {
+            anyhow::bail!(
+                "Model file too large: {} MB (max {} MB). Use a smaller quantization.",
+                metadata.len() / (1024 * 1024),
+                MAX_MODEL_FILE_SIZE / (1024 * 1024)
+            );
+        }
 
         let mut file = std::fs::File::open(model_path)?;
         let model_content = candle_core::quantized::gguf_file::Content::read(&mut file)?;

@@ -11,6 +11,7 @@ pub struct NdjsonTransport {
 }
 
 impl NdjsonTransport {
+    /// Create a new transport that locks stdout for the process lifetime.
     pub fn new() -> Self {
         // Leak stdout handle to get a 'static lock — this is fine because
         // the transport lives for the entire process lifetime.

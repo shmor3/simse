@@ -39,28 +39,44 @@ pub trait Embedder: Send {
 
 // ── Result types ──────────────────────────────────────────────────────────
 
+/// Result of a text generation request.
 pub struct GenerationResult {
+    /// The full generated text.
     pub full_text: String,
+    /// Number of tokens in the input prompt.
     pub prompt_tokens: u64,
+    /// Number of tokens generated.
     pub completion_tokens: u64,
+    /// Why generation stopped (e.g. "end_turn", "max_tokens", "stop_sequence", "timeout").
     pub stop_reason: String,
 }
 
+/// Result of an embedding request.
 pub struct EmbedResult {
+    /// One embedding vector per input text.
     pub embeddings: Vec<Vec<f32>>,
+    /// Total tokens consumed across all inputs.
     pub prompt_tokens: u64,
 }
 
 // ── Sampling parameters ───────────────────────────────────────────────────
 
+/// Parameters controlling token sampling during generation.
 #[derive(Debug, Clone)]
 pub struct SamplingParams {
+    /// Softmax temperature (0.0 = greedy, higher = more random).
     pub temperature: f64,
+    /// Nucleus sampling threshold (0.0..1.0).
     pub top_p: Option<f64>,
+    /// Top-k sampling: only consider the k most likely tokens.
     pub top_k: Option<usize>,
+    /// Maximum number of tokens to generate.
     pub max_tokens: usize,
+    /// Penalty applied to repeated tokens (1.0 = no penalty).
     pub repeat_penalty: f32,
+    /// Number of recent tokens to consider for repeat penalty.
     pub repeat_last_n: usize,
+    /// Stop generation when any of these sequences is emitted.
     pub stop_sequences: Vec<String>,
     /// Wall-clock timeout for generation in seconds (default: 300 = 5 minutes).
     pub generation_timeout_secs: u64,
@@ -83,13 +99,14 @@ impl Default for SamplingParams {
 
 // ── Model configuration ──────────────────────────────────────────────────
 
+/// Configuration for locating a model on HuggingFace Hub.
 #[derive(Debug, Clone, Default)]
 pub struct ModelConfig {
-    /// Specific filename within a HuggingFace repo (e.g., "model-Q4_K_M.gguf")
+    /// Specific filename within a HuggingFace repo (e.g., "model-Q4_K_M.gguf").
     pub filename: Option<String>,
-    /// HuggingFace revision/branch
+    /// HuggingFace revision/branch.
     pub revision: Option<String>,
-    /// Explicit tokenizer source (HF repo ID or local path)
+    /// Explicit tokenizer source (HF repo ID or local path).
     pub tokenizer: Option<String>,
 }
 
@@ -103,6 +120,7 @@ pub struct ModelRegistry {
 }
 
 impl ModelRegistry {
+    /// Create a new empty registry on the given compute device.
     pub fn new(device: candle_core::Device) -> Self {
         Self {
             generators: HashMap::new(),
@@ -111,6 +129,7 @@ impl ModelRegistry {
         }
     }
 
+    /// Return a reference to the compute device used by this registry.
     pub fn device(&self) -> &candle_core::Device {
         &self.device
     }

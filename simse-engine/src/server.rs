@@ -8,6 +8,12 @@ use crate::models::{ModelRegistry, SamplingParams};
 use crate::protocol::*;
 use crate::transport::NdjsonTransport;
 
+/// Maximum allowed temperature value for sampling.
+const MAX_TEMPERATURE: f64 = 10.0;
+
+/// Maximum allowed `max_tokens` value for generation.
+const MAX_TOKENS_LIMIT: u64 = 1_000_000;
+
 // ── Conversation history ─────────────────────────────────────────────────
 
 #[derive(Clone)]
@@ -18,18 +24,27 @@ struct HistoryMessage {
 
 // ── Server configuration ──────────────────────────────────────────────────
 
+/// Configuration for the ACP server instance.
 pub struct ServerConfig {
+    /// Server name reported in the ACP `initialize` response.
     pub server_name: String,
+    /// Server version reported in the ACP `initialize` response.
     pub server_version: String,
+    /// Default text generation model ID.
     pub default_model: String,
+    /// Default embedding model ID.
     pub embedding_model: String,
+    /// Optional TEI server URL for remote embeddings.
     pub tei_url: Option<String>,
+    /// Whether to stream token-by-token via `session/update` notifications.
     pub streaming: bool,
+    /// Default sampling parameters for generation requests.
     pub default_sampling: SamplingParams,
 }
 
 // ── ACP server ────────────────────────────────────────────────────────────
 
+/// ACP-compatible inference server that handles JSON-RPC messages over stdin/stdout.
 pub struct AcpServer {
     config: ServerConfig,
     registry: ModelRegistry,
@@ -40,6 +55,7 @@ pub struct AcpServer {
 }
 
 impl AcpServer {
+    /// Create a new ACP server with the given configuration, model registry, and transport.
     pub fn new(config: ServerConfig, registry: ModelRegistry, transport: NdjsonTransport) -> Self {
         let current_model = config.default_model.clone();
         Self {
@@ -387,14 +403,14 @@ impl AcpServer {
 
         if let Some(meta) = metadata {
             if let Some(temp) = meta.get("temperature").and_then(|v| v.as_f64()) {
-                if temp.is_finite() && (0.0..=10.0).contains(&temp) {
+                if temp.is_finite() && (0.0..=MAX_TEMPERATURE).contains(&temp) {
                     params.temperature = temp;
                 } else {
                     tracing::warn!(temperature = temp, "Invalid temperature, using default");
                 }
             }
             if let Some(max) = meta.get("max_tokens").and_then(|v| v.as_u64()) {
-                if max > 0 && max <= 1_000_000 {
+                if max > 0 && max <= MAX_TOKENS_LIMIT {
                     params.max_tokens = max as usize;
                 } else {
                     tracing::warn!(max_tokens = max, "Invalid max_tokens, using default");

@@ -163,7 +163,12 @@ bootstrap()
 					permissionManager={permissionManager}
 					hasACP={hasACP}
 				/>,
-				{ exitOnCtrlC: false },
+				{
+					exitOnCtrlC: false,
+					// Incremental rendering diffs line-by-line instead of erasing
+					// the entire dynamic area, preventing visual glitches on resize.
+					incrementalRendering: true,
+				} as Parameters<typeof render>[1],
 			);
 		},
 	)

@@ -83,12 +83,12 @@ impl AcpServer {
                 }
             };
 
-            let trimmed = line.trim().to_string();
+            let trimmed = line.trim();
             if trimmed.is_empty() {
                 continue;
             }
 
-            let msg: JsonRpcIncoming = match serde_json::from_str(&trimmed) {
+            let msg: JsonRpcIncoming = match serde_json::from_str(trimmed) {
                 Ok(m) => m,
                 Err(e) => {
                     tracing::warn!("Parse error: {}", e);
@@ -231,10 +231,11 @@ impl AcpServer {
             let (user_prompt, system_prompt) = Self::extract_text_from_content(&prompt_params.prompt);
 
             // Build conversation context from history for multi-turn
-            let history = self.session_history.get(&prompt_params.session_id).cloned().unwrap_or_default();
             let mut context_parts: Vec<String> = Vec::new();
-            for msg in &history {
-                context_parts.push(format!("{}: {}", msg.role, msg.content));
+            if let Some(history) = self.session_history.get(&prompt_params.session_id) {
+                for msg in history {
+                    context_parts.push(format!("{}: {}", msg.role, msg.content));
+                }
             }
 
             // Prepend history to the user prompt if there is conversation context
@@ -249,7 +250,7 @@ impl AcpServer {
             if let Some(hist) = self.session_history.get_mut(&prompt_params.session_id) {
                 hist.push(HistoryMessage {
                     role: "user".to_string(),
-                    content: user_prompt.clone(),
+                    content: user_prompt,
                 });
             }
 
@@ -259,7 +260,7 @@ impl AcpServer {
                 &full_user_prompt,
                 system_prompt.as_deref(),
                 &sampling,
-                &mut self.transport,
+                &self.transport,
                 &prompt_params.session_id,
                 self.config.streaming,
             )?;
@@ -267,7 +268,7 @@ impl AcpServer {
             // Record assistant response in history
             let response_text: String = result.content.iter().filter_map(|block| {
                 match block {
-                    AcpContentBlock::Text { text } => Some(text.clone()),
+                    AcpContentBlock::Text { text } => Some(text.as_str()),
                     _ => None,
                 }
             }).collect::<Vec<_>>().join("");
@@ -290,7 +291,7 @@ impl AcpServer {
             if let Some(session_id) = params.get("sessionId").and_then(|v| v.as_str()) {
                 self.sessions.remove(session_id);
                 self.session_history.remove(session_id);
-                tracing::info!(session_id, "Session deleted");
+                tracing::debug!(session_id, "Session deleted");
                 self.transport.write_response(id, serde_json::json!({}));
                 return;
             }
@@ -371,9 +372,14 @@ impl AcpServer {
     fn extract_embed_texts(content: &[AcpContentBlock]) -> Vec<String> {
         let mut texts = Vec::new();
         for block in content {
-            let value = match block {
-                AcpContentBlock::Text { text } => serde_json::from_str::<serde_json::Value>(text).ok(),
-                AcpContentBlock::Data { data, .. } => Some(data.clone()),
+            // Try to get a reference to a JSON value containing "texts"
+            let parsed;
+            let value: Option<&serde_json::Value> = match block {
+                AcpContentBlock::Text { text } => {
+                    parsed = serde_json::from_str::<serde_json::Value>(text).ok();
+                    parsed.as_ref()
+                }
+                AcpContentBlock::Data { data, .. } => Some(data),
                 _ => None,
             };
 

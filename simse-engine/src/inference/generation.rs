@@ -10,13 +10,14 @@ use crate::transport::NdjsonTransport;
 ///
 /// Sends `session/update` notifications for each decoded token chunk,
 /// then returns the final `AcpSessionPromptResult` with full text + usage.
+#[allow(clippy::too_many_arguments)]
 pub fn run_generation(
     registry: &mut ModelRegistry,
     model_id: &str,
     prompt: &str,
     system: Option<&str>,
     params: &SamplingParams,
-    transport: &mut NdjsonTransport,
+    transport: &NdjsonTransport,
     session_id: &str,
     streaming: bool,
 ) -> Result<AcpSessionPromptResult> {

@@ -40,8 +40,8 @@ fn main() -> Result<()> {
     registry.load_generator(
         &args.model,
         &ModelConfig {
-            filename: args.model_file.clone(),
-            tokenizer: args.tokenizer.clone(),
+            filename: args.model_file,
+            tokenizer: args.tokenizer,
             ..Default::default()
         },
     )?;
@@ -71,7 +71,7 @@ fn main() -> Result<()> {
         server_version: args.server_version,
         default_model: args.model,
         embedding_model: args.embedding_model,
-        tei_url: args.tei_url.clone(),
+        tei_url: args.tei_url,
         streaming: !args.no_streaming,
         default_sampling: SamplingParams {
             temperature: args.temperature,

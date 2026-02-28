@@ -1,4 +1,4 @@
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 
 use crate::protocol::{JsonRpcError, JsonRpcNotification, JsonRpcResponse};
 
@@ -6,21 +6,22 @@ use crate::protocol::{JsonRpcError, JsonRpcNotification, JsonRpcResponse};
 ///
 /// Reads one JSON object per line from stdin, writes one per line to stdout.
 /// Matches the transport in simse-code/acp-ollama-bridge.ts.
-pub struct NdjsonTransport {
-    stdout: io::StdoutLock<'static>,
+pub struct NdjsonTransport;
+
+impl Default for NdjsonTransport {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl NdjsonTransport {
-    /// Create a new transport that locks stdout for the process lifetime.
+    /// Create a new transport.
     pub fn new() -> Self {
-        // Leak stdout handle to get a 'static lock — this is fine because
-        // the transport lives for the entire process lifetime.
-        let stdout = Box::leak(Box::new(io::stdout())).lock();
-        Self { stdout }
+        Self
     }
 
     /// Write a successful JSON-RPC response.
-    pub fn write_response(&mut self, id: u64, result: serde_json::Value) {
+    pub fn write_response(&self, id: u64, result: serde_json::Value) {
         let msg = JsonRpcResponse {
             jsonrpc: "2.0",
             id,
@@ -31,7 +32,7 @@ impl NdjsonTransport {
     }
 
     /// Write a JSON-RPC error response.
-    pub fn write_error(&mut self, id: u64, code: i32, message: impl Into<String>) {
+    pub fn write_error(&self, id: u64, code: i32, message: impl Into<String>) {
         let msg = JsonRpcResponse {
             jsonrpc: "2.0",
             id,
@@ -46,7 +47,7 @@ impl NdjsonTransport {
     }
 
     /// Write a JSON-RPC notification (no id — fire and forget).
-    pub fn write_notification(&mut self, method: &str, params: serde_json::Value) {
+    pub fn write_notification(&self, method: &str, params: serde_json::Value) {
         let msg = JsonRpcNotification {
             jsonrpc: "2.0",
             method: method.to_string(),
@@ -55,35 +56,17 @@ impl NdjsonTransport {
         self.write_line(&msg);
     }
 
-    /// Read all incoming messages from stdin (blocks until EOF).
-    /// Yields parsed messages, skipping blank lines and logging parse errors.
-    pub fn read_lines(&self) -> impl Iterator<Item = crate::protocol::JsonRpcIncoming> {
-        let stdin = io::stdin();
-        let reader = stdin.lock();
-        reader
-            .lines()
-            .filter_map(|line_result| {
-                let line = line_result.ok()?;
-                let trimmed = line.trim().to_string();
-                if trimmed.is_empty() {
-                    return None;
-                }
-                match serde_json::from_str(&trimmed) {
-                    Ok(msg) => Some(msg),
-                    Err(e) => {
-                        tracing::warn!("Failed to parse JSON-RPC message: {}", e);
-                        None
-                    }
-                }
-            })
-            .collect::<Vec<_>>()
-            .into_iter()
-    }
-
-    fn write_line(&mut self, msg: &impl serde::Serialize) {
-        if let Ok(json) = serde_json::to_string(msg) {
-            let _ = writeln!(self.stdout, "{}", json);
-            let _ = self.stdout.flush();
+    fn write_line(&self, value: &impl serde::Serialize) {
+        let mut stdout = io::stdout().lock();
+        if let Err(e) = serde_json::to_writer(&mut stdout, value) {
+            tracing::error!("Failed to serialize response: {}", e);
+            return;
+        }
+        if let Err(e) = writeln!(stdout) {
+            tracing::error!("Failed to write newline: {}", e);
+        }
+        if let Err(e) = stdout.flush() {
+            tracing::error!("Failed to flush stdout: {}", e);
         }
     }
 }

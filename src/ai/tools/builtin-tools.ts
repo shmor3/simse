@@ -226,7 +226,7 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 		async (args) => {
 			try {
 				const path = String(args.path ?? 'vfs:///');
-				const result = vfs.readFile(path);
+				const result = await vfs.readFile(path);
 				if (result.contentType === 'binary') {
 					return `[Binary file: ${result.size} bytes]`;
 				}
@@ -260,7 +260,7 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 			try {
 				const path = String(args.path ?? 'vfs:///');
 				const content = String(args.content ?? '');
-				vfs.writeFile(path, content, { createParents: true });
+				await vfs.writeFile(path, content, { createParents: true });
 				return `Wrote ${Buffer.byteLength(content, 'utf-8')} bytes to ${path}`;
 			} catch (err) {
 				throw toError(err);
@@ -286,7 +286,7 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 		async (args) => {
 			try {
 				const path = String(args.path ?? 'vfs:///');
-				const entries = vfs.readdir(path);
+				const entries = await vfs.readdir(path);
 				if (entries.length === 0) return 'Directory is empty.';
 				return entries
 					.map((e) => `${e.type === 'directory' ? 'd' : 'f'} ${e.name}`)
@@ -314,7 +314,7 @@ export function registerVFSTools(registry: ToolRegistry, vfs: VirtualFS): void {
 		async (args) => {
 			try {
 				const path = String(args.path ?? 'vfs:///');
-				return vfs.tree(path);
+				return await vfs.tree(path);
 			} catch (err) {
 				throw toError(err);
 			}

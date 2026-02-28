@@ -119,7 +119,7 @@ export function createVFSDisk(
 		const dryRun = commitOptions?.dryRun ?? false;
 		const filter = commitOptions?.filter;
 
-		const snap = vfs.snapshot();
+		const snap = await vfs.snapshot();
 
 		// Validate if requested
 		let validation: VFSValidationResult | undefined;
@@ -308,8 +308,8 @@ export function createVFSDisk(
 				if (filter && !filter(relativePath)) continue;
 
 				if (entry.isDirectory()) {
-					if (!vfs.exists(entryVfsPath)) {
-						vfs.mkdir(entryVfsPath, { recursive: true });
+					if (!(await vfs.exists(entryVfsPath))) {
+						await vfs.mkdir(entryVfsPath, { recursive: true });
 						operations.push(
 							Object.freeze({
 								type: 'mkdir' as const,
@@ -337,7 +337,7 @@ export function createVFSDisk(
 					}
 
 					// Check if exists in VFS
-					if (!overwrite && vfs.exists(entryVfsPath)) {
+					if (!overwrite && (await vfs.exists(entryVfsPath))) {
 						operations.push(
 							Object.freeze({
 								type: 'skip' as const,
@@ -352,7 +352,7 @@ export function createVFSDisk(
 					const binary = isBinaryPath(entry.name);
 					if (binary) {
 						const data = new Uint8Array(await readFile(entryDiskPath));
-						vfs.writeFile(entryVfsPath, data, {
+						await vfs.writeFile(entryVfsPath, data, {
 							createParents: true,
 							contentType: 'binary',
 						});
@@ -368,7 +368,7 @@ export function createVFSDisk(
 					} else {
 						const text = await readFile(entryDiskPath, 'utf-8');
 						const size = Buffer.from(text, 'utf-8').byteLength;
-						vfs.writeFile(entryVfsPath, text, {
+						await vfs.writeFile(entryVfsPath, text, {
 							createParents: true,
 							contentType: 'text',
 						});

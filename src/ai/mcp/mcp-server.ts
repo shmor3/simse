@@ -532,7 +532,7 @@ export function createMCPServer(
 				},
 				async ({ path }) => {
 					try {
-						const result = vfs.readFile(path as string);
+						const result = await vfs.readFile(path as string);
 						if (result.contentType === 'binary') {
 							return {
 								content: [
@@ -570,7 +570,7 @@ export function createMCPServer(
 				},
 				async ({ path, content: fileContent }) => {
 					try {
-						vfs.writeFile(path as string, fileContent as string, {
+						await vfs.writeFile(path as string, fileContent as string, {
 							createParents: true,
 						});
 						return {
@@ -606,7 +606,7 @@ export function createMCPServer(
 				},
 				async ({ path }) => {
 					try {
-						const entries = vfs.readdir((path as string) ?? 'vfs:///');
+						const entries = await vfs.readdir((path as string) ?? 'vfs:///');
 						if (entries.length === 0) {
 							return {
 								content: [
@@ -644,7 +644,7 @@ export function createMCPServer(
 				},
 				async ({ path }) => {
 					try {
-						const tree = vfs.tree((path as string) ?? 'vfs:///');
+						const tree = await vfs.tree((path as string) ?? 'vfs:///');
 						return {
 							content: [{ type: 'text' as const, text: tree }],
 						};
@@ -931,7 +931,7 @@ export function createMCPServer(
 					mimeType: 'text/plain',
 				},
 				async (uri) => {
-					const tree = vfs.tree('vfs:///');
+					const tree = await vfs.tree('vfs:///');
 					return {
 						contents: [
 							{

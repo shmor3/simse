@@ -60,6 +60,14 @@ impl TeiEmbedder {
     }
 }
 
+impl TeiEmbedder {
+    /// Return the constructed embed endpoint URL (for testing).
+    #[cfg(test)]
+    pub(crate) fn url(&self) -> &str {
+        &self.url
+    }
+}
+
 impl Embedder for TeiEmbedder {
     fn embed(&self, texts: &[String]) -> Result<EmbedResult> {
         if texts.is_empty() {
@@ -103,5 +111,99 @@ impl Embedder for TeiEmbedder {
             embeddings,
             prompt_tokens,
         })
+    }
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── TeiConfig::default() ─────────────────────────────────────────────
+
+    #[test]
+    fn tei_config_default_values() {
+        let config = TeiConfig::default();
+        assert_eq!(config.base_url, "http://localhost:8080");
+        assert_eq!(config.timeout_secs, 30);
+        assert!(config.normalize);
+        assert!(!config.truncate);
+    }
+
+    // ── TeiEmbedder::new() URL construction ──────────────────────────────
+
+    #[test]
+    fn tei_embedder_url_no_trailing_slash() {
+        let config = TeiConfig {
+            base_url: "http://localhost:8080".to_string(),
+            ..Default::default()
+        };
+        let embedder = TeiEmbedder::new(config);
+        assert_eq!(embedder.url(), "http://localhost:8080/embed");
+    }
+
+    #[test]
+    fn tei_embedder_url_with_trailing_slash() {
+        let config = TeiConfig {
+            base_url: "http://localhost:8080/".to_string(),
+            ..Default::default()
+        };
+        let embedder = TeiEmbedder::new(config);
+        assert_eq!(embedder.url(), "http://localhost:8080/embed");
+    }
+
+    #[test]
+    fn tei_embedder_url_with_multiple_trailing_slashes() {
+        let config = TeiConfig {
+            base_url: "http://localhost:8080///".to_string(),
+            ..Default::default()
+        };
+        let embedder = TeiEmbedder::new(config);
+        assert_eq!(embedder.url(), "http://localhost:8080/embed");
+    }
+
+    #[test]
+    fn tei_embedder_url_with_path_prefix() {
+        let config = TeiConfig {
+            base_url: "http://example.com/api/v1".to_string(),
+            ..Default::default()
+        };
+        let embedder = TeiEmbedder::new(config);
+        assert_eq!(embedder.url(), "http://example.com/api/v1/embed");
+    }
+
+    #[test]
+    fn tei_embedder_url_with_path_prefix_and_trailing_slash() {
+        let config = TeiConfig {
+            base_url: "http://example.com/api/v1/".to_string(),
+            ..Default::default()
+        };
+        let embedder = TeiEmbedder::new(config);
+        assert_eq!(embedder.url(), "http://example.com/api/v1/embed");
+    }
+
+    #[test]
+    fn tei_embedder_url_with_port() {
+        let config = TeiConfig {
+            base_url: "http://gpu-server:3000".to_string(),
+            ..Default::default()
+        };
+        let embedder = TeiEmbedder::new(config);
+        assert_eq!(embedder.url(), "http://gpu-server:3000/embed");
+    }
+
+    #[test]
+    fn tei_embedder_preserves_config() {
+        let config = TeiConfig {
+            base_url: "http://localhost:9090".to_string(),
+            timeout_secs: 60,
+            normalize: false,
+            truncate: true,
+        };
+        let embedder = TeiEmbedder::new(config);
+        assert!(!embedder.config.normalize);
+        assert!(embedder.config.truncate);
+        assert_eq!(embedder.config.timeout_secs, 60);
     }
 }

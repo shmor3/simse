@@ -199,3 +199,127 @@ impl ModelRegistry {
         self.generators.keys().next().cloned()
     }
 }
+
+// ── Tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── ModelRegistry::new() ─────────────────────────────────────────────
+
+    #[test]
+    fn new_registry_is_empty() {
+        let registry = ModelRegistry::new(candle_core::Device::Cpu);
+        assert!(registry.available_models().is_empty());
+    }
+
+    #[test]
+    fn new_registry_has_no_default_generator() {
+        let registry = ModelRegistry::new(candle_core::Device::Cpu);
+        assert!(registry.default_generator_id().is_none());
+    }
+
+    // ── get_embedder() ──────────────────────────────────────────────────
+
+    #[test]
+    fn get_embedder_unknown_model_returns_none() {
+        let registry = ModelRegistry::new(candle_core::Device::Cpu);
+        assert!(registry.get_embedder("nonexistent-model").is_none());
+    }
+
+    #[test]
+    fn get_embedder_tei_prefix_returns_none_when_not_loaded() {
+        let registry = ModelRegistry::new(candle_core::Device::Cpu);
+        assert!(registry.get_embedder("tei://some-model").is_none());
+    }
+
+    #[test]
+    fn get_embedder_bare_tei_prefix_maps_to_default() {
+        let mut registry = ModelRegistry::new(candle_core::Device::Cpu);
+        // Load a TEI embedder with the default key
+        let config = TeiConfig {
+            base_url: "http://localhost:8080".to_string(),
+            ..Default::default()
+        };
+        registry.load_tei_embedder("tei://default", config).unwrap();
+
+        // "tei://" should map to "tei://default"
+        assert!(registry.get_embedder("tei://").is_some());
+    }
+
+    #[test]
+    fn get_embedder_tei_prefix_with_name() {
+        let mut registry = ModelRegistry::new(candle_core::Device::Cpu);
+        let config = TeiConfig {
+            base_url: "http://localhost:9090".to_string(),
+            ..Default::default()
+        };
+        registry.load_tei_embedder("tei://my-model", config).unwrap();
+
+        assert!(registry.get_embedder("tei://my-model").is_some());
+        assert!(registry.get_embedder("tei://other-model").is_none());
+    }
+
+    // ── available_models() ──────────────────────────────────────────────
+
+    #[test]
+    fn available_models_empty_for_fresh_registry() {
+        let registry = ModelRegistry::new(candle_core::Device::Cpu);
+        assert!(registry.available_models().is_empty());
+    }
+
+    #[test]
+    fn available_models_includes_tei_embedders() {
+        let mut registry = ModelRegistry::new(candle_core::Device::Cpu);
+        let config = TeiConfig::default();
+        registry.load_tei_embedder("tei://test", config).unwrap();
+
+        let models = registry.available_models();
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].model_id, "tei://test");
+        assert_eq!(models[0].description, Some("Embedding model".to_string()));
+    }
+
+    // ── load_tei_embedder + get_embedder roundtrip ──────────────────────
+
+    #[test]
+    fn load_tei_embedder_and_retrieve() {
+        let mut registry = ModelRegistry::new(candle_core::Device::Cpu);
+        let config = TeiConfig {
+            base_url: "http://gpu-server:3000".to_string(),
+            timeout_secs: 60,
+            normalize: true,
+            truncate: false,
+        };
+        let result = registry.load_tei_embedder("tei://roundtrip", config);
+        assert!(result.is_ok());
+
+        // Should be retrievable by exact key
+        assert!(registry.get_embedder("tei://roundtrip").is_some());
+
+        // Should appear in available models
+        let models = registry.available_models();
+        assert!(models.iter().any(|m| m.model_id == "tei://roundtrip"));
+    }
+
+    #[test]
+    fn load_multiple_tei_embedders() {
+        let mut registry = ModelRegistry::new(candle_core::Device::Cpu);
+
+        registry.load_tei_embedder("tei://a", TeiConfig::default()).unwrap();
+        registry.load_tei_embedder("tei://b", TeiConfig::default()).unwrap();
+
+        assert!(registry.get_embedder("tei://a").is_some());
+        assert!(registry.get_embedder("tei://b").is_some());
+        assert_eq!(registry.available_models().len(), 2);
+    }
+
+    // ── device() ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn registry_device_is_cpu() {
+        let registry = ModelRegistry::new(candle_core::Device::Cpu);
+        assert!(matches!(registry.device(), candle_core::Device::Cpu));
+    }
+}

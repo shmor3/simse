@@ -398,7 +398,7 @@ impl AcpServer {
     }
 
     /// Extract sampling params from session/prompt metadata with bounds validation.
-    fn extract_sampling_params(&self, metadata: &Option<serde_json::Value>) -> SamplingParams {
+    pub(crate) fn extract_sampling_params(&self, metadata: &Option<serde_json::Value>) -> SamplingParams {
         let mut params = self.config.default_sampling.clone();
 
         if let Some(meta) = metadata {
@@ -439,5 +439,310 @@ impl AcpServer {
         }
 
         params
+    }
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Helper to build an AcpServer for testing extract_sampling_params.
+    fn test_server() -> AcpServer {
+        let config = ServerConfig {
+            server_name: "test".to_string(),
+            server_version: "0.0.1".to_string(),
+            default_model: "test-model".to_string(),
+            embedding_model: "test-embed".to_string(),
+            tei_url: None,
+            streaming: false,
+            default_sampling: SamplingParams::default(),
+        };
+        let registry = ModelRegistry::new(candle_core::Device::Cpu);
+        let transport = NdjsonTransport::new();
+        AcpServer::new(config, registry, transport)
+    }
+
+    // ── is_embed_request ─────────────────────────────────────────────────
+
+    #[test]
+    fn is_embed_request_with_embed_json_in_text_block() {
+        let content = vec![AcpContentBlock::Text {
+            text: r#"{"texts":["hello"],"action":"embed"}"#.to_string(),
+        }];
+        assert!(AcpServer::is_embed_request(&content));
+    }
+
+    #[test]
+    fn is_embed_request_with_normal_text() {
+        let content = vec![AcpContentBlock::Text {
+            text: "Hello, how are you?".to_string(),
+        }];
+        assert!(!AcpServer::is_embed_request(&content));
+    }
+
+    #[test]
+    fn is_embed_request_with_empty_content() {
+        let content: Vec<AcpContentBlock> = vec![];
+        assert!(!AcpServer::is_embed_request(&content));
+    }
+
+    #[test]
+    fn is_embed_request_with_data_block() {
+        let content = vec![AcpContentBlock::Data {
+            data: serde_json::json!({"texts": ["foo"], "action": "embed"}),
+            mime_type: None,
+        }];
+        assert!(AcpServer::is_embed_request(&content));
+    }
+
+    #[test]
+    fn is_embed_request_with_data_block_no_embed_action() {
+        let content = vec![AcpContentBlock::Data {
+            data: serde_json::json!({"texts": ["foo"], "action": "generate"}),
+            mime_type: None,
+        }];
+        assert!(!AcpServer::is_embed_request(&content));
+    }
+
+    #[test]
+    fn is_embed_request_json_without_action_field() {
+        let content = vec![AcpContentBlock::Text {
+            text: r#"{"texts":["hello"]}"#.to_string(),
+        }];
+        assert!(!AcpServer::is_embed_request(&content));
+    }
+
+    // ── extract_embed_texts ──────────────────────────────────────────────
+
+    #[test]
+    fn extract_embed_texts_from_text_block() {
+        let content = vec![AcpContentBlock::Text {
+            text: r#"{"texts":["hello","world"],"action":"embed"}"#.to_string(),
+        }];
+        let texts = AcpServer::extract_embed_texts(&content);
+        assert_eq!(texts, vec!["hello", "world"]);
+    }
+
+    #[test]
+    fn extract_embed_texts_from_data_block() {
+        let content = vec![AcpContentBlock::Data {
+            data: serde_json::json!({"texts": ["alpha", "beta", "gamma"], "action": "embed"}),
+            mime_type: None,
+        }];
+        let texts = AcpServer::extract_embed_texts(&content);
+        assert_eq!(texts, vec!["alpha", "beta", "gamma"]);
+    }
+
+    #[test]
+    fn extract_embed_texts_empty_content() {
+        let content: Vec<AcpContentBlock> = vec![];
+        let texts = AcpServer::extract_embed_texts(&content);
+        assert!(texts.is_empty());
+    }
+
+    #[test]
+    fn extract_embed_texts_no_texts_field() {
+        let content = vec![AcpContentBlock::Text {
+            text: r#"{"action":"embed"}"#.to_string(),
+        }];
+        let texts = AcpServer::extract_embed_texts(&content);
+        assert!(texts.is_empty());
+    }
+
+    #[test]
+    fn extract_embed_texts_non_string_texts_filtered() {
+        let content = vec![AcpContentBlock::Text {
+            text: r#"{"texts":["valid", 42, null, "also_valid"],"action":"embed"}"#.to_string(),
+        }];
+        let texts = AcpServer::extract_embed_texts(&content);
+        assert_eq!(texts, vec!["valid", "also_valid"]);
+    }
+
+    // ── extract_text_from_content ────────────────────────────────────────
+
+    #[test]
+    fn extract_text_empty_content() {
+        let content: Vec<AcpContentBlock> = vec![];
+        let (user, system) = AcpServer::extract_text_from_content(&content);
+        assert!(user.is_empty());
+        assert!(system.is_none());
+    }
+
+    #[test]
+    fn extract_text_single_block() {
+        let content = vec![AcpContentBlock::Text {
+            text: "Hello world".to_string(),
+        }];
+        let (user, system) = AcpServer::extract_text_from_content(&content);
+        assert_eq!(user, "Hello world");
+        assert!(system.is_none());
+    }
+
+    #[test]
+    fn extract_text_two_blocks_system_and_user() {
+        let content = vec![
+            AcpContentBlock::Text { text: "You are a helpful assistant.".to_string() },
+            AcpContentBlock::Text { text: "What is Rust?".to_string() },
+        ];
+        let (user, system) = AcpServer::extract_text_from_content(&content);
+        assert_eq!(user, "What is Rust?");
+        assert_eq!(system, Some("You are a helpful assistant.".to_string()));
+    }
+
+    #[test]
+    fn extract_text_ignores_non_text_blocks() {
+        let content = vec![
+            AcpContentBlock::Data {
+                data: serde_json::json!({"key": "value"}),
+                mime_type: None,
+            },
+            AcpContentBlock::Text { text: "Only text block".to_string() },
+        ];
+        let (user, system) = AcpServer::extract_text_from_content(&content);
+        assert_eq!(user, "Only text block");
+        assert!(system.is_none());
+    }
+
+    #[test]
+    fn extract_text_multiple_blocks_first_system_last_user() {
+        let content = vec![
+            AcpContentBlock::Text { text: "system".to_string() },
+            AcpContentBlock::Text { text: "middle".to_string() },
+            AcpContentBlock::Text { text: "user".to_string() },
+        ];
+        let (user, system) = AcpServer::extract_text_from_content(&content);
+        assert_eq!(user, "user");
+        assert_eq!(system, Some("system".to_string()));
+    }
+
+    // ── extract_sampling_params ──────────────────────────────────────────
+
+    #[test]
+    fn extract_sampling_params_none_metadata() {
+        let server = test_server();
+        let params = server.extract_sampling_params(&None);
+        // Should return defaults
+        assert!((params.temperature - 0.7).abs() < f64::EPSILON);
+        assert_eq!(params.max_tokens, 2048);
+        assert!(params.top_p.is_none());
+        assert!(params.top_k.is_none());
+        assert!(params.stop_sequences.is_empty());
+    }
+
+    #[test]
+    fn extract_sampling_params_valid_values() {
+        let server = test_server();
+        let meta = Some(serde_json::json!({
+            "temperature": 1.5,
+            "max_tokens": 4096,
+            "top_p": 0.9,
+            "top_k": 50,
+            "stop_sequences": ["</s>", "\n"]
+        }));
+        let params = server.extract_sampling_params(&meta);
+        assert!((params.temperature - 1.5).abs() < f64::EPSILON);
+        assert_eq!(params.max_tokens, 4096);
+        assert_eq!(params.top_p, Some(0.9));
+        assert_eq!(params.top_k, Some(50));
+        assert_eq!(params.stop_sequences, vec!["</s>", "\n"]);
+    }
+
+    #[test]
+    fn extract_sampling_params_invalid_temperature_uses_default() {
+        let server = test_server();
+        // Temperature > MAX_TEMPERATURE (10.0) should be rejected
+        let meta = Some(serde_json::json!({ "temperature": 999.0 }));
+        let params = server.extract_sampling_params(&meta);
+        assert!((params.temperature - 0.7).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn extract_sampling_params_negative_temperature_uses_default() {
+        let server = test_server();
+        let meta = Some(serde_json::json!({ "temperature": -1.0 }));
+        let params = server.extract_sampling_params(&meta);
+        assert!((params.temperature - 0.7).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn extract_sampling_params_zero_temperature_valid() {
+        let server = test_server();
+        let meta = Some(serde_json::json!({ "temperature": 0.0 }));
+        let params = server.extract_sampling_params(&meta);
+        assert!((params.temperature).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn extract_sampling_params_zero_max_tokens_uses_default() {
+        let server = test_server();
+        let meta = Some(serde_json::json!({ "max_tokens": 0 }));
+        let params = server.extract_sampling_params(&meta);
+        assert_eq!(params.max_tokens, 2048);
+    }
+
+    #[test]
+    fn extract_sampling_params_exceeding_max_tokens_uses_default() {
+        let server = test_server();
+        let meta = Some(serde_json::json!({ "max_tokens": 2_000_000 }));
+        let params = server.extract_sampling_params(&meta);
+        assert_eq!(params.max_tokens, 2048);
+    }
+
+    #[test]
+    fn extract_sampling_params_invalid_top_p_uses_default() {
+        let server = test_server();
+        let meta = Some(serde_json::json!({ "top_p": 1.5 }));
+        let params = server.extract_sampling_params(&meta);
+        assert!(params.top_p.is_none());
+    }
+
+    #[test]
+    fn extract_sampling_params_zero_top_k_uses_default() {
+        let server = test_server();
+        let meta = Some(serde_json::json!({ "top_k": 0 }));
+        let params = server.extract_sampling_params(&meta);
+        assert!(params.top_k.is_none());
+    }
+
+    #[test]
+    fn extract_sampling_params_nan_temperature_uses_default() {
+        let server = test_server();
+        let meta = Some(serde_json::json!({ "temperature": f64::NAN }));
+        let params = server.extract_sampling_params(&meta);
+        // NaN is not finite, so it should be rejected
+        assert!((params.temperature - 0.7).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn extract_sampling_params_empty_metadata_object() {
+        let server = test_server();
+        let meta = Some(serde_json::json!({}));
+        let params = server.extract_sampling_params(&meta);
+        assert!((params.temperature - 0.7).abs() < f64::EPSILON);
+        assert_eq!(params.max_tokens, 2048);
+    }
+
+    #[test]
+    fn extract_sampling_params_boundary_temperature() {
+        let server = test_server();
+        // Exactly MAX_TEMPERATURE (10.0) should be accepted
+        let meta = Some(serde_json::json!({ "temperature": 10.0 }));
+        let params = server.extract_sampling_params(&meta);
+        assert!((params.temperature - 10.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn extract_sampling_params_boundary_top_p() {
+        let server = test_server();
+        // top_p = 0.0 and 1.0 should both be accepted
+        let meta_zero = Some(serde_json::json!({ "top_p": 0.0 }));
+        let params = server.extract_sampling_params(&meta_zero);
+        assert_eq!(params.top_p, Some(0.0));
+
+        let meta_one = Some(serde_json::json!({ "top_p": 1.0 }));
+        let params = server.extract_sampling_params(&meta_one);
+        assert_eq!(params.top_p, Some(1.0));
     }
 }

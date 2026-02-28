@@ -1,5 +1,6 @@
 use anyhow::Result;
 use candle_core::{Device, Tensor};
+use rand::Rng;
 
 /// Sampling strategy for token generation.
 pub enum Sampling {
@@ -108,11 +109,8 @@ fn softmax(logits: &[f32]) -> Vec<f32> {
     let max = logits.iter().cloned().fold(f32::NEG_INFINITY, f32::max);
     let exps: Vec<f32> = logits.iter().map(|&l| (l - max).exp()).collect();
     let sum: f32 = exps.iter().sum();
-    if sum == 0.0 {
-        vec![1.0 / logits.len() as f32; logits.len()]
-    } else {
-        exps.iter().map(|&e| e / sum).collect()
-    }
+    let safe_sum = sum.max(f32::EPSILON);
+    exps.iter().map(|&e| e / safe_sum).collect()
 }
 
 fn top_k_filter(logits: &[f32], k: usize) -> Vec<f32> {
@@ -151,17 +149,7 @@ fn top_p_filter(logits: &[f32], p: f64) -> Vec<f32> {
 fn sample_multinomial(logits: &[f32]) -> Result<u32> {
     let probs = softmax(logits);
 
-    // Simple random sampling using a basic PRNG seeded from time
-    let random: f32 = {
-        use std::time::SystemTime;
-        let nanos = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .subsec_nanos();
-        // Simple hash for quick randomness
-        let hash = nanos.wrapping_mul(2654435761);
-        (hash as f32) / (u32::MAX as f32)
-    };
+    let random: f32 = rand::rng().random::<f32>();
 
     let mut cumulative = 0.0f32;
     for (i, &prob) in probs.iter().enumerate() {

@@ -168,6 +168,8 @@ export function TextInput({
 				tab: boolean;
 				escape: boolean;
 				meta: boolean;
+				home: boolean;
+				end: boolean;
 			},
 		) => {
 			if (
@@ -188,6 +190,95 @@ export function TextInput({
 					setSelectionAnchor(0);
 					cursorRef.current = v.length;
 					setCursorOffset(v.length);
+				}
+				return;
+			}
+
+			// Home: move to start of input
+			if (key.home) {
+				if (key.shift) {
+					extendSelection(0);
+				} else {
+					if (anchorRef.current !== null) clearSelection();
+					cursorRef.current = 0;
+					setCursorOffset(0);
+				}
+				return;
+			}
+
+			// End: move to end of input
+			if (key.end) {
+				const v = valueRef.current;
+				if (key.shift) {
+					extendSelection(v.length);
+				} else {
+					if (anchorRef.current !== null) clearSelection();
+					cursorRef.current = v.length;
+					setCursorOffset(v.length);
+				}
+				return;
+			}
+
+			// Word navigation: meta+arrow on macOS, ctrl+arrow on Linux/Windows
+			const isWordModifier = IS_MAC ? key.meta : key.ctrl;
+
+			if (isWordModifier && key.leftArrow) {
+				const v = valueRef.current;
+				const c = cursorRef.current;
+				const target = findWordBoundaryLeft(v, c);
+				if (key.shift) {
+					extendSelection(target);
+				} else {
+					if (anchorRef.current !== null) clearSelection();
+					cursorRef.current = target;
+					setCursorOffset(target);
+				}
+				return;
+			}
+
+			if (isWordModifier && key.rightArrow) {
+				const v = valueRef.current;
+				const c = cursorRef.current;
+				const target = findWordBoundaryRight(v, c);
+				if (key.shift) {
+					extendSelection(target);
+				} else {
+					if (anchorRef.current !== null) clearSelection();
+					cursorRef.current = target;
+					setCursorOffset(target);
+				}
+				return;
+			}
+
+			// Word delete: meta+backspace on macOS, ctrl+backspace on Linux/Windows
+			if (isWordModifier && (key.backspace || key.delete)) {
+				const v = valueRef.current;
+				const c = cursorRef.current;
+				// Delete selection first if any
+				const sel = deleteSelection();
+				if (sel) {
+					clearSelection();
+					valueRef.current = sel.value;
+					cursorRef.current = sel.cursor;
+					setCursorOffset(sel.cursor);
+					internalChangeRef.current = true;
+					onChangeRef.current(sel.value);
+					return;
+				}
+				if (key.backspace) {
+					const target = findWordBoundaryLeft(v, c);
+					const next = v.slice(0, target) + v.slice(c);
+					valueRef.current = next;
+					cursorRef.current = target;
+					setCursorOffset(target);
+					internalChangeRef.current = true;
+					onChangeRef.current(next);
+				} else {
+					const target = findWordBoundaryRight(v, c);
+					const next = v.slice(0, c) + v.slice(target);
+					valueRef.current = next;
+					internalChangeRef.current = true;
+					onChangeRef.current(next);
 				}
 				return;
 			}
@@ -242,6 +333,18 @@ export function TextInput({
 			}
 
 			if (key.leftArrow) {
+				if (key.shift) {
+					const c = Math.max(0, cursorRef.current - 1);
+					extendSelection(c);
+					return;
+				}
+				// Collapse selection if active
+				if (anchorRef.current !== null) {
+					const pos = collapseSelection('left');
+					cursorRef.current = pos;
+					setCursorOffset(pos);
+					return;
+				}
 				const c = Math.max(0, cursorRef.current - 1);
 				cursorRef.current = c;
 				setCursorOffset(c);
@@ -249,6 +352,19 @@ export function TextInput({
 			}
 
 			if (key.rightArrow) {
+				if (key.shift) {
+					const v = valueRef.current;
+					const c = Math.min(v.length, cursorRef.current + 1);
+					extendSelection(c);
+					return;
+				}
+				// Collapse selection if active
+				if (anchorRef.current !== null) {
+					const pos = collapseSelection('right');
+					cursorRef.current = pos;
+					setCursorOffset(pos);
+					return;
+				}
 				const v = valueRef.current;
 				const c = cursorRef.current;
 				// Accept suggestion when cursor is at end and suggestion exists

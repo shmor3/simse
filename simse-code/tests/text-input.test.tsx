@@ -196,6 +196,86 @@ describe('selection', () => {
 	});
 });
 
+describe('word navigation', () => {
+	test('Option+Left (meta+left) jumps to previous word boundary', async () => {
+		function WordNavHarness() {
+			const [value, setValue] = useState('hello world');
+			return (
+				<>
+					<TextInput value={value} onChange={setValue} />
+					<Text>VALUE:{value}</Text>
+				</>
+			);
+		}
+		const { lastFrame, stdin } = render(<WordNavHarness />);
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Option+Left on macOS = \x1b\x1b[D (double-escape + [D)
+		stdin.write('\x1b\x1b[D');
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Type 'X' — should insert at word boundary (pos 6, start of "world")
+		stdin.write('X');
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(lastFrame()).toContain('VALUE:hello Xworld');
+	});
+});
+
+describe('Home/End navigation', () => {
+	test('Home key moves cursor to start of input', async () => {
+		function HomeEndHarness() {
+			const [value, setValue] = useState('hello');
+			return (
+				<>
+					<TextInput value={value} onChange={setValue} />
+					<Text>VALUE:{value}</Text>
+				</>
+			);
+		}
+		const { lastFrame, stdin } = render(<HomeEndHarness />);
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Home key = \x1b[H
+		stdin.write('\x1b[H');
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Type X at beginning
+		stdin.write('X');
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(lastFrame()).toContain('VALUE:Xhello');
+	});
+
+	test('End key moves cursor to end of input', async () => {
+		function HomeEndHarness2() {
+			const [value, setValue] = useState('hello');
+			return (
+				<>
+					<TextInput value={value} onChange={setValue} />
+					<Text>VALUE:{value}</Text>
+				</>
+			);
+		}
+		const { lastFrame, stdin } = render(<HomeEndHarness2 />);
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Home first to move to start
+		stdin.write('\x1b[H');
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Then End to move back to end
+		stdin.write('\x1b[F');
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Type X at end
+		stdin.write('X');
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(lastFrame()).toContain('VALUE:helloX');
+	});
+});
+
 describe('word boundary helpers', () => {
 	test('findWordBoundaryLeft from middle of word', () => {
 		expect(findWordBoundaryLeft('hello world', 8)).toBe(6);

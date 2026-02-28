@@ -4,10 +4,7 @@ import {
 	listOllamaModels,
 	testOllamaConnection,
 } from '../ollama-test.js';
-import type {
-	OllamaConnectionResult,
-	OllamaModelInfo,
-} from '../ollama-test.js';
+
 
 // ---------------------------------------------------------------------------
 // Helpers

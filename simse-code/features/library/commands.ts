@@ -7,9 +7,10 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		description: 'Add a note to a topic',
 		category: 'library',
 		execute: (args) => {
+			if (!args.trim()) return { text: 'Usage: /add <topic> <text>' };
 			const spaceIdx = args.indexOf(' ');
 			if (spaceIdx === -1) return { text: 'Usage: /add <topic> <text>' };
-			return { text: `Adding to "${args.slice(0, spaceIdx)}"...` };
+			return { text: 'Library not connected. Run /setup to configure an ACP server with library support.' };
 		},
 	},
 	{
@@ -20,7 +21,7 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		category: 'library',
 		execute: (args) => {
 			if (!args.trim()) return { text: 'Usage: /search <query>' };
-			return { text: `Searching for "${args}"...` };
+			return { text: 'Library not connected. Run /setup to configure an ACP server with library support.' };
 		},
 	},
 	{
@@ -31,7 +32,7 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		category: 'library',
 		execute: (args) => {
 			if (!args.trim()) return { text: 'Usage: /recommend <query>' };
-			return { text: `Recommending for "${args}"...` };
+			return { text: 'Library not connected. Run /setup to configure an ACP server with library support.' };
 		},
 	},
 	{
@@ -39,7 +40,7 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		usage: '/topics',
 		description: 'List all topics',
 		category: 'library',
-		execute: () => ({ text: 'Listing topics...' }),
+		execute: () => ({ text: 'Library not connected. Run /setup to configure an ACP server with library support.' }),
 	},
 	{
 		name: 'notes',
@@ -47,8 +48,8 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		usage: '/notes [topic]',
 		description: 'List notes (optionally filtered by topic)',
 		category: 'library',
-		execute: (args) => ({
-			text: args ? `Notes in "${args}"...` : 'Listing all notes...',
+		execute: () => ({
+			text: 'Library not connected. Run /setup to configure an ACP server with library support.',
 		}),
 	},
 	{
@@ -58,7 +59,7 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		category: 'library',
 		execute: (args) => {
 			if (!args.trim()) return { text: 'Usage: /get <id>' };
-			return { text: `Getting note ${args}...` };
+			return { text: 'Library not connected. Run /setup to configure an ACP server with library support.' };
 		},
 	},
 	{
@@ -69,7 +70,7 @@ export const libraryCommands: readonly CommandDefinition[] = [
 		category: 'library',
 		execute: (args) => {
 			if (!args.trim()) return { text: 'Usage: /delete <id>' };
-			return { text: `Deleting note ${args}...` };
+			return { text: 'Library not connected. Run /setup to configure an ACP server with library support.' };
 		},
 	},
 ];

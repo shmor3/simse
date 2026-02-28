@@ -14,6 +14,7 @@ interface StatusBarProps {
 	readonly bypassPermissions?: boolean;
 	readonly totalTokens?: number;
 	readonly contextPercent?: number;
+	readonly permissionMode?: string;
 }
 
 const SEP = ' \u00b7 ';
@@ -25,10 +26,13 @@ export function StatusBar({
 	bypassPermissions,
 	totalTokens,
 	contextPercent,
+	permissionMode,
 }: StatusBarProps) {
 	const hints: string[] = [];
 
-	if (bypassPermissions) {
+	if (permissionMode) {
+		hints.push(`${permissionMode} (shift+tab to cycle)`);
+	} else if (bypassPermissions) {
 		hints.push('bypass permissions on (shift+tab to cycle)');
 	}
 

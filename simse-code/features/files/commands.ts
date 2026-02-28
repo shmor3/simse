@@ -6,8 +6,8 @@ export const filesCommands: readonly CommandDefinition[] = [
 		usage: '/files [path]',
 		description: 'List files in the virtual filesystem',
 		category: 'files',
-		execute: (args) => ({
-			text: args ? `Listing files in "${args}"...` : 'Listing files in /...',
+		execute: () => ({
+			text: 'VFS not initialized. Files will be available when an ACP agent uses the virtual filesystem.',
 		}),
 	},
 	{
@@ -15,10 +15,8 @@ export const filesCommands: readonly CommandDefinition[] = [
 		usage: '/save [path]',
 		description: 'Save VFS files to disk',
 		category: 'files',
-		execute: (args) => ({
-			text: args
-				? `Saving "${args}" to disk...`
-				: 'Saving all files to disk...',
+		execute: () => ({
+			text: 'VFS not initialized. Nothing to save.',
 		}),
 	},
 	{
@@ -26,8 +24,8 @@ export const filesCommands: readonly CommandDefinition[] = [
 		usage: '/validate [path]',
 		description: 'Validate VFS file contents',
 		category: 'files',
-		execute: (args) => ({
-			text: args ? `Validating "${args}"...` : 'Validating all files...',
+		execute: () => ({
+			text: 'VFS not initialized. Nothing to validate.',
 		}),
 	},
 	{
@@ -35,10 +33,8 @@ export const filesCommands: readonly CommandDefinition[] = [
 		usage: '/discard [path]',
 		description: 'Discard VFS changes',
 		category: 'files',
-		execute: (args) => ({
-			text: args
-				? `Discarding changes to "${args}"...`
-				: 'Discarding all changes...',
+		execute: () => ({
+			text: 'VFS not initialized. Nothing to discard.',
 		}),
 	},
 	{
@@ -46,8 +42,8 @@ export const filesCommands: readonly CommandDefinition[] = [
 		usage: '/diff [path]',
 		description: 'Show VFS file diffs',
 		category: 'files',
-		execute: (args) => ({
-			text: args ? `Diff for "${args}"...` : 'Showing all diffs...',
+		execute: () => ({
+			text: 'VFS not initialized. No diffs available.',
 		}),
 	},
 ];

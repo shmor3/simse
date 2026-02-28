@@ -15,4 +15,5 @@ export {
 export type { MetaCommandContext } from './meta/index.js';
 export { createSessionCommands } from './session/index.js';
 export type { SessionCommandContext } from './session/index.js';
-export { toolsCommands } from './tools/index.js';
+export { createToolsCommands } from './tools/index.js';
+export type { ToolsCommandContext } from './tools/index.js';

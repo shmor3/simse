@@ -5,7 +5,7 @@ import { filesCommands } from '../features/files/index.js';
 import { libraryCommands } from '../features/library/index.js';
 import { createSessionCommands } from '../features/session/index.js';
 import type { SessionCommandContext } from '../features/session/index.js';
-import { toolsCommands } from '../features/tools/index.js';
+import { createToolsCommands } from '../features/tools/index.js';
 
 /** Minimal mock context for session commands. */
 function mockSessionCtx(): SessionCommandContext {
@@ -27,7 +27,19 @@ function mockSessionCtx(): SessionCommandContext {
 	};
 }
 
+/** Minimal mock tool registry for tools commands. */
+function mockToolRegistry() {
+	return {
+		discover: async () => {},
+		getToolDefinitions: () => [],
+		formatForSystemPrompt: () => '',
+		execute: async () => ({ id: '', name: '', output: '', isError: false }),
+		toolCount: 0,
+	};
+}
+
 const sessionCommands = createSessionCommands(mockSessionCtx());
+const toolsCommands = createToolsCommands({ getToolRegistry: () => mockToolRegistry() });
 
 describe('all feature modules', () => {
 	test('library module exports commands with correct category', () => {

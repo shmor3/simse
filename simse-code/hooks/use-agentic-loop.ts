@@ -17,9 +17,12 @@ export function deriveToolSummary(
 	output: string,
 ): string | undefined {
 	if (!output) return undefined;
-	const lines = output.split('\n');
+	const trimmed = output.trim();
+	const lines = trimmed.split('\n');
+	// Short single-line output: show it directly
+	if (lines.length === 1 && trimmed.length <= 80) return trimmed;
 	if (lines.length > 1) return `${lines.length} lines`;
-	if (output.length > 100) return `${output.length} chars`;
+	if (trimmed.length > 80) return `${trimmed.length} chars`;
 	return undefined;
 }
 

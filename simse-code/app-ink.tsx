@@ -36,7 +36,7 @@ import { createMetaCommands } from './features/meta/index.js';
 import type { MetaCommandContext } from './features/meta/index.js';
 import { createSessionCommands } from './features/session/index.js';
 import type { SessionCommandContext } from './features/session/index.js';
-import { toolsCommands } from './features/tools/index.js';
+import { createToolsCommands } from './features/tools/index.js';
 import { useAgenticLoop } from './hooks/use-agentic-loop.js';
 import { useCommandDispatch } from './hooks/use-command-dispatch.js';
 import {
@@ -94,6 +94,9 @@ export function App({
 	const sessionIdRef = useRef(initialSessionId);
 	const [promptMode, setPromptMode] = useState<PromptMode>('normal');
 	const [ctrlCWarning, setCtrlCWarning] = useState(false);
+	const [permissionModeLabel, setPermissionModeLabel] = useState(
+		permissionManager.formatMode(),
+	);
 
 	// Ctrl+C double-press guard: first press shows warning, second exits
 	const ctrlCRef = useRef(false);
@@ -253,7 +256,7 @@ export function App({
 		const meta = createMetaCommands(metaCtx);
 		reg.registerAll(meta);
 		reg.registerAll(libraryCommands);
-		reg.registerAll(toolsCommands);
+		reg.registerAll(createToolsCommands({ getToolRegistry: () => toolRegistryRef.current }));
 		reg.registerAll(createSessionCommands(sessionCtx));
 		reg.registerAll(filesCommands);
 		reg.registerAll(configCommands);
@@ -304,6 +307,16 @@ export function App({
 			if (key.ctrl && input === 'l') {
 				conversationRef.current.clear();
 				setItems([{ kind: 'command-result', element: bannerRef.current }]);
+			}
+			// Shift+Tab cycles permission mode
+			if (key.shift && key.tab) {
+				permissionManager.cycleMode();
+				const label = permissionManager.formatMode();
+				setPermissionModeLabel(label);
+				setItems((prev) => [
+					...prev,
+					{ kind: 'info', text: `Permission mode: ${label}` },
+				]);
 			}
 		},
 		{ isActive: !isProcessing },
@@ -503,6 +516,7 @@ export function App({
 					isProcessing={isProcessing}
 					planMode={planMode}
 					verbose={verbose}
+					permissionMode={permissionModeLabel}
 					totalTokens={tokenUsage.totalTokens}
 					contextPercent={Math.round(
 						(conversationRef.current.estimatedChars / 200_000) * 100,

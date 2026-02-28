@@ -9,7 +9,7 @@ export const aiCommands: readonly CommandDefinition[] = [
 		category: 'ai',
 		execute: (args) => {
 			if (!args.trim()) return { text: 'Usage: /chain <name> [args]' };
-			return { text: `Running chain "${args}"...` };
+			return { text: 'No chains configured. Define chains in your simse config to use this command.' };
 		},
 	},
 	{
@@ -17,6 +17,6 @@ export const aiCommands: readonly CommandDefinition[] = [
 		usage: '/prompts',
 		description: 'List available prompt templates',
 		category: 'ai',
-		execute: () => ({ text: 'Listing prompt templates...' }),
+		execute: () => ({ text: 'No prompt templates configured. Define templates in your simse config.' }),
 	},
 ];

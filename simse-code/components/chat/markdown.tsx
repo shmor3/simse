@@ -11,8 +11,9 @@ interface MarkdownProps {
  */
 function parseInline(line: string): React.ReactNode[] {
 	const nodes: React.ReactNode[] = [];
-	// Regex matches: `code`, **bold**, or *italic*
-	const pattern = /`([^`]+)`|\*\*(.+?)\*\*|\*(.+?)\*/g;
+	// Regex matches: `code`, **bold**, ~~strikethrough~~, [text](url), or *italic*
+	const pattern =
+		/`([^`]+)`|\*\*(.+?)\*\*|~~(.+?)~~|\[([^\]]+)\]\(([^)]+)\)|\*(.+?)\*/g;
 	const matches = Array.from(line.matchAll(pattern));
 	let lastIndex = 0;
 	let key = 0;
@@ -38,10 +39,29 @@ function parseInline(line: string): React.ReactNode[] {
 				</Text>,
 			);
 		} else if (match[3] !== undefined) {
+			// Strikethrough
+			nodes.push(
+				<Text key={key++} strikethrough dimColor>
+					{match[3]}
+				</Text>,
+			);
+		} else if (match[4] !== undefined) {
+			// Link [text](url) — show text underlined + dimmed url
+			nodes.push(
+				<Text key={key++} underline color="blue">
+					{match[4]}
+				</Text>,
+			);
+			nodes.push(
+				<Text key={key++} dimColor>
+					{` (${match[5]})`}
+				</Text>,
+			);
+		} else if (match[6] !== undefined) {
 			// Italic
 			nodes.push(
 				<Text key={key++} italic>
-					{match[3]}
+					{match[6]}
 				</Text>,
 			);
 		}
@@ -69,12 +89,18 @@ interface BlockNode {
 		| 'heading'
 		| 'code-block'
 		| 'list-item'
+		| 'numbered-list-item'
+		| 'task-list-item'
 		| 'blockquote'
 		| 'horizontal-rule'
+		| 'table'
 		| 'blank';
 	readonly content: string;
 	readonly level?: number;
 	readonly language?: string;
+	readonly checked?: boolean;
+	readonly number?: number;
+	readonly rows?: readonly string[][];
 }
 
 /**
@@ -130,6 +156,21 @@ function parseBlocks(text: string): BlockNode[] {
 			continue;
 		}
 
+		// Task list items (- [ ] or - [x])
+		const taskMatch = line.match(/^(\s*)-\s+\[([ x])\]\s+(.+)$/);
+		if (taskMatch) {
+			const indent = Math.floor(taskMatch[1]!.length / 2);
+			blocks.push({
+				key,
+				type: 'task-list-item',
+				content: taskMatch[3]!,
+				level: indent,
+				checked: taskMatch[2] === 'x',
+			});
+			i++;
+			continue;
+		}
+
 		// List items (- bullets, with optional indentation)
 		const listMatch = line.match(/^(\s*)-\s+(.+)$/);
 		if (listMatch) {
@@ -142,6 +183,48 @@ function parseBlocks(text: string): BlockNode[] {
 			});
 			i++;
 			continue;
+		}
+
+		// Numbered list items (1. 2. etc.)
+		const numMatch = line.match(/^(\s*)(\d+)\.\s+(.+)$/);
+		if (numMatch) {
+			const indent = Math.floor(numMatch[1]!.length / 2);
+			blocks.push({
+				key,
+				type: 'numbered-list-item',
+				content: numMatch[3]!,
+				level: indent,
+				number: Number.parseInt(numMatch[2]!, 10),
+			});
+			i++;
+			continue;
+		}
+
+		// Table (header row followed by separator row)
+		if (
+			line.includes('|') &&
+			i + 1 < lines.length &&
+			/^\|?[\s-]+(\|[\s-]+)+\|?$/.test(lines[i + 1]!)
+		) {
+			const rows: string[][] = [];
+			let j = i;
+			while (j < lines.length && lines[j]!.includes('|')) {
+				const row = lines[j]!
+					.replace(/^\|/, '')
+					.replace(/\|$/, '')
+					.split('|')
+					.map((cell) => cell.trim());
+				// Skip separator rows
+				if (!/^[\s-]+$/.test(row.join(''))) {
+					rows.push(row);
+				}
+				j++;
+			}
+			if (rows.length > 0) {
+				blocks.push({ key, type: 'table', content: '', rows });
+				i = j;
+				continue;
+			}
 		}
 
 		// Blockquote
@@ -305,6 +388,83 @@ function ListItem({ content, level = 0 }: { content: string; level?: number }) {
 	);
 }
 
+function NumberedListItem({
+	content,
+	level = 0,
+	number = 1,
+}: { content: string; level?: number; number?: number }) {
+	const indent = '  '.repeat(level);
+	return (
+		<Text>
+			{indent}{number}. {parseInline(content)}
+		</Text>
+	);
+}
+
+function TaskListItem({
+	content,
+	level = 0,
+	checked = false,
+}: { content: string; level?: number; checked?: boolean }) {
+	const indent = '  '.repeat(level);
+	const checkbox = checked ? '\u2611' : '\u2610';
+	return (
+		<Text>
+			{indent}{checkbox} {checked ? <Text dimColor>{content}</Text> : parseInline(content)}
+		</Text>
+	);
+}
+
+function TableBlock({ rows }: { rows: readonly string[][] }) {
+	if (rows.length === 0) return null;
+
+	// Calculate column widths
+	const colCount = Math.max(...rows.map((r) => r.length));
+	const colWidths: number[] = Array.from({ length: colCount }, () => 0);
+	for (const row of rows) {
+		for (let c = 0; c < colCount; c++) {
+			colWidths[c] = Math.max(colWidths[c]!, (row[c] ?? '').length);
+		}
+	}
+
+	const renderRow = (row: string[], rowIdx: number, isHeader: boolean) => {
+		const cells = Array.from({ length: colCount }, (_, c) => {
+			const cell = (row[c] ?? '').padEnd(colWidths[c]!);
+			return cell;
+		});
+		return (
+			<Text key={`tr${rowIdx}`}>
+				<Text dimColor>{'\u2502'} </Text>
+				{cells.map((cell, c) => (
+					<Text key={`tc${rowIdx}-${c}`}>
+						{isHeader ? <Text bold>{cell}</Text> : <>{parseInline(cell)}</>}
+						{c < colCount - 1 ? <Text dimColor> {'\u2502'} </Text> : null}
+					</Text>
+				))}
+			</Text>
+		);
+	};
+
+	const separator = colWidths
+		.map((w) => '\u2500'.repeat(w))
+		.join('\u2500\u253c\u2500');
+
+	return (
+		<Box flexDirection="column">
+			{rows.map((row, idx) => (
+				<Box key={`tg${idx}`} flexDirection="column">
+					{renderRow(row, idx, idx === 0)}
+					{idx === 0 && (
+						<Text dimColor>
+							{'\u2502'} {separator}
+						</Text>
+					)}
+				</Box>
+			))}
+		</Box>
+	);
+}
+
 function Blockquote({ content }: { content: string }) {
 	return (
 		<Text>
@@ -326,8 +486,14 @@ function BlockView({ block }: { block: BlockNode }) {
 			return <CodeBlock content={block.content} language={block.language} />;
 		case 'list-item':
 			return <ListItem content={block.content} level={block.level} />;
+		case 'numbered-list-item':
+			return <NumberedListItem content={block.content} level={block.level} number={block.number} />;
+		case 'task-list-item':
+			return <TaskListItem content={block.content} level={block.level} checked={block.checked} />;
 		case 'blockquote':
 			return <Blockquote content={block.content} />;
+		case 'table':
+			return <TableBlock rows={block.rows ?? []} />;
 		case 'horizontal-rule':
 			return <HorizontalRule />;
 		case 'blank':

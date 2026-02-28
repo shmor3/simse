@@ -30,6 +30,9 @@
 		"typescript",
 		"bun"
 	],
+	"workspaces": [
+		"simse-vector"
+	],
 	"license": "MIT",
 	"scripts": {
 		"build": "bun build ./src/lib.ts --outdir ./dist --target bun && tsc --project tsconfig.build.json",
@@ -41,6 +44,7 @@
 		"typecheck": "bun x tsc --noEmit"
 	},
 	"dependencies": {
+		"simse-vector": "workspace:*",
 		"@modelcontextprotocol/sdk": "^1.12.0",
 		"hono": "^4.12.2",
 		"ink": "^6.8.0",

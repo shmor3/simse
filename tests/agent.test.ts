@@ -1,9 +1,8 @@
 import { describe, expect, it, mock } from 'bun:test';
+import type { Library, Lookup } from 'simse-vector';
 import type { ACPClient } from '../src/ai/acp/acp-client.js';
 import type { ACPGenerateResult } from '../src/ai/acp/types.js';
 import { createAgentExecutor } from '../src/ai/agent/agent-executor.js';
-import type { Library } from '../src/ai/library/library.js';
-import type { Lookup } from '../src/ai/library/types.js';
 import type { MCPClient } from '../src/ai/mcp/mcp-client.js';
 import { isChainError, isMCPToolError } from '../src/errors/index.js';
 import { createLogger, type Logger } from '../src/logger.js';

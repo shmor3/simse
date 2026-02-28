@@ -5,8 +5,8 @@
 // Each function is idempotent and safe to call multiple times.
 // ---------------------------------------------------------------------------
 
+import type { Library } from 'simse-vector';
 import { toError } from '../../errors/base.js';
-import type { Library } from '../library/library.js';
 import type { TaskList } from '../tasks/types.js';
 import type { VirtualFS } from '../vfs/index.js';
 import type { ToolDefinition, ToolHandler, ToolRegistry } from './types.js';

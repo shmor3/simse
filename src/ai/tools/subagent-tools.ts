@@ -5,10 +5,10 @@
 // Follows the same pattern as registerLibraryTools / registerTaskTools.
 // ---------------------------------------------------------------------------
 
+import type { Library } from 'simse-vector';
 import { toError } from '../../errors/base.js';
 import type { ACPClient } from '../acp/acp-client.js';
 import { createConversation } from '../conversation/conversation.js';
-import type { Library } from '../library/library.js';
 import { createAgenticLoop } from '../loop/agentic-loop.js';
 import type { SubagentInfo, SubagentResult } from '../loop/types.js';
 import { createToolRegistry } from './tool-registry.js';

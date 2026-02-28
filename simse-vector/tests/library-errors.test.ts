@@ -10,7 +10,7 @@ import {
 	isStacksCorruptionError,
 	isStacksError,
 	isStacksIOError,
-} from '../src/errors/index.js';
+} from '../src/errors.js';
 
 describe('Library errors', () => {
 	it('createLibraryError creates a LIBRARY_ERROR', () => {

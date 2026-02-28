@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
-import { createLibrary, type Library } from '../src/ai/library/library.js';
-import type {
-	EmbeddingProvider,
-	LibraryConfig,
-} from '../src/ai/library/types.js';
+import type { EmbeddingProvider, LibraryConfig } from 'simse-vector';
+import { createLibrary, type Library } from 'simse-vector';
 import { createMemoryStorage, createSilentLogger } from './utils/mocks.js';
 
 function createMockEmbedder(dim = 3): EmbeddingProvider {

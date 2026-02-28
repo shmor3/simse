@@ -1,6 +1,6 @@
 // tests/topic-catalog.test.ts
 import { describe, expect, it } from 'bun:test';
-import { createTopicCatalog } from '../src/ai/library/topic-catalog.js';
+import { createTopicCatalog } from 'simse-vector';
 
 describe('TopicCatalog', () => {
 	it('resolve() registers a new topic', () => {

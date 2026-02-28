@@ -1,11 +1,11 @@
 // tests/circulation-desk.test.ts
 import { describe, expect, it, mock } from 'bun:test';
-import { createCirculationDesk } from '../src/ai/library/circulation-desk.js';
 import type {
+	Librarian,
 	LibrarianRegistry,
 	ManagedLibrarian,
-} from '../src/ai/library/librarian-registry.js';
-import type { Librarian } from '../src/ai/library/types.js';
+} from 'simse-vector';
+import { createCirculationDesk } from 'simse-vector';
 
 // Mock librarian that returns a single extraction
 function createMockLibrarian(): Librarian {

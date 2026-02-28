@@ -1,6 +1,6 @@
 import { describe, expect, it, mock } from 'bun:test';
-import type { Library } from '../src/ai/library/library.js';
-import { createLibraryServices } from '../src/ai/library/library-services.js';
+import type { Library } from '../src/library.js';
+import { createLibraryServices } from '../src/library-services.js';
 
 function createMockLibrary(): Library {
 	return {

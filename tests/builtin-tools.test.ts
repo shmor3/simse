@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
-import type { Library } from '../src/ai/library/library.js';
+import type { Library } from 'simse-vector';
 import type { TaskList } from '../src/ai/tasks/types.js';
 import {
 	registerLibraryTools,

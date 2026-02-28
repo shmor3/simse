@@ -2,7 +2,7 @@
 // Format search results for chain injection
 // ---------------------------------------------------------------------------
 
-import type { Lookup } from '../library/types.js';
+import type { Lookup } from 'simse-vector';
 
 export interface FormatSearchResultsOptions {
 	/** Message returned when there are no results. Defaults to `'(no relevant memories found)'`. */

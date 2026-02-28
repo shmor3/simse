@@ -2,17 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ACPConnection } from '../src/ai/acp/acp-connection.js';
-import { saveDefinition } from '../src/ai/library/librarian-definition.js';
-import {
-	createLibrarianRegistry,
-	type LibrarianRegistryOptions,
-} from '../src/ai/library/librarian-registry.js';
 import type {
 	LibrarianDefinition,
 	LibrarianLibraryAccess,
 	TextGenerationProvider,
-} from '../src/ai/library/types.js';
+} from 'simse-vector';
+import {
+	createLibrarianRegistry,
+	type LibrarianRegistryOptions,
+	saveDefinition,
+} from 'simse-vector';
+import type { ACPConnection } from '../src/ai/acp/acp-connection.js';
 import { createLogger } from '../src/logger.js';
 
 // ---------------------------------------------------------------------------

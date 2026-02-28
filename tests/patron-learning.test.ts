@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it } from 'bun:test';
 import type { Buffer } from 'node:buffer';
-import type { LearningEngine } from '../src/ai/library/patron-learning.js';
-import { createLearningEngine } from '../src/ai/library/patron-learning.js';
-import { createStacks } from '../src/ai/library/stacks.js';
-import type { StorageBackend } from '../src/ai/library/storage.js';
+import type { LearningEngine, StorageBackend } from 'simse-vector';
+import { createLearningEngine, createStacks } from 'simse-vector';
 import { createLogger, type Logger } from '../src/logger.js';
 
 // ---------------------------------------------------------------------------

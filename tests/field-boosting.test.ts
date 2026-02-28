@@ -1,14 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import {
-	createMagnitudeCache,
-	createMetadataIndex,
-} from '../src/ai/library/cataloging.js';
-import { createInvertedIndex } from '../src/ai/library/inverted-index.js';
+import type { Volume } from 'simse-vector';
 import {
 	advancedStacksSearch,
+	createInvertedIndex,
+	createMagnitudeCache,
+	createMetadataIndex,
 	type StacksSearchConfig,
-} from '../src/ai/library/stacks-search.js';
-import type { Volume } from '../src/ai/library/types.js';
+} from 'simse-vector';
 
 function makeEntry(
 	id: string,

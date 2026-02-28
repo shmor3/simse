@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { formatMemoryContext } from '../src/ai/library/prompt-injection.js';
-import type { Lookup } from '../src/ai/library/types.js';
+import type { Lookup } from 'simse-vector';
+import { formatMemoryContext } from 'simse-vector';
 
 function makeResult(
 	text: string,

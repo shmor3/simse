@@ -6,9 +6,9 @@
  */
 import { describe, expect, it } from 'bun:test';
 import type { Buffer } from 'node:buffer';
-import { createLibrary } from '../src/ai/library/library.js';
-import type { StorageBackend } from '../src/ai/library/storage.js';
-import type { EmbeddingProvider } from '../src/ai/library/types.js';
+import { createLibrary } from '../src/library.js';
+import type { StorageBackend } from '../src/storage.js';
+import type { EmbeddingProvider } from '../src/types.js';
 
 // ---------------------------------------------------------------------------
 // In-memory storage backend for tests

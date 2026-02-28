@@ -64,7 +64,7 @@ const configJsonSchema: ConfigFileSchema = Object.freeze({
 
 const acpJsonSchema: ConfigFileSchema = Object.freeze({
 	filename: 'acp.json',
-	description: 'ACP server configuration (read-only, edit via /setup)',
+	description: 'ACP server configuration',
 	fields: Object.freeze([
 		Object.freeze({
 			key: 'defaultServer',
@@ -145,12 +145,6 @@ const memoryJsonSchema: ConfigFileSchema = Object.freeze({
 	]),
 });
 
-const mcpJsonSchema: ConfigFileSchema = Object.freeze({
-	filename: 'mcp.json',
-	description: 'MCP server configuration (read-only)',
-	fields: Object.freeze([]),
-});
-
 const summarizeJsonSchema: ConfigFileSchema = Object.freeze({
 	filename: 'summarize.json',
 	description: 'Summarization ACP server configuration',
@@ -222,7 +216,6 @@ const allSchemas: readonly ConfigFileSchema[] = Object.freeze([
 	acpJsonSchema,
 	embedJsonSchema,
 	memoryJsonSchema,
-	mcpJsonSchema,
 	summarizeJsonSchema,
 	settingsJsonSchema,
 ]);

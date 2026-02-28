@@ -3,7 +3,7 @@ import {
 	formatBytes,
 	listOllamaModels,
 	testOllamaConnection,
-} from '../ollama-test.js';
+} from '../features/config/ollama-test.js';
 
 
 // ---------------------------------------------------------------------------

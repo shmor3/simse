@@ -7,7 +7,7 @@ import {
 	getConfigSchema,
 	loadConfigFile,
 	saveConfigField,
-} from '../settings-schema.js';
+} from '../features/config/settings-schema.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,10 +49,9 @@ describe('getConfigSchema', () => {
 		expect(schema!.filename).toBe('acp.json');
 	});
 
-	it('should return schema for mcp.json', () => {
+	it('should return undefined for mcp.json (excluded, no editable fields)', () => {
 		const schema = getConfigSchema('mcp.json');
-		expect(schema).toBeDefined();
-		expect(schema!.filename).toBe('mcp.json');
+		expect(schema).toBeUndefined();
 	});
 
 	it('should return schema for summarize.json', () => {
@@ -85,7 +84,7 @@ describe('getConfigSchema', () => {
 describe('getAllConfigSchemas', () => {
 	it('should return all schemas', () => {
 		const schemas = getAllConfigSchemas();
-		expect(schemas.length).toBeGreaterThanOrEqual(7);
+		expect(schemas.length).toBeGreaterThanOrEqual(6);
 	});
 
 	it('should include config.json schema', () => {

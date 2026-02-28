@@ -2,6 +2,9 @@
 // simse-vfs — public API surface
 // ---------------------------------------------------------------------------
 
+// ---- VFS Client (JSON-RPC transport) ---------------------------------------
+export type { VFSClient, VFSClientEvent, VFSClientOptions } from './client.js';
+export { createVFSClient } from './client.js';
 export type { VFSError, VFSErrorOptions } from './errors.js';
 // ---- Errors ----------------------------------------------------------------
 export { createVFSError, isVFSError, toError } from './errors.js';
@@ -77,9 +80,6 @@ export {
 	createTrailingWhitespaceValidator,
 	validateSnapshot,
 } from './validators.js';
-// ---- VFS Client (JSON-RPC transport) ---------------------------------------
-export type { VFSClient, VFSClientEvent, VFSClientOptions } from './client.js';
-export { createVFSClient } from './client.js';
 // ---- VFS (async wrapper over Rust subprocess) ------------------------------
 export type { VFSMetrics, VirtualFS, VirtualFSOptions } from './vfs.js';
 export { createVirtualFS } from './vfs.js';

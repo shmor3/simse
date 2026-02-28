@@ -93,9 +93,7 @@ export interface VirtualFS {
 		options?: VFSSearchOptions,
 	) => Promise<readonly VFSSearchResult[] | number>;
 
-	readonly history: (
-		path: string,
-	) => Promise<readonly VFSHistoryEntry[]>;
+	readonly history: (path: string) => Promise<readonly VFSHistoryEntry[]>;
 	readonly diff: (
 		oldPath: string,
 		newPath: string,
@@ -277,10 +275,7 @@ export async function createVirtualFS(
 
 		// ----- Directory operations -------------------------------------------
 
-		mkdir: async (
-			path: string,
-			opts?: VFSMkdirOptions,
-		): Promise<void> => {
+		mkdir: async (path: string, opts?: VFSMkdirOptions): Promise<void> => {
 			const params: Record<string, unknown> = { path };
 			if (opts?.recursive !== undefined) {
 				params.recursive = opts.recursive;
@@ -301,33 +296,24 @@ export async function createVirtualFS(
 			return Object.freeze(result.entries);
 		},
 
-		rmdir: async (
-			path: string,
-			opts?: VFSDeleteOptions,
-		): Promise<boolean> => {
-			const result = await client.request<{ deleted: boolean }>(
-				'vfs/rmdir',
-				{
-					path,
-					recursive: opts?.recursive,
-				},
-			);
+		rmdir: async (path: string, opts?: VFSDeleteOptions): Promise<boolean> => {
+			const result = await client.request<{ deleted: boolean }>('vfs/rmdir', {
+				path,
+				recursive: opts?.recursive,
+			});
 			return result.deleted;
 		},
 
 		// ----- Stat / exists / rename / copy ----------------------------------
 
 		stat: async (path: string): Promise<VFSStat> => {
-			return Object.freeze(
-				await client.request<VFSStat>('vfs/stat', { path }),
-			);
+			return Object.freeze(await client.request<VFSStat>('vfs/stat', { path }));
 		},
 
 		exists: async (path: string): Promise<boolean> => {
-			const result = await client.request<{ exists: boolean }>(
-				'vfs/exists',
-				{ path },
-			);
+			const result = await client.request<{ exists: boolean }>('vfs/exists', {
+				path,
+			});
 			return result.exists;
 		},
 
@@ -377,8 +363,7 @@ export async function createVirtualFS(
 		): Promise<readonly VFSSearchResult[] | number> => {
 			const params: Record<string, unknown> = { query };
 			if (opts?.glob !== undefined) params.glob = opts.glob;
-			if (opts?.maxResults !== undefined)
-				params.maxResults = opts.maxResults;
+			if (opts?.maxResults !== undefined) params.maxResults = opts.maxResults;
 			if (opts?.mode !== undefined) params.mode = opts.mode;
 			if (opts?.contextBefore !== undefined)
 				params.contextBefore = opts.contextBefore;
@@ -402,9 +387,7 @@ export async function createVirtualFS(
 
 		// ----- History / diff / checkout --------------------------------------
 
-		history: async (
-			path: string,
-		): Promise<readonly VFSHistoryEntry[]> => {
+		history: async (path: string): Promise<readonly VFSHistoryEntry[]> => {
 			const result = await client.request<{
 				entries: readonly VFSHistoryEntry[];
 			}>('vfs/history', { path });
@@ -418,10 +401,7 @@ export async function createVirtualFS(
 		): Promise<VFSDiffResult> => {
 			const params: Record<string, unknown> = { oldPath, newPath };
 			if (opts?.context !== undefined) params.context = opts.context;
-			const result = await client.request<VFSDiffResult>(
-				'vfs/diff',
-				params,
-			);
+			const result = await client.request<VFSDiffResult>('vfs/diff', params);
 			Object.freeze(result.hunks);
 			return Object.freeze(result);
 		},
@@ -450,10 +430,7 @@ export async function createVirtualFS(
 		// ----- Snapshot / restore / clear / transaction -----------------------
 
 		snapshot: async (): Promise<VFSSnapshot> => {
-			const result = await client.request<VFSSnapshot>(
-				'vfs/snapshot',
-				{},
-			);
+			const result = await client.request<VFSSnapshot>('vfs/snapshot', {});
 			Object.freeze(result.files);
 			Object.freeze(result.directories);
 			return Object.freeze(result);

@@ -730,9 +730,7 @@ describe('createVirtualFS', () => {
 			expect(await vfs.exists('vfs:///old/sub')).toBe(false);
 			expect(await vfs.exists('vfs:///new')).toBe(true);
 			expect(await vfs.exists('vfs:///new/sub')).toBe(true);
-			expect((await vfs.readFile('vfs:///new/sub/f.txt')).text).toBe(
-				'content',
-			);
+			expect((await vfs.readFile('vfs:///new/sub/f.txt')).text).toBe('content');
 		});
 
 		it('throws VFS_ALREADY_EXISTS when destination exists', async () => {
@@ -1881,14 +1879,9 @@ describe('createVirtualFS', () => {
 	describe('search', () => {
 		it('finds substring matches in text files', async () => {
 			const vfs = await createFS();
-			await vfs.writeFile(
-				'vfs:///f.txt',
-				'hello world\nfoo bar\nhello again',
-			);
+			await vfs.writeFile('vfs:///f.txt', 'hello world\nfoo bar\nhello again');
 
-			const results = (await vfs.search(
-				'hello',
-			)) as readonly VFSSearchResult[];
+			const results = (await vfs.search('hello')) as readonly VFSSearchResult[];
 			expect(results.length).toBe(2);
 			expect(results[0].path).toBe('vfs:///f.txt');
 			expect(results[0].line).toBe(1);
@@ -1899,9 +1892,7 @@ describe('createVirtualFS', () => {
 		it('returns line and column accurately', async () => {
 			const vfs = await createFS();
 			await vfs.writeFile('vfs:///f.txt', 'abcXYZdef');
-			const results = (await vfs.search(
-				'XYZ',
-			)) as readonly VFSSearchResult[];
+			const results = (await vfs.search('XYZ')) as readonly VFSSearchResult[];
 			expect(results.length).toBe(1);
 			expect(results[0].line).toBe(1);
 			expect(results[0].column).toBe(4);
@@ -1937,9 +1928,7 @@ describe('createVirtualFS', () => {
 				new Uint8Array([104, 101, 108, 108, 111]),
 			);
 			await vfs.writeFile('vfs:///f.txt', 'hello');
-			const results = (await vfs.search(
-				'hello',
-			)) as readonly VFSSearchResult[];
+			const results = (await vfs.search('hello')) as readonly VFSSearchResult[];
 			expect(results.length).toBe(1);
 			expect(results[0].path).toBe('vfs:///f.txt');
 		});

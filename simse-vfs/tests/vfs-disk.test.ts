@@ -393,10 +393,7 @@ describe('createVFSDisk', () => {
 
 			await vfs1.mkdir('vfs:///src');
 			await vfs1.writeFile('vfs:///src/index.ts', 'const x = 1;');
-			await vfs1.writeFile(
-				'vfs:///src/data.bin',
-				new Uint8Array([10, 20, 30]),
-			);
+			await vfs1.writeFile('vfs:///src/data.bin', new Uint8Array([10, 20, 30]));
 			await vfs1.writeFile('vfs:///readme.txt', 'Hello');
 
 			await disk1.commit(tempDir);

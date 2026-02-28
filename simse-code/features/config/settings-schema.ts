@@ -6,7 +6,13 @@
  * fields exist and how to edit them.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	readdirSync,
+	writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -238,6 +244,90 @@ const allSchemas: readonly ConfigFileSchema[] = Object.freeze([
 const schemaByFilename = new Map<string, ConfigFileSchema>(
 	allSchemas.map((s) => [s.filename, s]),
 );
+
+// ---------------------------------------------------------------------------
+// Embedding model presets
+// ---------------------------------------------------------------------------
+
+const EMBEDDING_MODEL_PRESETS: readonly string[] = Object.freeze([
+	'Snowflake/snowflake-arctic-embed-xs',
+	'nomic-ai/nomic-embed-text-v1.5',
+	'Snowflake/snowflake-arctic-embed-l',
+]);
+
+// ---------------------------------------------------------------------------
+// Dynamic option resolver
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolves dropdown options for a field based on its `resolve` type.
+ * Reads on-disk data (acp.json, agent files) to populate choices.
+ */
+export function resolveFieldOptions(
+	resolve: ResolveType,
+	dataDir: string,
+	workDir?: string,
+): string[] {
+	switch (resolve) {
+		case 'acp-servers': {
+			const config = loadConfigFile(dataDir, 'acp.json');
+			const servers = Array.isArray(config.servers) ? config.servers : [];
+			const names: string[] = [];
+			for (const server of servers) {
+				if (
+					typeof server === 'object' &&
+					server !== null &&
+					typeof server.name === 'string'
+				) {
+					names.push(server.name);
+				}
+			}
+			return [...names, '(unset)', 'Add new server...'];
+		}
+
+		case 'agents': {
+			const ids = new Set<string>();
+
+			// Derive agent IDs from ACP server configs
+			const config = loadConfigFile(dataDir, 'acp.json');
+			const servers = Array.isArray(config.servers) ? config.servers : [];
+			for (const server of servers) {
+				if (typeof server === 'object' && server !== null) {
+					const agentId =
+						typeof server.defaultAgent === 'string'
+							? server.defaultAgent
+							: typeof server.name === 'string'
+								? server.name
+								: undefined;
+					if (agentId) {
+						ids.add(agentId);
+					}
+				}
+			}
+
+			// Scan .simse/agents/*.md files
+			if (workDir) {
+				const agentsDir = join(workDir, '.simse', 'agents');
+				try {
+					const files = readdirSync(agentsDir);
+					for (const file of files) {
+						if (file.endsWith('.md')) {
+							ids.add(file.slice(0, -3));
+						}
+					}
+				} catch {
+					// agents dir doesn't exist — ignore
+				}
+			}
+
+			return [...ids, '(unset)', 'Custom value...'];
+		}
+
+		case 'embedding-models': {
+			return [...EMBEDDING_MODEL_PRESETS, '(unset)', 'Custom model...'];
+		}
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Public API

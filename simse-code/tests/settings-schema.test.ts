@@ -7,6 +7,7 @@ import {
 	getAllConfigSchemas,
 	getConfigSchema,
 	loadConfigFile,
+	resolveFieldOptions,
 	saveConfigField,
 } from '../features/config/settings-schema.js';
 
@@ -457,5 +458,95 @@ describe('field presets and resolve', () => {
 	it('defaultServer in settings.json should have resolve acp-servers', () => {
 		const field = getField('settings.json', 'defaultServer');
 		expect(field.resolve).toBe('acp-servers');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// resolveFieldOptions
+// ---------------------------------------------------------------------------
+
+describe('resolveFieldOptions', () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = makeTempDir();
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	it('should return acp server names from acp.json', () => {
+		const acpData = {
+			servers: [
+				{ name: 'claude', command: 'bunx' },
+				{ name: 'ollama', command: 'bun' },
+			],
+		};
+		writeFileSync(join(tempDir, 'acp.json'), JSON.stringify(acpData));
+
+		const options = resolveFieldOptions('acp-servers', tempDir, tempDir);
+		expect(options).toContain('claude');
+		expect(options).toContain('ollama');
+		expect(options).toContain('(unset)');
+		expect(options).toContain('Add new server...');
+		expect(options[options.length - 1]).toBe('Add new server...');
+	});
+
+	it('should return empty + Add new server when acp.json missing', () => {
+		const options = resolveFieldOptions('acp-servers', tempDir, tempDir);
+		expect(options).toContain('(unset)');
+		expect(options).toContain('Add new server...');
+	});
+
+	it('should return agent IDs from acp.json servers', () => {
+		const acpData = {
+			servers: [
+				{ name: 'claude-server', command: 'bunx', defaultAgent: 'claude-agent' },
+				{ name: 'ollama', command: 'bun' },
+			],
+		};
+		writeFileSync(join(tempDir, 'acp.json'), JSON.stringify(acpData));
+
+		const options = resolveFieldOptions('agents', tempDir, tempDir);
+		expect(options).toContain('claude-agent');
+		expect(options).toContain('ollama');
+		expect(options).toContain('(unset)');
+		expect(options).toContain('Custom value...');
+	});
+
+	it('should return agent IDs from .simse/agents/*.md files', () => {
+		const agentsDir = join(tempDir, '.simse', 'agents');
+		mkdirSync(agentsDir, { recursive: true });
+		writeFileSync(join(agentsDir, 'researcher.md'), '# Researcher');
+		writeFileSync(join(agentsDir, 'coder.md'), '# Coder');
+
+		const options = resolveFieldOptions('agents', tempDir, tempDir);
+		expect(options).toContain('researcher');
+		expect(options).toContain('coder');
+	});
+
+	it('should return embedding model presets', () => {
+		const options = resolveFieldOptions('embedding-models', tempDir, tempDir);
+		expect(options).toContain('Snowflake/snowflake-arctic-embed-xs');
+		expect(options).toContain('nomic-ai/nomic-embed-text-v1.5');
+		expect(options).toContain('Snowflake/snowflake-arctic-embed-l');
+		expect(options).toContain('(unset)');
+		expect(options).toContain('Custom model...');
+	});
+
+	it('should deduplicate agent names from servers and agent files', () => {
+		const acpData = {
+			servers: [{ name: 'researcher', command: 'bunx' }],
+		};
+		writeFileSync(join(tempDir, 'acp.json'), JSON.stringify(acpData));
+
+		const agentsDir = join(tempDir, '.simse', 'agents');
+		mkdirSync(agentsDir, { recursive: true });
+		writeFileSync(join(agentsDir, 'researcher.md'), '# Researcher');
+
+		const options = resolveFieldOptions('agents', tempDir, tempDir);
+		const count = options.filter((o) => o === 'researcher').length;
+		expect(count).toBe(1);
 	});
 });

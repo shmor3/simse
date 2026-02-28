@@ -1,14 +1,14 @@
 /**
  * E2E test: Full library pipeline — embed → store → search → dedup.
  *
- * Tests the complete flow from createLocalEmbedder through
- * createLibrary with real ONNX embeddings.
+ * Uses a deterministic mock embedder that produces consistent vectors
+ * from text content for testing library semantics.
  */
 import { describe, expect, it } from 'bun:test';
 import type { Buffer } from 'node:buffer';
-import { createLocalEmbedder } from '../src/ai/acp/local-embedder.js';
 import { createLibrary } from '../src/ai/library/library.js';
 import type { StorageBackend } from '../src/ai/library/storage.js';
+import type { EmbeddingProvider } from '../src/ai/library/types.js';
 
 // ---------------------------------------------------------------------------
 // In-memory storage backend for tests
@@ -27,14 +27,56 @@ function createMemoryStorage(): StorageBackend {
 }
 
 // ---------------------------------------------------------------------------
+// Deterministic mock embedder
+//
+// Produces 64-dimensional vectors seeded from text content.
+// Similar texts produce similar vectors (word overlap → dimension overlap).
+// ---------------------------------------------------------------------------
+
+function createMockEmbedder(): EmbeddingProvider {
+	const DIM = 128;
+
+	function wordHash(word: string): number {
+		let h = 0;
+		for (let i = 0; i < word.length; i++) {
+			h = (h * 31 + word.charCodeAt(i)) | 0;
+		}
+		return ((h % DIM) + DIM) % DIM;
+	}
+
+	function hashText(text: string): number[] {
+		const vec = new Array(DIM).fill(0);
+		const words = text
+			.toLowerCase()
+			.replace(/[^a-z0-9\s]/g, '')
+			.split(/\s+/);
+		for (const word of words) {
+			if (word.length === 0) continue;
+			// Each word activates a primary and secondary dimension
+			const primary = wordHash(word);
+			const secondary = wordHash(`${word}_`);
+			vec[primary] += 1.0;
+			vec[secondary] += 0.5;
+		}
+		const mag =
+			Math.sqrt(vec.reduce((s: number, v: number) => s + v * v, 0)) || 1;
+		return vec.map((v: number) => v / mag);
+	}
+
+	return Object.freeze({
+		embed: async (input: string | readonly string[]) => {
+			const texts = typeof input === 'string' ? [input] : [...input];
+			return { embeddings: texts.map(hashText) };
+		},
+	});
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
 describe('Library pipeline E2E', () => {
-	const embedder = createLocalEmbedder({
-		model: 'Xenova/all-MiniLM-L6-v2',
-		dtype: 'q8',
-	});
+	const embedder = createMockEmbedder();
 
 	it('adds volumes and searches semantically', async () => {
 		const library = createLibrary(
@@ -56,7 +98,6 @@ describe('Library pipeline E2E', () => {
 			topic: 'weather',
 		});
 
-		// Search with positional args: query, maxResults, threshold
 		const results = await library.search(
 			'What programming languages are useful?',
 			3,
@@ -69,7 +110,7 @@ describe('Library pipeline E2E', () => {
 		const topics = results.map((r) => r.volume.metadata?.topic);
 		expect(topics[0]).toBe('programming');
 		expect(topics[1]).toBe('programming');
-	}, 120_000);
+	});
 
 	it('detects near-duplicate text', async () => {
 		const library = createLibrary(
@@ -86,7 +127,7 @@ describe('Library pipeline E2E', () => {
 		);
 		expect(dupeResult.isDuplicate).toBe(true);
 		expect(dupeResult.similarity).toBeGreaterThan(0.8);
-	}, 120_000);
+	});
 
 	it('stores and retrieves by topic', async () => {
 		const library = createLibrary(
@@ -110,5 +151,5 @@ describe('Library pipeline E2E', () => {
 
 		const topics = library.getTopics();
 		expect(topics.length).toBe(2);
-	}, 120_000);
+	});
 });

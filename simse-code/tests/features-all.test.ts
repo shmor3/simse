@@ -2,7 +2,10 @@ import { describe, expect, test } from 'bun:test';
 import { aiCommands } from '../features/ai/index.js';
 import { createSettingsCommands } from '../features/config/index.js';
 import { filesCommands } from '../features/files/index.js';
-import { libraryCommands } from '../features/library/index.js';
+import {
+	createLibrarianCommands,
+	libraryCommands,
+} from '../features/library/index.js';
 import type { SessionCommandContext } from '../features/session/index.js';
 import { createSessionCommands } from '../features/session/index.js';
 import { createToolsCommands } from '../features/tools/index.js';
@@ -43,6 +46,7 @@ const sessionCommands = createSessionCommands(mockSessionCtx());
 const toolsCommands = createToolsCommands({
 	getToolRegistry: () => mockToolRegistry(),
 });
+const librarianCommands = createLibrarianCommands(async () => {});
 
 describe('all feature modules', () => {
 	test('library module exports commands with correct category', () => {
@@ -75,6 +79,11 @@ describe('all feature modules', () => {
 		for (const cmd of aiCommands) expect(cmd.category).toBe('ai');
 	});
 
+	test('librarian module exports commands with correct category', () => {
+		expect(librarianCommands.length).toBeGreaterThan(0);
+		for (const cmd of librarianCommands) expect(cmd.category).toBe('library');
+	});
+
 	test('no duplicate command names across modules', () => {
 		const allNames = [
 			...libraryCommands,
@@ -83,6 +92,7 @@ describe('all feature modules', () => {
 			...filesCommands,
 			...configCommands,
 			...aiCommands,
+			...librarianCommands,
 		].map((c) => c.name);
 		const unique = new Set(allNames);
 		expect(unique.size).toBe(allNames.length);

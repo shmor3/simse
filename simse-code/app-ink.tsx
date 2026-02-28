@@ -22,8 +22,8 @@ import {
 	PromptInput,
 	type PromptMode,
 } from './components/input/prompt-input.js';
-import type { SetupPresetOption } from './components/input/setup-selector.js';
 import { SettingsExplorer } from './components/input/settings-explorer.js';
+import type { SetupPresetOption } from './components/input/setup-selector.js';
 import { SetupSelector } from './components/input/setup-selector.js';
 import { Banner } from './components/layout/banner.js';
 import { MainLayout } from './components/layout/main-layout.js';
@@ -222,14 +222,11 @@ export function App({
 		resolve: (confirmed: boolean) => void;
 	} | null>(null);
 
-	const handleConfirm = useCallback(
-		(message: string): Promise<boolean> => {
-			return new Promise((resolve) => {
-				setPendingConfirm({ message, resolve });
-			});
-		},
-		[],
-	);
+	const handleConfirm = useCallback((message: string): Promise<boolean> => {
+		return new Promise((resolve) => {
+			setPendingConfirm({ message, resolve });
+		});
+	}, []);
 
 	// Interactive settings explorer — Promise-based active-area dialog
 	const [pendingSettings, setPendingSettings] = useState<{
@@ -310,7 +307,9 @@ export function App({
 		);
 		reg.registerAll(createSessionCommands(sessionCtx));
 		reg.registerAll(filesCommands);
-		reg.registerAll(createSettingsCommands(dataDir, handleShowSettingsExplorer));
+		reg.registerAll(
+			createSettingsCommands(dataDir, handleShowSettingsExplorer),
+		);
 		reg.registerAll(
 			createSetupCommands(
 				dataDir,

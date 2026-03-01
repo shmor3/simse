@@ -94,4 +94,4 @@ describe('TextInput E2E', () => {
 		const screen = term.getScreen();
 		expect(screen).toContain(longText);
 	}, 30_000);
-}, 120_000);
+});

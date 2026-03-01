@@ -84,7 +84,7 @@ describe('createFileStorageBackend', () => {
 		const loaded = await backend.load();
 
 		expect(loaded.get('large')?.length).toBe(100_000);
-		expect(loaded.get('large')?.every((b) => b === 0x42)).toBe(true);
+		expect(loaded.get('large')?.every((b: number) => b === 0x42)).toBe(true);
 	});
 
 	it('should clean up temp files on close', async () => {

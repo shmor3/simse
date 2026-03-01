@@ -233,4 +233,4 @@ describe('Library Commands E2E', () => {
 		expect(screen).toContain('Usage:');
 		expect(screen).toContain('/recommend');
 	}, 30_000);
-}, 300_000);
+});

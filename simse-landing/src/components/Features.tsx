@@ -1,3 +1,5 @@
+import clsx from 'clsx';
+
 const features = [
 	{
 		title: 'ACP Client',
@@ -129,38 +131,65 @@ const features = [
 
 export default function Features() {
 	return (
-		<section className="relative px-6 py-8">
+		<section className={clsx('relative px-6 py-8')}>
 			{/* Section header */}
-			<div className="mx-auto max-w-5xl">
+			<div className={clsx('mx-auto max-w-5xl')}>
 				{/* Card grid */}
-				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+				<div className={clsx('grid gap-4 sm:grid-cols-2 lg:grid-cols-3')}>
 					{features.map((feature, i) => (
 						<article
 							key={feature.title}
-							className="group relative rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-5 opacity-0 animate-fade-in-up [animation-fill-mode:forwards] transition-all duration-300 hover:border-zinc-700 hover:bg-zinc-900/80"
+							className={clsx(
+								'group relative rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-5',
+								'opacity-0 animate-fade-in-up [animation-fill-mode:forwards]',
+								'transition-all duration-300 hover:border-zinc-700 hover:bg-zinc-900/80',
+							)}
 							style={{ animationDelay: `${i * 80}ms` }}
 						>
 							{/* Corner glow on hover */}
-							<div className="pointer-events-none absolute -inset-px rounded-xl opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-								<div className="absolute top-0 left-0 h-px w-16 bg-gradient-to-r from-emerald-500/40 to-transparent" />
-								<div className="absolute top-0 left-0 h-16 w-px bg-gradient-to-b from-emerald-500/40 to-transparent" />
+							<div
+								className={clsx(
+									'pointer-events-none absolute -inset-px rounded-xl opacity-0 transition-opacity duration-300 group-hover:opacity-100',
+								)}
+							>
+								<div
+									className={clsx(
+										'absolute top-0 left-0 h-px w-16 bg-gradient-to-r from-emerald-500/40 to-transparent',
+									)}
+								/>
+								<div
+									className={clsx(
+										'absolute top-0 left-0 h-16 w-px bg-gradient-to-b from-emerald-500/40 to-transparent',
+									)}
+								/>
 							</div>
 
-							<div className="relative">
+							<div className={clsx('relative')}>
 								{/* Icon + label row */}
-								<div className="mb-4 flex items-center gap-3">
-									<div className="flex size-9 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-400 transition-colors group-hover:border-emerald-500/30 group-hover:text-emerald-400">
+								<div className={clsx('mb-4 flex items-center gap-3')}>
+									<div
+										className={clsx(
+											'flex size-9 items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900 text-zinc-400',
+											'transition-colors group-hover:border-emerald-500/30 group-hover:text-emerald-400',
+										)}
+									>
 										{feature.icon}
 									</div>
-									<span className="font-mono text-[10px] tracking-widest text-zinc-700 uppercase transition-colors group-hover:text-zinc-600">
+									<span
+										className={clsx(
+											'font-mono text-[10px] tracking-widest text-zinc-700 uppercase transition-colors group-hover:text-zinc-600',
+										)}
+									>
 										{feature.label}
 									</span>
 								</div>
 
-								<h3 className="text-base font-semibold text-zinc-200">
+								<h3 className={clsx('text-base font-semibold text-zinc-200')}>
 									{feature.title}
 								</h3>
-								<p className="mt-2 text-sm leading-relaxed text-zinc-500">
+								<p
+									className={clsx('mt-2 text-sm leading-relaxed text-zinc-500')}
+								>
 									{feature.description}
 								</p>
 							</div>

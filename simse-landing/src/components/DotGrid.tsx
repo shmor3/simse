@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { useEffect, useRef } from 'react';
 
 const GRID = 24;
@@ -122,7 +123,7 @@ export default function DotGrid() {
 	return (
 		<canvas
 			ref={canvasRef}
-			className="pointer-events-none fixed inset-0 z-0"
+			className={clsx('pointer-events-none fixed inset-0 z-0')}
 			aria-hidden="true"
 		/>
 	);

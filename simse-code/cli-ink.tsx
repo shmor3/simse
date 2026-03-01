@@ -1,9 +1,26 @@
 #!/usr/bin/env bun
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { render } from 'ink';
 import type { ACPClient, ACPPermissionRequestInfo } from 'simse';
 import { createACPClient, toError } from 'simse';
+
+const __dir =
+	typeof import.meta.dirname === 'string'
+		? import.meta.dirname
+		: dirname(fileURLToPath(import.meta.url));
+
+/** Resolve a Rust engine binary from the local build tree. */
+function resolveEngine(crateName: string): string | undefined {
+	const ext = process.platform === 'win32' ? '.exe' : '';
+	for (const profile of ['release', 'debug']) {
+		const p = resolve(__dir, '..', crateName, 'target', profile, `${crateName}-engine${ext}`);
+		if (existsSync(p)) return p;
+	}
+	return undefined;
+}
 import { App } from './app-ink.js';
 import { createCLIConfig } from './config.js';
 import type { Conversation } from './conversation.js';
@@ -82,6 +99,7 @@ async function bootstrap(): Promise<{
 
 	const acpClient = createACPClient(config.acp, {
 		logger,
+		enginePath: resolveEngine('simse-acp'),
 		onPermissionRequest: async (
 			info: ACPPermissionRequestInfo,
 		): Promise<string | undefined> => {
@@ -205,6 +223,7 @@ bootstrap()
 					serverName={serverName}
 					modelName={modelName}
 					acpClient={acpClient}
+					acpEnginePath={resolveEngine('simse-acp')}
 					conversation={conversation}
 					toolRegistry={toolRegistry}
 					permissionManager={permissionManager}

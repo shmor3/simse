@@ -14,8 +14,12 @@ bun test --watch           # bun test --watch
 bun test --coverage        # bun test --coverage
 bun run build:vector-engine  # cd simse-vector && cargo build --release
 bun run build:vfs-engine     # cd simse-vfs && cargo build --release
+bun run build:acp-engine     # cd simse-acp && cargo build --release
+bun run build:mcp-engine     # cd simse-mcp && cargo build --release
 cd simse-vector && cargo test  # Rust vector engine tests
 cd simse-vfs && cargo test     # Rust VFS engine tests
+cd simse-acp && cargo test     # Rust ACP engine tests
+cd simse-mcp && cargo test     # Rust MCP engine tests
 ```
 
 ## Architecture
@@ -28,6 +32,8 @@ simse is a modular pipeline framework for orchestrating multi-step AI workflows.
 src/                        # TypeScript — main package
 simse-vector/               # Pure Rust crate — vector store engine (JSON-RPC over stdio)
 simse-vfs/                  # Pure Rust crate — virtual filesystem engine (JSON-RPC over stdio)
+simse-acp/                  # Pure Rust crate — ACP engine (JSON-RPC over stdio)
+simse-mcp/                  # Pure Rust crate — MCP engine (JSON-RPC over stdio)
 simse-engine/               # Pure Rust crate — core engine (unchanged)
 ```
 
@@ -61,34 +67,26 @@ src/
       logger.ts             # Minimal Logger + EventBus interfaces, createNoopLogger
                              # Shared by library/ and vfs/ (subset of root logger.ts)
     acp/
-      acp-client.ts         # ACP client: generate(), generateStream(), chat(), embed()
-                             # Session management: listSessions(), loadSession(), deleteSession()
-                             # Mode/model switching: setSessionMode(), setSessionModel()
-      acp-connection.ts      # JSON-RPC 2.0 over NDJSON stdio transport
-                             # Permission handling with ACP option selection
-                             # AbortSignal support for request cancellation
-                             # Stderr routing to logger
-                             # Connection health check: isHealthy (child process liveness)
-      acp-results.ts        # Response parsing: extractContentText, extractTokenUsage
-                             # Tool call extraction: extractToolCall, extractToolCallUpdate
+      acp-engine-client.ts  # JSON-RPC client spawning simse-acp Rust engine
+      acp-client.ts         # Thin client delegating to acp-engine-client
+                             # generate(), generateStream(), chat(), embed()
+                             # Session management, mode/model switching
       acp-adapters.ts       # EmbeddingProvider + TextGenerationProvider adapters for ACP
       local-embedder.ts     # In-process embedding via @huggingface/transformers
       tei-bridge.ts         # Text Embeddings Inference (TEI) HTTP bridge
       types.ts              # ACP types: sessions, content blocks, streaming, permissions,
                              # tool calls, sampling params, model/mode info
+      index.ts              # Barrel re-export
     mcp/
-      mcp-client.ts         # MCP client: tools, resources, prompts, completions
-                             # Logging: setLoggingLevel(), onLoggingMessage()
-                             # List-changed: onToolsChanged(), onResourcesChanged()
-                             # Roots: setRoots(), sendRootsListChanged()
-                             # Resource templates: listResourceTemplates()
-                             # Retry logic on tool calls and resource reads
-      mcp-server.ts         # MCP server: generate, run-chain, list-agents,
-                             # library-search, library-shelve, vfs-*, task-* tools
-                             # List-changed notifications
-                             # Logging support
+      mcp-engine-client.ts  # JSON-RPC client spawning simse-mcp Rust engine
+      mcp-client.ts         # Thin client delegating to mcp-engine-client
+                             # tools, resources, prompts, completions, logging, roots
+      mcp-server.ts         # MCP server with tool handler callback pattern
+                             # generate, run-chain, list-agents, library-search,
+                             # library-shelve, vfs-*, task-* tools
       types.ts              # MCP types: tools, resources, prompts, logging,
                              # completions, roots, resource templates, annotations
+      index.ts              # Barrel re-export
     agent/
       agent-executor.ts     # Step execution dispatcher (acp/mcp/library providers)
       types.ts              # AgentResult, AgentStepConfig, ParallelConfig, SwarmMerge
@@ -197,6 +195,39 @@ simse-vfs/                  # Pure Rust crate
     error.rs                # Rust error types
   tests/
     integration.rs          # Integration tests
+
+simse-acp/                  # Pure Rust crate
+  Cargo.toml
+  src/
+    lib.rs                  # Library entry point
+    main.rs                 # Binary entry point (JSON-RPC server)
+    server.rs               # JSON-RPC request dispatcher
+    transport.rs            # NDJSON stdio transport
+    protocol.rs             # ACP + JSON-RPC protocol definitions
+    connection.rs           # Child process management, request/response tracking
+    permission.rs           # Permission policy resolution (AutoApprove/Deny/Prompt)
+    stream.rs               # Streaming state machine (futures::Stream<Item = StreamChunk>)
+    resilience.rs           # Circuit breaker, health monitor, retry with backoff
+    client.rs               # AcpClient orchestration: multi-server pool, sessions, agents
+    error.rs                # Rust error types (AcpError)
+  tests/
+    integration.rs          # Integration tests
+
+simse-mcp/                  # Pure Rust crate
+  Cargo.toml
+  src/
+    lib.rs                  # Library entry point
+    main.rs                 # Binary entry point (JSON-RPC server)
+    rpc_server.rs           # JSON-RPC request dispatcher (wraps McpClient + McpServer)
+    rpc_transport.rs        # NDJSON stdio transport for the RPC wrapper
+    protocol.rs             # MCP + JSON-RPC protocol definitions
+    stdio_transport.rs      # Stdio transport for connecting to MCP servers
+    http_transport.rs       # HTTP transport for connecting to MCP servers
+    client.rs               # McpClient: multi-server connections, tools, resources, prompts
+    mcp_server.rs           # McpServer: tool/resource/prompt hosting for external clients
+    error.rs                # Rust error types (McpError)
+  tests/
+    integration.rs          # Integration tests
 ```
 
 ### Key Patterns
@@ -207,18 +238,27 @@ simse-vfs/                  # Pure Rust crate
 - **`toError(unknown)`**: Always wrap catch-block errors with `toError()` from `errors/index.js` before accessing `.message`.
 - **ESM-only**: All imports use `.js` extensions (`import { foo } from './bar.js'`). The `verbatimModuleSyntax` tsconfig flag is enabled — use `import type` for type-only imports.
 - **Shared logger interface**: `src/ai/shared/logger.ts` defines a minimal `Logger` + `EventBus` interface used by `library/` and `vfs/`. The root `src/logger.ts` is a superset — never import the root logger from library/vfs code.
-- **Rust engine subprocess pattern**: Both `library/client.ts` and `vfs/client.ts` spawn a Rust binary as a child process, communicate over JSON-RPC 2.0 / NDJSON stdio, and handle lifecycle (spawn, health check, dispose).
+- **Rust engine subprocess pattern**: `library/client.ts`, `vfs/client.ts`, `acp/acp-engine-client.ts`, and `mcp/mcp-engine-client.ts` each spawn a Rust binary as a child process, communicate over JSON-RPC 2.0 / NDJSON stdio, and handle lifecycle (spawn, health check, dispose).
 - **In-flight promise deduplication**: `load()`, `initialize()`, MCP `start()`, and MCP `connect()` use a stored promise to deduplicate concurrent callers. The pattern is: check for existing promise → create if missing → clear in `.finally()`.
 - **Doom loop detection**: The agentic loop tracks consecutive identical tool calls (same name + JSON-stringified args). After `maxIdenticalToolCalls` (default 3), it fires `onDoomLoop` callback, publishes `loop.doom_loop` event, and injects a system warning into the conversation.
 - **Tool output truncation**: `ToolRegistryOptions.maxOutputChars` (default 50,000) caps tool output to prevent context overflow. Per-tool `ToolDefinition.maxOutputChars` overrides the registry default. Truncated output gets an `[OUTPUT TRUNCATED]` suffix.
 - **Session forking**: `SessionManager.fork(id)` creates a new session with cloned conversation state via `toJSON()`/`fromJSON()`, a fresh event bus, and new ID/timestamp.
 - **Structured compaction**: When auto-compaction fires, the prompt requests 6 sections (Goal, Progress, Current State, Key Decisions, Relevant Files, Next Steps). `AgenticLoopOptions.compactionPrompt` overrides the default. `LoopCallbacks.onPreCompaction` can inject extra context before summarization.
-- **Connection health check**: `ACPConnection.isHealthy` verifies the child process is still running. `withResilience` auto-reconnects unhealthy connections before retry attempts.
+- **Connection health check**: ACP connection health is managed in Rust (`connection.rs` uses `Arc<AtomicBool>` updated on process EOF). `withResilience` auto-reconnects unhealthy connections before retry attempts.
 
 ### ACP Protocol
 
-The ACP client implements the [Agent Client Protocol](https://agentclientprotocol.com) over JSON-RPC 2.0 / NDJSON stdio:
+The ACP engine is implemented in Rust (`simse-acp/`) and exposes the [Agent Client Protocol](https://agentclientprotocol.com) over JSON-RPC 2.0 / NDJSON stdio. The TS layer (`src/ai/acp/acp-engine-client.ts`) is a thin JSON-RPC client that spawns the Rust binary.
 
+**Rust engine** (`simse-acp/src/`) — handles all ACP operations:
+- **Client** (`client.rs`): Multi-server connection pool, session caching, agent discovery, resilient request execution
+- **Connection** (`connection.rs`): Child process management, NDJSON parsing, request/response tracking, notification routing
+- **Stream** (`stream.rs`): `futures::Stream` state machine with sliding-window timeout, cancellation, permission-aware suspension
+- **Permission** (`permission.rs`): Policy-based resolution (AutoApprove/Deny/Prompt)
+- **Resilience** (`resilience.rs`): Circuit breaker (Closed/Open/HalfOpen), health monitor (sliding window), retry with exponential backoff + jitter
+- **Server** (`server.rs`): JSON-RPC dispatcher routing requests to AcpClient
+
+**Protocol details:**
 - **Protocol version**: 1
 - **Field naming**: camelCase throughout (`sessionId`, `stopReason`, `agentInfo`, not snake_case)
 - **Session lifecycle**: `session/new` → `session/prompt` → `session/update` notifications → response
@@ -233,10 +273,19 @@ The ACP client implements the [Agent Client Protocol](https://agentclientprotoco
 
 ### MCP Protocol
 
-The MCP implementation uses `@modelcontextprotocol/sdk`:
+The MCP engine is implemented in Rust (`simse-mcp/`) and implements the [Model Context Protocol](https://modelcontextprotocol.io) over JSON-RPC 2.0 / NDJSON stdio. The TS layer (`src/ai/mcp/mcp-engine-client.ts`) is a thin JSON-RPC client that spawns the Rust binary.
 
+**Rust engine** (`simse-mcp/src/`) — handles all MCP operations:
+- **Client** (`client.rs`): Multi-server connections (stdio + HTTP), tool/resource/prompt aggregation, circuit breaker + health monitor per server, retry with backoff
+- **Server** (`mcp_server.rs`): Tool/resource/prompt registration and hosting, capability advertisement, logging level management, workspace roots tracking
+- **Stdio transport** (`stdio_transport.rs`): Child process management, MCP initialize/initialized handshake, notification routing
+- **HTTP transport** (`http_transport.rs`): HTTP POST-based JSON-RPC transport for remote MCP servers
+- **RPC server** (`rpc_server.rs`): JSON-RPC dispatcher wrapping both McpClient and McpServer, tool execution callback pattern for TS integration
+- **RPC transport** (`rpc_transport.rs`): NDJSON stdio transport for the outer JSON-RPC wrapper
+
+**Protocol details:**
 - **Client**: Connects to external MCP servers via stdio or HTTP transport
-- **Server**: Exposes simse capabilities as MCP tools (generate, run-chain, list-agents, library-search, library-shelve)
+- **Server**: Exposes simse capabilities as MCP tools (generate, run-chain, list-agents, library-search, library-shelve, vfs-*, task-*)
 - **Logging**: `setLoggingLevel()` + `onLoggingMessage()` for structured log collection
 - **List-changed**: Notification handlers for dynamic tool/resource/prompt discovery
 - **Completions**: `complete()` for argument autocomplete

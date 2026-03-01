@@ -11,7 +11,8 @@ import { createACPEmbedder, createACPGenerator } from '../providers.js';
 // ---------------------------------------------------------------------------
 
 function createMockACPClient(overrides: Partial<ACPClient> = {}): ACPClient {
-	const noop = () => {};
+	// biome-ignore lint/suspicious/noExplicitAny: typed as any so mockResolvedValue accepts non-void values
+	const noop = (): any => {};
 	return {
 		initialize: mock(noop),
 		dispose: mock(noop),

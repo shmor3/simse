@@ -61,6 +61,7 @@ interface AppProps {
 	readonly serverName?: string;
 	readonly modelName?: string;
 	readonly acpClient: ACPClient;
+	readonly acpEnginePath?: string;
 	readonly conversation: Conversation;
 	readonly toolRegistry: ToolRegistry;
 	readonly permissionManager: PermissionManager;
@@ -74,6 +75,7 @@ export function App({
 	serverName: initialServerName,
 	modelName: initialModelName,
 	acpClient: initialAcpClient,
+	acpEnginePath,
 	conversation: initialConversation,
 	toolRegistry: initialToolRegistry,
 	permissionManager,
@@ -149,6 +151,7 @@ export function App({
 
 			const newClient = createACPClient(config.acp, {
 				logger,
+				enginePath: acpEnginePath,
 				onPermissionRequest: async (
 					info: ACPPermissionRequestInfo,
 				): Promise<string | undefined> => {

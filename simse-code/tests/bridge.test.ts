@@ -108,8 +108,8 @@ describe('acp-ollama-bridge (JSON-RPC)', () => {
 			expect(response.error).toBeUndefined();
 
 			const result = response.result as ACPInitializeResult;
-			expect(result.server_info.name).toBe('acp-ollama-bridge');
-			expect(result.server_info.version).toBe('2.0.0');
+			expect(result.agentInfo.name).toBe('acp-ollama-bridge');
+			expect(result.agentInfo.version).toBe('2.0.0');
 		} finally {
 			bridge.close();
 		}
@@ -142,9 +142,9 @@ describe('acp-ollama-bridge (JSON-RPC)', () => {
 			expect(response.error).toBeUndefined();
 
 			const result = response.result as ACPSessionNewResult;
-			expect(result.session_id).toBeDefined();
-			expect(typeof result.session_id).toBe('string');
-			expect(result.session_id.length).toBeGreaterThan(0);
+			expect(result.sessionId).toBeDefined();
+			expect(typeof result.sessionId).toBe('string');
+			expect(result.sessionId.length).toBeGreaterThan(0);
 		} finally {
 			bridge.close();
 		}
@@ -238,8 +238,8 @@ describe('acp-ollama-bridge (JSON-RPC)', () => {
 			expect(sess2.id).toBe(3);
 
 			// Different session IDs
-			const id1 = (sess1.result as ACPSessionNewResult).session_id;
-			const id2 = (sess2.result as ACPSessionNewResult).session_id;
+			const id1 = (sess1.result as ACPSessionNewResult).sessionId;
+			const id2 = (sess2.result as ACPSessionNewResult).sessionId;
 			expect(id1).not.toBe(id2);
 		} finally {
 			bridge.close();

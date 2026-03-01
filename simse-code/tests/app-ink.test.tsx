@@ -3,6 +3,7 @@ import { render } from 'ink-testing-library';
 import { App } from '../app-ink.js';
 import { createConversation } from '../conversation.js';
 import type { PermissionManager } from '../permission-manager.js';
+import type { SessionStore } from '../session-store.js';
 
 // Minimal mock ACPClient for testing
 function createMockACPClient() {
@@ -65,6 +66,19 @@ function createMockPermissionManager(): PermissionManager {
 	};
 }
 
+function createMockSessionStore(): SessionStore {
+	return {
+		create: () => 'test-session-1',
+		append: () => {},
+		load: () => [],
+		list: () => [],
+		get: () => undefined,
+		rename: () => {},
+		remove: () => {},
+		latest: () => undefined,
+	};
+}
+
 describe('App', () => {
 	test('renders without crashing', () => {
 		const { lastFrame } = render(
@@ -74,6 +88,8 @@ describe('App', () => {
 				conversation={createConversation()}
 				toolRegistry={createMockToolRegistry()}
 				permissionManager={createMockPermissionManager()}
+				sessionStore={createMockSessionStore()}
+				sessionId="test-session-1"
 			/>,
 		);
 		expect(lastFrame()).toBeDefined();
@@ -87,6 +103,8 @@ describe('App', () => {
 				conversation={createConversation()}
 				toolRegistry={createMockToolRegistry()}
 				permissionManager={createMockPermissionManager()}
+				sessionStore={createMockSessionStore()}
+				sessionId="test-session-1"
 			/>,
 		);
 		expect(lastFrame()).toContain('>');
@@ -101,6 +119,8 @@ describe('App', () => {
 				conversation={createConversation()}
 				toolRegistry={createMockToolRegistry()}
 				permissionManager={createMockPermissionManager()}
+				sessionStore={createMockSessionStore()}
+				sessionId="test-session-1"
 			/>,
 		);
 		expect(lastFrame()).toContain('simse');

@@ -62,4 +62,4 @@ describe('Banner E2E', () => {
 		// The banner box uses ╭ (U+256D) as the top-left corner
 		expect(screen).toContain('\u256D');
 	}, 30_000);
-}, 120_000);
+});

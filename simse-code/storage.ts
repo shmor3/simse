@@ -13,7 +13,15 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { gunzipSync, gzipSync } from 'node:zlib';
-import type { StorageBackend } from 'simse';
+// ---------------------------------------------------------------------------
+// StorageBackend interface (previously exported from simse)
+// ---------------------------------------------------------------------------
+
+export interface StorageBackend {
+	readonly load: () => Promise<Map<string, Buffer>>;
+	readonly save: (data: Map<string, Buffer>) => Promise<void>;
+	readonly close: () => Promise<void>;
+}
 
 // ---------------------------------------------------------------------------
 // Options

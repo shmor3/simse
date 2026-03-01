@@ -19,9 +19,9 @@ import {
 	type Logger,
 	type PatronProfile,
 	type RetryOptions,
-	type StorageBackend,
 	type TaskList,
 	type TextGenerationProvider,
+	type TopicInfo,
 } from 'simse';
 import { type AgentService, createAgentService } from './agents.js';
 import type { PromptConfig } from './config.js';
@@ -108,8 +108,10 @@ export interface AppOptions {
 	readonly config: AppConfig;
 	/** Logger instance. */
 	readonly logger: Logger;
-	/** Storage backend for library persistence. */
-	readonly storage: StorageBackend;
+	/** Path to the Rust vector engine binary. */
+	readonly enginePath: string;
+	/** Directory for Rust-side persistence. If provided, data persists across restarts. */
+	readonly storagePath?: string;
 	/** Embedding provider — required for all library operations. */
 	readonly embedder: EmbeddingProvider;
 	/** Text generation provider — required for summarization. */
@@ -118,10 +120,6 @@ export interface AppOptions {
 	readonly duplicateThreshold?: number;
 	/** Duplicate detection behavior: skip, warn, or error. */
 	readonly duplicateBehavior?: 'skip' | 'warn' | 'error';
-	/** Whether vector store auto-saves on every mutation. */
-	readonly autoSave?: boolean;
-	/** Auto-flush interval in ms (0 = disabled, only used when autoSave is false). */
-	readonly flushIntervalMs?: number;
 	/** Default max results for search(). */
 	readonly defaultSearchResults?: number;
 	/** Default max results for recommend(). */
@@ -156,8 +154,8 @@ export interface KnowledgeBaseApp {
 		metadata?: Record<string, string>,
 	) => Promise<string>;
 	readonly deleteVolume: (id: string) => Promise<boolean>;
-	readonly getVolume: (id: string) => VolumeView | undefined;
-	readonly getAllVolumes: () => readonly VolumeView[];
+	readonly getVolume: (id: string) => Promise<VolumeView | undefined>;
+	readonly getAllVolumes: () => Promise<readonly VolumeView[]>;
 
 	// Search & discovery
 	readonly search: (
@@ -168,8 +166,8 @@ export interface KnowledgeBaseApp {
 		query: string,
 		maxResults?: number,
 	) => Promise<readonly SearchResultView[]>;
-	readonly getTopics: () => readonly TopicView[];
-	readonly getVolumesByTopic: (topic: string) => readonly VolumeView[];
+	readonly getTopics: () => Promise<readonly TopicView[]>;
+	readonly getVolumesByTopic: (topic: string) => Promise<readonly VolumeView[]>;
 
 	// Generation — library-aware by default
 	readonly generate: (
@@ -205,7 +203,7 @@ export interface KnowledgeBaseApp {
 	) => Promise<string>;
 
 	// Learning
-	readonly getPatronProfile: () => PatronProfile | undefined;
+	readonly getPatronProfile: () => Promise<PatronProfile | undefined>;
 
 	// Re-embed — clear and re-add all entries with the current embedding provider
 	readonly reembed: (
@@ -219,7 +217,7 @@ export interface KnowledgeBaseApp {
 	readonly tasks: TaskList;
 
 	// Stats
-	readonly volumeCount: number;
+	readonly volumeCount: Promise<number>;
 }
 
 // ---------------------------------------------------------------------------
@@ -266,12 +264,11 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 	const tasks = createTaskList();
 
 	const library = createLibrary(embedder, config.memory, {
-		storage: appOptions.storage,
+		enginePath: appOptions.enginePath,
+		storagePath: appOptions.storagePath,
 		logger,
 		textGenerator,
 		stacksOptions: {
-			autoSave: appOptions.autoSave,
-			flushIntervalMs: appOptions.flushIntervalMs,
 			duplicateThreshold: appOptions.duplicateThreshold,
 			duplicateBehavior: appOptions.duplicateBehavior,
 		},
@@ -281,7 +278,8 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 
 	const initialize = async (): Promise<void> => {
 		await library.initialize();
-		logger.info(`Knowledge base ready (${library.size} existing volumes)`);
+		const count = await library.size;
+		logger.info(`Knowledge base ready (${count} existing volumes)`);
 	};
 
 	const dispose = async (): Promise<void> => {
@@ -296,7 +294,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 	const autoSummarizeTopic = async (topic: string): Promise<void> => {
 		if (autoSummarizeThreshold <= 0 || !textGenerator) return;
 
-		const topicVolumes = library.filterByTopic([topic]);
+		const topicVolumes = await library.filterByTopic([topic]);
 		if (topicVolumes.length <= autoSummarizeThreshold) return;
 
 		// Summarize the oldest half, keep the newest half fresh
@@ -335,13 +333,15 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 
 	const deleteVolume = (id: string): Promise<boolean> => library.delete(id);
 
-	const getVolume = (id: string): VolumeView | undefined => {
-		const entry = library.getById(id);
+	const getVolume = async (id: string): Promise<VolumeView | undefined> => {
+		const entry = await library.getById(id);
 		return entry ? toVolumeView(entry) : undefined;
 	};
 
-	const getAllVolumes = (): readonly VolumeView[] =>
-		Object.freeze(library.getAll().map(toVolumeView));
+	const getAllVolumes = async (): Promise<readonly VolumeView[]> => {
+		const all = await library.getAll();
+		return Object.freeze(all.map(toVolumeView));
+	};
 
 	// -- Search & discovery ---------------------------------------------------
 
@@ -374,18 +374,20 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		);
 	};
 
-	const getTopics = (): readonly TopicView[] => {
+	const getTopics = async (): Promise<readonly TopicView[]> => {
+		const topics = await library.getTopics();
 		return Object.freeze(
-			library
-				.getTopics()
-				.map((t) =>
-					Object.freeze({ topic: t.topic, volumeCount: t.entryCount }),
-				),
+			topics.map((t: TopicInfo) =>
+				Object.freeze({ topic: t.topic, volumeCount: t.entryCount }),
+			),
 		);
 	};
 
-	const getVolumesByTopic = (topic: string): readonly VolumeView[] => {
-		return Object.freeze(library.filterByTopic([topic]).map(toVolumeView));
+	const getVolumesByTopic = async (
+		topic: string,
+	): Promise<readonly VolumeView[]> => {
+		const volumes = await library.filterByTopic([topic]);
+		return Object.freeze(volumes.map(toVolumeView));
 	};
 
 	// -- Generate (library-aware) ----------------------------------------------
@@ -394,7 +396,8 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		prompt: string,
 		options?: GenerateOptions,
 	): Promise<GenerateResult> => {
-		const useLibrary = !options?.skipLibrary && library.size > 0;
+		const currentSize = await library.size;
+		const useLibrary = !options?.skipLibrary && currentSize > 0;
 		let libraryContext: SearchResultView[] = [];
 		let enrichedPrompt = prompt;
 
@@ -492,7 +495,8 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		prompt: string,
 		options?: GenerateOptions,
 	): Promise<LibraryStreamResult> => {
-		const useLibrary = !options?.skipLibrary && library.size > 0;
+		const streamSize = await library.size;
+		const useLibrary = !options?.skipLibrary && streamSize > 0;
 		let libraryContext: SearchResultView[] = [];
 		let enrichedPrompt = prompt;
 
@@ -673,8 +677,8 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 
 	// -- Learning -------------------------------------------------------------
 
-	const getPatronProfile = (): PatronProfile | undefined => {
-		return library.patronProfile;
+	const getPatronProfile = async (): Promise<PatronProfile | undefined> => {
+		return await library.patronProfile;
 	};
 
 	// -- Re-embed -------------------------------------------------------------
@@ -682,7 +686,7 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 	const reembed = async (
 		onProgress?: (done: number, total: number) => void,
 	): Promise<number> => {
-		const allEntries = library.getAll();
+		const allEntries = await library.getAll();
 		if (allEntries.length === 0) return 0;
 
 		// Snapshot text + metadata before clearing

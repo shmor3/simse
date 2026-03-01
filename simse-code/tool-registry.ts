@@ -187,7 +187,7 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 				},
 				async (args) => {
 					const path = String(args.path ?? 'vfs:///');
-					const result = vfs.readFile(path);
+					const result = await vfs.readFile(path);
 					if (result.contentType === 'binary') {
 						return `[Binary file: ${result.size} bytes]`;
 					}
@@ -219,14 +219,14 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 					// Capture old content for diff
 					let oldContent = '';
 					try {
-						const existing = vfs.readFile(path);
+						const existing = await vfs.readFile(path);
 						if (existing.contentType === 'text') {
 							oldContent = existing.text;
 						}
 					} catch {
 						// File doesn't exist yet
 					}
-					vfs.writeFile(path, content, { createParents: true });
+					await vfs.writeFile(path, content, { createParents: true });
 					return {
 						output: `Wrote ${Buffer.byteLength(content, 'utf-8')} bytes to ${path}`,
 						diff: generateWriteDiff(oldContent, content),
@@ -249,7 +249,7 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 				},
 				async (args) => {
 					const path = String(args.path ?? 'vfs:///');
-					const entries = vfs.readdir(path);
+					const entries = await vfs.readdir(path);
 					if (entries.length === 0) return 'Directory is empty.';
 					return entries
 						.map((e) => `${e.type === 'directory' ? 'd' : 'f'} ${e.name}`)
@@ -271,7 +271,7 @@ export function createToolRegistry(options: ToolRegistryOptions): ToolRegistry {
 				},
 				async (args) => {
 					const path = String(args.path ?? 'vfs:///');
-					return vfs.tree(path);
+					return await vfs.tree(path);
 				},
 			);
 		}

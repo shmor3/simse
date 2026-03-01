@@ -354,24 +354,24 @@ describe('createCLIConfig', () => {
 		expect(libraryConfig.enabled).toBe(true);
 	});
 
-	it('should read embeddingServer from memory.json', () => {
+	it('should read embeddingServer from embed.json', () => {
 		writeJson(testDir, 'acp.json', makeACPConfig());
-		writeJson(testDir, 'memory.json', {
+		writeJson(testDir, 'embed.json', {
 			embeddingServer: 'embed-server',
-		} satisfies LibraryFileConfig);
+		} satisfies EmbedFileConfig);
 
 		const result = createCLIConfig({ dataDir: testDir });
-		expect(result.libraryConfig.embeddingServer).toBe('embed-server');
+		expect(result.embedConfig.embeddingServer).toBe('embed-server');
 	});
 
-	it('should read embeddingModel from memory.json', () => {
+	it('should read embeddingModel from embed.json', () => {
 		writeJson(testDir, 'acp.json', makeACPConfig());
-		writeJson(testDir, 'memory.json', {
+		writeJson(testDir, 'embed.json', {
 			embeddingModel: 'nomic-embed-text',
-		} satisfies LibraryFileConfig);
+		} satisfies EmbedFileConfig);
 
 		const result = createCLIConfig({ dataDir: testDir });
-		expect(result.libraryConfig.embeddingModel).toBe('nomic-embed-text');
+		expect(result.embedConfig.embeddingModel).toBe('nomic-embed-text');
 	});
 
 	it('should read storageFilename from memory.json', () => {

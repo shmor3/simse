@@ -49,4 +49,4 @@ describe('Startup E2E', () => {
 		expect(screen).toContain('No ACP server configured');
 		expect(screen).toContain('/setup');
 	}, 30_000);
-}, 120_000);
+});

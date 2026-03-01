@@ -75,4 +75,4 @@ describe('Tools Commands E2E', () => {
 		expect(screen).toContain('Listing skills');
 		expect(screen).not.toContain('Unknown command');
 	}, 30_000);
-}, 120_000);
+});

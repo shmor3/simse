@@ -94,11 +94,17 @@ export async function validateEmail(email: string): Promise<ValidationResult> {
 	}
 
 	if (isDisposable(domain)) {
-		return { valid: false, reason: 'Disposable email addresses are not allowed' };
+		return {
+			valid: false,
+			reason: 'Disposable email addresses are not allowed',
+		};
 	}
 
 	if (!(await hasMxRecords(domain))) {
-		return { valid: false, reason: 'This email domain does not appear to accept mail' };
+		return {
+			valid: false,
+			reason: 'This email domain does not appear to accept mail',
+		};
 	}
 
 	return { valid: true };

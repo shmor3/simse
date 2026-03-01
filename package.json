@@ -40,7 +40,9 @@
 		"lint:fix": "biome check --write .",
 		"typecheck": "bun x tsc --noEmit",
 		"build:vector-engine": "cd simse-vector && cargo build --release",
-		"build:vfs-engine": "cd simse-vfs && cargo build --release"
+		"build:vfs-engine": "cd simse-vfs && cargo build --release",
+		"build:acp-engine": "cd simse-acp && cargo build --release",
+		"build:mcp-engine": "cd simse-mcp && cargo build --release"
 	},
 	"dependencies": {
 		"hono": "^4.12.2",

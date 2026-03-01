@@ -46,8 +46,7 @@
 		animation: blink 0.8s step-end infinite;
 	}
 
-	.typewriter-cursor {
-		border-right: 2px solid #34d399;
+	.animate-blink-cursor {
 		animation: blink-cursor 0.8s step-end infinite;
 	}
 }

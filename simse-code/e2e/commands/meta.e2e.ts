@@ -151,4 +151,4 @@ describe('Meta Commands E2E', () => {
 		const screen = term.getScreen();
 		expect(screen).not.toContain('Unknown command');
 	}, 30_000);
-}, 120_000);
+});

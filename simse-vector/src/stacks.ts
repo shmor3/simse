@@ -95,6 +95,8 @@ export interface Stacks {
 	readonly recommend: (
 		options?: RecommendOptions,
 	) => Promise<Recommendation[]>;
+	/** Record explicit user feedback on whether a volume was relevant. */
+	readonly recordFeedback: (entryId: string, relevant: boolean) => Promise<void>;
 	/** No longer exposed — the learning engine lives in Rust. */
 	readonly learningEngine: undefined;
 	/** Snapshot of the current patron learning profile. */
@@ -361,6 +363,17 @@ export function createStacks(options: StacksOptions): Stacks {
 	};
 
 	// -------------------------------------------------------------------
+	// Feedback
+	// -------------------------------------------------------------------
+
+	const recordFeedback = async (
+		entryId: string,
+		relevant: boolean,
+	): Promise<void> => {
+		await client.request('learning/recordFeedback', { entryId, relevant });
+	};
+
+	// -------------------------------------------------------------------
 	// Return frozen interface
 	// -------------------------------------------------------------------
 
@@ -385,6 +398,7 @@ export function createStacks(options: StacksOptions): Stacks {
 		findDuplicates,
 		checkDuplicate,
 		recommend,
+		recordFeedback,
 		get learningEngine() {
 			return undefined;
 		},

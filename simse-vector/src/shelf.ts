@@ -26,8 +26,8 @@ export function createShelf(name: string, library: Library): Shelf {
 		return library.search(query, maxResults, threshold);
 	};
 
-	const volumes = (): Volume[] => {
-		return library.getAll().filter((v) => v.metadata.shelf === name);
+	const volumes = async (): Promise<Volume[]> => {
+		return (await library.getAll()).filter((v) => v.metadata.shelf === name);
 	};
 
 	return Object.freeze({ name, add, search, searchGlobal, volumes });

@@ -413,7 +413,7 @@ export interface Shelf {
 		maxResults?: number,
 		threshold?: number,
 	) => Promise<Lookup[]>;
-	readonly volumes: () => Volume[];
+	readonly volumes: () => Promise<Volume[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -498,8 +498,8 @@ export interface OptimizationResult {
 /** Subset of Library needed during librarian bidding. */
 export interface LibrarianLibraryAccess {
 	readonly search: (query: string, maxResults?: number) => Promise<Lookup[]>;
-	readonly getTopics: () => TopicInfo[];
-	readonly filterByTopic: (topics: string[]) => Volume[];
+	readonly getTopics: () => Promise<TopicInfo[]>;
+	readonly filterByTopic: (topics: string[]) => Promise<Volume[]>;
 }
 
 export interface Librarian {

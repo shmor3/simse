@@ -9,7 +9,6 @@ import { createNoopLogger, type Logger } from './logger.js';
 import { parseQuery } from './query-dsl.js';
 import { createShelf } from './shelf.js';
 import { createStacks, type StacksOptions } from './stacks.js';
-import type { StorageBackend } from './storage.js';
 import type {
 	AdvancedLookup,
 	CirculationDeskThresholds,
@@ -39,12 +38,14 @@ import type {
 // ---------------------------------------------------------------------------
 
 export interface LibraryOptions {
-	/** Pluggable storage backend. Consumers must provide their own implementation. */
-	storage: StorageBackend;
+	/** Path to the Rust vector engine binary. */
+	enginePath: string;
+	/** Directory for Rust-side persistence. If provided, data persists across restarts. */
+	storagePath?: string;
 	/** Inject a custom logger. */
 	logger?: Logger;
-	/** Override stacks options (except storage and logger, which are set at this level). */
-	stacksOptions?: Omit<StacksOptions, 'logger' | 'storage'>;
+	/** Override stacks options (except enginePath, storagePath, and logger, which are set at this level). */
+	stacksOptions?: Omit<StacksOptions, 'logger' | 'enginePath' | 'storagePath'>;
 	/**
 	 * Optional text generation provider used for compendium.
 	 * Can also be set later via `setTextGenerator()`.
@@ -75,40 +76,40 @@ export interface Library {
 		maxResults?: number,
 		threshold?: number,
 	) => Promise<Lookup[]>;
-	readonly textSearch: (options: TextSearchOptions) => TextLookup[];
-	readonly filterByMetadata: (filters: MetadataFilter[]) => Volume[];
-	readonly filterByDateRange: (range: DateRange) => Volume[];
+	readonly textSearch: (options: TextSearchOptions) => Promise<TextLookup[]>;
+	readonly filterByMetadata: (filters: MetadataFilter[]) => Promise<Volume[]>;
+	readonly filterByDateRange: (range: DateRange) => Promise<Volume[]>;
 	readonly advancedSearch: (
 		options: SearchOptions,
 	) => Promise<AdvancedLookup[]>;
 	readonly query: (dsl: string) => Promise<AdvancedLookup[]>;
-	readonly getById: (id: string) => Volume | undefined;
-	readonly getAll: () => Volume[];
-	readonly getTopics: () => TopicInfo[];
-	readonly filterByTopic: (topics: string[]) => Volume[];
+	readonly getById: (id: string) => Promise<Volume | undefined>;
+	readonly getAll: () => Promise<Volume[]>;
+	readonly getTopics: () => Promise<TopicInfo[]>;
+	readonly filterByTopic: (topics: string[]) => Promise<Volume[]>;
 	readonly recommend: (
 		query: string,
 		options?: Omit<RecommendOptions, 'queryEmbedding'>,
 	) => Promise<Recommendation[]>;
-	readonly findDuplicates: (threshold?: number) => DuplicateVolumes[];
+	readonly findDuplicates: (threshold?: number) => Promise<DuplicateVolumes[]>;
 	readonly checkDuplicate: (text: string) => Promise<DuplicateCheckResult>;
 	readonly compendium: (
 		options: CompendiumOptions,
 	) => Promise<CompendiumResult>;
 	readonly setTextGenerator: (provider: TextGenerationProvider) => void;
 	/** Record explicit user feedback on whether a volume was relevant. */
-	readonly recordFeedback: (entryId: string, relevant: boolean) => void;
+	readonly recordFeedback: (entryId: string, relevant: boolean) => Promise<void>;
 	readonly delete: (id: string) => Promise<boolean>;
 	readonly deleteBatch: (ids: string[]) => Promise<number>;
 	readonly clear: () => Promise<void>;
 	/** Snapshot of the patron learning profile, or undefined if learning is disabled. */
-	readonly patronProfile: PatronProfile | undefined;
-	readonly size: number;
+	readonly patronProfile: Promise<PatronProfile | undefined>;
+	readonly size: Promise<number>;
 	readonly isInitialized: boolean;
 	readonly isDirty: boolean;
 	readonly embeddingAgent: string | undefined;
 	readonly shelf: (name: string) => Shelf;
-	readonly shelves: () => string[];
+	readonly shelves: () => Promise<string[]>;
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +135,8 @@ export function createLibrary(
 	const logger = (options.logger ?? createNoopLogger()).child('library');
 	const eventBus = options.eventBus;
 	const store = createStacks({
-		storage: options.storage,
+		enginePath: options.enginePath,
+		storagePath: options.storagePath,
 		logger,
 		...(options.stacksOptions ?? {}),
 	});
@@ -209,7 +211,7 @@ export function createLibrary(
 			await store.load();
 			initialized = true;
 
-			logger.info(`Library initialized (${store.size} volumes loaded)`);
+			logger.info(`Library initialized (${await store.size} volumes loaded)`);
 		})().finally(() => {
 			initPromise = null;
 		});
@@ -343,7 +345,7 @@ export function createLibrary(
 		const start = Date.now();
 		const queryEmbedding = await getEmbedding(query);
 
-		const results = store.search(
+		const results = await store.search(
 			queryEmbedding,
 			maxResults ?? config.maxResults,
 			threshold ?? config.similarityThreshold,
@@ -363,7 +365,9 @@ export function createLibrary(
 	// Text Search (content-based, no embeddings)
 	// -----------------------------------------------------------------------
 
-	const textSearch = (searchOptions: TextSearchOptions): TextLookup[] => {
+	const textSearch = async (
+		searchOptions: TextSearchOptions,
+	): Promise<TextLookup[]> => {
 		ensureInitialized();
 
 		if (searchOptions.query.trim().length === 0) {
@@ -377,7 +381,7 @@ export function createLibrary(
 			threshold: searchOptions.threshold ?? 0.3,
 		});
 
-		const results = store.textSearch(searchOptions);
+		const results = await store.textSearch(searchOptions);
 
 		logger.debug(`Text search found ${results.length} matching volumes`);
 		return results;
@@ -387,14 +391,16 @@ export function createLibrary(
 	// Metadata Filtering
 	// -----------------------------------------------------------------------
 
-	const filterByMetadata = (filters: MetadataFilter[]): Volume[] => {
+	const filterByMetadata = async (
+		filters: MetadataFilter[],
+	): Promise<Volume[]> => {
 		ensureInitialized();
 
 		logger.debug('Filtering library by metadata', {
 			filterCount: filters.length,
 		});
 
-		const results = store.filterByMetadata(filters);
+		const results = await store.filterByMetadata(filters);
 
 		logger.debug(`Metadata filter returned ${results.length} matching volumes`);
 		return results;
@@ -404,7 +410,7 @@ export function createLibrary(
 	// Date Range Filtering
 	// -----------------------------------------------------------------------
 
-	const filterByDateRange = (range: DateRange): Volume[] => {
+	const filterByDateRange = async (range: DateRange): Promise<Volume[]> => {
 		ensureInitialized();
 
 		logger.debug('Filtering library by date range', {
@@ -412,7 +418,7 @@ export function createLibrary(
 			before: range.before,
 		});
 
-		const results = store.filterByDateRange(range);
+		const results = await store.filterByDateRange(range);
 
 		logger.debug(
 			`Date range filter returned ${results.length} matching volumes`,
@@ -453,7 +459,7 @@ export function createLibrary(
 			rankBy: resolvedOptions.rankBy ?? 'average',
 		});
 
-		const results = store.advancedSearch(resolvedOptions);
+		const results = await store.advancedSearch(resolvedOptions);
 
 		logger.debug(`Advanced search found ${results.length} matching volumes`);
 		return results;
@@ -500,11 +506,11 @@ export function createLibrary(
 			}
 		}
 
-		let results = store.advancedSearch(searchOptions);
+		let results = await store.advancedSearch(searchOptions);
 
 		// Apply topic filter manually if present
 		if (parsed.topicFilter && parsed.topicFilter.length > 0) {
-			const topicVolumes = store.filterByTopic([...parsed.topicFilter]);
+			const topicVolumes = await store.filterByTopic([...parsed.topicFilter]);
 			const topicIds = new Set(topicVolumes.map((e) => e.id));
 			results = results.filter((r) => topicIds.has(r.volume.id));
 		}
@@ -517,24 +523,24 @@ export function createLibrary(
 	// Accessors
 	// -----------------------------------------------------------------------
 
-	const getById = (id: string): Volume | undefined => {
+	const getById = async (id: string): Promise<Volume | undefined> => {
 		ensureInitialized();
-		return store.getById(id);
+		return await store.getById(id);
 	};
 
-	const getAll = (): Volume[] => {
+	const getAll = async (): Promise<Volume[]> => {
 		ensureInitialized();
-		return store.getAll();
+		return await store.getAll();
 	};
 
-	const getTopics = (): TopicInfo[] => {
+	const getTopics = async (): Promise<TopicInfo[]> => {
 		ensureInitialized();
-		return store.getTopics();
+		return await store.getTopics();
 	};
 
-	const filterByTopic = (topics: string[]): Volume[] => {
+	const filterByTopic = async (topics: string[]): Promise<Volume[]> => {
 		ensureInitialized();
-		return store.filterByTopic(topics);
+		return await store.filterByTopic(topics);
 	};
 
 	// -----------------------------------------------------------------------
@@ -558,7 +564,7 @@ export function createLibrary(
 		});
 
 		const queryEmbedding = await getEmbedding(query);
-		const results = store.recommend({
+		const results = await store.recommend({
 			...recommendOptions,
 			queryEmbedding,
 		});
@@ -571,11 +577,13 @@ export function createLibrary(
 	// Deduplication
 	// -----------------------------------------------------------------------
 
-	const findDuplicates = (threshold?: number): DuplicateVolumes[] => {
+	const findDuplicates = async (
+		threshold?: number,
+	): Promise<DuplicateVolumes[]> => {
 		ensureInitialized();
 
 		logger.debug('Finding duplicate volumes', { threshold });
-		const groups = store.findDuplicates(threshold);
+		const groups = await store.findDuplicates(threshold);
 		logger.debug(`Found ${groups.length} duplicate groups`);
 		return groups;
 	};
@@ -590,7 +598,7 @@ export function createLibrary(
 		}
 
 		const embedding = await getEmbedding(text);
-		return store.checkDuplicate(embedding);
+		return await store.checkDuplicate(embedding);
 	};
 
 	// -----------------------------------------------------------------------
@@ -618,7 +626,7 @@ export function createLibrary(
 		// Gather volume texts
 		const sourceVolumes: Volume[] = [];
 		for (const id of compendiumOptions.ids) {
-			const vol = store.getById(id);
+			const vol = await store.getById(id);
 			if (!vol) {
 				throw createLibraryError(`Volume "${id}" not found for compendium`, {
 					code: 'MEMORY_ENTRY_NOT_FOUND',
@@ -690,18 +698,13 @@ export function createLibrary(
 	// Explicit Feedback
 	// -----------------------------------------------------------------------
 
-	const recordFeedback = (entryId: string, relevant: boolean): void => {
+	const recordFeedback = async (
+		entryId: string,
+		relevant: boolean,
+	): Promise<void> => {
 		ensureInitialized();
 
-		const engine = store.learningEngine;
-		if (!engine) {
-			throw createLibraryError(
-				'Cannot record feedback: adaptive learning is not enabled.',
-				{ code: 'MEMORY_LEARNING_DISABLED' },
-			);
-		}
-
-		engine.recordFeedback(entryId, relevant);
+		await store.recordFeedback(entryId, relevant);
 		logger.debug(
 			`Recorded ${relevant ? 'positive' : 'negative'} feedback for "${entryId}"`,
 		);
@@ -755,10 +758,10 @@ export function createLibrary(
 		return s;
 	};
 
-	const shelves = (): string[] => {
+	const shelves = async (): Promise<string[]> => {
 		ensureInitialized();
 		const names = new Set<string>();
-		for (const vol of store.getAll()) {
+		for (const vol of await store.getAll()) {
 			if (vol.metadata.shelf) {
 				names.add(vol.metadata.shelf);
 			}

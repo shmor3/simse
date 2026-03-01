@@ -10,4 +10,5 @@ pub mod events;
 pub mod logger;
 pub mod prompts;
 pub mod tasks;
+pub mod tools;
 pub mod utils;

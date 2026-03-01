@@ -1,6 +1,7 @@
 // simse-core: Pure Rust orchestration library for simse
 // Links simse-acp, simse-mcp, simse-vector, simse-vfs as library dependencies
 
+pub mod chain;
 pub mod config;
 pub mod conversation;
 pub mod error;

@@ -4,7 +4,6 @@
 
 import { createVectorClient, type VectorClient } from './client.js';
 import { createNoopLogger, type Logger } from './logger.js';
-import type { RecencyOptions } from './recommendation.js';
 import type {
 	AdvancedLookup,
 	DateRange,
@@ -14,6 +13,7 @@ import type {
 	Lookup,
 	MetadataFilter,
 	PatronProfile,
+	RecencyOptions,
 	Recommendation,
 	RecommendOptions,
 	SearchOptions,
@@ -86,17 +86,16 @@ export interface Stacks {
 	readonly getById: (id: string) => Promise<Volume | undefined>;
 	readonly getTopics: () => Promise<TopicInfo[]>;
 	readonly filterByTopic: (topics: readonly string[]) => Promise<Volume[]>;
-	readonly findDuplicates: (
-		threshold?: number,
-	) => Promise<DuplicateVolumes[]>;
+	readonly findDuplicates: (threshold?: number) => Promise<DuplicateVolumes[]>;
 	readonly checkDuplicate: (
 		embedding: readonly number[],
 	) => Promise<DuplicateCheckResult>;
-	readonly recommend: (
-		options?: RecommendOptions,
-	) => Promise<Recommendation[]>;
+	readonly recommend: (options?: RecommendOptions) => Promise<Recommendation[]>;
 	/** Record explicit user feedback on whether a volume was relevant. */
-	readonly recordFeedback: (entryId: string, relevant: boolean) => Promise<void>;
+	readonly recordFeedback: (
+		entryId: string,
+		relevant: boolean,
+	) => Promise<void>;
 	/** No longer exposed — the learning engine lives in Rust. */
 	readonly learningEngine: undefined;
 	/** Snapshot of the current patron learning profile. */
@@ -182,25 +181,21 @@ export function createStacks(options: StacksOptions): Stacks {
 		}>,
 	): Promise<string[]> => {
 		if (entries.length === 0) return [];
-		const result = await client.request<{ ids: string[] }>(
-			'store/addBatch',
-			{
-				entries: entries.map((e) => ({
-					text: e.text,
-					embedding: [...e.embedding],
-					metadata: e.metadata ?? {},
-				})),
-			},
-		);
+		const result = await client.request<{ ids: string[] }>('store/addBatch', {
+			entries: entries.map((e) => ({
+				text: e.text,
+				embedding: [...e.embedding],
+				metadata: e.metadata ?? {},
+			})),
+		});
 		dirty = true;
 		return result.ids;
 	};
 
 	const deleteVolume = async (id: string): Promise<boolean> => {
-		const result = await client.request<{ deleted: boolean }>(
-			'store/delete',
-			{ id },
-		);
+		const result = await client.request<{ deleted: boolean }>('store/delete', {
+			id,
+		});
 		if (result.deleted) dirty = true;
 		return result.deleted;
 	};
@@ -229,14 +224,11 @@ export function createStacks(options: StacksOptions): Stacks {
 		maxResults: number,
 		threshold: number,
 	): Promise<Lookup[]> => {
-		const result = await client.request<{ results: Lookup[] }>(
-			'store/search',
-			{
-				queryEmbedding: [...queryEmbedding],
-				maxResults,
-				threshold,
-			},
-		);
+		const result = await client.request<{ results: Lookup[] }>('store/search', {
+			queryEmbedding: [...queryEmbedding],
+			maxResults,
+			threshold,
+		});
 		return result.results;
 	};
 
@@ -289,9 +281,7 @@ export function createStacks(options: StacksOptions): Stacks {
 	// -------------------------------------------------------------------
 
 	const getAll = async (): Promise<Volume[]> => {
-		const result = await client.request<{ volumes: Volume[] }>(
-			'store/getAll',
-		);
+		const result = await client.request<{ volumes: Volume[] }>('store/getAll');
 		return result.volumes;
 	};
 

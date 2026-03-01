@@ -595,6 +595,19 @@ export interface CirculationDeskThresholds {
 	};
 }
 
+// ---------------------------------------------------------------------------
+// Recency Options
+// ---------------------------------------------------------------------------
+
+export interface RecencyOptions {
+	/** Half-life in milliseconds for the exponential decay. Defaults to 30 days. */
+	readonly halfLifeMs?: number;
+}
+
+// ---------------------------------------------------------------------------
+// CirculationDesk (async background queue processing)
+// ---------------------------------------------------------------------------
+
 export interface CirculationDesk {
 	readonly enqueueExtraction: (turn: TurnContext) => void;
 	readonly enqueueCompendium: (topic: string) => void;

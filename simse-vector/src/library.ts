@@ -98,7 +98,10 @@ export interface Library {
 	) => Promise<CompendiumResult>;
 	readonly setTextGenerator: (provider: TextGenerationProvider) => void;
 	/** Record explicit user feedback on whether a volume was relevant. */
-	readonly recordFeedback: (entryId: string, relevant: boolean) => Promise<void>;
+	readonly recordFeedback: (
+		entryId: string,
+		relevant: boolean,
+	) => Promise<void>;
 	readonly delete: (id: string) => Promise<boolean>;
 	readonly deleteBatch: (ids: string[]) => Promise<number>;
 	readonly clear: () => Promise<void>;

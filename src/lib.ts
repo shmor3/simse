@@ -8,14 +8,9 @@
 
 // ---- Library / Vector Store (from simse-vector) ----------------------------
 export type {
-	// Stacks serialization
-	AccessStats,
 	// Types
 	AdvancedLookup,
 	ArbitrationResult,
-	// Inverted index
-	BM25Options,
-	BM25Result,
 	CirculationDesk,
 	// Circulation desk
 	CirculationDeskOptions,
@@ -23,32 +18,15 @@ export type {
 	ClassificationResult,
 	CompendiumOptions,
 	CompendiumResult,
-	// Preservation
-	CompressionOptions,
-	// Stacks persistence
-	CorrelatedPair,
-	CorrelationEntry,
 	DateRange,
-	DeserializedData,
 	// Librarian registry
 	DisposableConnection,
 	DuplicateCheckResult,
 	DuplicateVolumes,
 	EmbeddingProvider,
-	ExplicitFeedbackEntry,
 	ExtractionMemory,
 	ExtractionResult,
-	FeedbackEntry,
-	// Text search
-	FuzzyScoreOptions,
-	FuzzyScoreWeights,
-	IndexEntry,
-	IndexFile,
-	InvertedIndex,
-	// Patron learning
-	LearningEngine,
 	LearningOptions,
-	LearningState,
 	Librarian,
 	LibrarianBid,
 	LibrarianDefinition,
@@ -66,11 +44,8 @@ export type {
 	LibraryServices,
 	LibraryServicesOptions,
 	Lookup,
-	// Cataloging
-	MagnitudeCache,
 	ManagedLibrarian,
 	MetadataFilter,
-	MetadataIndex,
 	MetadataMatchMode,
 	OptimizationResult,
 	// Query DSL
@@ -79,41 +54,24 @@ export type {
 	// Prompt injection
 	PromptInjectionOptions,
 	QueryRecord,
-	// Recommendation
 	RecencyOptions,
 	Recommendation,
-	RecommendationScoreInput,
-	RecommendationScoreResult,
 	RecommendOptions,
 	RelatedTopic,
 	RelevanceFeedback,
 	ReorganizationPlan,
 	SearchOptions,
-	SerializedData,
-	SerializedQueryRecord,
 	Shelf,
 	// Stacks
 	Stacks,
 	StacksOptions,
-	// Stacks search
-	StacksSearchConfig,
-	// Storage
-	StorageBackend,
-	// Text cache
-	TextCache,
-	TextCacheOptions,
 	TextGenerationProvider,
 	TextLookup,
 	TextSearchMode,
 	TextSearchOptions,
 	TopicCatalog,
-	// Topic catalog
-	TopicCatalogOptions,
 	TopicCatalogSection,
-	TopicIndex,
-	TopicIndexOptions,
 	TopicInfo,
-	TopicProfileEntry,
 	TurnContext,
 	// Librarian definition
 	ValidationResult as LibrarianValidationResult,
@@ -124,30 +82,12 @@ export type {
 	WeightProfile,
 } from 'simse-vector';
 export {
-	// Stacks search
-	advancedStacksSearch,
-	// Deduplication
-	checkDuplicate,
-	// Preservation
-	compressText,
-	// Cataloging
-	computeMagnitude,
-	// Recommendation
-	computeRecommendationScore,
-	// Stacks recommendation
-	computeRecommendations,
-	// Cosine similarity
-	cosineSimilarity,
 	// Circulation desk
 	createCirculationDesk,
 	// Librarian
 	createDefaultLibrarian,
 	// Errors (library errors from simse-vector)
 	createEmbeddingError,
-	// Inverted index
-	createInvertedIndex,
-	// Patron learning
-	createLearningEngine,
 	createLibrarian,
 	// Librarian registry
 	createLibrarianRegistry,
@@ -156,8 +96,6 @@ export {
 	createLibraryError,
 	// Library services
 	createLibraryServices,
-	createMagnitudeCache,
-	createMetadataIndex,
 	createNoopLogger,
 	// Shelf
 	createShelf,
@@ -166,60 +104,22 @@ export {
 	createStacksCorruptionError,
 	createStacksError,
 	createStacksIOError,
-	// Text cache
-	createTextCache,
-	// Topic catalog
-	createTopicCatalog,
-	createTopicIndex,
 	createVectorError,
-	decodeEmbedding,
-	decompressText,
-	// Stacks serialization
-	deserializeEntry,
-	deserializeFromStorage,
-	encodeEmbedding,
-	filterVolumesByDateRange,
-	filterVolumesByMetadata,
-	findDuplicateVolumes,
 	// Prompt injection
 	formatMemoryContext,
-	frequencyScore,
-	// Text search
-	fuzzyScore,
 	isEmbeddingError,
-	isGzipped,
 	isLibraryError,
 	isStacksCorruptionError,
 	isStacksError,
 	isStacksIOError,
-	// Stacks persistence
-	isValidIndexEntry,
-	isValidIndexFile,
-	isValidLearningState,
 	isVectorError,
-	LEARNING_KEY,
-	levenshteinDistance,
-	levenshteinSimilarity,
 	// Librarian definition
 	loadAllDefinitions,
 	loadDefinition,
-	matchesAllMetadataFilters,
-	matchesMetadataFilter,
 	matchesTopic,
-	ngramSimilarity,
-	ngrams,
-	normalizeWeights,
 	// Query DSL
 	parseQuery,
-	recencyScore,
 	saveDefinition,
-	serializeEntry,
-	serializeToStorage,
-	stacksSearch,
-	textSearchVolumes,
-	tokenize,
-	tokenizeForIndex,
-	tokenOverlapScore,
 	validateDefinition,
 } from 'simse-vector';
 // ---- Virtual Filesystem (from simse-vfs) ----------------------------------

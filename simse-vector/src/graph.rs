@@ -574,9 +574,10 @@ impl GraphIndex {
 			None => return 0.0,
 		};
 
+		let relevant_set: HashSet<&String> = relevant_ids.iter().collect();
 		let mut max_weight: f64 = 0.0;
 		for edge in edges {
-			if relevant_ids.contains(&edge.target_id) && edge.weight > max_weight {
+			if relevant_set.contains(&edge.target_id) && edge.weight > max_weight {
 				max_weight = edge.weight;
 			}
 		}

@@ -275,21 +275,22 @@ impl CirculationDesk {
 
 	async fn resolve_librarian_for_job(
 		&self,
-		_topic: &str,
-		_content: &str,
+		topic: &str,
+		content: &str,
 	) -> (Arc<Librarian>, String) {
-		// The circulation desk uses the librarian directly for job processing.
-		// Registry-based resolution happens at the enqueue level, not during processing.
-		// When a registry is available, the default librarian from the registry
-		// is used, which matches the TS behavior where resolveLibrarianForJob
-		// falls back to the default librarian.
-		if let Some(ref lib) = self.librarian {
-			(Arc::clone(lib), "default".to_string())
-		} else {
-			// This shouldn't happen due to the constructor check,
-			// but provide a safe fallback.
-			unreachable!("CirculationDesk requires either librarian or registry")
+		// When a registry is available, resolve through it (bidding/arbitration).
+		if let Some(ref registry) = self.registry {
+			let result = registry.resolve_librarian(topic, content).await;
+			if let Some(managed) = registry.get(&result.winner).await {
+				return (Arc::clone(&managed.librarian), result.winner);
+			}
 		}
+		// Fall back to the explicit librarian.
+		if let Some(ref lib) = self.librarian {
+			return (Arc::clone(lib), "default".to_string());
+		}
+		// Constructor guarantees at least one is set; this is unreachable.
+		unreachable!("CirculationDesk requires either librarian or registry")
 	}
 
 	// -----------------------------------------------------------------------

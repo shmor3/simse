@@ -45,7 +45,7 @@ pub trait DisposableConnection: Send + Sync {
 /// A librarian bundled with its definition, provider, and optional connection.
 pub struct ManagedLibrarian {
 	pub definition: LibrarianDefinition,
-	pub librarian: Librarian,
+	pub librarian: Arc<Librarian>,
 	pub provider: Arc<dyn TextGenerationProvider>,
 	pub connection: Option<Arc<dyn DisposableConnection>>,
 }
@@ -158,7 +158,7 @@ impl LibrarianRegistry {
 				);
 				return Ok(ManagedLibrarian {
 					definition,
-					librarian,
+					librarian: Arc::new(librarian),
 					provider,
 					connection: Some(connection),
 				});
@@ -174,7 +174,7 @@ impl LibrarianRegistry {
 		);
 		Ok(ManagedLibrarian {
 			definition,
-			librarian,
+			librarian: Arc::new(librarian),
 			provider: Arc::clone(&self.default_provider),
 			connection: None,
 		})

@@ -8,8 +8,13 @@
 //! The library wraps a `VolumeStore` behind `Arc<Mutex<_>>` so it can be shared
 //! safely across async tasks and passed to shelves.
 
+pub mod circulation;
+pub mod librarian;
+pub mod librarian_def;
+pub mod librarian_reg;
 pub mod prompt_inject;
 pub mod query_dsl;
+pub mod services;
 pub mod shelf;
 
 #[allow(clippy::module_inception)]

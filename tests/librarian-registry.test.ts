@@ -2,10 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { ACPConnection } from '../src/ai/acp/acp-connection.js';
 import { saveDefinition } from '../src/ai/library/librarian-definition.js';
 import {
 	createLibrarianRegistry,
+	type DisposableConnection,
 	type LibrarianRegistryOptions,
 } from '../src/ai/library/librarian-registry.js';
 import type {
@@ -181,7 +181,9 @@ describe('LibrarianRegistry', () => {
 
 		it('closes ACP connection on unregister', async () => {
 			const mockClose = mock(async () => {});
-			const mockConnection = { close: mockClose } as unknown as ACPConnection;
+			const mockConnection = {
+				close: mockClose,
+			} as unknown as DisposableConnection;
 			const createConnection = mock(async () => ({
 				connection: mockConnection,
 				provider: createMockProvider('{}'),
@@ -568,7 +570,9 @@ describe('LibrarianRegistry', () => {
 
 		it('closes ACP connections on dispose', async () => {
 			const mockClose = mock(async () => {});
-			const mockConnection = { close: mockClose } as unknown as ACPConnection;
+			const mockConnection = {
+				close: mockClose,
+			} as unknown as DisposableConnection;
 			const createConnection = mock(async () => ({
 				connection: mockConnection,
 				provider: createMockProvider('{}'),

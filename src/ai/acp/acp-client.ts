@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Agent Client Protocol (ACP) Client — JSON-RPC 2.0 over stdio
+// Agent Client Protocol (ACP) Client — thin wrapper over Rust engine
 // ---------------------------------------------------------------------------
 
 import {
@@ -10,41 +10,66 @@ import {
 	toError,
 } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
+import type { HealthSnapshot } from '../../utils/health-monitor.js';
 import {
-	type CircuitBreaker,
-	createCircuitBreaker,
-} from '../../utils/circuit-breaker.js';
-import {
-	createHealthMonitor,
-	type HealthMonitor,
-	type HealthSnapshot,
-} from '../../utils/health-monitor.js';
-import { isTransientError, retry } from '../../utils/retry.js';
-import { type ACPConnection, createACPConnection } from './acp-connection.js';
-import { extractContentText, extractTokenUsage } from './acp-results.js';
+	type AcpEngineClient,
+	createAcpEngineClient,
+} from './acp-engine-client.js';
 import type {
 	ACPAgentInfo,
 	ACPConfig,
-	ACPContentBlock,
 	ACPEmbedResult,
 	ACPGenerateResult,
-	ACPModelInfo,
 	ACPModelsInfo,
 	ACPModesInfo,
 	ACPPermissionPolicy,
 	ACPSamplingParams,
-	ACPServerEntry,
 	ACPServerStatus,
 	ACPSessionInfo,
 	ACPSessionListEntry,
-	ACPSessionNewResult,
-	ACPSessionPromptResult,
-	ACPSessionUpdateParams,
 	ACPStreamChunk,
 	ACPTokenUsage,
 	ACPToolCall,
 	ACPToolCallUpdate,
 } from './types.js';
+
+// ---------------------------------------------------------------------------
+// Permission request info (previously in acp-connection.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * A permission option presented by the ACP agent.
+ */
+export interface ACPPermissionOption {
+	readonly optionId: string;
+	readonly kind: string;
+	/** ACP spec field — human-readable label for the option. */
+	readonly name?: string;
+	/** @deprecated Use `name` — kept for backwards compat with older servers. */
+	readonly title?: string;
+	readonly description?: string;
+}
+
+/**
+ * Tool call details attached to a permission request.
+ */
+export interface ACPPermissionToolCall {
+	readonly toolCallId?: string;
+	readonly title?: string;
+	readonly kind?: string;
+	readonly rawInput?: unknown;
+	readonly status?: string;
+}
+
+/**
+ * Info passed to the permission handler callback in 'prompt' mode.
+ */
+export interface ACPPermissionRequestInfo {
+	readonly title?: string;
+	readonly description?: string;
+	readonly toolCall?: ACPPermissionToolCall;
+	readonly options: readonly ACPPermissionOption[];
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -75,8 +100,10 @@ export interface ACPClientOptions {
 	 * Return the selected optionId, or undefined to reject.
 	 */
 	onPermissionRequest?: (
-		info: import('./acp-connection.js').ACPPermissionRequestInfo,
+		info: ACPPermissionRequestInfo,
 	) => Promise<string | undefined>;
+	/** Path to the ACP engine binary. Required. */
+	enginePath?: string;
 }
 
 export interface ACPStreamOptions {
@@ -192,33 +219,23 @@ export interface ACPClient {
 // ---------------------------------------------------------------------------
 
 /**
- * Create an ACP client that communicates with one or more ACP-compatible
- * agent servers over JSON-RPC 2.0 / NDJSON stdio.
+ * Create an ACP client that delegates to the Rust ACP engine via
+ * JSON-RPC 2.0 / NDJSON stdio.
  *
  * @param config - ACP server definitions (command, args, env per server).
- * @param options - Retry policy, stream timeout, circuit breaker thresholds.
+ * @param options - Engine path, retry policy, stream timeout, circuit breaker thresholds.
  * @returns A frozen {@link ACPClient} with generate, chat, embed, and session management.
- * @throws {ProviderUnavailableError} When the target server process cannot be spawned.
+ * @throws {ProviderUnavailableError} When the engine binary cannot be spawned.
  */
 export function createACPClient(
 	config: ACPConfig,
 	options?: ACPClientOptions,
 ): ACPClient {
 	const logger = (options?.logger ?? getDefaultLogger()).child('acp');
-
-	const maxRetryAttempts = options?.retryOptions?.maxAttempts ?? 3;
-	const retryBaseDelayMs = options?.retryOptions?.baseDelayMs ?? 500;
-	const retryMaxDelayMs = options?.retryOptions?.maxDelayMs ?? 15_000;
 	const streamTimeoutMs = options?.streamTimeoutMs ?? 120_000;
-	const clientName = options?.clientName ?? 'simse';
-	const clientVersion = options?.clientVersion ?? '1.0.0';
+	const enginePath = options?.enginePath ?? 'simse-acp-engine';
 
-	// Connection pool — one connection per configured server
-	const connections = new Map<string, ACPConnection>();
-
-	// Per-server circuit breakers and health monitors
-	const breakers = new Map<string, CircuitBreaker>();
-	const monitors = new Map<string, HealthMonitor>();
+	let engineClient: AcpEngineClient | undefined;
 
 	// Session info cache — stores models/modes from session/new and loadSession
 	const sessionInfoCache = new Map<string, ACPSessionInfo>();
@@ -228,293 +245,118 @@ export function createACPClient(
 	// -----------------------------------------------------------------------
 
 	const initialize = async (): Promise<void> => {
-		const results = await Promise.allSettled(
-			config.servers.map(async (entry) => {
-				if (connections.has(entry.name)) return;
+		if (engineClient?.isHealthy) return;
 
-				logger.info(
-					`Connecting to ACP server "${entry.name}": ${entry.command} ${(entry.args ?? []).join(' ')}`,
-				);
+		logger.info('Spawning ACP engine process');
 
-				const connection = createACPConnection({
-					command: entry.command,
-					args: entry.args,
-					cwd: entry.cwd,
-					env: entry.env,
-					timeoutMs: entry.timeoutMs,
-					permissionPolicy: entry.permissionPolicy,
-					clientName,
-					clientVersion,
-					stderrHandler: (text) => {
-						logger.debug(`ACP server "${entry.name}" stderr: ${text}`);
-					},
-					onPermissionRequest: options?.onPermissionRequest,
-				});
+		engineClient = createAcpEngineClient({
+			enginePath,
+			timeoutMs: streamTimeoutMs,
+			logger,
+		});
 
-				const result = await connection.initialize();
-				connections.set(entry.name, connection);
+		// Register permission notification handler
+		if (options?.onPermissionRequest) {
+			const handler = options.onPermissionRequest;
+			engineClient.onNotification('permission/request', (params: unknown) => {
+				const p = params as {
+					requestId: number;
+					title?: string;
+					description?: string;
+					toolCall?: ACPPermissionToolCall;
+					options?: readonly ACPPermissionOption[];
+				};
 
-				// Create circuit breaker and health monitor for this server
-				if (options?.circuitBreaker) {
-					breakers.set(
-						entry.name,
-						createCircuitBreaker({
-							name: `acp:${entry.name}`,
-							failureThreshold: options.circuitBreaker.failureThreshold,
-							resetTimeoutMs: options.circuitBreaker.resetTimeoutMs,
-							shouldCount: isTransientError,
-							onStateChange: (from, to) => {
-								logger.warn(
-									`Circuit breaker for ACP server "${entry.name}": ${from} → ${to}`,
-								);
-							},
-						}),
-					);
-				}
-				monitors.set(entry.name, createHealthMonitor());
-
-				const info = result.agentInfo;
-				logger.info(
-					`ACP server "${entry.name}" initialized${info ? `: ${info.name} v${info.version}` : ''}`,
-				);
-			}),
-		);
-
-		for (let i = 0; i < results.length; i++) {
-			const result = results[i];
-			if (result.status === 'rejected') {
-				const name = config.servers[i].name;
-				logger.warn(
-					`ACP server "${name}" failed to initialize: ${toError(result.reason).message}`,
-				);
-			}
+				handler({
+					title: p?.title,
+					description: p?.description,
+					toolCall: p?.toolCall,
+					options: p?.options ?? [],
+				})
+					.then((selectedId) => {
+						if (selectedId) {
+							engineClient
+								?.request('acp/permissionResponse', {
+									requestId: p.requestId,
+									optionId: selectedId,
+								})
+								.catch(() => {});
+						}
+					})
+					.catch(() => {});
+			});
 		}
 
-		if (connections.size === 0) {
+		// Build server config for the Rust engine
+		const servers = config.servers.map((entry) => ({
+			name: entry.name,
+			command: entry.command,
+			args: entry.args ? [...entry.args] : undefined,
+			cwd: entry.cwd,
+			env: entry.env ? { ...entry.env } : undefined,
+			defaultAgent: entry.defaultAgent,
+			timeoutMs: entry.timeoutMs,
+			permissionPolicy: entry.permissionPolicy,
+		}));
+
+		const mcpServers = config.mcpServers?.map((mcp) => ({
+			name: mcp.name,
+			config: {
+				command: mcp.command,
+				args: mcp.args ? [...mcp.args] : undefined,
+				env: mcp.env ? { ...mcp.env } : undefined,
+			},
+		}));
+
+		try {
+			await engineClient.request('acp/initialize', {
+				servers,
+				defaultServer: config.defaultServer,
+				defaultAgent: config.defaultAgent,
+				mcpServers,
+			});
+
+			logger.info('ACP engine initialized');
+		} catch (error) {
+			logger.error('ACP engine initialization failed', toError(error));
 			throw createProviderUnavailableError('acp', {
+				cause: error,
 				metadata: {
-					reason: 'All ACP servers failed to initialize',
-					servers: config.servers.map((s) => s.name),
+					reason: `ACP engine initialization failed: ${toError(error).message}`,
 				},
 			});
 		}
 	};
 
 	const dispose = async (): Promise<void> => {
-		const closePromises = [...connections.entries()].map(
-			async ([name, conn]) => {
-				logger.debug(`Closing ACP connection "${name}"`);
-				await conn.close();
-			},
-		);
-		await Promise.all(closePromises);
-		connections.clear();
-	};
+		if (!engineClient) return;
 
-	// -----------------------------------------------------------------------
-	// Internal helpers
-	// -----------------------------------------------------------------------
-
-	const resolveConnection = (
-		serverName?: string,
-	): {
-		connection: ACPConnection;
-		entry: ACPServerEntry;
-		name: string;
-	} => {
-		const name = serverName ?? config.defaultServer ?? config.servers[0]?.name;
-
-		if (!name) {
-			throw createProviderUnavailableError('acp', {
-				metadata: { reason: 'No ACP servers configured' },
-			});
-		}
-
-		const connection = connections.get(name);
-		if (!connection) {
-			throw createProviderUnavailableError('acp', {
-				metadata: {
-					reason: `ACP server "${name}" is not connected. Call initialize() first.`,
-					configuredServers: config.servers.map((s) => s.name),
-				},
-			});
-		}
-
-		const entry = config.servers.find((s) => s.name === name) as ACPServerEntry;
-		return { connection, entry, name };
-	};
-
-	const resolveAgentId = (
-		entry: ACPServerEntry,
-		stepAgentId?: string,
-	): string => {
-		// Resolution order: step → server default → global default → server name
-		// The server name is the ultimate fallback so a single-server config
-		// "just works" without requiring an explicit agent ID anywhere.
-		return (
-			stepAgentId ?? entry.defaultAgent ?? config.defaultAgent ?? entry.name
-		);
-	};
-
-	const withResilience = async <T>(
-		sName: string,
-		operation: string,
-		fn: () => Promise<T>,
-	): Promise<T> => {
-		const breaker = breakers.get(sName);
-		const monitor = monitors.get(sName);
-
-		const retryFn = () =>
-			retry(
-				async (attempt) => {
-					if (attempt > 1) {
-						logger.debug(
-							`Retrying "${operation}" (attempt ${attempt}/${maxRetryAttempts})`,
-						);
-						// Check connection health before retry — stale connections
-						// can persist even after increasing timeout defaults
-						const conn = connections.get(sName);
-						if (conn && !conn.isHealthy) {
-							logger.warn(
-								`Connection to "${sName}" is unhealthy before retry, reconnecting`,
-							);
-							await conn.close();
-							connections.delete(sName);
-							const entry = config.servers.find((s) => s.name === sName);
-							if (entry) {
-								const fresh = createACPConnection({
-									command: entry.command,
-									args: entry.args,
-									cwd: entry.cwd,
-									env: entry.env,
-									timeoutMs: entry.timeoutMs,
-									permissionPolicy: entry.permissionPolicy,
-									clientName,
-									clientVersion,
-									stderrHandler: (text) => {
-										logger.debug(`ACP server "${entry.name}" stderr: ${text}`);
-									},
-									onPermissionRequest: options?.onPermissionRequest,
-								});
-								await fresh.initialize();
-								connections.set(sName, fresh);
-							}
-						}
-					}
-					return fn();
-				},
-				{
-					maxAttempts: maxRetryAttempts,
-					baseDelayMs: retryBaseDelayMs,
-					maxDelayMs: retryMaxDelayMs,
-					shouldRetry: (error) => isTransientError(error),
-					onRetry: (error, nextAttempt, delayMs) => {
-						logger.warn(
-							`Operation "${operation}" failed, retrying in ${delayMs}ms (attempt ${nextAttempt})`,
-							{ error: toError(error).message },
-						);
-					},
-				},
-			);
+		logger.debug('Disposing ACP engine');
 
 		try {
-			const result = breaker ? await breaker.execute(retryFn) : await retryFn();
-			monitor?.recordSuccess();
-			return result;
-		} catch (error) {
-			monitor?.recordFailure(error instanceof Error ? error : undefined);
-			throw error;
+			await engineClient.request('acp/dispose');
+		} catch {
+			// Best-effort cleanup
 		}
+
+		await engineClient.dispose();
+		engineClient = undefined;
+		sessionInfoCache.clear();
 	};
 
 	// -----------------------------------------------------------------------
-	// ACP session helpers
+	// Require engine
 	// -----------------------------------------------------------------------
 
-	const createSession = async (connection: ACPConnection): Promise<string> => {
-		const result = await connection.request<ACPSessionNewResult>(
-			'session/new',
-			{
-				cwd: process.cwd(),
-				mcpServers: config.mcpServers ?? [],
-			},
-		);
-
-		// Cache session info (models/modes) for later retrieval
-		sessionInfoCache.set(result.sessionId, result);
-
-		// Set the permission mode based on the connection's policy.
-		// This tells the agent how to handle tool permissions for this session.
-		const modeId =
-			connection.permissionPolicy === 'auto-approve'
-				? 'bypassPermissions'
-				: connection.permissionPolicy === 'deny'
-					? 'plan'
-					: 'default';
-
-		// Fire-and-forget — don't block session creation if the agent
-		// doesn't support mode switching (it's best-effort).
-		connection
-			.request('session/set_config_option', {
-				sessionId: result.sessionId,
-				configOptionId: 'mode',
-				groupId: modeId,
-			})
-			.catch(() => {
-				// Agent may not support config options — that's fine,
-				// permissions still fall back to session/request_permission.
+	const requireEngine = (): AcpEngineClient => {
+		if (!engineClient?.isHealthy) {
+			throw createProviderUnavailableError('acp', {
+				metadata: {
+					reason: 'ACP engine is not connected. Call initialize() first.',
+				},
 			});
-
-		return result.sessionId;
-	};
-
-	const sendPrompt = async (
-		connection: ACPConnection,
-		sessionId: string,
-		content: readonly ACPContentBlock[],
-		metadata?: Record<string, unknown>,
-		promptTimeoutMs?: number,
-	): Promise<ACPSessionPromptResult> => {
-		return connection.request<ACPSessionPromptResult>(
-			'session/prompt',
-			{
-				sessionId,
-				prompt: content,
-				...(metadata && { metadata }),
-			},
-			promptTimeoutMs,
-		);
-	};
-
-	// -----------------------------------------------------------------------
-	// Build content blocks
-	// -----------------------------------------------------------------------
-
-	const buildTextContent = (
-		prompt: string,
-		systemPrompt?: string,
-	): ACPContentBlock[] => {
-		const blocks: ACPContentBlock[] = [];
-		if (systemPrompt) {
-			blocks.push({ type: 'text', text: systemPrompt });
 		}
-		blocks.push({ type: 'text', text: prompt });
-		return blocks;
-	};
-
-	const buildSamplingMetadata = (
-		sampling?: ACPSamplingParams,
-	): Record<string, unknown> | undefined => {
-		if (!sampling) return undefined;
-		const meta: Record<string, unknown> = {};
-		if (sampling.temperature !== undefined)
-			meta.temperature = sampling.temperature;
-		if (sampling.maxTokens !== undefined) meta.max_tokens = sampling.maxTokens;
-		if (sampling.topP !== undefined) meta.top_p = sampling.topP;
-		if (sampling.topK !== undefined) meta.top_k = sampling.topK;
-		if (sampling.stopSequences !== undefined)
-			meta.stop_sequences = sampling.stopSequences;
-		return Object.keys(meta).length > 0 ? meta : undefined;
+		return engineClient;
 	};
 
 	// -----------------------------------------------------------------------
@@ -522,30 +364,12 @@ export function createACPClient(
 	// -----------------------------------------------------------------------
 
 	const listAgents = async (serverName?: string): Promise<ACPAgentInfo[]> => {
-		// Native ACP has no agent listing — return synthetic info from config
-		if (serverName) {
-			const entry = config.servers.find((s) => s.name === serverName);
-			if (!entry) {
-				throw createProviderUnavailableError('acp', {
-					metadata: {
-						reason: `ACP server "${serverName}" is not configured`,
-					},
-				});
-			}
-			return [
-				{
-					id: entry.defaultAgent ?? entry.name,
-					name: entry.name,
-					description: `ACP agent on server "${entry.name}"`,
-				},
-			];
-		}
-
-		return config.servers.map((entry) => ({
-			id: entry.defaultAgent ?? entry.name,
-			name: entry.name,
-			description: `ACP agent on server "${entry.name}"`,
-		}));
+		const engine = requireEngine();
+		const result = await engine.request<{ agents: ACPAgentInfo[] }>(
+			'acp/listAgents',
+			{ server: serverName },
+		);
+		return result.agents ?? [];
 	};
 
 	const getAgent = async (
@@ -574,41 +398,23 @@ export function createACPClient(
 			modelId?: string;
 		},
 	): Promise<ACPGenerateResult> => {
-		const { connection, entry, name } = resolveConnection(
-			generateOptions?.serverName,
-		);
-		const agentId = resolveAgentId(entry, generateOptions?.agentId);
+		const engine = requireEngine();
 
 		logger.debug('Starting generate request', {
-			server: name,
-			agent: agentId,
 			promptLength: prompt.length,
 			hasSystemPrompt: !!generateOptions?.systemPrompt,
 		});
 
-		return withResilience(name, 'generate', async () => {
-			const sessionId = await createSession(connection);
-			if (generateOptions?.modelId) {
-				await setSessionModel(sessionId, generateOptions.modelId, name);
-			}
-			const content = buildTextContent(prompt, generateOptions?.systemPrompt);
-			const result = await sendPrompt(
-				connection,
-				sessionId,
-				content,
-				buildSamplingMetadata(generateOptions?.sampling),
-				streamTimeoutMs,
-			);
-
-			return {
-				content: extractContentText(result.content),
-				agentId,
-				serverName: name,
-				sessionId,
-				usage: extractTokenUsage(result.metadata),
-				stopReason: result.stopReason,
-			};
+		const result = await engine.request<ACPGenerateResult>('acp/generate', {
+			prompt,
+			agentId: generateOptions?.agentId,
+			serverName: generateOptions?.serverName,
+			systemPrompt: generateOptions?.systemPrompt,
+			sampling: generateOptions?.sampling,
+			sessionId: undefined,
 		});
+
+		return result;
 	};
 
 	const chat = async (
@@ -630,295 +436,179 @@ export function createACPClient(
 			);
 		}
 
-		const { connection, entry, name } = resolveConnection(
-			chatOptions?.serverName,
-		);
-		const agentId = resolveAgentId(entry, chatOptions?.agentId);
+		const engine = requireEngine();
 
 		logger.debug('Starting chat request', {
-			server: name,
-			agent: agentId,
 			messageCount: messages.length,
 		});
 
-		return withResilience(name, 'chat', async () => {
-			const sessionId = await createSession(connection);
+		// Send messages as content blocks for each role
+		const chatMessages = messages.map((msg) => ({
+			role: msg.role,
+			content: [{ type: 'text' as const, text: msg.content }],
+		}));
 
-			// Combine all messages into content blocks for a single prompt.
-			// System messages become prefixed text blocks, assistant messages
-			// are included as context.
-			const content: ACPContentBlock[] = [];
-			for (const msg of messages) {
-				const prefix =
-					msg.role === 'system'
-						? '[System] '
-						: msg.role === 'assistant'
-							? '[Assistant] '
-							: '';
-				content.push({ type: 'text', text: `${prefix}${msg.content}` });
-			}
-
-			const result = await sendPrompt(
-				connection,
-				sessionId,
-				content,
-				buildSamplingMetadata(chatOptions?.sampling),
-				streamTimeoutMs,
-			);
-
-			return {
-				content: extractContentText(result.content),
-				agentId,
-				serverName: name,
-				sessionId,
-				usage: extractTokenUsage(result.metadata),
-				stopReason: result.stopReason,
-			};
+		const result = await engine.request<ACPGenerateResult>('acp/chat', {
+			messages: chatMessages,
+			agentId: chatOptions?.agentId,
+			serverName: chatOptions?.serverName,
+			sampling: chatOptions?.sampling,
+			sessionId: undefined,
 		});
+
+		return result;
 	};
 
 	async function* generateStream(
 		prompt: string,
 		streamOptions?: ACPStreamOptions,
 	): AsyncGenerator<ACPStreamChunk> {
-		const { connection, entry, name } = resolveConnection(
-			streamOptions?.serverName,
-		);
-		const agentId = resolveAgentId(entry, streamOptions?.agentId);
-		const monitor = monitors.get(name);
+		const engine = requireEngine();
 
 		logger.debug('Starting generate stream', {
-			server: name,
-			agent: agentId,
 			promptLength: prompt.length,
 		});
 
-		// Retry wrapper: on transient failure, reset and retry from scratch
-		let lastStreamError: unknown;
-		for (let attempt = 1; attempt <= maxRetryAttempts; attempt++) {
-			if (attempt > 1) {
-				logger.debug(
-					`Retrying generateStream (attempt ${attempt}/${maxRetryAttempts})`,
-				);
-				// Backoff before retry
-				const delay = retryBaseDelayMs * 2 ** (attempt - 2);
-				await new Promise<void>((r) =>
-					setTimeout(r, Math.min(delay, retryMaxDelayMs)),
-				);
-			}
+		// Start the stream — returns a stream ID
+		const { streamId } = await engine.request<{ streamId: string }>(
+			'acp/streamStart',
+			{
+				prompt,
+				agentId: streamOptions?.agentId,
+				serverName: streamOptions?.serverName,
+				systemPrompt: streamOptions?.systemPrompt,
+				sampling: streamOptions?.sampling,
+				sessionId: undefined,
+				streamTimeoutMs: streamTimeoutMs,
+			},
+		);
 
-			const sessionId = await createSession(connection);
-			const content = buildTextContent(prompt, streamOptions?.systemPrompt);
+		// Collect streaming chunks via notification handlers
+		type ChunkItem =
+			| { text: string }
+			| { done: true; usage?: ACPTokenUsage }
+			| { toolCall: ACPToolCall }
+			| { toolCallUpdate: ACPToolCallUpdate };
 
-			// Append image content blocks if provided
-			if (streamOptions?.images && streamOptions.images.length > 0) {
-				for (const img of streamOptions.images) {
-					content.push({
-						type: 'resource',
-						resource: {
-							uri: `data:${img.mimeType};base64`,
-							mimeType: img.mimeType,
-							blob: img.base64,
-						},
-					});
-				}
-			}
+		const chunks: ChunkItem[] = [];
+		let chunkResolve: (() => void) | undefined;
 
-			// Collect streaming chunks via notification handler
-			type ChunkItem =
-				| { text: string }
-				| { keepalive: true }
-				| { done: true }
-				| { toolCall: ACPToolCall }
-				| { toolCallUpdate: ACPToolCallUpdate };
-			const chunks: ChunkItem[] = [];
-			let chunkResolve: (() => void) | undefined;
-			let streamUsage: ACPTokenUsage | undefined;
-
-			const pushKeepalive = (): void => {
-				chunks.push({ keepalive: true });
+		const unsubDelta = engine.onNotification(
+			'stream/delta',
+			(params: unknown) => {
+				const p = params as { streamId: string; text: string };
+				if (p.streamId !== streamId) return;
+				chunks.push({ text: p.text });
 				chunkResolve?.();
-			};
+			},
+		);
 
-			const unsubscribe = connection.onNotification(
-				'session/update',
-				(params: unknown) => {
-					const p = params as ACPSessionUpdateParams;
-					if (p.sessionId !== sessionId) return;
-
-					const update = p.update;
-					if (!update) return;
-
-					if (
-						update.sessionUpdate === 'agent_message_chunk' &&
-						update.content
-					) {
-						const content = update.content;
-						// Content may be a single block or an array
-						const blocks = Array.isArray(content) ? content : [content];
-						const text = extractContentText(
-							blocks as readonly ACPContentBlock[],
-						);
-						if (text) {
-							chunks.push({ text });
-							chunkResolve?.();
-						}
-					}
-
-					if (update.sessionUpdate === 'tool_call') {
-						const tc: ACPToolCall = {
-							toolCallId: update.toolCallId as string,
-							title: update.title as string,
-							kind: (update.kind as ACPToolCall['kind']) ?? 'other',
-							status: (update.status as ACPToolCall['status']) ?? 'pending',
-						};
-						streamOptions?.onToolCall?.(tc);
-						// Yield as a typed chunk so consumers can render tool progress
-						chunks.push({ toolCall: tc });
-						chunkResolve?.();
-					}
-
-					if (update.sessionUpdate === 'tool_call_update') {
-						const tcu: ACPToolCallUpdate = {
-							toolCallId: update.toolCallId as string,
-							status:
-								(update.status as ACPToolCallUpdate['status']) ?? 'in_progress',
-							content: update.content,
-						};
-						streamOptions?.onToolCallUpdate?.(tcu);
-						// Yield as a typed chunk so consumers can render tool progress
-						chunks.push({ toolCallUpdate: tcu });
-						chunkResolve?.();
-					}
-
-					if (update.metadata) {
-						const usage = extractTokenUsage(
-							update.metadata as Readonly<Record<string, unknown>>,
-						);
-						if (usage) streamUsage = usage;
-					}
-				},
-			);
-
-			// Subscribe to permission activity events to push keepalives
-			// while the user decides — prevents stream timeout during prompts
-			const unsubscribePermission = connection.onPermissionActivity(() => {
-				pushKeepalive();
-			});
-
-			// Send the prompt — don't await yet, chunks arrive as notifications
-			const promptTimeoutMs = streamTimeoutMs;
-			const promptPromise = sendPrompt(
-				connection,
-				sessionId,
-				content,
-				buildSamplingMetadata(streamOptions?.sampling),
-				promptTimeoutMs,
-			).then((result) => {
-				// Final result arrived — mark stream as done
-				if (result.metadata) {
-					const usage = extractTokenUsage(result.metadata);
-					if (usage) streamUsage = usage;
-				}
-				chunks.push({ done: true });
+		const unsubToolCall = engine.onNotification(
+			'stream/toolCall',
+			(params: unknown) => {
+				const p = params as { streamId: string; toolCall: ACPToolCall };
+				if (p.streamId !== streamId) return;
+				streamOptions?.onToolCall?.(p.toolCall);
+				chunks.push({ toolCall: p.toolCall });
 				chunkResolve?.();
-				return result;
-			});
+			},
+		);
 
-			try {
-				// Sliding-window stream timeout — resets each time a chunk arrives
-				const timeoutMs = streamTimeoutMs;
-				let lastActivity = Date.now();
+		const unsubToolCallUpdate = engine.onNotification(
+			'stream/toolCallUpdate',
+			(params: unknown) => {
+				const p = params as {
+					streamId: string;
+					update: ACPToolCallUpdate;
+				};
+				if (p.streamId !== streamId) return;
+				streamOptions?.onToolCallUpdate?.(p.update);
+				chunks.push({ toolCallUpdate: p.update });
+				chunkResolve?.();
+			},
+		);
 
-				let idx = 0;
-				while (true) {
-					// Check abort signal
+		const unsubComplete = engine.onNotification(
+			'stream/complete',
+			(params: unknown) => {
+				const p = params as {
+					streamId: string;
+					usage?: ACPTokenUsage;
+				};
+				if (p.streamId !== streamId) return;
+				chunks.push({ done: true, usage: p.usage });
+				chunkResolve?.();
+			},
+		);
+
+		try {
+			// Sliding-window timeout — resets each time a chunk arrives
+			const timeoutDuration = streamTimeoutMs;
+			let lastActivity = Date.now();
+			let idx = 0;
+
+			while (true) {
+				// Check abort signal
+				if (streamOptions?.signal?.aborted) {
+					yield { type: 'complete', usage: undefined };
+					return;
+				}
+
+				if (idx < chunks.length) {
+					const chunk = chunks[idx++];
+					lastActivity = Date.now();
+
+					if ('done' in chunk) {
+						yield { type: 'complete', usage: chunk.usage };
+						return;
+					}
+					if ('toolCall' in chunk) {
+						yield { type: 'tool_call', toolCall: chunk.toolCall };
+						continue;
+					}
+					if ('toolCallUpdate' in chunk) {
+						yield {
+							type: 'tool_call_update',
+							update: chunk.toolCallUpdate,
+						};
+						continue;
+					}
+					yield { type: 'delta', text: chunk.text };
+				} else {
+					// Check abort before waiting
 					if (streamOptions?.signal?.aborted) {
-						yield { type: 'complete', usage: streamUsage };
+						yield { type: 'complete', usage: undefined };
 						return;
 					}
 
-					if (idx < chunks.length) {
-						const chunk = chunks[idx++];
-						lastActivity = Date.now();
-						if ('done' in chunk) break;
-						// Keepalive chunks reset lastActivity but don't yield text
-						if ('keepalive' in chunk) continue;
-						if ('toolCall' in chunk) {
-							yield { type: 'tool_call', toolCall: chunk.toolCall };
-							continue;
-						}
-						if ('toolCallUpdate' in chunk) {
-							yield {
-								type: 'tool_call_update',
-								update: chunk.toolCallUpdate,
-							};
-							continue;
-						}
-						yield { type: 'delta', text: chunk.text };
-					} else {
-						// Check abort before waiting
-						if (streamOptions?.signal?.aborted) {
-							yield { type: 'complete', usage: streamUsage };
-							return;
-						}
-
-						const elapsed = Date.now() - lastActivity;
-						if (elapsed >= timeoutMs) {
-							throw createProviderGenerationError(
-								'acp',
-								`Stream timed out after ${timeoutMs}ms of inactivity`,
-								{ model: agentId },
-							);
-						}
-
-						const remaining = timeoutMs - elapsed;
-						await new Promise<void>((resolve) => {
-							chunkResolve = resolve;
-							setTimeout(resolve, Math.min(remaining, 100));
-						});
+					const elapsed = Date.now() - lastActivity;
+					if (elapsed >= timeoutDuration) {
+						throw createProviderGenerationError(
+							'acp',
+							`Stream timed out after ${timeoutDuration}ms of inactivity`,
+						);
 					}
-				}
 
-				yield { type: 'complete', usage: streamUsage };
-				monitor?.recordSuccess();
-				return; // success — exit retry loop
-			} catch (error) {
-				lastStreamError = error;
-				// Only retry on transient errors and not on last attempt
-				if (attempt < maxRetryAttempts && isTransientError(error)) {
-					logger.warn(
-						`Stream attempt ${attempt} failed with transient error, will retry`,
-						{ error: toError(error).message },
-					);
-					continue;
+					const remaining = timeoutDuration - elapsed;
+					await new Promise<void>((resolve) => {
+						chunkResolve = resolve;
+						setTimeout(resolve, Math.min(remaining, 100));
+					});
 				}
-
-				monitor?.recordFailure(error instanceof Error ? error : undefined);
-				if (isSimseError(error)) throw error;
-				throw createProviderGenerationError(
-					'acp',
-					`Stream interrupted: ${toError(error).message}`,
-					{ cause: error, model: agentId },
-				);
-			} finally {
-				unsubscribe();
-				unsubscribePermission();
-				// Ensure the prompt promise settles
-				promptPromise.catch(() => {});
 			}
+		} catch (error) {
+			if (isSimseError(error)) throw error;
+			throw createProviderGenerationError(
+				'acp',
+				`Stream interrupted: ${toError(error).message}`,
+				{ cause: error },
+			);
+		} finally {
+			unsubDelta();
+			unsubToolCall();
+			unsubToolCallUpdate();
+			unsubComplete();
 		}
-
-		// All retry attempts exhausted
-		monitor?.recordFailure(
-			lastStreamError instanceof Error ? lastStreamError : undefined,
-		);
-		if (isSimseError(lastStreamError)) throw lastStreamError;
-		throw createProviderGenerationError(
-			'acp',
-			`Stream failed after ${maxRetryAttempts} attempts: ${toError(lastStreamError).message}`,
-			{ cause: lastStreamError, model: agentId },
-		);
 	}
 
 	const embed = async (
@@ -926,97 +616,36 @@ export function createACPClient(
 		model?: string,
 		serverName?: string,
 	): Promise<ACPEmbedResult> => {
-		// ACP does not support embeddings natively.
-		// Send embedding data as a data content block and hope the server handles it.
+		const engine = requireEngine();
 		const texts = Array.isArray(input) ? input : [input];
-		const { connection, entry, name } = resolveConnection(serverName);
-		const agentId = model ?? resolveAgentId(entry);
 
-		logger.debug('Generating embeddings via ACP', {
-			server: name,
-			agent: agentId,
+		logger.debug('Generating embeddings via ACP engine', {
 			inputCount: texts.length,
 		});
 
-		return withResilience(name, 'embed', async () => {
-			const sessionId = await createSession(connection);
-
-			// ACP does not define an embedding-specific content block.
-			// Send as a text prompt asking the agent to return embeddings.
-			const content: ACPContentBlock[] = [
-				{
-					type: 'text',
-					text: JSON.stringify({ texts, action: 'embed' }),
-				},
-			];
-
-			const result = await sendPrompt(connection, sessionId, content);
-
-			// Try to extract embeddings from the response
-			for (const block of result.content ?? []) {
-				if (block.type === 'data') {
-					const data = block.data;
-					if (Array.isArray(data)) {
-						return {
-							embeddings: data as number[][],
-							agentId,
-							serverName: name,
-							usage: extractTokenUsage(result.metadata),
-						};
-					}
-					if (
-						typeof data === 'object' &&
-						data !== null &&
-						'embeddings' in data
-					) {
-						return {
-							embeddings: (data as { embeddings: number[][] }).embeddings,
-							agentId,
-							serverName: name,
-							usage: extractTokenUsage(result.metadata),
-						};
-					}
-				}
-
-				if (block.type === 'text') {
-					try {
-						const parsed = JSON.parse(block.text);
-						if (Array.isArray(parsed)) {
-							return {
-								embeddings: parsed as number[][],
-								agentId,
-								serverName: name,
-								usage: extractTokenUsage(result.metadata),
-							};
-						}
-						if (parsed && 'embeddings' in parsed) {
-							return {
-								embeddings: (parsed as { embeddings: number[][] }).embeddings,
-								agentId,
-								serverName: name,
-								usage: extractTokenUsage(result.metadata),
-							};
-						}
-					} catch {
-						// Not JSON
-					}
-				}
-			}
-
+		try {
+			const result = await engine.request<ACPEmbedResult>('acp/embed', {
+				input: texts,
+				model,
+				server: serverName,
+			});
+			return result;
+		} catch (error) {
+			if (isSimseError(error)) throw error;
 			throw createEmbeddingError(
-				'ACP server returned no embeddings in response',
-				{ model: agentId },
+				`ACP embedding failed: ${toError(error).message}`,
+				{ cause: error },
 			);
-		});
+		}
 	};
 
 	const listSessions = async (
 		serverName?: string,
 	): Promise<ACPSessionListEntry[]> => {
-		const { connection } = resolveConnection(serverName);
-		const result = await connection.request<{
+		const engine = requireEngine();
+		const result = await engine.request<{
 			sessions: ACPSessionListEntry[];
-		}>('session/list', {});
+		}>('acp/listSessions', { server: serverName });
 		return result.sessions ?? [];
 	};
 
@@ -1024,11 +653,11 @@ export function createACPClient(
 		sessionId: string,
 		serverName?: string,
 	): Promise<ACPSessionInfo> => {
-		const { connection } = resolveConnection(serverName);
-		const info = await connection.request<ACPSessionInfo>('session/load', {
+		const engine = requireEngine();
+		const info = await engine.request<ACPSessionInfo>('acp/loadSession', {
 			sessionId,
+			server: serverName,
 		});
-		// Update session info cache with fresh data
 		sessionInfoCache.set(sessionId, info);
 		return info;
 	};
@@ -1037,8 +666,12 @@ export function createACPClient(
 		sessionId: string,
 		serverName?: string,
 	): Promise<void> => {
-		const { connection } = resolveConnection(serverName);
-		await connection.request('session/delete', { sessionId });
+		const engine = requireEngine();
+		await engine.request('acp/deleteSession', {
+			sessionId,
+			server: serverName,
+		});
+		sessionInfoCache.delete(sessionId);
 	};
 
 	const setSessionMode = async (
@@ -1046,12 +679,12 @@ export function createACPClient(
 		modeId: string,
 		serverName?: string,
 	): Promise<void> => {
-		const { connection } = resolveConnection(serverName);
-		await connection
-			.request('session/set_config_option', {
+		const engine = requireEngine();
+		await engine
+			.request('acp/setSessionMode', {
 				sessionId,
-				configOptionId: 'mode',
-				groupId: modeId,
+				value: modeId,
+				server: serverName,
 			})
 			.catch(() => {}); // Best-effort
 	};
@@ -1061,36 +694,35 @@ export function createACPClient(
 		modelId: string,
 		serverName?: string,
 	): Promise<void> => {
-		const { connection } = resolveConnection(serverName);
-		await connection
-			.request('session/set_config_option', {
+		const engine = requireEngine();
+		await engine
+			.request('acp/setSessionModel', {
 				sessionId,
-				configOptionId: 'model',
-				groupId: modelId,
+				value: modelId,
+				server: serverName,
 			})
 			.catch(() => {}); // Best-effort
 	};
 
 	const isAvailable = async (serverName?: string): Promise<boolean> => {
 		try {
-			const name =
-				serverName ?? config.defaultServer ?? config.servers[0]?.name;
-			if (!name) return false;
-			const connection = connections.get(name);
-			return connection?.isConnected ?? false;
+			const engine = requireEngine();
+			const result = await engine.request<{ available: boolean }>(
+				'acp/serverHealth',
+				{ server: serverName },
+			);
+			return result.available;
 		} catch {
 			return false;
 		}
 	};
 
-	// -----------------------------------------------------------------------
-	// Return the frozen record
-	// -----------------------------------------------------------------------
-
-	const getServerHealth = (serverName?: string): HealthSnapshot | undefined => {
-		const name = serverName ?? config.defaultServer ?? config.servers[0]?.name;
-		if (!name) return undefined;
-		return monitors.get(name)?.getHealth();
+	const getServerHealth = (
+		_serverName?: string,
+	): HealthSnapshot | undefined => {
+		// Health monitoring is now in Rust — return undefined for TS consumers
+		// that check this. The engine handles resilience internally.
+		return undefined;
 	};
 
 	const getSessionModels = async (
@@ -1108,33 +740,25 @@ export function createACPClient(
 	};
 
 	const setPermissionPolicy = (policy: ACPPermissionPolicy): void => {
-		for (const conn of connections.values()) {
-			conn.setPermissionPolicy(policy);
-		}
+		if (!engineClient?.isHealthy) return;
+		engineClient.request('acp/setPermissionPolicy', { policy }).catch(() => {});
 	};
 
 	const getServerModelInfo = async (
 		serverName?: string,
 	): Promise<ACPModelsInfo | undefined> => {
+		// The Rust engine doesn't expose a direct getServerModelInfo method.
+		// We can approximate by listing agents or checking cached session info.
+		// For now, return undefined — this is a best-effort method.
 		try {
-			const { connection } = resolveConnection(serverName);
-			const result = await connection.request<ACPSessionNewResult>(
-				'session/new',
-				{
-					cwd: process.cwd(),
-					mcpServers: config.mcpServers ?? [],
-				},
-			);
-
-			// Cache for later use
-			sessionInfoCache.set(result.sessionId, result);
-
-			// Clean up the temp session (fire-and-forget)
-			connection
-				.request('session/delete', { sessionId: result.sessionId })
-				.catch(() => {});
-
-			return result.models;
+			const engine = requireEngine();
+			// Try to load via the engine's server health which returns serverNames
+			const result = await engine.request<{
+				available: boolean;
+				serverNames: string[];
+			}>('acp/serverHealth', { server: serverName });
+			if (!result.available) return undefined;
+			return undefined;
 		} catch {
 			return undefined;
 		}
@@ -1144,30 +768,25 @@ export function createACPClient(
 		const statuses: ACPServerStatus[] = [];
 
 		for (const entry of config.servers) {
-			const connected = connections.has(entry.name);
-			let currentModel: string | undefined;
-			let availableModels: ACPModelInfo[] | undefined;
+			let connected = false;
 
-			if (connected) {
-				try {
-					const models = await getServerModelInfo(entry.name);
-					if (models) {
-						currentModel = models.currentModelId;
-						availableModels = [...models.availableModels];
-					}
-				} catch {
-					// Server may not support model info
-				}
+			try {
+				const engine = requireEngine();
+				const result = await engine.request<{ available: boolean }>(
+					'acp/serverHealth',
+					{ server: entry.name },
+				);
+				connected = result.available;
+			} catch {
+				connected = false;
 			}
 
 			statuses.push(
 				Object.freeze({
 					name: entry.name,
 					connected,
-					currentModel,
-					availableModels: availableModels
-						? Object.freeze(availableModels)
-						: undefined,
+					currentModel: undefined,
+					availableModels: undefined,
 					agentId: entry.defaultAgent ?? config.defaultAgent,
 				}),
 			);
@@ -1175,6 +794,10 @@ export function createACPClient(
 
 		return Object.freeze(statuses);
 	};
+
+	// -----------------------------------------------------------------------
+	// Return the frozen record
+	// -----------------------------------------------------------------------
 
 	return Object.freeze({
 		initialize,

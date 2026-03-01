@@ -17,22 +17,18 @@ export {
 export type {
 	ACPClient,
 	ACPClientOptions,
+	ACPPermissionOption,
+	ACPPermissionRequestInfo,
+	ACPPermissionToolCall,
 	ACPStreamOptions,
 } from './ai/acp/acp-client.js';
 // ---- ACP (Agent Client Protocol) ------------------------------------------
 export { createACPClient } from './ai/acp/acp-client.js';
 export type {
-	ACPConnection,
-	ACPConnectionOptions,
-	ACPPermissionOption,
-	ACPPermissionRequestInfo,
-	ACPPermissionToolCall,
-} from './ai/acp/acp-connection.js';
-export { createACPConnection } from './ai/acp/acp-connection.js';
-export {
-	extractToolCall,
-	extractToolCallUpdate,
-} from './ai/acp/acp-results.js';
+	AcpEngineClient,
+	AcpEngineClientOptions,
+} from './ai/acp/acp-engine-client.js';
+export { createAcpEngineClient } from './ai/acp/acp-engine-client.js';
 export type {
 	ACPAgentCapabilities,
 	ACPAgentInfo,

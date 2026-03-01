@@ -24,7 +24,7 @@ pub struct Message {
 }
 
 /// Conversation buffer with auto-compaction support.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Conversation {
 	pub system_prompt: Option<String>,
 	pub messages: Vec<Message>,

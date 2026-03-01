@@ -3,8 +3,10 @@
 //! Manages cursor position, text selection, and word boundaries.
 //! No rendering — just state transitions.
 
+use serde::{Deserialize, Serialize};
+
 /// Selection state: anchor + cursor defines the selected range.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InputState {
 	pub value: String,
 	pub cursor: usize,

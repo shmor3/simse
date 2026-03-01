@@ -12,7 +12,7 @@ pub enum PermissionMode {
 }
 
 /// Decision for a permission check.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PermissionDecision {
 	Allow,
 	Deny,
@@ -28,7 +28,7 @@ pub struct PermissionRule {
 }
 
 /// Permission state.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PermissionState {
 	pub mode: PermissionMode,
 	pub rules: Vec<PermissionRule>,

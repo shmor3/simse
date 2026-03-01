@@ -1,7 +1,9 @@
 //! Diff parsing and formatting.
 
+use serde::{Deserialize, Serialize};
+
 /// A single diff hunk.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiffHunk {
 	pub old_start: usize,
 	pub old_count: usize,
@@ -11,7 +13,7 @@ pub struct DiffHunk {
 }
 
 /// A line in a diff hunk.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum DiffLine {
 	Context(String),
 	Added(String),

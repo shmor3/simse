@@ -163,6 +163,10 @@ impl VectorServer {
 			// -- Prompt injection ----------------------------------------
 			"format/memoryContext" => handle_format_memory_context(req.params),
 
+			// -- Graph ---------------------------------------------------
+			"graph/neighbors" => self.with_store(|s| handle_graph_neighbors(s, req.params)),
+			"graph/traverse" => self.with_store(|s| handle_graph_traverse(s, req.params)),
+
 			// -- Unknown -------------------------------------------------
 			_ => {
 				self.transport.write_error(
@@ -374,6 +378,23 @@ struct RecordFeedbackParams {
 #[serde(rename_all = "camelCase")]
 struct QueryParseParams {
 	dsl: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphNeighborsParams {
+	id: String,
+	edge_types: Option<Vec<String>>,
+	max_results: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GraphTraverseParams {
+	id: String,
+	depth: Option<usize>,
+	edge_types: Option<Vec<String>>,
+	max_results: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -642,4 +663,69 @@ fn handle_format_memory_context(
 
 	let text = format_memory_context(&lookups, &options, now);
 	Ok(serde_json::json!({ "text": text }))
+}
+
+// ---------------------------------------------------------------------------
+// Graph handlers
+// ---------------------------------------------------------------------------
+
+fn parse_edge_types(raw: &[String]) -> Vec<crate::graph::EdgeType> {
+	raw.iter()
+		.filter_map(|s| match s.as_str() {
+			"Related" => Some(crate::graph::EdgeType::Related),
+			"Parent" => Some(crate::graph::EdgeType::Parent),
+			"Child" => Some(crate::graph::EdgeType::Child),
+			"Extends" => Some(crate::graph::EdgeType::Extends),
+			"Contradicts" => Some(crate::graph::EdgeType::Contradicts),
+			"Similar" => Some(crate::graph::EdgeType::Similar),
+			"CoOccurs" => Some(crate::graph::EdgeType::CoOccurs),
+			_ => None,
+		})
+		.collect()
+}
+
+fn handle_graph_neighbors(
+	store: &VolumeStore,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VectorError> {
+	let p: GraphNeighborsParams = parse_params(params)?;
+	let edge_types = p.edge_types.as_ref().map(|et| parse_edge_types(et));
+	let max = p.max_results.unwrap_or(20);
+	let results = store.graph_neighbors(&p.id, edge_types.as_deref(), max);
+	let neighbors: Vec<serde_json::Value> = results
+		.iter()
+		.map(|(edge, vol)| {
+			serde_json::json!({
+				"volume": vol,
+				"edge": {
+					"edgeType": format!("{:?}", edge.edge_type),
+					"weight": edge.weight,
+					"origin": format!("{:?}", edge.origin),
+				}
+			})
+		})
+		.collect();
+	Ok(serde_json::json!({ "neighbors": neighbors }))
+}
+
+fn handle_graph_traverse(
+	store: &VolumeStore,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VectorError> {
+	let p: GraphTraverseParams = parse_params(params)?;
+	let edge_types = p.edge_types.as_ref().map(|et| parse_edge_types(et));
+	let depth = p.depth.unwrap_or(1).min(2); // Cap at 2 hops
+	let max = p.max_results.unwrap_or(50);
+	let results = store.graph_traverse(&p.id, depth, edge_types.as_deref(), max);
+	let nodes: Vec<serde_json::Value> = results
+		.iter()
+		.map(|(node, vol)| {
+			serde_json::json!({
+				"volume": vol,
+				"depth": node.depth,
+				"path": node.path,
+			})
+		})
+		.collect();
+	Ok(serde_json::json!({ "nodes": nodes }))
 }

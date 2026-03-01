@@ -84,6 +84,7 @@ pub struct RecommendationScores {
 	pub vector: Option<f64>,
 	pub recency: Option<f64>,
 	pub frequency: Option<f64>,
+	pub graph: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -91,6 +92,7 @@ pub struct WeightProfile {
 	pub vector: Option<f64>,
 	pub recency: Option<f64>,
 	pub frequency: Option<f64>,
+	pub graph: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -136,6 +138,12 @@ pub struct RequiredWeightProfile {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphBoost {
+	pub enabled: Option<bool>,
+	pub weight: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchOptions {
 	#[serde(rename = "queryEmbedding")]
 	pub query_embedding: Option<Vec<f32>>,
@@ -155,6 +163,8 @@ pub struct SearchOptions {
 	pub rank_weights: Option<RankWeights>,
 	#[serde(rename = "topicFilter")]
 	pub topic_filter: Option<Vec<String>>,
+	#[serde(rename = "graphBoost")]
+	pub graph_boost: Option<GraphBoost>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

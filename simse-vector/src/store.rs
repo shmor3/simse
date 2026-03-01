@@ -903,6 +903,20 @@ impl VolumeStore {
 			});
 		}
 
+		// Apply graph boost if enabled
+		if let Some(ref gb) = options.graph_boost {
+			if gb.enabled.unwrap_or(false) {
+				let weight = gb.weight.unwrap_or(self.graph_index.config().graph_boost_weight);
+				let result_ids: Vec<String> =
+					results.iter().map(|r| r.volume.id.clone()).collect();
+				for item in &mut results {
+					let graph_score =
+						self.graph_index.compute_graph_score(&item.volume.id, &result_ids);
+					item.score = (1.0 - weight) * item.score + weight * graph_score;
+				}
+			}
+		}
+
 		results.sort_by(|a, b| {
 			b.score
 				.partial_cmp(&a.score)
@@ -1013,6 +1027,24 @@ impl VolumeStore {
 			.as_ref()
 			.map(|e| compute_magnitude(e));
 
+		// Graph weight: opt-in only, default 0 (no change to existing behavior)
+		let graph_weight = options
+			.weights
+			.as_ref()
+			.and_then(|w| w.graph)
+			.unwrap_or(0.0);
+
+		// Collect recently accessed volume IDs for graph scoring
+		let recent_ids: Vec<String> = if graph_weight > 0.0 {
+			self.access_stats
+				.iter()
+				.filter(|(_, stats)| stats.access_count > 0)
+				.map(|(id, _)| id.clone())
+				.collect()
+		} else {
+			Vec::new()
+		};
+
 		let mut results: Vec<Recommendation> = Vec::new();
 
 		for vol in &candidates {
@@ -1039,14 +1071,27 @@ impl VolumeStore {
 				.unwrap_or(0);
 			let freq_score = frequency_score(access_count, max_access);
 
-			// Compute base recommendation score
+			// Compute graph score (opt-in: only if graph_weight > 0)
+			let graph_score_val = if graph_weight > 0.0 {
+				self.graph_index.compute_graph_score(&vol.id, &recent_ids)
+			} else {
+				0.0
+			};
+
+			// Compute base recommendation score (vector + recency + frequency)
 			let input = RecommendationScoreInput {
 				vector_score,
 				recency_score: Some(rec_score),
 				frequency_score: Some(freq_score),
 			};
 			let score_result = compute_recommendation_score(&input, &weights);
-			let mut final_score = score_result.score;
+
+			// Blend graph score: base_score * (1 - graph_weight) + graph_score * graph_weight
+			let mut final_score = if graph_weight > 0.0 {
+				(1.0 - graph_weight) * score_result.score + graph_weight * graph_score_val
+			} else {
+				score_result.score
+			};
 
 			// Apply learning boost
 			if let Some(engine) = &self.learning_engine {
@@ -1062,6 +1107,11 @@ impl VolumeStore {
 						vector: score_result.vector,
 						recency: score_result.recency,
 						frequency: score_result.frequency,
+						graph: if graph_weight > 0.0 {
+							Some(graph_score_val)
+						} else {
+							None
+						},
 					},
 				});
 			}
@@ -1748,6 +1798,7 @@ mod tests {
 				field_boosts: None,
 				rank_weights: None,
 				topic_filter: None,
+				graph_boost: None,
 			})
 			.unwrap();
 
@@ -2070,6 +2121,7 @@ mod tests {
 				field_boosts: None,
 				rank_weights: None,
 				topic_filter: None,
+				graph_boost: None,
 			}),
 			Err(VectorError::NotInitialized)
 		));
@@ -2173,6 +2225,7 @@ mod tests {
 				field_boosts: None,
 				rank_weights: None,
 				topic_filter: None,
+				graph_boost: None,
 			})
 			.unwrap();
 

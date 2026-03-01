@@ -150,6 +150,7 @@ mod tests {
 			vector: Some(0.5),
 			recency: Some(0.3),
 			frequency: Some(0.2),
+			graph: None,
 		});
 		let result = normalize_weights(&w);
 		assert!((result.vector - 0.5).abs() < 1e-10);
@@ -163,6 +164,7 @@ mod tests {
 			vector: Some(1.0),
 			recency: Some(1.0),
 			frequency: Some(1.0),
+			graph: None,
 		});
 		let result = normalize_weights(&w);
 		let sum = result.vector + result.recency + result.frequency;
@@ -176,6 +178,7 @@ mod tests {
 			vector: Some(0.0),
 			recency: Some(0.0),
 			frequency: Some(0.0),
+			graph: None,
 		});
 		let result = normalize_weights(&w);
 		assert!((result.vector - 0.6).abs() < 1e-10);
@@ -189,6 +192,7 @@ mod tests {
 			vector: Some(0.8),
 			recency: None,
 			frequency: None,
+			graph: None,
 		});
 		let result = normalize_weights(&w);
 		let sum = result.vector + result.recency + result.frequency;

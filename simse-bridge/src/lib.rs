@@ -1,0 +1,1 @@
+//! simse-bridge — stub

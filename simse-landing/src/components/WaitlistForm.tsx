@@ -1,5 +1,6 @@
 import type { FormEvent } from 'react';
 import { useState } from 'react';
+import { waitlistSchema } from '../lib/schema';
 
 type FormState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -10,7 +11,13 @@ export default function WaitlistForm() {
 
 	async function handleSubmit(e: FormEvent) {
 		e.preventDefault();
-		if (!email.trim()) return;
+
+		const result = waitlistSchema.safeParse({ email: email.trim() });
+		if (!result.success) {
+			setState('error');
+			setErrorMsg(result.error.issues[0].message);
+			return;
+		}
 
 		setState('loading');
 		setErrorMsg('');

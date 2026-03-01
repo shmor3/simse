@@ -15,7 +15,8 @@
 		"@fontsource-variable/dm-sans": "^5.2.8",
 		"@fontsource/space-mono": "^5.2.9",
 		"react": "^19.2.0",
-		"react-dom": "^19.2.0"
+		"react-dom": "^19.2.0",
+		"zod": "^4.3.6"
 	},
 	"devDependencies": {
 		"@cloudflare/workers-types": "^4.20260305.0",

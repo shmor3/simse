@@ -1,3 +1,4 @@
+import { waitlistSchema } from '../../src/lib/schema';
 import { validateEmail } from '../lib/validate-email';
 import { sendWelcomeEmail } from '../lib/welcome-email';
 
@@ -8,20 +9,23 @@ interface Env {
 	UNSUBSCRIBE_URL: string;
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 export const onRequestPost: PagesFunction<Env> = async (context) => {
-	let body: { email?: string };
+	let body: unknown;
 	try {
 		body = await context.request.json();
 	} catch {
 		return Response.json({ error: 'Invalid JSON' }, { status: 400 });
 	}
 
-	const email = body.email?.trim().toLowerCase();
-	if (!email || !EMAIL_RE.test(email)) {
-		return Response.json({ error: 'Invalid email' }, { status: 400 });
+	const parsed = waitlistSchema.safeParse(body);
+	if (!parsed.success) {
+		return Response.json(
+			{ error: parsed.error.issues[0].message },
+			{ status: 400 },
+		);
 	}
+
+	const email = parsed.data.email.trim().toLowerCase();
 
 	const validation = await validateEmail(email);
 	if (!validation.valid) {

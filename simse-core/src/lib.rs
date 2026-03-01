@@ -6,5 +6,6 @@ pub mod conversation;
 pub mod error;
 pub mod events;
 pub mod logger;
+pub mod prompts;
 pub mod tasks;
 pub mod utils;

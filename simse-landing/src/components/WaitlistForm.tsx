@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import type { FormEvent } from 'react';
 import { useState } from 'react';
 import { waitlistSchema } from '../lib/schema';
@@ -47,7 +48,11 @@ export default function WaitlistForm() {
 
 	if (state === 'success') {
 		return (
-			<p className="animate-fade-in text-center font-mono text-sm text-emerald-400">
+			<p
+				className={clsx(
+					'animate-fade-in text-center font-mono text-sm text-emerald-400',
+				)}
+			>
 				You're on the list.
 			</p>
 		);
@@ -55,7 +60,11 @@ export default function WaitlistForm() {
 
 	return (
 		<form onSubmit={handleSubmit}>
-			<div className="flex flex-col gap-3 sm:flex-row sm:gap-0 sm:overflow-hidden sm:rounded-lg sm:bg-zinc-900">
+			<div
+				className={clsx(
+					'flex flex-col gap-3 sm:flex-row sm:gap-0 sm:overflow-hidden sm:rounded-lg sm:bg-zinc-900',
+				)}
+			>
 				<input
 					type="email"
 					value={email}
@@ -63,28 +72,46 @@ export default function WaitlistForm() {
 					placeholder="you@company.dev"
 					required
 					disabled={state === 'loading'}
-					className="h-14 w-full shrink-0 rounded-lg border border-zinc-700 bg-zinc-800/60 px-4 font-mono text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none disabled:opacity-50 sm:h-12 sm:min-w-0 sm:shrink sm:flex-1 sm:rounded-none sm:border-none sm:bg-transparent"
+					className={clsx(
+						'h-14 w-full shrink-0 rounded-lg border border-zinc-700 bg-zinc-800/60 px-4 font-mono text-sm text-zinc-200',
+						'placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none disabled:opacity-50',
+						'sm:h-12 sm:min-w-0 sm:shrink sm:flex-1 sm:rounded-none sm:border-none sm:bg-transparent',
+					)}
 				/>
 				<button
 					type="submit"
 					disabled={state === 'loading'}
-					className="h-14 shrink-0 cursor-pointer rounded-lg bg-emerald-500 px-6 font-mono text-sm font-medium text-zinc-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50 sm:h-12 sm:rounded-none"
+					className={clsx(
+						'h-14 shrink-0 cursor-pointer rounded-lg bg-emerald-500 px-6 font-mono text-sm font-medium text-zinc-950',
+						'transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50',
+						'sm:h-12 sm:rounded-none',
+					)}
 				>
 					{state === 'loading' ? 'Joining...' : 'Get early access'}
 				</button>
 			</div>
 
-			<p className="mt-3 text-center text-[11px] leading-relaxed text-zinc-600">
+			<p
+				className={clsx(
+					'mt-3 text-center text-[11px] leading-relaxed text-zinc-600',
+				)}
+			>
 				By signing up you agree to receive product updates. Unsubscribe anytime.
 			</p>
 
 			{state === 'error' && (
-				<p className="animate-fade-in mt-2 text-center font-mono text-xs text-red-400/80">
+				<p
+					className={clsx(
+						'animate-fade-in mt-2 text-center font-mono text-xs text-red-400/80',
+					)}
+				>
 					{errorMsg}.{' '}
 					<button
 						type="button"
 						onClick={() => handleSubmit()}
-						className="cursor-pointer underline underline-offset-2 hover:text-red-300"
+						className={clsx(
+							'cursor-pointer underline underline-offset-2 hover:text-red-300',
+						)}
 					>
 						Retry
 					</button>

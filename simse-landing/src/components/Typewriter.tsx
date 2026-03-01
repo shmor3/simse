@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 const words = [
@@ -77,16 +78,22 @@ export default function Typewriter() {
 	return (
 		<span
 			ref={containerRef}
-			className="relative inline-block text-emerald-400"
+			className={clsx('relative inline-block text-emerald-400')}
 			style={{ width: maxWidth > 0 ? `${maxWidth}px` : undefined }}
 		>
 			{/* Inline text with blinking border-right cursor */}
-			<span className="typewriter-cursor">
+			<span
+				className={clsx('border-r-2 border-emerald-400 animate-blink-cursor')}
+			>
 				{'\u200B'}
 				{displayed}
 			</span>
 			{/* Underline pinned to bottom */}
-			<span className="absolute right-0 bottom-0 left-0 h-0.5 bg-emerald-400/30" />
+			<span
+				className={clsx(
+					'absolute right-0 bottom-0 left-0 h-0.5 bg-emerald-400/30',
+				)}
+			/>
 		</span>
 	);
 }

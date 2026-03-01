@@ -152,6 +152,8 @@ pub enum LibraryErrorCode {
 	EmbeddingFailed,
 	NotInitialized,
 	DuplicateDetected,
+	NotFound,
+	InvalidInput,
 }
 
 impl LibraryErrorCode {
@@ -161,6 +163,8 @@ impl LibraryErrorCode {
 			Self::EmbeddingFailed => "LIBRARY_EMBEDDING_FAILED",
 			Self::NotInitialized => "LIBRARY_NOT_INITIALIZED",
 			Self::DuplicateDetected => "LIBRARY_DUPLICATE_DETECTED",
+			Self::NotFound => "LIBRARY_NOT_FOUND",
+			Self::InvalidInput => "LIBRARY_INVALID_INPUT",
 		}
 	}
 }

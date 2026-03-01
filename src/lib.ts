@@ -6,6 +6,120 @@
 // need to configure, build, and run chains programmatically.
 // ---------------------------------------------------------------------------
 
+export type {
+	ACPEmbedderOptions,
+	ACPGeneratorOptions,
+} from './ai/acp/acp-adapters.js';
+export {
+	createACPEmbedder,
+	createACPGenerator,
+} from './ai/acp/acp-adapters.js';
+export type {
+	ACPClient,
+	ACPClientOptions,
+	ACPStreamOptions,
+} from './ai/acp/acp-client.js';
+// ---- ACP (Agent Client Protocol) ------------------------------------------
+export { createACPClient } from './ai/acp/acp-client.js';
+export type {
+	ACPConnection,
+	ACPConnectionOptions,
+	ACPPermissionOption,
+	ACPPermissionRequestInfo,
+	ACPPermissionToolCall,
+} from './ai/acp/acp-connection.js';
+export { createACPConnection } from './ai/acp/acp-connection.js';
+export {
+	extractToolCall,
+	extractToolCallUpdate,
+} from './ai/acp/acp-results.js';
+export type {
+	ACPAgentCapabilities,
+	ACPAgentInfo,
+	ACPChatMessage,
+	ACPChatOptions,
+	ACPClientCapabilities,
+	ACPConfig,
+	ACPContentBlock,
+	ACPDataContent,
+	ACPEmbedResult,
+	ACPGenerateOptions,
+	ACPGenerateResult,
+	ACPInitializeResult,
+	ACPMCPServerConfig,
+	ACPModeInfo,
+	ACPModelInfo,
+	ACPModelsInfo,
+	ACPModesInfo,
+	ACPPermissionPolicy,
+	ACPResourceContent,
+	ACPResourceLinkContent,
+	ACPSamplingParams,
+	ACPServerEntry,
+	ACPServerInfo,
+	ACPServerStatus,
+	ACPSessionInfo,
+	ACPSessionListEntry,
+	ACPSessionPromptResult,
+	ACPStopReason,
+	ACPStreamChunk,
+	ACPStreamComplete,
+	ACPStreamDelta,
+	ACPStreamToolCall,
+	ACPStreamToolCallUpdate,
+	ACPTextContent,
+	ACPTokenUsage,
+	ACPToolCall,
+	ACPToolCallUpdate,
+	JsonRpcError,
+	JsonRpcMessage,
+	JsonRpcNotification,
+	JsonRpcRequest,
+	JsonRpcResponse,
+} from './ai/acp/types.js';
+// ---- Agent ----------------------------------------------------------------
+export type {
+	AgentExecutor,
+	AgentExecutorOptions,
+	AgentResult,
+	AgentStepConfig,
+	ParallelConfig,
+	ParallelSubResult,
+	ParallelSubStepConfig,
+	SwarmMergeStrategy,
+} from './ai/agent/index.js';
+export { createAgentExecutor } from './ai/agent/index.js';
+// ---- Chains ---------------------------------------------------------------
+export type {
+	Chain,
+	ChainCallbacks,
+	ChainOptions,
+	ChainStepConfig,
+	PromptTemplate,
+	Provider,
+	StepResult,
+} from './ai/chain/index.js';
+export {
+	createChain,
+	createChainFromDefinition,
+	createPromptTemplate,
+	formatSearchResults,
+	isPromptTemplate,
+	runNamedChain,
+} from './ai/chain/index.js';
+// ---- Conversation ---------------------------------------------------------
+export type {
+	ContextPruner,
+	ContextPrunerOptions,
+	Conversation,
+	ConversationMessage,
+	ConversationOptions,
+	ConversationRole,
+} from './ai/conversation/index.js';
+export {
+	createContextPruner,
+	createConversation,
+} from './ai/conversation/index.js';
 // ---- Library / Vector Store (from simse-vector) ----------------------------
 export type {
 	// Types
@@ -122,183 +236,6 @@ export {
 	saveDefinition,
 	validateDefinition,
 } from './ai/library/index.js';
-// ---- Virtual Filesystem (from simse-vfs) ----------------------------------
-export type {
-	VFSCommitOperation,
-	VFSCommitOptions,
-	VFSCommitResult,
-	VFSContentType,
-	VFSCopyOptions,
-	VFSDeleteOptions,
-	VFSDiffHunk,
-	VFSDiffLine,
-	VFSDiffOptions,
-	VFSDiffResult,
-	VFSDirEntry,
-	VFSDisk,
-	VFSDiskOptions,
-	VFSError,
-	VFSErrorOptions,
-	VFSHistoryEntry,
-	VFSHistoryOptions,
-	VFSLimits,
-	VFSLoadOptions,
-	VFSMkdirOptions,
-	VFSNodeType,
-	VFSReaddirOptions,
-	VFSReadResult,
-	VFSSearchOptions,
-	VFSSearchResult,
-	VFSSnapshot,
-	VFSSnapshotDirectory,
-	VFSSnapshotFile,
-	VFSStat,
-	VFSValidationIssue,
-	VFSValidationResult,
-	VFSValidator,
-	VFSWriteEvent,
-	VFSWriteOptions,
-	VirtualFS,
-	VirtualFSOptions,
-} from './ai/vfs/index.js';
-export {
-	ancestorPaths,
-	baseName,
-	createDefaultValidators,
-	createEmptyFileValidator,
-	createJSONSyntaxValidator,
-	createMissingTrailingNewlineValidator,
-	createMixedIndentationValidator,
-	createMixedLineEndingsValidator,
-	createTrailingWhitespaceValidator,
-	createVFSDisk,
-	createVFSError,
-	createVirtualFS,
-	isVFSError,
-	normalizePath,
-	parentPath,
-	pathDepth,
-	toLocalPath,
-	VFS_ROOT,
-	VFS_SCHEME,
-	validatePath,
-	validateSegment,
-	validateSnapshot,
-} from './ai/vfs/index.js';
-export type {
-	ACPEmbedderOptions,
-	ACPGeneratorOptions,
-} from './ai/acp/acp-adapters.js';
-export {
-	createACPEmbedder,
-	createACPGenerator,
-} from './ai/acp/acp-adapters.js';
-export type {
-	ACPClient,
-	ACPClientOptions,
-	ACPStreamOptions,
-} from './ai/acp/acp-client.js';
-// ---- ACP (Agent Client Protocol) ------------------------------------------
-export { createACPClient } from './ai/acp/acp-client.js';
-export type {
-	ACPConnection,
-	ACPConnectionOptions,
-	ACPPermissionOption,
-	ACPPermissionRequestInfo,
-	ACPPermissionToolCall,
-} from './ai/acp/acp-connection.js';
-export { createACPConnection } from './ai/acp/acp-connection.js';
-export {
-	extractToolCall,
-	extractToolCallUpdate,
-} from './ai/acp/acp-results.js';
-export type {
-	ACPAgentCapabilities,
-	ACPAgentInfo,
-	ACPChatMessage,
-	ACPChatOptions,
-	ACPClientCapabilities,
-	ACPConfig,
-	ACPContentBlock,
-	ACPDataContent,
-	ACPEmbedResult,
-	ACPGenerateOptions,
-	ACPGenerateResult,
-	ACPInitializeResult,
-	ACPMCPServerConfig,
-	ACPModeInfo,
-	ACPModelInfo,
-	ACPModelsInfo,
-	ACPModesInfo,
-	ACPPermissionPolicy,
-	ACPResourceContent,
-	ACPResourceLinkContent,
-	ACPSamplingParams,
-	ACPServerEntry,
-	ACPServerInfo,
-	ACPServerStatus,
-	ACPSessionInfo,
-	ACPSessionListEntry,
-	ACPSessionPromptResult,
-	ACPStopReason,
-	ACPStreamChunk,
-	ACPStreamComplete,
-	ACPStreamDelta,
-	ACPStreamToolCall,
-	ACPStreamToolCallUpdate,
-	ACPTextContent,
-	ACPTokenUsage,
-	ACPToolCall,
-	ACPToolCallUpdate,
-	JsonRpcError,
-	JsonRpcMessage,
-	JsonRpcNotification,
-	JsonRpcRequest,
-	JsonRpcResponse,
-} from './ai/acp/types.js';
-// ---- Agent ----------------------------------------------------------------
-export type {
-	AgentExecutor,
-	AgentExecutorOptions,
-	AgentResult,
-	AgentStepConfig,
-	ParallelConfig,
-	ParallelSubResult,
-	ParallelSubStepConfig,
-	SwarmMergeStrategy,
-} from './ai/agent/index.js';
-export { createAgentExecutor } from './ai/agent/index.js';
-// ---- Chains ---------------------------------------------------------------
-export type {
-	Chain,
-	ChainCallbacks,
-	ChainOptions,
-	ChainStepConfig,
-	PromptTemplate,
-	Provider,
-	StepResult,
-} from './ai/chain/index.js';
-export {
-	createChain,
-	createChainFromDefinition,
-	createPromptTemplate,
-	formatSearchResults,
-	isPromptTemplate,
-	runNamedChain,
-} from './ai/chain/index.js';
-// ---- Conversation ---------------------------------------------------------
-export type {
-	ContextPruner,
-	ContextPrunerOptions,
-	Conversation,
-	ConversationMessage,
-	ConversationOptions,
-	ConversationRole,
-} from './ai/conversation/index.js';
-export {
-	createContextPruner,
-	createConversation,
-} from './ai/conversation/index.js';
 // ---- Agentic Loop ---------------------------------------------------------
 export type {
 	AgenticLoop,
@@ -410,6 +347,69 @@ export type {
 	ToolPermissionRule,
 } from './ai/tools/permissions.js';
 export { createToolPermissionResolver } from './ai/tools/permissions.js';
+// ---- Virtual Filesystem (from simse-vfs) ----------------------------------
+export type {
+	VFSCommitOperation,
+	VFSCommitOptions,
+	VFSCommitResult,
+	VFSContentType,
+	VFSCopyOptions,
+	VFSDeleteOptions,
+	VFSDiffHunk,
+	VFSDiffLine,
+	VFSDiffOptions,
+	VFSDiffResult,
+	VFSDirEntry,
+	VFSDisk,
+	VFSDiskOptions,
+	VFSError,
+	VFSErrorOptions,
+	VFSHistoryEntry,
+	VFSHistoryOptions,
+	VFSLimits,
+	VFSLoadOptions,
+	VFSMkdirOptions,
+	VFSNodeType,
+	VFSReaddirOptions,
+	VFSReadResult,
+	VFSSearchOptions,
+	VFSSearchResult,
+	VFSSnapshot,
+	VFSSnapshotDirectory,
+	VFSSnapshotFile,
+	VFSStat,
+	VFSValidationIssue,
+	VFSValidationResult,
+	VFSValidator,
+	VFSWriteEvent,
+	VFSWriteOptions,
+	VirtualFS,
+	VirtualFSOptions,
+} from './ai/vfs/index.js';
+export {
+	ancestorPaths,
+	baseName,
+	createDefaultValidators,
+	createEmptyFileValidator,
+	createJSONSyntaxValidator,
+	createMissingTrailingNewlineValidator,
+	createMixedIndentationValidator,
+	createMixedLineEndingsValidator,
+	createTrailingWhitespaceValidator,
+	createVFSDisk,
+	createVFSError,
+	createVirtualFS,
+	isVFSError,
+	normalizePath,
+	parentPath,
+	pathDepth,
+	toLocalPath,
+	VFS_ROOT,
+	VFS_SCHEME,
+	validatePath,
+	validateSegment,
+	validateSnapshot,
+} from './ai/vfs/index.js';
 // ---- Configuration --------------------------------------------------------
 export type {
 	ACPServerInput,

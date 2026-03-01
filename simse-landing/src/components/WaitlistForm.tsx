@@ -1,5 +1,5 @@
-import { useState } from 'react';
 import type { FormEvent } from 'react';
+import { useState } from 'react';
 
 type FormState = 'idle' | 'loading' | 'success' | 'error';
 
@@ -23,7 +23,9 @@ export default function WaitlistForm() {
 			});
 
 			if (!res.ok) {
-				const data = await res.json().catch(() => ({ error: 'Request failed' }));
+				const data = await res
+					.json()
+					.catch(() => ({ error: 'Request failed' }));
 				throw new Error(
 					(data as { error?: string }).error || `HTTP ${res.status}`,
 				);
@@ -32,9 +34,7 @@ export default function WaitlistForm() {
 			setState('success');
 		} catch (err) {
 			setState('error');
-			setErrorMsg(
-				err instanceof Error ? err.message : 'Something went wrong',
-			);
+			setErrorMsg(err instanceof Error ? err.message : 'Something went wrong');
 		}
 	}
 

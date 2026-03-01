@@ -5,6 +5,7 @@
 
 import { unlink } from 'node:fs/promises';
 import { join } from 'node:path';
+import { createNoopLogger, type Logger } from '../shared/logger.js';
 import { toError } from './errors.js';
 import { createLibrarian } from './librarian.js';
 import {
@@ -13,7 +14,6 @@ import {
 	saveDefinition,
 	validateDefinition,
 } from './librarian-definition.js';
-import { createNoopLogger, type Logger } from '../shared/logger.js';
 import type {
 	ArbitrationResult,
 	Librarian,

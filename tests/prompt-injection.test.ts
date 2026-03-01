@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import type { Lookup } from '../src/ai/library/types.js';
 import { formatMemoryContext } from '../src/ai/library/prompt-injection.js';
+import type { Lookup } from '../src/ai/library/types.js';
 
 function makeResult(
 	text: string,

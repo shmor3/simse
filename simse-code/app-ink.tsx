@@ -2,13 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import chalk from 'chalk';
 import { Box, Text, useInput } from 'ink';
-import {
-	type ReactNode,
-	useCallback,
-	useMemo,
-	useRef,
-	useState,
-} from 'react';
+import { type ReactNode, useCallback, useMemo, useRef, useState } from 'react';
 import type { ACPClient, ACPPermissionRequestInfo } from 'simse';
 import { createACPClient, toError } from 'simse';
 import { createCommandRegistry } from './command-registry.js';
@@ -16,13 +10,13 @@ import { Markdown } from './components/chat/markdown.js';
 import { MessageList } from './components/chat/message-list.js';
 import { ToolCallBox } from './components/chat/tool-call-box.js';
 import { ConfirmDialog } from './components/input/confirm-dialog.js';
+import { LibrarianExplorer } from './components/input/librarian-explorer.js';
 import { OnboardingWizard } from './components/input/onboarding-wizard.js';
 import { PermissionDialog } from './components/input/permission-dialog.js';
 import {
 	PromptInput,
 	type PromptMode,
 } from './components/input/prompt-input.js';
-import { LibrarianExplorer } from './components/input/librarian-explorer.js';
 import { SettingsExplorer } from './components/input/settings-explorer.js';
 import type { SetupPresetOption } from './components/input/setup-selector.js';
 import { SetupSelector } from './components/input/setup-selector.js';
@@ -112,7 +106,9 @@ export function App({
 
 	// Ctrl+C double-press guard: first press shows warning, second exits
 	const ctrlCRef = useRef(false);
-	const ctrlCTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	const ctrlCTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(
+		undefined,
+	);
 
 	// Ctrl+C double-press to exit (must be useInput, not SIGINT — raw mode)
 	useInput((input, key) => {
@@ -385,7 +381,13 @@ export function App({
 	// (but not when setup selector or settings explorer is active — they handle their own Escape)
 	useInput(
 		(_input, key) => {
-			if (key.escape && !pendingSetup && !pendingSettings && !pendingConfirm && !pendingLibrarians) {
+			if (
+				key.escape &&
+				!pendingSetup &&
+				!pendingSettings &&
+				!pendingConfirm &&
+				!pendingLibrarians
+			) {
 				abortLoop();
 				setIsProcessing(false);
 				setItems((prev) => [...prev, { kind: 'info', text: 'Interrupted.' }]);

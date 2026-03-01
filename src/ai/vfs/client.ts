@@ -3,9 +3,9 @@
 // ---------------------------------------------------------------------------
 
 import { type ChildProcess, spawn } from 'node:child_process';
-import { createVFSError, toError } from './errors.js';
 import type { Logger } from '../shared/logger.js';
 import { createNoopLogger } from '../shared/logger.js';
+import { createVFSError, toError } from './errors.js';
 import type { VFSHistoryOptions, VFSLimits } from './types.js';
 
 // ---------------------------------------------------------------------------

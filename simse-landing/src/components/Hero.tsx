@@ -14,7 +14,7 @@ export default function Hero() {
         className="animate-fade-in-up mt-8 text-center text-[2.75rem] leading-[1.1] font-bold tracking-[-0.025em] text-white sm:text-[3.5rem] lg:text-[4rem]"
         style={{ animationDelay: "150ms" }}
       >
-        A <Typewriter /> assistant
+        AI <Typewriter /> assistant
         <br />
         that <span className="text-emerald-400">grows with you</span>
       </h1>

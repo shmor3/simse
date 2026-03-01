@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { fileURLToPath } from 'node:url';
 import { createLibrary, type Library } from '../../src/ai/library/library.js';
-import type { EmbeddingProvider, LibraryConfig } from '../../src/ai/library/types.js';
+import type {
+	EmbeddingProvider,
+	LibraryConfig,
+} from '../../src/ai/library/types.js';
 import { createSilentLogger } from './utils.js';
 
 const ENGINE_PATH = fileURLToPath(

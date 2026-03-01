@@ -135,7 +135,7 @@ impl GraphIndex {
 		let edges = self
 			.adjacency
 			.entry(edge.source_id.clone())
-			.or_insert_with(Vec::new);
+			.or_default();
 
 		let mut found = false;
 		for existing in edges.iter_mut() {
@@ -158,7 +158,7 @@ impl GraphIndex {
 		let edges = self.adjacency.get_mut(&edge.source_id).unwrap();
 		if edges.len() > self.config.max_edges_per_node {
 			// Sort ascending by weight so we can pop the weakest
-			edges.sort_by(|a, b| a.weight.partial_cmp(&b.weight).unwrap());
+			edges.sort_by(|a, b| a.weight.partial_cmp(&b.weight).unwrap_or(std::cmp::Ordering::Equal));
 			let evicted = edges.remove(0);
 			// Also remove from reverse index
 			if let Some(rev) = self.reverse.get_mut(&evicted.target_id) {
@@ -170,11 +170,24 @@ impl GraphIndex {
 
 		// Update reverse index (only if we didn't just update in-place via found)
 		if !found {
-			let rev = self
-				.reverse
-				.entry(edge.target_id.clone())
-				.or_insert_with(Vec::new);
-			rev.push(edge);
+			// Check if the newly added edge survived eviction before updating reverse index
+			let survived = self
+				.adjacency
+				.get(&edge.source_id)
+				.map(|edges| {
+					edges.iter().any(|e| {
+						e.target_id == edge.target_id && e.edge_type == edge.edge_type
+					})
+				})
+				.unwrap_or(false);
+
+			if survived {
+				let rev = self
+					.reverse
+					.entry(edge.target_id.clone())
+					.or_default();
+				rev.push(edge);
+			}
 		} else {
 			// Update the weight in reverse index too
 			if let Some(rev) = self.reverse.get_mut(&edge.target_id) {
@@ -255,7 +268,7 @@ impl GraphIndex {
 			Some(edges) => edges.iter().collect(),
 			None => return vec![],
 		};
-		result.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap());
+		result.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
 		result
 	}
 
@@ -269,7 +282,7 @@ impl GraphIndex {
 				.collect(),
 			None => return vec![],
 		};
-		result.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap());
+		result.sort_by(|a, b| b.weight.partial_cmp(&a.weight).unwrap_or(std::cmp::Ordering::Equal));
 		result
 	}
 
@@ -632,7 +645,7 @@ impl GraphIndex {
 // ---------------------------------------------------------------------------
 
 /// A node discovered during BFS traversal.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TraversalNode {
 	pub node_id: String,
 	pub depth: usize,

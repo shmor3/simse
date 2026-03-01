@@ -1,15 +1,15 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { Library } from '../library/library.js';
-import type { VirtualFS } from '../vfs/vfs.js';
 import { z } from 'zod';
 import { toError } from '../../errors/base.js';
 import type { ACPClient } from '../acp/acp-client.js';
 import { createChain } from '../chain/chain.js';
 import { createPromptTemplate } from '../chain/prompt-template.js';
 import type { Conversation } from '../conversation/types.js';
+import type { Library } from '../library/library.js';
 import type { TaskList } from '../tasks/types.js';
 import type { ToolRegistry } from '../tools/types.js';
+import type { VirtualFS } from '../vfs/vfs.js';
 import type { MCPServerConfig } from './types.js';
 
 // ---------------------------------------------------------------------------

@@ -19,7 +19,7 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 
 	try {
 		await context.env.DB.prepare(
-			'INSERT INTO waitlist (email) VALUES (?) ON CONFLICT (email) DO NOTHING'
+			'INSERT INTO waitlist (email) VALUES (?) ON CONFLICT (email) DO NOTHING',
 		)
 			.bind(email)
 			.run();

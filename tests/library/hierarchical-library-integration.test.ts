@@ -4,7 +4,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createLibrary, type Library } from '../../src/ai/library/library.js';
-import type { EmbeddingProvider, LibraryConfig } from '../../src/ai/library/types.js';
+import type {
+	EmbeddingProvider,
+	LibraryConfig,
+} from '../../src/ai/library/types.js';
 import { createSilentLogger } from './utils.js';
 
 const ENGINE_PATH = fileURLToPath(
@@ -127,7 +130,9 @@ describe('Hierarchical Library System Integration', () => {
 			expect(progTexts).toContain('Python async await');
 
 			// Querying a leaf topic should return only that entry
-			const rustEntries = await library.filterByTopic(['programming/rust/ownership']);
+			const rustEntries = await library.filterByTopic([
+				'programming/rust/ownership',
+			]);
 			expect(rustEntries.length).toBe(1);
 			expect(rustEntries[0].text).toBe('Rust ownership model');
 

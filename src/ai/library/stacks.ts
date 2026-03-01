@@ -2,8 +2,8 @@
 // Stacks — thin async client delegating to the Rust vector engine via JSON-RPC
 // ---------------------------------------------------------------------------
 
-import { createVectorClient, type VectorClient } from './client.js';
 import { createNoopLogger, type Logger } from '../shared/logger.js';
+import { createVectorClient, type VectorClient } from './client.js';
 import type {
 	AdvancedLookup,
 	DateRange,

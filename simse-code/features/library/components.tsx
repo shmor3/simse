@@ -56,7 +56,9 @@ export function VolumeList({ volumes, topic }: VolumeListProps) {
 	if (volumes.length === 0) {
 		return (
 			<Box paddingLeft={2}>
-				<Text dimColor>{topic ? `No volumes in "${topic}"` : 'No volumes'}</Text>
+				<Text dimColor>
+					{topic ? `No volumes in "${topic}"` : 'No volumes'}
+				</Text>
 			</Box>
 		);
 	}

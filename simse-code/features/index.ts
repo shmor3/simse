@@ -4,9 +4,9 @@ export { createInitCommands, createSettingsCommands } from './config/index.js';
 export { filesCommands } from './files/index.js';
 export {
 	libraryCommands,
-	VolumeList,
 	SearchResults,
 	TopicList,
+	VolumeList,
 } from './library/index.js';
 export type { MetaCommandContext } from './meta/index.js';
 export {

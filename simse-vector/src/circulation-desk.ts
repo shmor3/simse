@@ -16,10 +16,10 @@ export interface CirculationDeskOptions {
 		metadata?: Record<string, string>,
 	) => Promise<string>;
 	readonly checkDuplicate: (text: string) => Promise<DuplicateCheckResult>;
-	readonly getVolumesForTopic: (topic: string) => Volume[];
+	readonly getVolumesForTopic: (topic: string) => Promise<Volume[]>;
 	readonly deleteVolume?: (id: string) => Promise<void>;
-	readonly getTotalVolumeCount?: () => number;
-	readonly getAllTopics?: () => string[];
+	readonly getTotalVolumeCount?: () => Promise<number>;
+	readonly getAllTopics?: () => Promise<string[]>;
 	readonly thresholds?: CirculationDeskThresholds;
 	readonly catalog?: import('./types.js').TopicCatalog;
 }
@@ -66,19 +66,19 @@ export function createCirculationDesk(
 	let isProcessing = false;
 	let disposed = false;
 
-	const checkEscalation = (topic: string): void => {
+	const checkEscalation = async (topic: string): Promise<void> => {
 		if (!optimizationConfig || !deleteVolume) return;
 
-		const topicVolumes = getVolumesForTopic(topic);
+		const topicVolumes = await getVolumesForTopic(topic);
 		if (topicVolumes.length >= topicThreshold) {
 			queue.push({ type: 'optimization', topic });
 			return;
 		}
 
 		if (getTotalVolumeCount && getAllTopics) {
-			const total = getTotalVolumeCount();
+			const total = await getTotalVolumeCount();
 			if (total >= globalThreshold) {
-				for (const t of getAllTopics()) {
+				for (const t of await getAllTopics()) {
 					queue.push({ type: 'optimization', topic: t });
 				}
 			}
@@ -109,7 +109,7 @@ export function createCirculationDesk(
 
 	const checkSpawning = async (topic: string): Promise<void> => {
 		if (!registry || !spawningConfig) return;
-		const volumes = getVolumesForTopic(topic);
+		const volumes = await getVolumesForTopic(topic);
 		const threshold = spawningConfig.complexityThreshold ?? 100;
 		if (volumes.length >= threshold) {
 			await registry.spawnSpecialist(topic, volumes);
@@ -142,13 +142,13 @@ export function createCirculationDesk(
 						extractedTopics.add(topic);
 					}
 					for (const topic of extractedTopics) {
-						checkEscalation(topic);
+						await checkEscalation(topic);
 						await checkSpawning(topic);
 					}
 					break;
 				}
 				case 'compendium': {
-					const volumes = getVolumesForTopic(job.topic);
+					const volumes = await getVolumesForTopic(job.topic);
 					if (volumes.length >= minEntries) {
 						const resolved = await resolveLibrarianForJob(
 							job.topic,
@@ -159,7 +159,7 @@ export function createCirculationDesk(
 					break;
 				}
 				case 'reorganization': {
-					const volumes = getVolumesForTopic(job.topic);
+					const volumes = await getVolumesForTopic(job.topic);
 					if (volumes.length >= maxVolumesPerTopic) {
 						const resolved = await resolveLibrarianForJob(
 							job.topic,
@@ -182,7 +182,7 @@ export function createCirculationDesk(
 				}
 				case 'optimization': {
 					if (!deleteVolume || !optimizationConfig) break;
-					const volumes = getVolumesForTopic(job.topic);
+					const volumes = await getVolumesForTopic(job.topic);
 					if (volumes.length === 0) break;
 					const resolved = await resolveLibrarianForJob(
 						job.topic,

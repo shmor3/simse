@@ -145,7 +145,7 @@ export function registerLibraryTools(
 		},
 		async (args) => {
 			try {
-				const topics = library.getTopics();
+				const topics = await library.getTopics();
 				const filterTopic =
 					typeof args.topic === 'string' ? args.topic : undefined;
 				const filtered = filterTopic
@@ -189,7 +189,7 @@ export function registerLibraryTools(
 		async (args) => {
 			try {
 				const topic = String(args.topic ?? '');
-				const volumes = library.filterByTopic([topic]);
+				const volumes = await library.filterByTopic([topic]);
 				if (volumes.length < 2) {
 					return `Topic "${topic}" has fewer than 2 volumes — nothing to compact.`;
 				}

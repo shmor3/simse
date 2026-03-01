@@ -85,7 +85,7 @@ export function createLibraryServices(
 	const enrichSystemPrompt = async (
 		context: LibraryContext,
 	): Promise<string> => {
-		if (!library.isInitialized || library.size === 0) {
+		if (!library.isInitialized || (await library.size) === 0) {
 			return context.currentSystemPrompt;
 		}
 

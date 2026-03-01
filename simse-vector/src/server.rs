@@ -234,6 +234,7 @@ impl VectorServer {
 				.recency_half_life_ms
 				.unwrap_or(30.0 * 24.0 * 60.0 * 60.0 * 1000.0),
 			topic_catalog_threshold: p.topic_catalog_threshold.unwrap_or(0.85),
+			graph_config: Default::default(),
 		};
 
 		let mut store = VolumeStore::new(config);

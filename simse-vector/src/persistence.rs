@@ -30,6 +30,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use thiserror::Error;
 
+use crate::graph::GraphState;
 use crate::learning::LearningState;
 use crate::types::Volume;
 
@@ -62,6 +63,7 @@ pub struct AccessStats {
 // ---------------------------------------------------------------------------
 
 pub const LEARNING_KEY: &str = "__learning";
+pub const GRAPH_KEY: &str = "__graph";
 
 // ---------------------------------------------------------------------------
 // Embedding encode / decode
@@ -295,6 +297,7 @@ pub struct DeserializedData {
 	pub entries: Vec<Volume>,
 	pub access_stats: HashMap<String, AccessStats>,
 	pub learning_state: Option<LearningState>,
+	pub graph_state: Option<GraphState>,
 	pub skipped: usize,
 }
 
@@ -307,6 +310,7 @@ pub fn deserialize_from_storage(raw_data: &HashMap<String, Vec<u8>>) -> Deserial
 	let mut entries = Vec::new();
 	let mut access_stats = HashMap::new();
 	let mut learning_state: Option<LearningState> = None;
+	let mut graph_state: Option<GraphState> = None;
 	let mut skipped = 0;
 
 	for (key, value) in raw_data {
@@ -319,6 +323,24 @@ pub fn deserialize_from_storage(raw_data: &HashMap<String, Vec<u8>>) -> Deserial
 					}
 					Err(_) => {
 						// Invalid learning state — start fresh
+						skipped += 1;
+					}
+				},
+				Err(_) => {
+					skipped += 1;
+				}
+			}
+			continue;
+		}
+
+		if key == GRAPH_KEY {
+			// Parse graph state from UTF-8 JSON
+			match std::str::from_utf8(value) {
+				Ok(json_str) => match serde_json::from_str::<GraphState>(json_str) {
+					Ok(state) => {
+						graph_state = Some(state);
+					}
+					Err(_) => {
 						skipped += 1;
 					}
 				},
@@ -352,15 +374,17 @@ pub fn deserialize_from_storage(raw_data: &HashMap<String, Vec<u8>>) -> Deserial
 		entries,
 		access_stats,
 		learning_state,
+		graph_state,
 		skipped,
 	}
 }
 
-/// Serialize all entries + learning state to storage format.
+/// Serialize all entries + learning state + graph state to storage format.
 pub fn serialize_to_storage(
 	entries: &[Volume],
 	access_stats: &HashMap<String, AccessStats>,
 	learning_state: Option<&LearningState>,
+	graph_state: Option<&GraphState>,
 ) -> HashMap<String, Vec<u8>> {
 	let mut data = HashMap::new();
 
@@ -375,6 +399,20 @@ pub fn serialize_to_storage(
 			match serde_json::to_string(state) {
 				Ok(json) => {
 					data.insert(LEARNING_KEY.to_string(), json.into_bytes());
+				}
+				Err(_) => {
+					// Silently skip if serialization fails
+				}
+			}
+		}
+	}
+
+	// Persist graph state alongside entries (only if there are explicit edges)
+	if let Some(state) = graph_state {
+		if !state.explicit_edges.is_empty() {
+			match serde_json::to_string(state) {
+				Ok(json) => {
+					data.insert(GRAPH_KEY.to_string(), json.into_bytes());
 				}
 				Err(_) => {
 					// Silently skip if serialization fails
@@ -411,12 +449,13 @@ pub fn save_to_directory(
 	entries: &[Volume],
 	access_stats: &HashMap<String, AccessStats>,
 	learning_state: Option<&LearningState>,
+	graph_state: Option<&GraphState>,
 ) -> Result<(), PersistenceError> {
 	// Create directory if needed
 	std::fs::create_dir_all(dir).map_err(PersistenceError::Io)?;
 
 	// Serialize all entries to binary, then base64 encode each
-	let storage = serialize_to_storage(entries, access_stats, learning_state);
+	let storage = serialize_to_storage(entries, access_stats, learning_state, graph_state);
 	let mut index_entries = HashMap::new();
 	for (key, value) in &storage {
 		index_entries.insert(key.clone(), STANDARD.encode(value));
@@ -460,6 +499,7 @@ pub fn load_from_directory(dir: &str) -> Result<DeserializedData, PersistenceErr
 			entries: Vec::new(),
 			access_stats: HashMap::new(),
 			learning_state: None,
+			graph_state: None,
 			skipped: 0,
 		});
 	};
@@ -685,7 +725,7 @@ mod tests {
 			},
 		);
 
-		let storage = serialize_to_storage(&volumes, &access_stats, None);
+		let storage = serialize_to_storage(&volumes, &access_stats, None, None);
 		let result = deserialize_from_storage(&storage);
 
 		assert_eq!(result.entries.len(), 3);
@@ -728,7 +768,7 @@ mod tests {
 			correlations: None,
 		};
 
-		let storage = serialize_to_storage(&volumes, &access_stats, Some(&learning));
+		let storage = serialize_to_storage(&volumes, &access_stats, Some(&learning), None);
 
 		// Verify learning key is present
 		assert!(storage.contains_key(LEARNING_KEY));
@@ -785,7 +825,7 @@ mod tests {
 			correlations: None,
 		};
 
-		save_to_directory(dir_path, &volumes, &access_stats, Some(&learning)).unwrap();
+		save_to_directory(dir_path, &volumes, &access_stats, Some(&learning), None).unwrap();
 
 		// Verify index.gz was written
 		assert!(dir.path().join("index.gz").exists());
@@ -932,7 +972,7 @@ mod tests {
 			correlations: None,
 		};
 
-		let storage = serialize_to_storage(&volumes, &access_stats, Some(&learning));
+		let storage = serialize_to_storage(&volumes, &access_stats, Some(&learning), None);
 
 		// Learning key should NOT be present when total_queries == 0
 		assert!(!storage.contains_key(LEARNING_KEY));
@@ -946,7 +986,7 @@ mod tests {
 		let nested_str = nested.to_str().unwrap();
 
 		let volumes = vec![make_volume("x", "test", &[1.0], 1000)];
-		save_to_directory(nested_str, &volumes, &HashMap::new(), None).unwrap();
+		save_to_directory(nested_str, &volumes, &HashMap::new(), None, None).unwrap();
 
 		assert!(nested.join("index.gz").exists());
 	}

@@ -96,8 +96,9 @@ impl SessionStore {
 	/// here — it is created lazily on the first [`append`] call.
 	pub fn create(&self, work_dir: &str) -> io::Result<String> {
 		let id = generate_id();
-		let now = Utc::now().format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
-		let title = Utc::now().format("Session %Y-%m-%d %H:%M").to_string();
+		let ts = Utc::now();
+		let now = ts.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+		let title = ts.format("Session %Y-%m-%d %H:%M").to_string();
 
 		let meta = SessionMeta {
 			id: id.clone(),
@@ -130,8 +131,7 @@ impl SessionStore {
 			tool_name: message.tool_name.clone(),
 		};
 
-		let jsonl_path = self.sessions_dir.join(format!("{session_id}.jsonl"));
-		append_json_line(&jsonl_path, &entry)?;
+		append_json_line(&self.session_file_path(session_id), &entry)?;
 
 		// Update index metadata
 		let mut index = self.load_index();
@@ -149,8 +149,7 @@ impl SessionStore {
 	/// Returns an empty `Vec` if the session file does not exist.
 	/// Corrupt lines are silently skipped.
 	pub fn load(&self, session_id: &str) -> Vec<SessionMessage> {
-		let jsonl_path = self.sessions_dir.join(format!("{session_id}.jsonl"));
-		let entries: Vec<SessionEntry> = read_json_lines(&jsonl_path);
+		let entries: Vec<SessionEntry> = read_json_lines(&self.session_file_path(session_id));
 		entries
 			.into_iter()
 			.map(|e| SessionMessage {
@@ -173,6 +172,8 @@ impl SessionStore {
 	}
 
 	/// Rename a session (update its title).
+	///
+	/// Silently succeeds if the session ID does not exist (idempotent).
 	pub fn rename(&self, session_id: &str, title: &str) -> io::Result<()> {
 		let mut index = self.load_index();
 		if let Some(meta) = index.iter_mut().find(|m| m.id == session_id) {
@@ -182,14 +183,16 @@ impl SessionStore {
 	}
 
 	/// Remove a session from the index and delete its JSONL file.
+	///
+	/// Silently succeeds if the session ID does not exist (idempotent).
 	pub fn remove(&self, session_id: &str) -> io::Result<()> {
 		let mut index = self.load_index();
 		index.retain(|m| m.id != session_id);
 		write_json_file(&self.index_path, &index)?;
 
-		let jsonl_path = self.sessions_dir.join(format!("{session_id}.jsonl"));
+		let jsonl_path = self.session_file_path(session_id);
 		if jsonl_path.exists() {
-			std::fs::remove_file(&jsonl_path)?;
+			std::fs::remove_file(jsonl_path)?;
 		}
 
 		Ok(())
@@ -209,6 +212,11 @@ impl SessionStore {
 	/// Load the index file, returning an empty vec on any failure.
 	fn load_index(&self) -> Vec<SessionMeta> {
 		read_json_file::<Vec<SessionMeta>>(&self.index_path).unwrap_or_default()
+	}
+
+	/// Path to a session's JSONL message file.
+	fn session_file_path(&self, session_id: &str) -> PathBuf {
+		self.sessions_dir.join(format!("{session_id}.jsonl"))
 	}
 }
 
@@ -320,7 +328,7 @@ mod tests {
 		store.append(&id, &msg("user", "hello")).unwrap();
 
 		// Verify file exists
-		let jsonl_path = store.sessions_dir.join(format!("{id}.jsonl"));
+		let jsonl_path = store.session_file_path(&id);
 		assert!(jsonl_path.exists());
 
 		store.remove(&id).unwrap();
@@ -348,7 +356,7 @@ mod tests {
 		let id = store.create("/project").unwrap();
 
 		// Manually write a JSONL file with a corrupt line in the middle
-		let jsonl_path = store.sessions_dir.join(format!("{id}.jsonl"));
+		let jsonl_path = store.session_file_path(&id);
 		let good1 = r#"{"ts":"2025-01-01T00:00:00.000Z","role":"user","content":"first"}"#;
 		let bad = "NOT VALID JSON";
 		let good2 =

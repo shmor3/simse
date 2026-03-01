@@ -876,3 +876,367 @@ fn unknown_method() {
 		"unknown method should return METHOD_NOT_FOUND (-32601), got: {code}"
 	);
 }
+
+// ---------------------------------------------------------------------------
+// Graph integration tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn graph_neighbors_with_explicit_edges() {
+	let mut proc = VectorProcess::spawn();
+	proc.initialize();
+
+	// Add volume A
+	let ra = proc.call(
+		"store/add",
+		json!({
+			"text": "Volume A — base concept",
+			"embedding": [1.0, 0.0, 0.0],
+			"metadata": {}
+		}),
+	);
+	let id_a = ra["id"].as_str().unwrap().to_string();
+
+	// Add volume B with rel:related metadata pointing to A
+	let rb = proc.call(
+		"store/add",
+		json!({
+			"text": "Volume B — related to A",
+			"embedding": [0.0, 1.0, 0.0],
+			"metadata": { "rel:related": id_a }
+		}),
+	);
+	let id_b = rb["id"].as_str().unwrap().to_string();
+
+	// Call graph/neighbors for B
+	let result = proc.call("graph/neighbors", json!({ "id": id_b }));
+	let neighbors = result["neighbors"].as_array().expect("neighbors should be array");
+
+	assert!(
+		!neighbors.is_empty(),
+		"B should have at least one neighbor"
+	);
+
+	// Assert neighbors contains A with Related edge type
+	let has_a = neighbors.iter().any(|n| {
+		n["volume"]["id"].as_str() == Some(id_a.as_str())
+			&& n["edge"]["edgeType"].as_str() == Some("Related")
+	});
+	assert!(has_a, "B's neighbors should include A with Related edge type, got: {neighbors:?}");
+
+	// rel:related is bidirectional, so A should also have B as neighbor
+	let result = proc.call("graph/neighbors", json!({ "id": id_a }));
+	let neighbors = result["neighbors"].as_array().expect("neighbors should be array");
+	let has_b = neighbors.iter().any(|n| {
+		n["volume"]["id"].as_str() == Some(id_b.as_str())
+			&& n["edge"]["edgeType"].as_str() == Some("Related")
+	});
+	assert!(has_b, "A's neighbors should include B with Related edge type");
+}
+
+#[test]
+fn graph_traverse_two_hops() {
+	let mut proc = VectorProcess::spawn();
+	proc.initialize();
+
+	// Add volume A
+	let ra = proc.call(
+		"store/add",
+		json!({
+			"text": "Volume A — chain start",
+			"embedding": [1.0, 0.0, 0.0],
+			"metadata": {}
+		}),
+	);
+	let id_a = ra["id"].as_str().unwrap().to_string();
+
+	// Add volume B that extends A
+	let rb = proc.call(
+		"store/add",
+		json!({
+			"text": "Volume B — extends A",
+			"embedding": [0.0, 1.0, 0.0],
+			"metadata": { "rel:extends": id_a }
+		}),
+	);
+	let id_b = rb["id"].as_str().unwrap().to_string();
+
+	// Add volume C that extends B
+	let rc = proc.call(
+		"store/add",
+		json!({
+			"text": "Volume C — extends B",
+			"embedding": [0.0, 0.0, 1.0],
+			"metadata": { "rel:extends": id_b }
+		}),
+	);
+	let id_c = rc["id"].as_str().unwrap().to_string();
+
+	// Traverse from B with depth 2 (B→A via extends, C→B means B has no outgoing to C)
+	// Note: rel:extends is directed: B→A and C→B. So from B, depth 1 reaches A.
+	// From A, nothing extends from A. But from C, C→B at depth 1.
+	// Let's traverse from C with depth 2: C→B (depth 1), B→A (depth 2).
+	let result = proc.call(
+		"graph/traverse",
+		json!({
+			"id": id_c,
+			"depth": 2
+		}),
+	);
+	let nodes = result["nodes"].as_array().expect("nodes should be array");
+
+	assert!(
+		nodes.len() >= 2,
+		"traversal from C with depth 2 should reach at least B and A, got {} nodes: {nodes:?}",
+		nodes.len()
+	);
+
+	// Check that we have a node at depth 1 (B)
+	let depth_1_nodes: Vec<&serde_json::Value> = nodes
+		.iter()
+		.filter(|n| n["depth"].as_u64() == Some(1))
+		.collect();
+	assert!(
+		!depth_1_nodes.is_empty(),
+		"should have at least one node at depth 1"
+	);
+	let b_at_depth_1 = depth_1_nodes.iter().any(|n| {
+		n["volume"]["id"].as_str() == Some(id_b.as_str())
+	});
+	assert!(b_at_depth_1, "B should be at depth 1 from C");
+
+	// Check that we have a node at depth 2 (A)
+	let depth_2_nodes: Vec<&serde_json::Value> = nodes
+		.iter()
+		.filter(|n| n["depth"].as_u64() == Some(2))
+		.collect();
+	assert!(
+		!depth_2_nodes.is_empty(),
+		"should have at least one node at depth 2"
+	);
+	let a_at_depth_2 = depth_2_nodes.iter().any(|n| {
+		n["volume"]["id"].as_str() == Some(id_a.as_str())
+	});
+	assert!(a_at_depth_2, "A should be at depth 2 from C");
+}
+
+#[test]
+fn graph_boosted_search() {
+	let mut proc = VectorProcess::spawn();
+	proc.initialize();
+
+	// Add "Machine learning" (id1)
+	let r1 = proc.call(
+		"store/add",
+		json!({
+			"text": "Machine learning algorithms and techniques",
+			"embedding": [0.9, 0.1, 0.0],
+			"metadata": {}
+		}),
+	);
+	let id1 = r1["id"].as_str().unwrap().to_string();
+
+	// Add "Neural networks" (id2) with rel:related to id1
+	let r2 = proc.call(
+		"store/add",
+		json!({
+			"text": "Neural networks deep learning",
+			"embedding": [0.8, 0.2, 0.0],
+			"metadata": { "rel:related": id1 }
+		}),
+	);
+	let id2 = r2["id"].as_str().unwrap().to_string();
+
+	// Add "Gardening tips" (id3) — unrelated
+	let r3 = proc.call(
+		"store/add",
+		json!({
+			"text": "Gardening tips for beginners",
+			"embedding": [0.0, 0.0, 1.0],
+			"metadata": {}
+		}),
+	);
+	let _id3 = r3["id"].as_str().unwrap().to_string();
+
+	// Call advancedSearch with embedding similar to ML, with graph boost enabled
+	let result = proc.call(
+		"store/advancedSearch",
+		json!({
+			"queryEmbedding": [0.85, 0.15, 0.0],
+			"maxResults": 5,
+			"graphBoost": {
+				"enabled": true,
+				"weight": 0.2
+			}
+		}),
+	);
+
+	let results = result["results"].as_array().expect("results should be array");
+	assert!(
+		!results.is_empty(),
+		"graph-boosted search should return results"
+	);
+
+	// The ML-related volumes should appear in results
+	let result_ids: Vec<&str> = results
+		.iter()
+		.filter_map(|r| r["volume"]["id"].as_str())
+		.collect();
+	assert!(
+		result_ids.contains(&id1.as_str()),
+		"results should contain the ML volume (id1)"
+	);
+	assert!(
+		result_ids.contains(&id2.as_str()),
+		"results should contain the neural networks volume (id2)"
+	);
+
+	// The ML volume should score higher than gardening
+	let ml_score = results
+		.iter()
+		.find(|r| r["volume"]["id"].as_str() == Some(id1.as_str()))
+		.and_then(|r| r["score"].as_f64())
+		.expect("ML volume should have a score");
+	let gardening_score = results
+		.iter()
+		.find(|r| r["volume"]["text"].as_str().map(|t| t.contains("Gardening")).unwrap_or(false))
+		.and_then(|r| r["score"].as_f64());
+	if let Some(gs) = gardening_score {
+		assert!(
+			ml_score > gs,
+			"ML score ({ml_score}) should be higher than gardening score ({gs})"
+		);
+	}
+}
+
+#[test]
+fn graph_persistence_round_trip() {
+	let tmp = tempfile::tempdir().expect("failed to create tempdir");
+	let storage_path = tmp.path().to_str().expect("tempdir path is not valid UTF-8");
+
+	let (id_a, id_b);
+
+	// --- First process: add volumes with explicit edges and save ---
+	{
+		let mut proc = VectorProcess::spawn();
+		proc.initialize_with_path(storage_path);
+
+		// Add volume A
+		let ra = proc.call(
+			"store/add",
+			json!({
+				"text": "Persisted graph node A",
+				"embedding": [1.0, 0.0, 0.0],
+				"metadata": {}
+			}),
+		);
+		id_a = ra["id"].as_str().unwrap().to_string();
+
+		// Add volume B with rel:related to A
+		let rb = proc.call(
+			"store/add",
+			json!({
+				"text": "Persisted graph node B",
+				"embedding": [0.0, 1.0, 0.0],
+				"metadata": { "rel:related": id_a }
+			}),
+		);
+		id_b = rb["id"].as_str().unwrap().to_string();
+
+		// Verify the edge exists before saving
+		let result = proc.call("graph/neighbors", json!({ "id": id_a }));
+		let neighbors = result["neighbors"].as_array().unwrap();
+		assert!(
+			!neighbors.is_empty(),
+			"A should have neighbors before save"
+		);
+
+		// Save to disk
+		proc.call("store/save", json!({}));
+		proc.call("store/dispose", json!({}));
+	}
+
+	// --- Second process: load from disk and verify graph edges survived ---
+	{
+		let mut proc = VectorProcess::spawn();
+		proc.initialize_with_path(storage_path);
+
+		// Verify volumes loaded
+		let result = proc.call("store/size", json!({}));
+		assert_eq!(
+			result["count"].as_u64().unwrap(),
+			2,
+			"should have 2 volumes after reload"
+		);
+
+		// Verify graph edges survived: A should have B as neighbor
+		let result = proc.call("graph/neighbors", json!({ "id": id_a }));
+		let neighbors = result["neighbors"].as_array().expect("neighbors should be array");
+		assert!(
+			!neighbors.is_empty(),
+			"A should have neighbors after reload from disk"
+		);
+		let has_b = neighbors.iter().any(|n| {
+			n["volume"]["id"].as_str() == Some(id_b.as_str())
+				&& n["edge"]["edgeType"].as_str() == Some("Related")
+		});
+		assert!(has_b, "A's neighbors should include B with Related edge after reload");
+
+		// Verify B also has A as neighbor (bidirectional)
+		let result = proc.call("graph/neighbors", json!({ "id": id_b }));
+		let neighbors = result["neighbors"].as_array().expect("neighbors should be array");
+		let has_a = neighbors.iter().any(|n| {
+			n["volume"]["id"].as_str() == Some(id_a.as_str())
+				&& n["edge"]["edgeType"].as_str() == Some("Related")
+		});
+		assert!(has_a, "B's neighbors should include A with Related edge after reload");
+	}
+}
+
+#[test]
+fn delete_volume_cascades_graph_edges() {
+	let mut proc = VectorProcess::spawn();
+	proc.initialize();
+
+	// Add volume A
+	let ra = proc.call(
+		"store/add",
+		json!({
+			"text": "Graph cascade A",
+			"embedding": [1.0, 0.0, 0.0],
+			"metadata": {}
+		}),
+	);
+	let id_a = ra["id"].as_str().unwrap().to_string();
+
+	// Add volume B with rel:related to A
+	let rb = proc.call(
+		"store/add",
+		json!({
+			"text": "Graph cascade B",
+			"embedding": [0.0, 1.0, 0.0],
+			"metadata": { "rel:related": id_a }
+		}),
+	);
+	let id_b = rb["id"].as_str().unwrap().to_string();
+
+	// Verify graph/neighbors for A shows B
+	let result = proc.call("graph/neighbors", json!({ "id": id_a }));
+	let neighbors = result["neighbors"].as_array().expect("neighbors should be array");
+	let has_b = neighbors.iter().any(|n| {
+		n["volume"]["id"].as_str() == Some(id_b.as_str())
+	});
+	assert!(has_b, "A should have B as neighbor before deletion");
+
+	// Delete B
+	let del_result = proc.call("store/delete", json!({ "id": id_b }));
+	assert!(del_result["deleted"].as_bool().unwrap(), "delete should return true");
+
+	// Verify graph/neighbors for A is now empty
+	let result = proc.call("graph/neighbors", json!({ "id": id_a }));
+	let neighbors = result["neighbors"].as_array().expect("neighbors should be array");
+	assert!(
+		neighbors.is_empty(),
+		"A's neighbors should be empty after deleting B, got: {neighbors:?}"
+	);
+}

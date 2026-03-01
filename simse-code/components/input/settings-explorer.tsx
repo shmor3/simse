@@ -276,10 +276,7 @@ export function SettingsExplorer({
 				if (!field) return;
 
 				const selected = dropdownOptions[dropdownIndex];
-				if (
-					selected === 'Custom value...' ||
-					selected === 'Custom model...'
-				) {
+				if (selected === 'Custom value...' || selected === 'Custom model...') {
 					const current = fileData[field.key];
 					setEditValue(
 						current !== undefined && current !== null ? String(current) : '',
@@ -438,7 +435,10 @@ export function SettingsExplorer({
 									<Text color={isSelected ? 'cyan' : undefined}>
 										{isSelected ? '  \u276F ' : '    '}
 									</Text>
-									<Text bold={isSelected} color={isSelected ? 'cyan' : undefined}>
+									<Text
+										bold={isSelected}
+										color={isSelected ? 'cyan' : undefined}
+									>
 										{field.key}
 										{': '}
 									</Text>

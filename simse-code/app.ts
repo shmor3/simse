@@ -378,7 +378,9 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		return Object.freeze(
 			library
 				.getTopics()
-				.map((t) => Object.freeze({ topic: t.topic, volumeCount: t.entryCount })),
+				.map((t) =>
+					Object.freeze({ topic: t.topic, volumeCount: t.entryCount }),
+				),
 		);
 	};
 
@@ -447,10 +449,13 @@ export function createApp(appOptions: AppOptions): KnowledgeBaseApp {
 		if (!options?.skipLibrary) {
 			try {
 				const convTopic = appOptions.conversationTopic ?? 'conversation';
-				storedVolumeId = await library.add(`Q: ${prompt}\nA: ${result.content}`, {
-					topic: convTopic,
-					source: 'generate',
-				});
+				storedVolumeId = await library.add(
+					`Q: ${prompt}\nA: ${result.content}`,
+					{
+						topic: convTopic,
+						source: 'generate',
+					},
+				);
 				logger.debug('Stored generation result in library', {
 					volumeId: storedVolumeId,
 				});

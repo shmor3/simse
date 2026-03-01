@@ -6,9 +6,9 @@
 // from the library, and stores responses back into the library after the loop.
 // ---------------------------------------------------------------------------
 
+import type { Logger } from '../shared/logger.js';
 import type { LibrarianRegistry } from './librarian-registry.js';
 import type { Library } from './library.js';
-import type { Logger } from '../shared/logger.js';
 import {
 	formatMemoryContext,
 	type PromptInjectionOptions,

@@ -20,6 +20,7 @@ use crate::cataloging::{MagnitudeCache, MetadataIndex, TopicIndex};
 use crate::cosine::compute_magnitude;
 use crate::deduplication;
 use crate::error::VectorError;
+use crate::graph::{GraphConfig, GraphIndex};
 use crate::inverted_index::InvertedIndex;
 use crate::learning::{LearningEngine, LearningOptions};
 use crate::persistence::{self, AccessStats};
@@ -67,6 +68,7 @@ pub struct StoreConfig {
 	pub learning_options: LearningOptions,
 	pub recency_half_life_ms: f64,
 	pub topic_catalog_threshold: f64,
+	pub graph_config: GraphConfig,
 }
 
 impl Default for StoreConfig {
@@ -80,6 +82,7 @@ impl Default for StoreConfig {
 			learning_options: LearningOptions::default(),
 			recency_half_life_ms: 30.0 * 24.0 * 60.0 * 60.0 * 1000.0,
 			topic_catalog_threshold: 0.85,
+			graph_config: GraphConfig::default(),
 		}
 	}
 }
@@ -107,6 +110,7 @@ pub struct VolumeStore {
 	magnitude_cache: MagnitudeCache,
 	inverted_index: InvertedIndex,
 	topic_catalog: TopicCatalog,
+	graph_index: GraphIndex,
 	learning_engine: Option<LearningEngine>,
 	text_cache: Option<TextCache>,
 	access_stats: HashMap<String, AccessStats>,
@@ -159,6 +163,8 @@ impl VolumeStore {
 			None
 		};
 
+		let graph_index = GraphIndex::new(config.graph_config.clone());
+
 		Self {
 			volumes: Vec::new(),
 			topic_index: TopicIndex::new(5, &[]),
@@ -166,6 +172,7 @@ impl VolumeStore {
 			magnitude_cache: MagnitudeCache::new(),
 			inverted_index: InvertedIndex::new(),
 			topic_catalog: TopicCatalog::new(config.topic_catalog_threshold),
+			graph_index,
 			learning_engine,
 			text_cache: Some(TextCache::default()),
 			access_stats: HashMap::new(),
@@ -203,10 +210,35 @@ impl VolumeStore {
 			{
 				engine.restore(state);
 			}
+
+			// Restore graph state: explicit edges from persistence,
+			// then rebuild implicit similarity edges
+			if let Some(gs) = data.graph_state {
+				self.graph_index =
+					GraphIndex::from_state(gs, self.config.graph_config.clone());
+			}
 		}
 
 		// Rebuild all indexes from current volumes
 		self.rebuild_indexes();
+
+		// Rebuild implicit similarity edges for the graph
+		for i in 0..self.volumes.len() {
+			for j in (i + 1)..self.volumes.len() {
+				let sim = crate::cosine::cosine_similarity(
+					&self.volumes[i].embedding,
+					&self.volumes[j].embedding,
+				);
+				let ts = self.volumes[i].timestamp.max(self.volumes[j].timestamp);
+				self.graph_index.add_similarity_edge(
+					&self.volumes[i].id,
+					&self.volumes[j].id,
+					sim,
+					ts,
+				);
+			}
+		}
+
 		self.initialized = true;
 		self.dirty = false;
 
@@ -230,12 +262,14 @@ impl VolumeStore {
 		};
 
 		let learning_state = self.learning_engine.as_ref().map(|e| e.serialize());
+		let graph_state = self.graph_index.serialize();
 
 		persistence::save_to_directory(
 			&path,
 			&self.volumes,
 			&self.access_stats,
 			learning_state.as_ref(),
+			Some(&graph_state),
 		)
 		.map_err(|e| match e {
 			persistence::PersistenceError::Io(io) => VectorError::Io(io),
@@ -395,6 +429,37 @@ impl VolumeStore {
 
 		self.index_volume(&volume);
 		self.volumes.push(volume);
+
+		// Wire into graph index: parse explicit edges from rel:* metadata
+		// and create implicit similarity edges with existing volumes.
+		// We need to borrow the newly pushed volume immutably, so use index.
+		let new_idx = self.volumes.len() - 1;
+		self.graph_index.parse_metadata_edges(
+			&self.volumes[new_idx].id,
+			&self.volumes[new_idx].metadata,
+			self.volumes[new_idx].timestamp,
+		);
+
+		let new_mag = compute_magnitude(&self.volumes[new_idx].embedding);
+		for i in 0..new_idx {
+			let existing_mag = self
+				.magnitude_cache
+				.get(&self.volumes[i].id)
+				.unwrap_or_else(|| compute_magnitude(&self.volumes[i].embedding));
+			let sim = crate::cosine::cosine_similarity_with_magnitude(
+				&self.volumes[new_idx].embedding,
+				&self.volumes[i].embedding,
+				new_mag,
+				existing_mag,
+			);
+			self.graph_index.add_similarity_edge(
+				&self.volumes[new_idx].id,
+				&self.volumes[i].id,
+				sim,
+				self.volumes[new_idx].timestamp,
+			);
+		}
+
 		self.dirty = true;
 
 		Ok(id)
@@ -425,6 +490,7 @@ impl VolumeStore {
 			let vol = self.volumes.remove(pos);
 			self.deindex_volume(&vol);
 			self.access_stats.remove(id);
+			self.graph_index.remove_node(id);
 			self.dirty = true;
 
 			// Prune learning engine
@@ -463,6 +529,7 @@ impl VolumeStore {
 		self.magnitude_cache.clear();
 		self.inverted_index.clear();
 		self.access_stats.clear();
+		self.graph_index = GraphIndex::new(self.config.graph_config.clone());
 
 		if let Some(cache) = self.text_cache.as_mut() {
 			cache.clear();
@@ -836,6 +903,20 @@ impl VolumeStore {
 			});
 		}
 
+		// Apply graph boost if enabled
+		if let Some(ref gb) = options.graph_boost {
+			if gb.enabled.unwrap_or(false) {
+				let weight = gb.weight.unwrap_or(self.graph_index.config().graph_boost_weight);
+				let result_ids: Vec<String> =
+					results.iter().map(|r| r.volume.id.clone()).collect();
+				for item in &mut results {
+					let graph_score =
+						self.graph_index.compute_graph_score(&item.volume.id, &result_ids);
+					item.score = (1.0 - weight) * item.score + weight * graph_score;
+				}
+			}
+		}
+
 		results.sort_by(|a, b| {
 			b.score
 				.partial_cmp(&a.score)
@@ -946,6 +1027,24 @@ impl VolumeStore {
 			.as_ref()
 			.map(|e| compute_magnitude(e));
 
+		// Graph weight: opt-in only, default 0 (no change to existing behavior)
+		let graph_weight = options
+			.weights
+			.as_ref()
+			.and_then(|w| w.graph)
+			.unwrap_or(0.0);
+
+		// Collect recently accessed volume IDs for graph scoring
+		let recent_ids: Vec<String> = if graph_weight > 0.0 {
+			self.access_stats
+				.iter()
+				.filter(|(_, stats)| stats.access_count > 0)
+				.map(|(id, _)| id.clone())
+				.collect()
+		} else {
+			Vec::new()
+		};
+
 		let mut results: Vec<Recommendation> = Vec::new();
 
 		for vol in &candidates {
@@ -972,14 +1071,27 @@ impl VolumeStore {
 				.unwrap_or(0);
 			let freq_score = frequency_score(access_count, max_access);
 
-			// Compute base recommendation score
+			// Compute graph score (opt-in: only if graph_weight > 0)
+			let graph_score_val = if graph_weight > 0.0 {
+				self.graph_index.compute_graph_score(&vol.id, &recent_ids)
+			} else {
+				0.0
+			};
+
+			// Compute base recommendation score (vector + recency + frequency)
 			let input = RecommendationScoreInput {
 				vector_score,
 				recency_score: Some(rec_score),
 				frequency_score: Some(freq_score),
 			};
 			let score_result = compute_recommendation_score(&input, &weights);
-			let mut final_score = score_result.score;
+
+			// Blend graph score: base_score * (1 - graph_weight) + graph_score * graph_weight
+			let mut final_score = if graph_weight > 0.0 {
+				(1.0 - graph_weight) * score_result.score + graph_weight * graph_score_val
+			} else {
+				score_result.score
+			};
 
 			// Apply learning boost
 			if let Some(engine) = &self.learning_engine {
@@ -995,6 +1107,11 @@ impl VolumeStore {
 						vector: score_result.vector,
 						recency: score_result.recency,
 						frequency: score_result.frequency,
+						graph: if graph_weight > 0.0 {
+							Some(graph_score_val)
+						} else {
+							None
+						},
 					},
 				});
 			}
@@ -1141,6 +1258,52 @@ impl VolumeStore {
 	/// Get volume IDs under a specific topic in the catalog.
 	pub fn catalog_volumes(&self, topic: &str) -> Vec<String> {
 		self.topic_catalog.volumes(topic)
+	}
+
+	// -- Graph delegation ----------------------------------------------------
+
+	/// Get graph neighbors for a volume with optional edge type filter.
+	pub fn graph_neighbors(
+		&self,
+		id: &str,
+		edge_types: Option<&[crate::graph::EdgeType]>,
+		max_results: usize,
+	) -> Vec<(&crate::graph::Edge, Option<&Volume>)> {
+		let edges = match edge_types {
+			Some(types) => self.graph_index.neighbors_by_type(id, types),
+			None => self.graph_index.neighbors(id),
+		};
+		edges
+			.into_iter()
+			.take(max_results)
+			.map(|edge| {
+				let volume = self.volumes.iter().find(|v| v.id == edge.target_id);
+				(edge, volume)
+			})
+			.collect()
+	}
+
+	/// BFS traversal from a volume through the graph.
+	pub fn graph_traverse(
+		&self,
+		id: &str,
+		depth: usize,
+		edge_types: Option<&[crate::graph::EdgeType]>,
+		max_results: usize,
+	) -> Vec<(crate::graph::TraversalNode, Option<&Volume>)> {
+		let nodes = self.graph_index.traverse(id, depth, edge_types, max_results);
+		nodes
+			.into_iter()
+			.map(|node| {
+				let volume = self.volumes.iter().find(|v| v.id == node.node_id);
+				(node, volume)
+			})
+			.collect()
+	}
+
+	/// Direct access to the underlying graph index.
+	pub fn graph_index(&self) -> &GraphIndex {
+		&self.graph_index
 	}
 }
 
@@ -1635,6 +1798,7 @@ mod tests {
 				field_boosts: None,
 				rank_weights: None,
 				topic_filter: None,
+				graph_boost: None,
 			})
 			.unwrap();
 
@@ -1957,6 +2121,7 @@ mod tests {
 				field_boosts: None,
 				rank_weights: None,
 				topic_filter: None,
+				graph_boost: None,
 			}),
 			Err(VectorError::NotInitialized)
 		));
@@ -2060,6 +2225,7 @@ mod tests {
 				field_boosts: None,
 				rank_weights: None,
 				topic_filter: None,
+				graph_boost: None,
 			})
 			.unwrap();
 

@@ -1,36 +1,11 @@
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import {
-	getDefaultEnvironment,
-	StdioClientTransport,
-} from '@modelcontextprotocol/sdk/client/stdio.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import {
-	LoggingMessageNotificationSchema,
-	PromptListChangedNotificationSchema,
-	ResourceListChangedNotificationSchema,
-	ToolListChangedNotificationSchema,
-} from '@modelcontextprotocol/sdk/types.js';
-import {
-	createMCPConnectionError,
-	createMCPError,
-	createMCPServerNotConnectedError,
-	createMCPToolError,
-	createMCPTransportConfigError,
-	isMCPServerNotConnectedError,
-	isMCPTransportConfigError,
-	toError,
-} from '../../errors/index.js';
+// ---------------------------------------------------------------------------
+// MCP Client — thin wrapper over Rust MCP engine
+// ---------------------------------------------------------------------------
+
+import { createMCPConnectionError, toError } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
-import {
-	type CircuitBreaker,
-	createCircuitBreaker,
-} from '../../utils/circuit-breaker.js';
-import {
-	createHealthMonitor,
-	type HealthMonitor,
-	type HealthSnapshot,
-} from '../../utils/health-monitor.js';
-import { isTransientError, retry } from '../../utils/retry.js';
+import type { HealthSnapshot } from '../../utils/health-monitor.js';
+import { createMcpEngineClient } from './mcp-engine-client.js';
 import type {
 	MCPClientConfig,
 	MCPCompletionRef,
@@ -41,20 +16,9 @@ import type {
 	MCPResourceInfo,
 	MCPResourceTemplateInfo,
 	MCPRoot,
-	MCPServerConnection,
 	MCPToolInfo,
 	MCPToolResult,
 } from './types.js';
-
-// ---------------------------------------------------------------------------
-// Internal types
-// ---------------------------------------------------------------------------
-
-interface ConnectedServer {
-	config: MCPServerConnection;
-	client: Client;
-	transport: StdioClientTransport | StreamableHTTPClientTransport;
-}
 
 // ---------------------------------------------------------------------------
 // MCPClient interface
@@ -118,7 +82,7 @@ export interface MCPClient {
 
 /**
  * Create an MCP client that connects to one or more MCP servers
- * via stdio or HTTP transport.
+ * via the Rust MCP engine subprocess.
  *
  * @param config - Server definitions with connection details.
  * @param loggerOpt - Optional logger (defaults to the global logger).
@@ -130,16 +94,11 @@ export function createMCPClient(
 	loggerOpt?: Logger,
 ): MCPClient {
 	const logger = (loggerOpt ?? getDefaultLogger()).child('mcp-client');
-	const connections = new Map<string, ConnectedServer>();
 
-	// Per-server circuit breakers and health monitors
-	const breakers = new Map<string, CircuitBreaker>();
-	const monitors = new Map<string, HealthMonitor>();
+	// Track connected server names locally for isAvailable / connectionCount
+	const connectedServers = new Set<string>();
 
-	// -----------------------------------------------------------------------
-	// Notification handler registries
-	// -----------------------------------------------------------------------
-
+	// Notification handler registries (local)
 	const loggingHandlers = new Set<
 		(message: MCPLoggingMessage & { serverName: string }) => void
 	>();
@@ -149,103 +108,81 @@ export function createMCPClient(
 	let currentRoots: MCPRoot[] = [];
 
 	// -----------------------------------------------------------------------
-	// Internal helpers
+	// Engine client
 	// -----------------------------------------------------------------------
 
-	const createTransport = (
-		serverConfig: MCPServerConnection,
-	): StdioClientTransport | StreamableHTTPClientTransport => {
-		if (serverConfig.transport === 'stdio') {
-			if (!serverConfig.command) {
-				throw createMCPTransportConfigError(
-					serverConfig.name,
-					'stdio transport requires a "command" field',
-				);
-			}
+	const enginePath = process.env.SIMSE_MCP_ENGINE_PATH ?? 'simse-mcp-engine';
+	const engineClient = createMcpEngineClient({
+		enginePath,
+		logger,
+	});
 
-			const params: {
-				command: string;
-				args: string[];
-				env?: Record<string, string>;
-			} = {
-				command: serverConfig.command,
-				args: serverConfig.args ? [...serverConfig.args] : [],
-			};
+	// Initialize the engine with client config
+	const initPromise = engineClient
+		.request<void>('mcp/initialize', {
+			clientConfig: {
+				servers: config.servers.map((s) => ({
+					name: s.name,
+					transport: s.transport,
+					command: s.command,
+					args: s.args ? [...s.args] : undefined,
+					env: s.env,
+					url: s.url,
+				})),
+				clientName: config.clientName,
+				clientVersion: config.clientVersion,
+				circuitBreaker: config.circuitBreaker,
+			},
+		})
+		.catch((err) => {
+			logger.warn('MCP engine initialization failed', {
+				error: toError(err).message,
+			});
+		});
 
-			if (serverConfig.env) {
-				params.env = {
-					...getDefaultEnvironment(),
-					...serverConfig.env,
-				};
-			}
+	// -----------------------------------------------------------------------
+	// Subscribe to engine notifications
+	// -----------------------------------------------------------------------
 
-			return new StdioClientTransport(params);
+	engineClient.onNotification('mcp/loggingMessage', (params) => {
+		const p = params as {
+			serverName: string;
+			level: MCPLoggingLevel;
+			logger?: string;
+			data: unknown;
+		};
+		for (const handler of loggingHandlers) {
+			handler({
+				level: p.level,
+				logger: p.logger,
+				data: p.data,
+				serverName: p.serverName,
+			});
 		}
+	});
 
-		if (!serverConfig.url) {
-			throw createMCPTransportConfigError(
-				serverConfig.name,
-				'http transport requires a "url" field',
-			);
-		}
+	engineClient.onNotification('mcp/toolsChanged', (params) => {
+		const p = params as { serverName: string };
+		for (const handler of toolsChangedHandlers) handler(p.serverName);
+	});
 
-		let parsedUrl: URL;
-		try {
-			parsedUrl = new URL(serverConfig.url);
-		} catch (error) {
-			throw createMCPTransportConfigError(
-				serverConfig.name,
-				`Invalid URL "${serverConfig.url}": ${toError(error).message}`,
-			);
-		}
+	engineClient.onNotification('mcp/resourcesChanged', (params) => {
+		const p = params as { serverName: string };
+		for (const handler of resourcesChangedHandlers) handler(p.serverName);
+	});
 
-		if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-			throw createMCPTransportConfigError(
-				serverConfig.name,
-				`URL scheme "${parsedUrl.protocol}" is not allowed; only http and https are permitted`,
-			);
-		}
-
-		return new StreamableHTTPClientTransport(parsedUrl);
-	};
-
-	const getConnection = (serverName: string): ConnectedServer => {
-		const conn = connections.get(serverName);
-		if (!conn) {
-			throw createMCPServerNotConnectedError(serverName);
-		}
-		return conn;
-	};
-
-	const getTargetServers = (
-		serverName?: string,
-	): [string, ConnectedServer][] => {
-		if (serverName) {
-			return [[serverName, getConnection(serverName)]];
-		}
-		return [...connections.entries()];
-	};
+	engineClient.onNotification('mcp/promptsChanged', (params) => {
+		const p = params as { serverName: string };
+		for (const handler of promptsChangedHandlers) handler(p.serverName);
+	});
 
 	// -----------------------------------------------------------------------
 	// Connection lifecycle
 	// -----------------------------------------------------------------------
 
-	// Track in-flight connection attempts to prevent concurrent connect() races
-	const connectingPromises = new Map<string, Promise<void>>();
+	const connect = async (serverName: string): Promise<void> => {
+		await initPromise;
 
-	const connect = (serverName: string): Promise<void> => {
-		// If a connection attempt is already in flight for this server, join it
-		const inflight = connectingPromises.get(serverName);
-		if (inflight) return inflight;
-
-		const promise = doConnect(serverName).finally(() => {
-			connectingPromises.delete(serverName);
-		});
-		connectingPromises.set(serverName, promise);
-		return promise;
-	};
-
-	const doConnect = async (serverName: string): Promise<void> => {
 		const serverConfig = config.servers.find((s) => s.name === serverName);
 		if (!serverConfig) {
 			throw createMCPConnectionError(
@@ -254,186 +191,42 @@ export function createMCPClient(
 			);
 		}
 
-		// Disconnect existing connection to prevent resource leaks
-		if (connections.has(serverName)) {
-			await disconnect(serverName);
-		}
-
-		logger.debug(`Connecting to MCP server "${serverName}"`, {
-			transport: serverConfig.transport,
-		});
-
-		let transport: StdioClientTransport | StreamableHTTPClientTransport;
-		try {
-			transport = createTransport(serverConfig);
-		} catch (error) {
-			if (isMCPTransportConfigError(error)) throw error;
-			throw createMCPConnectionError(
-				serverName,
-				`Failed to create transport: ${toError(error).message}`,
-				{
-					cause: error,
-				},
-			);
-		}
-
-		if (!config.clientName || !config.clientVersion) {
-			throw createMCPConnectionError(
-				serverName,
-				'MCP client requires clientName and clientVersion in config',
-			);
-		}
-
-		const client = new Client({
-			name: config.clientName,
-			version: config.clientVersion,
-		});
-
-		try {
-			await retry(
-				async () => {
-					await client.connect(transport);
-				},
-				{
-					maxAttempts: 3,
-					baseDelayMs: 1000,
-					shouldRetry: (error) => isTransientError(error),
-					onRetry: (_error, nextAttempt, delayMs) => {
-						logger.warn(
-							`MCP connect to "${serverName}" failed, retrying in ${delayMs}ms (attempt ${nextAttempt})`,
-						);
-					},
-				},
-			);
-		} catch (error) {
-			// Close the transport to prevent resource leak (orphaned child process, etc.)
-			try {
-				await transport.close?.();
-			} catch (closeError) {
-				logger.debug(`Error closing transport for "${serverName}"`, {
-					error: toError(closeError).message,
-				});
-			}
-			throw createMCPConnectionError(
-				serverName,
-				`Connection failed: ${toError(error).message}`,
-				{ cause: error },
-			);
-		}
-
-		// Create circuit breaker and health monitor for this server
-		if (config.circuitBreaker) {
-			breakers.set(
-				serverName,
-				createCircuitBreaker({
-					name: `mcp:${serverName}`,
-					failureThreshold: config.circuitBreaker.failureThreshold,
-					resetTimeoutMs: config.circuitBreaker.resetTimeoutMs,
-					shouldCount: isTransientError,
-					onStateChange: (from, to) => {
-						logger.warn(
-							`Circuit breaker for MCP server "${serverName}": ${from} → ${to}`,
-						);
-					},
-				}),
-			);
-		}
-		monitors.set(serverName, createHealthMonitor());
-
-		// Register notification handlers
-		client.setNotificationHandler(
-			LoggingMessageNotificationSchema,
-			(notification) => {
-				for (const handler of loggingHandlers) {
-					handler({
-						level: notification.params.level as MCPLoggingLevel,
-						logger: notification.params.logger,
-						data: notification.params.data,
-						serverName,
-					});
-				}
-			},
-		);
-
-		client.setNotificationHandler(ToolListChangedNotificationSchema, () => {
-			for (const handler of toolsChangedHandlers) handler(serverName);
-		});
-
-		client.setNotificationHandler(ResourceListChangedNotificationSchema, () => {
-			for (const handler of resourcesChangedHandlers) handler(serverName);
-		});
-
-		client.setNotificationHandler(PromptListChangedNotificationSchema, () => {
-			for (const handler of promptsChangedHandlers) handler(serverName);
-		});
-
-		connections.set(serverName, {
-			config: serverConfig,
-			client,
-			transport,
-		});
+		await engineClient.request<void>('mcp/connect', { serverName });
+		connectedServers.add(serverName);
 		logger.info(`Connected to MCP server "${serverName}"`);
 	};
 
 	const connectAll = async (): Promise<string[]> => {
-		const results = await Promise.allSettled(
-			config.servers.map(async (server) => {
-				try {
-					await connect(server.name);
-				} catch (err) {
-					logger.warn(`Failed to connect to MCP server "${server.name}"`, {
-						error: toError(err).message,
-					});
-					throw err;
-				}
-			}),
-		);
+		await initPromise;
 
-		return config.servers
-			.filter((_, i) => results[i].status === 'fulfilled')
-			.map((s) => s.name);
+		const result = await engineClient.request<{ connected: string[] }>(
+			'mcp/connectAll',
+			{},
+		);
+		for (const name of result.connected) {
+			connectedServers.add(name);
+		}
+		logger.info(`Connected to ${result.connected.length} MCP servers`);
+		return result.connected;
 	};
 
 	const disconnect = async (serverName: string): Promise<void> => {
-		// If a connect is in-flight, wait for it to finish (or fail) first
-		const inflight = connectingPromises.get(serverName);
-		if (inflight) {
-			try {
-				await inflight;
-			} catch {
-				// connect failed — nothing to disconnect
-			}
-		}
-
-		const conn = connections.get(serverName);
-		if (!conn) return;
-
-		logger.debug(`Disconnecting from MCP server "${serverName}"`);
-
-		try {
-			await conn.client.close();
-		} catch (error) {
-			logger.warn(`Error disconnecting from "${serverName}"`, {
-				error: toError(error).message,
-			});
-		}
-
-		connections.delete(serverName);
-		breakers.delete(serverName);
-		monitors.delete(serverName);
+		await engineClient.request<void>('mcp/disconnect', { serverName });
+		connectedServers.delete(serverName);
 		logger.info(`Disconnected from MCP server "${serverName}"`);
 	};
 
 	const disconnectAll = async (): Promise<void> => {
-		const names = [...connections.keys()];
-		await Promise.all(names.map((name) => disconnect(name)));
+		await engineClient.request<void>('mcp/disconnectAll', {});
+		connectedServers.clear();
+		logger.info('Disconnected from all MCP servers');
 	};
 
 	const isAvailable = (serverName?: string): boolean => {
 		if (serverName) {
-			return connections.has(serverName);
+			return connectedServers.has(serverName);
 		}
-		return connections.size > 0;
+		return connectedServers.size > 0;
 	};
 
 	// -----------------------------------------------------------------------
@@ -441,56 +234,9 @@ export function createMCPClient(
 	// -----------------------------------------------------------------------
 
 	const listTools = async (serverName?: string): Promise<MCPToolInfo[]> => {
-		const servers = getTargetServers(serverName);
-		const results: MCPToolInfo[] = [];
-
-		for (const [name, conn] of servers) {
-			try {
-				const response = await retry(async () => conn.client.listTools(), {
-					maxAttempts: 2,
-					baseDelayMs: 500,
-					shouldRetry: (error) => isTransientError(error),
-				});
-				for (const tool of response.tools) {
-					const annotations = (tool as Record<string, unknown>).annotations as
-						| Record<string, unknown>
-						| undefined;
-					results.push({
-						serverName: name,
-						name: tool.name,
-						description: tool.description,
-						inputSchema: tool.inputSchema as Record<string, unknown>,
-						annotations: annotations
-							? {
-									title: annotations.title as string | undefined,
-									readOnlyHint: annotations.readOnlyHint as boolean | undefined,
-									destructiveHint: annotations.destructiveHint as
-										| boolean
-										| undefined,
-									idempotentHint: annotations.idempotentHint as
-										| boolean
-										| undefined,
-									openWorldHint: annotations.openWorldHint as
-										| boolean
-										| undefined,
-								}
-							: undefined,
-					});
-				}
-			} catch (error) {
-				if (isMCPServerNotConnectedError(error)) throw error;
-				throw createMCPError(
-					`Failed to list tools from server "${name}": ${toError(error).message}`,
-					{
-						code: 'MCP_LIST_TOOLS_FAILED',
-						cause: error,
-						metadata: { serverName: name },
-					},
-				);
-			}
-		}
-
-		return results;
+		return engineClient.request<MCPToolInfo[]>('mcp/listTools', {
+			serverName,
+		});
 	};
 
 	const callTool = async (
@@ -498,96 +244,11 @@ export function createMCPClient(
 		toolName: string,
 		args: Record<string, unknown>,
 	): Promise<MCPToolResult> => {
-		const breaker = breakers.get(serverName);
-		const monitor = monitors.get(serverName);
-
-		const retryFn = () =>
-			retry(
-				async () => {
-					const conn = getConnection(serverName);
-
-					logger.debug(`Calling tool "${toolName}" on server "${serverName}"`, {
-						argKeys: Object.keys(args),
-					});
-
-					const startedAt = new Date().toISOString();
-					const startMs = performance.now();
-
-					let response: Awaited<ReturnType<Client['callTool']>>;
-					try {
-						response = await conn.client.callTool({
-							name: toolName,
-							arguments: args,
-						});
-					} catch (error) {
-						throw createMCPToolError(
-							serverName,
-							toolName,
-							`Tool call failed: ${toError(error).message}`,
-							{ cause: error },
-						);
-					}
-
-					const durationMs = performance.now() - startMs;
-
-					const rawContent = (response.content ?? []) as Array<{
-						type: string;
-						text?: string;
-						[key: string]: unknown;
-					}>;
-
-					const textParts = rawContent
-						.filter(
-							(item): item is typeof item & { text: string } =>
-								item.type === 'text' &&
-								typeof item.text === 'string' &&
-								item.text.length > 0,
-						)
-						.map((item) => item.text);
-
-					const result: MCPToolResult = {
-						content: textParts.join('\n'),
-						isError: response.isError === true,
-						rawContent,
-						metrics: {
-							durationMs,
-							serverName,
-							toolName,
-							startedAt,
-						},
-					};
-
-					if (result.isError) {
-						logger.warn(
-							`Tool "${toolName}" on "${serverName}" returned an error`,
-							{
-								content: result.content.slice(0, 200),
-							},
-						);
-					} else {
-						logger.debug(`Tool "${toolName}" completed successfully`, {
-							contentLength: result.content.length,
-							durationMs,
-						});
-					}
-
-					return result;
-				},
-				{
-					maxAttempts: 2,
-					baseDelayMs: 500,
-					shouldRetry: (error) => isTransientError(error),
-				},
-			);
-
-		try {
-			const result = breaker ? await breaker.execute(retryFn) : await retryFn();
-			monitor?.recordSuccess();
-			return result;
-		} catch (error) {
-			monitor?.recordFailure(error instanceof Error ? error : undefined);
-			throw error;
-		}
+		return engineClient.request<MCPToolResult>('mcp/callTool', {
+			serverName,
+			toolName,
+			args,
+		});
 	};
 
 	// -----------------------------------------------------------------------
@@ -597,89 +258,28 @@ export function createMCPClient(
 	const listResources = async (
 		serverName?: string,
 	): Promise<MCPResourceInfo[]> => {
-		const servers = getTargetServers(serverName);
-		const results: MCPResourceInfo[] = [];
-
-		for (const [name, conn] of servers) {
-			try {
-				const response = await retry(async () => conn.client.listResources(), {
-					maxAttempts: 2,
-					baseDelayMs: 500,
-					shouldRetry: (error) => isTransientError(error),
-				});
-				for (const res of response.resources) {
-					results.push({
-						serverName: name,
-						uri: res.uri,
-						name: res.name,
-						description: res.description,
-						mimeType: res.mimeType,
-					});
-				}
-			} catch (error) {
-				if (isMCPServerNotConnectedError(error)) throw error;
-				throw createMCPError(
-					`Failed to list resources from server "${name}": ${toError(error).message}`,
-					{
-						code: 'MCP_LIST_RESOURCES_FAILED',
-						cause: error,
-						metadata: { serverName: name },
-					},
-				);
-			}
-		}
-
-		return results;
+		return engineClient.request<MCPResourceInfo[]>('mcp/listResources', {
+			serverName,
+		});
 	};
 
 	const readResource = async (
 		serverName: string,
 		uri: string,
 	): Promise<string> => {
-		const breaker = breakers.get(serverName);
-		const monitor = monitors.get(serverName);
+		return engineClient.request<string>('mcp/readResource', {
+			serverName,
+			uri,
+		});
+	};
 
-		const retryFn = () =>
-			retry(
-				async () => {
-					const conn = getConnection(serverName);
-
-					logger.debug(`Reading resource "${uri}" from server "${serverName}"`);
-
-					let response: Awaited<ReturnType<Client['readResource']>>;
-					try {
-						response = await conn.client.readResource({ uri });
-					} catch (error) {
-						throw createMCPError(
-							`Failed to read resource "${uri}" from server "${serverName}": ${toError(error).message}`,
-							{
-								code: 'MCP_READ_RESOURCE_FAILED',
-								cause: error,
-								metadata: { serverName, uri },
-							},
-						);
-					}
-
-					const first = response.contents[0];
-					if (!first) return '';
-					if ('text' in first) return first.text as string;
-					return JSON.stringify(first);
-				},
-				{
-					maxAttempts: 2,
-					baseDelayMs: 500,
-					shouldRetry: (error) => isTransientError(error),
-				},
-			);
-
-		try {
-			const result = breaker ? await breaker.execute(retryFn) : await retryFn();
-			monitor?.recordSuccess();
-			return result;
-		} catch (error) {
-			monitor?.recordFailure(error instanceof Error ? error : undefined);
-			throw error;
-		}
+	const listResourceTemplates = async (
+		serverName?: string,
+	): Promise<MCPResourceTemplateInfo[]> => {
+		return engineClient.request<MCPResourceTemplateInfo[]>(
+			'mcp/listResourceTemplates',
+			{ serverName },
+		);
 	};
 
 	// -----------------------------------------------------------------------
@@ -687,38 +287,9 @@ export function createMCPClient(
 	// -----------------------------------------------------------------------
 
 	const listPrompts = async (serverName?: string): Promise<MCPPromptInfo[]> => {
-		const servers = getTargetServers(serverName);
-		const results: MCPPromptInfo[] = [];
-
-		for (const [name, conn] of servers) {
-			try {
-				const response = await retry(async () => conn.client.listPrompts(), {
-					maxAttempts: 2,
-					baseDelayMs: 500,
-					shouldRetry: (error) => isTransientError(error),
-				});
-				for (const prompt of response.prompts) {
-					results.push({
-						serverName: name,
-						name: prompt.name,
-						description: prompt.description,
-						arguments: prompt.arguments,
-					});
-				}
-			} catch (error) {
-				if (isMCPServerNotConnectedError(error)) throw error;
-				throw createMCPError(
-					`Failed to list prompts from server "${name}": ${toError(error).message}`,
-					{
-						code: 'MCP_LIST_PROMPTS_FAILED',
-						cause: error,
-						metadata: { serverName: name },
-					},
-				);
-			}
-		}
-
-		return results;
+		return engineClient.request<MCPPromptInfo[]>('mcp/listPrompts', {
+			serverName,
+		});
 	};
 
 	const getPrompt = async (
@@ -726,33 +297,11 @@ export function createMCPClient(
 		promptName: string,
 		args: Record<string, string>,
 	): Promise<string> => {
-		const conn = getConnection(serverName);
-
-		logger.debug(`Getting prompt "${promptName}" from server "${serverName}"`);
-
-		let response: Awaited<ReturnType<Client['getPrompt']>>;
-		try {
-			response = await conn.client.getPrompt({
-				name: promptName,
-				arguments: args,
-			});
-		} catch (error) {
-			throw createMCPError(
-				`Failed to get prompt "${promptName}" from server "${serverName}": ${toError(error).message}`,
-				{
-					code: 'MCP_GET_PROMPT_FAILED',
-					cause: error,
-					metadata: { serverName, promptName },
-				},
-			);
-		}
-
-		return response.messages
-			.map((msg) => {
-				if (msg.content.type === 'text') return msg.content.text;
-				return JSON.stringify(msg.content);
-			})
-			.join('\n');
+		return engineClient.request<string>('mcp/getPrompt', {
+			serverName,
+			promptName,
+			args,
+		});
 	};
 
 	// -----------------------------------------------------------------------
@@ -763,11 +312,10 @@ export function createMCPClient(
 		serverName: string,
 		level: MCPLoggingLevel,
 	): Promise<void> => {
-		const conn = connections.get(serverName);
-		if (!conn) {
-			throw createMCPServerNotConnectedError(serverName);
-		}
-		await conn.client.setLoggingLevel(level);
+		await engineClient.request<void>('mcp/setLoggingLevel', {
+			serverName,
+			level,
+		});
 	};
 
 	const onLoggingMessage = (
@@ -819,77 +367,33 @@ export function createMCPClient(
 		ref: MCPCompletionRef,
 		argument: { name: string; value: string },
 	): Promise<MCPCompletionResult> => {
-		const conn = connections.get(serverName);
-		if (!conn) {
-			throw createMCPServerNotConnectedError(serverName);
-		}
-		const result = await conn.client.complete({ ref, argument });
-		return {
-			values: result.completion.values,
-			hasMore: result.completion.hasMore,
-			total: result.completion.total,
-		};
+		return engineClient.request<MCPCompletionResult>('mcp/complete', {
+			serverName,
+			ref,
+			argument,
+		});
 	};
 
 	// -----------------------------------------------------------------------
 	// Roots
 	// -----------------------------------------------------------------------
 
-	const getServerHealth = (serverName: string): HealthSnapshot | undefined => {
-		return monitors.get(serverName)?.getHealth();
+	const getServerHealth = (_serverName: string): HealthSnapshot | undefined => {
+		// Health is now managed in the Rust engine; delegate
+		// For now return undefined since health snapshots are engine-internal
+		return undefined;
 	};
 
 	const setRoots = (roots: MCPRoot[]): void => {
 		currentRoots = [...roots];
+		// Fire and forget — inform the engine of new roots
+		engineClient.request<void>('mcp/setRoots', { roots }).catch(() => {
+			// ignore errors
+		});
 	};
 
 	const sendRootsListChanged = async (): Promise<void> => {
-		for (const conn of connections.values()) {
-			try {
-				await conn.client.sendRootsListChanged();
-			} catch {
-				// Server may not support roots
-			}
-		}
-	};
-
-	// -----------------------------------------------------------------------
-	// Resource templates
-	// -----------------------------------------------------------------------
-
-	const listResourceTemplates = async (
-		serverName?: string,
-	): Promise<MCPResourceTemplateInfo[]> => {
-		if (serverName) {
-			const conn = connections.get(serverName);
-			if (!conn) throw createMCPServerNotConnectedError(serverName);
-			const result = await conn.client.listResourceTemplates();
-			return (result.resourceTemplates ?? []).map((t) => ({
-				serverName,
-				uriTemplate: t.uriTemplate,
-				name: t.name,
-				description: t.description,
-				mimeType: t.mimeType,
-			}));
-		}
-		const all: MCPResourceTemplateInfo[] = [];
-		for (const [name, conn] of connections) {
-			try {
-				const result = await conn.client.listResourceTemplates();
-				for (const t of result.resourceTemplates ?? []) {
-					all.push({
-						serverName: name,
-						uriTemplate: t.uriTemplate,
-						name: t.name,
-						description: t.description,
-						mimeType: t.mimeType,
-					});
-				}
-			} catch {
-				// Server may not support resource templates
-			}
-		}
-		return all;
+		await engineClient.request<void>('mcp/sendRootsListChanged', {});
 	};
 
 	// -----------------------------------------------------------------------
@@ -903,10 +407,10 @@ export function createMCPClient(
 		disconnectAll,
 		isAvailable,
 		get connectionCount() {
-			return connections.size;
+			return connectedServers.size;
 		},
 		get connectedServerNames() {
-			return [...connections.keys()];
+			return [...connectedServers];
 		},
 		listTools,
 		callTool,

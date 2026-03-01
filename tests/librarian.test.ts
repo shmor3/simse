@@ -1,11 +1,14 @@
 // tests/librarian.test.ts
 import { describe, expect, it, mock } from 'bun:test';
+import {
+	createDefaultLibrarian,
+	createLibrarian,
+} from '../src/ai/library/librarian.js';
 import type {
 	LibrarianLibraryAccess,
 	TextGenerationProvider,
 	Volume,
 } from '../src/ai/library/types.js';
-import { createDefaultLibrarian, createLibrarian } from '../src/ai/library/librarian.js';
 
 function createMockGenerator(response: string): TextGenerationProvider {
 	return {

@@ -2,13 +2,16 @@
 // Stacks — thin async client delegating to the Rust vector engine via JSON-RPC
 // ---------------------------------------------------------------------------
 
-import { createVectorClient, type VectorClient } from './client.js';
 import { createNoopLogger, type Logger } from '../shared/logger.js';
+import { createVectorClient, type VectorClient } from './client.js';
 import type {
 	AdvancedLookup,
 	DateRange,
 	DuplicateCheckResult,
 	DuplicateVolumes,
+	GraphEdgeType,
+	GraphNeighbor,
+	GraphTraversalNode,
 	LearningOptions,
 	Lookup,
 	MetadataFilter,
@@ -91,6 +94,17 @@ export interface Stacks {
 		embedding: readonly number[],
 	) => Promise<DuplicateCheckResult>;
 	readonly recommend: (options?: RecommendOptions) => Promise<Recommendation[]>;
+	readonly graphNeighbors: (
+		id: string,
+		edgeTypes?: readonly GraphEdgeType[],
+		maxResults?: number,
+	) => Promise<GraphNeighbor[]>;
+	readonly graphTraverse: (
+		id: string,
+		depth?: number,
+		edgeTypes?: readonly GraphEdgeType[],
+		maxResults?: number,
+	) => Promise<GraphTraversalNode[]>;
 	/** Record explicit user feedback on whether a volume was relevant. */
 	readonly recordFeedback: (
 		entryId: string,
@@ -353,6 +367,35 @@ export function createStacks(options: StacksOptions): Stacks {
 	};
 
 	// -------------------------------------------------------------------
+	// Graph Intelligence
+	// -------------------------------------------------------------------
+
+	const graphNeighbors = async (
+		id: string,
+		edgeTypes?: readonly GraphEdgeType[],
+		maxResults?: number,
+	): Promise<GraphNeighbor[]> => {
+		const result = await client.request<{ neighbors: GraphNeighbor[] }>(
+			'graph/neighbors',
+			{ id, edgeTypes: edgeTypes ? [...edgeTypes] : undefined, maxResults },
+		);
+		return result.neighbors;
+	};
+
+	const graphTraverse = async (
+		id: string,
+		depth?: number,
+		edgeTypes?: readonly GraphEdgeType[],
+		maxResults?: number,
+	): Promise<GraphTraversalNode[]> => {
+		const result = await client.request<{ nodes: GraphTraversalNode[] }>(
+			'graph/traverse',
+			{ id, depth, edgeTypes: edgeTypes ? [...edgeTypes] : undefined, maxResults },
+		);
+		return result.nodes;
+	};
+
+	// -------------------------------------------------------------------
 	// Feedback
 	// -------------------------------------------------------------------
 
@@ -388,6 +431,8 @@ export function createStacks(options: StacksOptions): Stacks {
 		findDuplicates,
 		checkDuplicate,
 		recommend,
+		graphNeighbors,
+		graphTraverse,
 		recordFeedback,
 		get learningEngine() {
 			return undefined;

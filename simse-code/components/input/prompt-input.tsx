@@ -198,7 +198,10 @@ export function PromptInput({
 					setMode('normal');
 					return;
 				}
-				if ((key.tab || key.return || key.rightArrow) && atCandidates.length > 0) {
+				if (
+					(key.tab || key.return || key.rightArrow) &&
+					atCandidates.length > 0
+				) {
 					const candidate = atCandidates[selectedIndex];
 					if (candidate) {
 						// Replace the @partial at end with @candidate
@@ -229,7 +232,10 @@ export function PromptInput({
 					setMode('normal');
 					return;
 				}
-				if ((key.tab || key.return || key.rightArrow) && filteredCommands.length > 0) {
+				if (
+					(key.tab || key.return || key.rightArrow) &&
+					filteredCommands.length > 0
+				) {
 					const cmd = filteredCommands[selectedIndex];
 					if (cmd) {
 						// If the command is already fully typed, Enter submits it

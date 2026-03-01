@@ -1,3 +1,5 @@
+import '@fontsource-variable/dm-sans';
+import '@fontsource/space-mono';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';

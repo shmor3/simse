@@ -1,15 +1,12 @@
-import Hero from './components/Hero';
-import Features from './components/Features';
+import DotGrid from './components/DotGrid';
 import Footer from './components/Footer';
+import Hero from './components/Hero';
 
 export default function App() {
 	return (
-		<div className="relative min-h-screen bg-zinc-950 text-zinc-50">
-			{/* Dot grid background */}
-			<div className="dot-grid pointer-events-none fixed inset-0" />
-
+		<div className="flex min-h-screen flex-col bg-[#0a0a0b]">
+			<DotGrid />
 			<Hero />
-			<Features />
 			<Footer />
 		</div>
 	);

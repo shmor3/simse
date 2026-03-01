@@ -2,6 +2,9 @@
 // simse library — public API surface
 // ---------------------------------------------------------------------------
 
+// ---- Logger / EventBus -----------------------------------------------------
+export type { EventBus, Logger } from '../shared/logger.js';
+export { createNoopLogger } from '../shared/logger.js';
 // ---- Circulation desk (async job queue) ------------------------------------
 export type { CirculationDeskOptions } from './circulation-desk.js';
 export { createCirculationDesk } from './circulation-desk.js';
@@ -40,9 +43,6 @@ export type {
 	LibraryServicesOptions,
 } from './library-services.js';
 export { createLibraryServices } from './library-services.js';
-// ---- Logger / EventBus -----------------------------------------------------
-export type { EventBus, Logger } from '../shared/logger.js';
-export { createNoopLogger } from '../shared/logger.js';
 // ---- Prompt injection (memory context formatting) --------------------------
 export type { PromptInjectionOptions } from './prompt-injection.js';
 export { formatMemoryContext } from './prompt-injection.js';
@@ -69,6 +69,12 @@ export type {
 	EmbeddingProvider,
 	ExtractionMemory,
 	ExtractionResult,
+	GraphBoostOptions,
+	GraphEdge,
+	GraphEdgeOrigin,
+	GraphEdgeType,
+	GraphNeighbor,
+	GraphTraversalNode,
 	LearningOptions,
 	Librarian,
 	LibrarianBid,
@@ -83,6 +89,7 @@ export type {
 	QueryRecord,
 	RecencyOptions,
 	Recommendation,
+	RecommendationScores,
 	RecommendOptions,
 	RelatedTopic,
 	RelevanceFeedback,

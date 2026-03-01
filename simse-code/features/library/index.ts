@@ -1,3 +1,3 @@
 export { libraryCommands } from './commands.js';
+export { SearchResults, TopicList, VolumeList } from './components.js';
 export { createLibrarianCommands } from './librarian-commands.js';
-export { VolumeList, SearchResults, TopicList } from './components.js';

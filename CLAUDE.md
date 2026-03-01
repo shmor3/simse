@@ -24,7 +24,7 @@ simse is a modular pipeline framework for orchestrating multi-step AI workflows.
 
 ### Repository Layout
 
-```
+```tree
 src/                        # TypeScript — main package
 simse-vector/               # Pure Rust crate — vector store engine (JSON-RPC over stdio)
 simse-vfs/                  # Pure Rust crate — virtual filesystem engine (JSON-RPC over stdio)
@@ -35,7 +35,7 @@ The Rust crates are standalone binaries spawned as child processes by the TS cli
 
 ### Module Layout
 
-```
+```tree
 src/
   lib.ts                    # Barrel exports (public API surface)
   logger.ts                 # Structured logger with child loggers
@@ -249,6 +249,7 @@ The MCP implementation uses `@modelcontextprotocol/sdk`:
 The library subsystem uses a **library analogy** throughout. The core storage engine is implemented in Rust (`simse-vector/`), while higher-level orchestration services are in TypeScript (`src/ai/library/`).
 
 **Rust engine** (`simse-vector/src/`) — handles all vector operations via JSON-RPC:
+
 - **Store** (`store.rs`): Add, search, delete, recommend, duplicate detection, topic operations
 - **Persistence** (`persistence.rs`): Float32↔base64 encoding (~75% size reduction), gzip compression, save/load
 - **Cataloging** (`cataloging.rs`): TopicIndex, MetadataIndex, MagnitudeCache
@@ -258,6 +259,7 @@ The library subsystem uses a **library analogy** throughout. The core storage en
 - **Learning** (`learning.rs`): Adaptive weight adaptation from query feedback
 
 **TypeScript client layer** (`src/ai/library/`) — orchestration and LLM integration:
+
 1. **Library** (`library.ts`): High-level API wrapping the Rust engine client
 2. **Stacks** (`stacks.ts`): Async wrapper spawning the Rust engine subprocess
 3. **Client** (`client.ts`): JSON-RPC transport to the Rust engine

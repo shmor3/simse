@@ -507,7 +507,11 @@ describe('resolveFieldOptions', () => {
 	it('should return agent IDs from acp.json servers', () => {
 		const acpData = {
 			servers: [
-				{ name: 'claude-server', command: 'bunx', defaultAgent: 'claude-agent' },
+				{
+					name: 'claude-server',
+					command: 'bunx',
+					defaultAgent: 'claude-agent',
+				},
 				{ name: 'ollama', command: 'bun' },
 			],
 		};

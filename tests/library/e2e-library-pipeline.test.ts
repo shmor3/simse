@@ -4,32 +4,22 @@
  * Uses a deterministic mock embedder that produces consistent vectors
  * from text content for testing library semantics.
  */
-import { describe, expect, it } from 'bun:test';
-import type { Buffer } from 'node:buffer';
+import { afterEach, describe, expect, it } from 'bun:test';
+import { fileURLToPath } from 'node:url';
 import { createLibrary } from '../../src/ai/library/library.js';
-import type { StorageBackend } from '../../src/ai/library/storage.js';
 import type { EmbeddingProvider } from '../../src/ai/library/types.js';
 
-// ---------------------------------------------------------------------------
-// In-memory storage backend for tests
-// ---------------------------------------------------------------------------
-
-function createMemoryStorage(): StorageBackend {
-	const data = new Map<string, Buffer>();
-	return Object.freeze({
-		load: async () => new Map(data),
-		save: async (snapshot: Map<string, Buffer>) => {
-			data.clear();
-			for (const [k, v] of snapshot) data.set(k, v);
-		},
-		close: async () => {},
-	});
-}
+const ENGINE_PATH = fileURLToPath(
+	new URL(
+		'../../simse-vector/target/debug/simse-vector-engine.exe',
+		import.meta.url,
+	),
+);
 
 // ---------------------------------------------------------------------------
 // Deterministic mock embedder
 //
-// Produces 64-dimensional vectors seeded from text content.
+// Produces 128-dimensional vectors seeded from text content.
 // Similar texts produce similar vectors (word overlap → dimension overlap).
 // ---------------------------------------------------------------------------
 
@@ -77,13 +67,19 @@ function createMockEmbedder(): EmbeddingProvider {
 
 describe('Library pipeline E2E', () => {
 	const embedder = createMockEmbedder();
+	let library: ReturnType<typeof createLibrary>;
+
+	afterEach(async () => {
+		await library?.dispose();
+	});
 
 	it('adds volumes and searches semantically', async () => {
-		const library = createLibrary(
+		library = createLibrary(
 			embedder,
 			{},
 			{
-				storage: createMemoryStorage(),
+				enginePath: ENGINE_PATH,
+				stacksOptions: { duplicateThreshold: 1 },
 			},
 		);
 		await library.initialize();
@@ -113,10 +109,13 @@ describe('Library pipeline E2E', () => {
 	});
 
 	it('detects near-duplicate text', async () => {
-		const library = createLibrary(
+		library = createLibrary(
 			embedder,
-			{ duplicateThreshold: 0.9 },
-			{ storage: createMemoryStorage() },
+			{},
+			{
+				enginePath: ENGINE_PATH,
+				stacksOptions: { duplicateThreshold: 0.8 },
+			},
 		);
 		await library.initialize();
 
@@ -130,11 +129,12 @@ describe('Library pipeline E2E', () => {
 	});
 
 	it('stores and retrieves by topic', async () => {
-		const library = createLibrary(
+		library = createLibrary(
 			embedder,
 			{},
 			{
-				storage: createMemoryStorage(),
+				enginePath: ENGINE_PATH,
+				stacksOptions: { duplicateThreshold: 1 },
 			},
 		);
 		await library.initialize();
@@ -143,13 +143,13 @@ describe('Library pipeline E2E', () => {
 		await library.add('Express is a Node framework', { topic: 'backend' });
 		await library.add('Vue is another UI framework', { topic: 'frontend' });
 
-		const frontend = library.filterByTopic(['frontend']);
+		const frontend = await library.filterByTopic(['frontend']);
 		expect(frontend).toHaveLength(2);
 
-		const backend = library.filterByTopic(['backend']);
+		const backend = await library.filterByTopic(['backend']);
 		expect(backend).toHaveLength(1);
 
-		const topics = library.getTopics();
+		const topics = await library.getTopics();
 		expect(topics.length).toBe(2);
 	});
 });

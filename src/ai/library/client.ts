@@ -3,9 +3,9 @@
 // ---------------------------------------------------------------------------
 
 import { type ChildProcess, spawn } from 'node:child_process';
-import { createStacksError, toError } from './errors.js';
 import type { Logger } from '../shared/logger.js';
 import { createNoopLogger } from '../shared/logger.js';
+import { createStacksError, toError } from './errors.js';
 
 // ---------------------------------------------------------------------------
 // Public types

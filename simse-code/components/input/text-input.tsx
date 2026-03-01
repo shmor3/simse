@@ -5,7 +5,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 const IS_MAC = process.platform === 'darwin';
 
 /** Render a single character with cursor or selection highlight. */
-function renderChar(ch: string, isCursor: boolean, isSelected: boolean): string {
+function renderChar(
+	ch: string,
+	isCursor: boolean,
+	isSelected: boolean,
+): string {
 	if (isCursor) return chalk.inverse(ch);
 	if (isSelected) return chalk.bgCyan.black(ch);
 	return ch;
@@ -399,9 +403,7 @@ export function TextInput({
 			if (sel) {
 				clearSelection();
 				const next =
-					sel.value.slice(0, sel.cursor) +
-					input +
-					sel.value.slice(sel.cursor);
+					sel.value.slice(0, sel.cursor) + input + sel.value.slice(sel.cursor);
 				const newCursor = sel.cursor + input.length;
 				valueRef.current = next;
 				cursorRef.current = newCursor;
@@ -462,19 +464,14 @@ export function TextInput({
 	// Single-line fast path
 	if (!value.includes('\n')) {
 		const selStart =
-			selectionAnchor !== null
-				? Math.min(selectionAnchor, cursorOffset)
-				: -1;
+			selectionAnchor !== null ? Math.min(selectionAnchor, cursorOffset) : -1;
 		const selEnd =
-			selectionAnchor !== null
-				? Math.max(selectionAnchor, cursorOffset)
-				: -1;
+			selectionAnchor !== null ? Math.max(selectionAnchor, cursorOffset) : -1;
 		let rendered = '';
 		for (let i = 0; i < value.length; i++) {
 			const ch = value[i] ?? '';
 			const isCursor = i === cursorOffset;
-			const isSelected =
-				selStart !== -1 && i >= selStart && i < selEnd;
+			const isSelected = selStart !== -1 && i >= selStart && i < selEnd;
 			rendered += renderChar(ch, isCursor, isSelected);
 		}
 		if (cursorOffset === value.length) {
@@ -494,13 +491,9 @@ export function TextInput({
 		cursorOffset,
 	);
 	const selStart =
-		selectionAnchor !== null
-			? Math.min(selectionAnchor, cursorOffset)
-			: -1;
+		selectionAnchor !== null ? Math.min(selectionAnchor, cursorOffset) : -1;
 	const selEnd =
-		selectionAnchor !== null
-			? Math.max(selectionAnchor, cursorOffset)
-			: -1;
+		selectionAnchor !== null ? Math.max(selectionAnchor, cursorOffset) : -1;
 
 	return (
 		<Box flexDirection="column">
@@ -520,9 +513,7 @@ export function TextInput({
 					const flatOffset = lineStartOffset + j;
 					const isCursor = isCursorLine && j === cursorCol;
 					const isSelected =
-						selStart !== -1 &&
-						flatOffset >= selStart &&
-						flatOffset < selEnd;
+						selStart !== -1 && flatOffset >= selStart && flatOffset < selEnd;
 					rendered += renderChar(ch, isCursor, isSelected);
 				}
 				// Cursor at end of this line

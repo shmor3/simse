@@ -3,9 +3,9 @@ import { Text } from 'ink';
 import { render } from 'ink-testing-library';
 import { useState } from 'react';
 import {
-	TextInput,
 	findWordBoundaryLeft,
 	findWordBoundaryRight,
+	TextInput,
 } from '../components/input/text-input.js';
 
 function TestHarness() {

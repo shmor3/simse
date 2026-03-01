@@ -2,6 +2,9 @@
 // simse vfs — public API surface
 // ---------------------------------------------------------------------------
 
+// ---- Logger / EventBus ----------------------------------------------------
+export type { EventBus, Logger } from '../shared/logger.js';
+export { createNoopLogger } from '../shared/logger.js';
 // ---- VFS Client (JSON-RPC transport) ---------------------------------------
 export type { VFSClient, VFSClientEvent, VFSClientOptions } from './client.js';
 export { createVFSClient } from './client.js';
@@ -16,9 +19,6 @@ export type {
 	VFSExecutor,
 } from './exec.js';
 export { createVFSExecutor } from './exec.js';
-// ---- Logger / EventBus ----------------------------------------------------
-export type { EventBus, Logger } from '../shared/logger.js';
-export { createNoopLogger } from '../shared/logger.js';
 // ---- Path utilities --------------------------------------------------------
 export {
 	ancestorPaths,

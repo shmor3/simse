@@ -6,12 +6,15 @@
 // ACP — use the acp-ollama-bridge to connect to a local Ollama instance.
 // ---------------------------------------------------------------------------
 
-import type { EmbeddingProvider, TextGenerationProvider } from '../library/types.js';
 import { toError } from '../../errors/base.js';
 import {
 	createEmbeddingError,
 	createProviderGenerationError,
 } from '../../errors/index.js';
+import type {
+	EmbeddingProvider,
+	TextGenerationProvider,
+} from '../library/types.js';
 import type { ACPClient } from './acp-client.js';
 
 // ---------------------------------------------------------------------------

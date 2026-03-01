@@ -1,8 +1,8 @@
 import {
 	existsSync,
 	mkdirSync,
-	readFileSync,
 	readdirSync,
+	readFileSync,
 	unlinkSync,
 	writeFileSync,
 } from 'node:fs';
@@ -202,9 +202,7 @@ function loadLibrarianList(dir: string): LibrarianSummary[] {
 					summaries.push({
 						name: parsed.name,
 						description:
-							typeof parsed.description === 'string'
-								? parsed.description
-								: '',
+							typeof parsed.description === 'string' ? parsed.description : '',
 					});
 				}
 			} catch {
@@ -229,7 +227,10 @@ function loadDefinition(
 	}
 }
 
-function getNestedValue(obj: Record<string, unknown>, path: readonly string[]): unknown {
+function getNestedValue(
+	obj: Record<string, unknown>,
+	path: readonly string[],
+): unknown {
 	let current: unknown = obj;
 	for (const key of path) {
 		if (typeof current !== 'object' || current === null) return undefined;
@@ -257,7 +258,10 @@ function setNestedValue(
 		if (parent !== undefined && child !== undefined) {
 			const existing = result[parent];
 			if (typeof existing === 'object' && existing !== null) {
-				result[parent] = { ...(existing as Record<string, unknown>), [child]: value };
+				result[parent] = {
+					...(existing as Record<string, unknown>),
+					[child]: value,
+				};
 			} else {
 				result[parent] = { [child]: value };
 			}
@@ -308,7 +312,10 @@ function resolveAcpCommands(dataDir: string): string[] {
 /**
  * Navigate to the next selectable index in the given direction.
  */
-function nextSelectableIndex(current: number, direction: 'up' | 'down'): number {
+function nextSelectableIndex(
+	current: number,
+	direction: 'up' | 'down',
+): number {
 	const idx = SELECTABLE_INDICES.indexOf(current);
 	if (idx === -1) return SELECTABLE_INDICES[0] ?? 0;
 	if (direction === 'up') {
@@ -768,7 +775,14 @@ export function LibrarianExplorer({
 
 			setEditMode('none');
 		},
-		[currentDef, fieldIndex, isCreating, originalName, handleRename, saveToDisk],
+		[
+			currentDef,
+			fieldIndex,
+			isCreating,
+			originalName,
+			handleRename,
+			saveToDisk,
+		],
 	);
 
 	// -----------------------------------------------------------------------
@@ -872,16 +886,13 @@ export function LibrarianExplorer({
 								<Text color={isSelected ? 'cyan' : 'red'}>
 									{isSelected ? '  \u276F ' : '    '}
 								</Text>
-								<Text
-									bold={isSelected}
-									color={isSelected ? 'cyan' : 'red'}
-								>
+								<Text bold={isSelected} color={isSelected ? 'cyan' : 'red'}>
 									{field.label}
 								</Text>
 							</Box>
 							{isDeleting && (
 								<Box paddingLeft={6}>
-									<Text>Are you sure?  </Text>
+									<Text>Are you sure? </Text>
 									<Text
 										bold={deleteSelection === 0}
 										color={deleteSelection === 0 ? 'cyan' : undefined}
@@ -909,10 +920,7 @@ export function LibrarianExplorer({
 							<Text color={isSelected ? 'cyan' : undefined}>
 								{isSelected ? '  \u276F ' : '    '}
 							</Text>
-							<Text
-								bold={isSelected}
-								color={isSelected ? 'cyan' : undefined}
-							>
+							<Text bold={isSelected} color={isSelected ? 'cyan' : undefined}>
 								{field.label}
 								{': '}
 							</Text>
@@ -939,19 +947,13 @@ export function LibrarianExplorer({
 									>
 										{displayValue}
 									</Text>
-									{isSaved && (
-										<Text color="green">{' Saved \u2713'}</Text>
-									)}
+									{isSaved && <Text color="green">{' Saved \u2713'}</Text>}
 								</>
 							)}
 						</Box>
 						{/* Inline dropdown */}
 						{isDropdownOpen && (
-							<Box
-								flexDirection="column"
-								paddingLeft={6}
-								marginBottom={0}
-							>
+							<Box flexDirection="column" paddingLeft={6} marginBottom={0}>
 								{dropdownOptions.map((opt, oi) => {
 									const isOptSelected = oi === dropdownIndex;
 									return (

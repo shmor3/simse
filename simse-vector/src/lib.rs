@@ -14,5 +14,6 @@ pub mod query_dsl;
 pub mod text_cache;
 pub mod persistence;
 pub mod prompt_injection;
+pub mod graph;
 pub mod store;
 pub mod server;

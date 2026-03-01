@@ -2,8 +2,8 @@
 // Virtual Filesystem — async client wrapper over Rust subprocess
 // ---------------------------------------------------------------------------
 
-import { createVFSClient, type VFSClientEvent } from './client.js';
 import type { Logger } from '../shared/logger.js';
+import { createVFSClient, type VFSClientEvent } from './client.js';
 import type {
 	VFSCallbacks,
 	VFSCopyOptions,

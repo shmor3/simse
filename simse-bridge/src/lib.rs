@@ -3,6 +3,8 @@
 //! Spawns a Bun/Node subprocess running the TS core as a JSON-RPC server.
 //! Communication via stdin/stdout NDJSON.
 
+pub mod acp_client;
+pub mod acp_types;
 pub mod client;
 pub mod config;
 pub mod json_io;

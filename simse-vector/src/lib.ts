@@ -15,6 +15,9 @@ export {
 	createMetadataIndex,
 	createTopicIndex,
 } from './cataloging.js';
+// ---- Client (JSON-RPC to Rust engine) ------------------------------------
+export type { VectorClient, VectorClientOptions } from './client.js';
+export { createVectorClient } from './client.js';
 // ---- Circulation desk (async job queue) ------------------------------------
 export type { CirculationDeskOptions } from './circulation-desk.js';
 export { createCirculationDesk } from './circulation-desk.js';

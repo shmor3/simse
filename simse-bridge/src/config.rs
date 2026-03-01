@@ -330,6 +330,8 @@ pub struct LoadedConfig {
 	pub embedding_model: String,
 	/// Resolved data directory.
 	pub data_dir: PathBuf,
+	/// Resolved working directory.
+	pub work_dir: PathBuf,
 }
 
 // ---------------------------------------------------------------------------
@@ -371,7 +373,18 @@ pub fn parse_frontmatter(content: &str) -> Frontmatter {
 	};
 
 	let rest = &content[after_open..];
-	let end_idx = match rest.find("\n---") {
+	let end_idx = rest
+		.find("\n---\n")
+		.or_else(|| rest.find("\n---\r\n"))
+		.or_else(|| {
+			if rest.ends_with("\n---") {
+				Some(rest.len() - 3)
+			} else {
+				None
+			}
+		});
+
+	let end_idx = match end_idx {
 		Some(pos) => pos,
 		None => {
 			return Frontmatter {
@@ -382,11 +395,16 @@ pub fn parse_frontmatter(content: &str) -> Frontmatter {
 	};
 
 	let frontmatter_text = &rest[..end_idx];
-	let body_start = after_open + end_idx + 4; // skip past "\n---"
-	let body = if body_start < content.len() {
-		content[body_start..].trim().to_string()
-	} else {
+	// Find the start of the body: skip past the "\n---" and the line ending that follows.
+	let after_delimiter = after_open + end_idx + 4; // skip past "\n---"
+	let body = if after_delimiter >= content.len() {
 		String::new()
+	} else if content[after_delimiter..].starts_with('\n') {
+		content[after_delimiter + 1..].trim().to_string()
+	} else if content[after_delimiter..].starts_with("\r\n") {
+		content[after_delimiter + 2..].trim().to_string()
+	} else {
+		content[after_delimiter..].trim().to_string()
 	};
 
 	let mut meta = HashMap::new();
@@ -565,7 +583,7 @@ pub fn check_mcp_servers(
 					.cloned()
 					.or_else(|| std::env::var(key).ok());
 				match val {
-					Some(v) => v.is_empty(),
+					Some(v) => v.is_empty() || v.starts_with("${"),
 					None => true,
 				}
 			})
@@ -727,6 +745,7 @@ pub fn load_config(options: &ConfigOptions) -> LoadedConfig {
 		default_server,
 		embedding_model,
 		data_dir,
+		work_dir,
 	}
 }
 
@@ -778,6 +797,25 @@ mod tests {
 			result.body,
 			"---\nname: broken\nThis has no closing delimiter."
 		);
+	}
+
+	#[test]
+	fn parse_frontmatter_delimiter_like_content_in_value() {
+		// A value that starts with "---" should not be treated as a closing delimiter.
+		let content = "---\nname: test\nseparator: ---in-value\n---\nBody content.";
+		let result = parse_frontmatter(content);
+		assert_eq!(result.meta.get("name").unwrap(), "test");
+		assert_eq!(result.meta.get("separator").unwrap(), "---in-value");
+		assert_eq!(result.body, "Body content.");
+	}
+
+	#[test]
+	fn parse_frontmatter_closing_delimiter_at_eof() {
+		// Closing delimiter at end of file with no trailing newline.
+		let content = "---\nname: eof\n---";
+		let result = parse_frontmatter(content);
+		assert_eq!(result.meta.get("name").unwrap(), "eof");
+		assert_eq!(result.body, "");
 	}
 
 	// -----------------------------------------------------------------------
@@ -1003,6 +1041,24 @@ mod tests {
 		assert_eq!(skipped.len(), 1);
 		assert_eq!(skipped[0].name, "missing-env");
 		assert_eq!(skipped[0].missing_env, vec!["NONEXISTENT_VAR_12345"]);
+	}
+
+	#[test]
+	fn check_mcp_servers_filters_unresolved_placeholders() {
+		let servers = vec![McpServerConfig {
+			name: "placeholder-env".into(),
+			transport: "stdio".into(),
+			command: "cmd".into(),
+			args: vec![],
+			env: HashMap::from([("TOKEN".into(), "${SOME_TOKEN}".into())]),
+			required_env: vec!["TOKEN".into()],
+		}];
+
+		let (valid, skipped) = check_mcp_servers(&servers);
+		assert!(valid.is_empty());
+		assert_eq!(skipped.len(), 1);
+		assert_eq!(skipped[0].name, "placeholder-env");
+		assert_eq!(skipped[0].missing_env, vec!["TOKEN"]);
 	}
 
 	// -----------------------------------------------------------------------

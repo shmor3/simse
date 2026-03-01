@@ -52,7 +52,7 @@ describe('CirculationDesk', () => {
 			librarian,
 			addVolume: addFn,
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => [],
+			getVolumesForTopic: async () => [],
 		});
 
 		desk.enqueueExtraction({
@@ -73,7 +73,7 @@ describe('CirculationDesk', () => {
 			librarian,
 			addVolume: async () => 'id',
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => [],
+			getVolumesForTopic: async () => [],
 		});
 
 		desk.enqueueExtraction({ userInput: 'a', response: 'b' });
@@ -89,7 +89,7 @@ describe('CirculationDesk', () => {
 			librarian,
 			addVolume: async () => 'id',
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => [],
+			getVolumesForTopic: async () => [],
 		});
 
 		desk.enqueueExtraction({ userInput: 'a', response: 'b' });
@@ -104,7 +104,7 @@ describe('CirculationDesk', () => {
 			librarian,
 			addVolume: async () => 'id',
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => [],
+			getVolumesForTopic: async () => [],
 		});
 
 		desk.dispose();
@@ -119,7 +119,7 @@ describe('CirculationDesk', () => {
 			librarian,
 			addVolume: addFn,
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => [],
+			getVolumesForTopic: async () => [],
 			thresholds: {
 				compendium: {
 					minEntries: 3,
@@ -145,7 +145,7 @@ describe('CirculationDesk', () => {
 			librarian,
 			addVolume: addFn,
 			checkDuplicate: async () => ({ isDuplicate: true }),
-			getVolumesForTopic: () => [],
+			getVolumesForTopic: async () => [],
 		});
 
 		desk.enqueueExtraction({ userInput: 'x', response: 'y' });
@@ -161,10 +161,10 @@ describe('CirculationDesk optimization', () => {
 			librarian,
 			addVolume: async () => 'id',
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => [],
+			getVolumesForTopic: async () => [],
 			deleteVolume: async () => {},
-			getTotalVolumeCount: () => 0,
-			getAllTopics: () => [],
+			getTotalVolumeCount: async () => 0,
+			getAllTopics: async () => [],
 			thresholds: {
 				optimization: { modelId: 'claude-opus-4-6' },
 			},
@@ -208,10 +208,10 @@ describe('CirculationDesk optimization', () => {
 			librarian,
 			addVolume: addFn,
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => volumes,
+			getVolumesForTopic: async () => volumes,
 			deleteVolume: deleteFn,
-			getTotalVolumeCount: () => 2,
-			getAllTopics: () => ['test'],
+			getTotalVolumeCount: async () => 2,
+			getAllTopics: async () => ['test'],
 			thresholds: {
 				optimization: { modelId: 'claude-opus-4-6' },
 			},
@@ -241,10 +241,10 @@ describe('CirculationDesk optimization', () => {
 			librarian,
 			addVolume: async () => 'id',
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => volumes,
+			getVolumesForTopic: async () => volumes,
 			deleteVolume: async () => {},
-			getTotalVolumeCount: () => 51,
-			getAllTopics: () => ['test/topic'],
+			getTotalVolumeCount: async () => 51,
+			getAllTopics: async () => ['test/topic'],
 			thresholds: {
 				optimization: {
 					topicThreshold: 50,
@@ -265,10 +265,10 @@ describe('CirculationDesk optimization', () => {
 			librarian,
 			addVolume: async () => 'id',
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => [],
+			getVolumesForTopic: async () => [],
 			deleteVolume: async () => {},
-			getTotalVolumeCount: () => 5,
-			getAllTopics: () => ['test'],
+			getTotalVolumeCount: async () => 5,
+			getAllTopics: async () => ['test'],
 			thresholds: {
 				optimization: {
 					topicThreshold: 50,
@@ -339,7 +339,7 @@ describe('CirculationDesk with registry', () => {
 			registry,
 			addVolume: addFn,
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => [],
+			getVolumesForTopic: async () => [],
 		});
 
 		desk.enqueueExtraction({
@@ -383,7 +383,7 @@ describe('CirculationDesk with registry', () => {
 			registry,
 			addVolume: addFn,
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => [],
+			getVolumesForTopic: async () => [],
 		});
 
 		desk.enqueueExtraction({ userInput: 'x', response: 'y' });
@@ -425,7 +425,7 @@ describe('CirculationDesk with registry', () => {
 			registry,
 			addVolume: async () => 'id',
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => volumes,
+			getVolumesForTopic: async () => volumes,
 			thresholds: { compendium: { minEntries: 10 } },
 		});
 
@@ -479,7 +479,7 @@ describe('CirculationDesk with registry', () => {
 			registry,
 			addVolume: addFn,
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => volumes,
+			getVolumesForTopic: async () => volumes,
 			deleteVolume: deleteFn,
 			thresholds: { optimization: { modelId: 'claude-opus-4-6' } },
 		});
@@ -500,7 +500,7 @@ describe('CirculationDesk with registry', () => {
 			librarian,
 			addVolume: addFn,
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => [],
+			getVolumesForTopic: async () => [],
 		});
 
 		desk.enqueueExtraction({ userInput: 'a', response: 'b' });
@@ -515,7 +515,7 @@ describe('CirculationDesk with registry', () => {
 			createCirculationDesk({
 				addVolume: async () => 'id',
 				checkDuplicate: async () => ({ isDuplicate: false }),
-				getVolumesForTopic: () => [],
+				getVolumesForTopic: async () => [],
 			}),
 		).toThrow('CirculationDesk requires either librarian or registry');
 	});
@@ -542,7 +542,7 @@ describe('CirculationDesk with registry', () => {
 			registry,
 			addVolume: async () => 'id',
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => volumes,
+			getVolumesForTopic: async () => volumes,
 			thresholds: {
 				spawning: {
 					complexityThreshold: 100,
@@ -572,7 +572,7 @@ describe('CirculationDesk with registry', () => {
 			librarian,
 			addVolume: async () => 'id',
 			checkDuplicate: async () => ({ isDuplicate: false }),
-			getVolumesForTopic: () => volumes,
+			getVolumesForTopic: async () => volumes,
 			thresholds: {
 				spawning: {
 					complexityThreshold: 100,

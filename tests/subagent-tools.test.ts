@@ -513,7 +513,7 @@ describe('subagent_spawn shelf integration', () => {
 			add: mock(async () => 'shelf-id'),
 			search: mock(async () => []),
 			searchGlobal: mock(async () => []),
-			volumes: mock(() => []),
+			volumes: mock(async () => []),
 		};
 		const mockLibrary = {
 			shelf: mock(() => mockShelf),

@@ -253,8 +253,8 @@ function createMockLibrary(
 ): LibrarianLibraryAccess {
 	return {
 		search: mock(async () => []),
-		getTopics: mock(() => []),
-		filterByTopic: mock(() => []),
+		getTopics: mock(async () => []),
+		filterByTopic: mock(async () => []),
 		...overrides,
 	};
 }

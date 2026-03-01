@@ -3,7 +3,6 @@
 // ---------------------------------------------------------------------------
 
 import { mock } from 'bun:test';
-import type { StorageBackend } from 'simse-vector';
 import type { ACPClient } from '../../src/ai/acp/acp-client.js';
 import type { ACPGenerateResult } from '../../src/ai/acp/types.js';
 import type { Logger } from '../../src/logger.js';
@@ -83,27 +82,6 @@ export function createMockACPClient(
 		defaultAgent: 'default',
 		...overrides,
 	} as unknown as ACPClient;
-}
-
-// ---------------------------------------------------------------------------
-// In-memory StorageBackend
-// ---------------------------------------------------------------------------
-
-export function createMemoryStorage(
-	sharedData?: Map<string, Buffer>,
-): StorageBackend {
-	const data: Map<string, Buffer> = sharedData ?? new Map();
-
-	return Object.freeze({
-		load: async () => new Map(data),
-		save: async (newData: Map<string, Buffer>) => {
-			data.clear();
-			for (const [k, v] of newData) {
-				data.set(k, v);
-			}
-		},
-		close: async () => {},
-	});
 }
 
 // ---------------------------------------------------------------------------

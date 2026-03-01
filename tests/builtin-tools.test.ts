@@ -41,16 +41,16 @@ function createMockLibrary(): Library {
 				score: 0.9,
 			},
 		]),
-		textSearch: mock(() => []),
-		filterByMetadata: mock(() => []),
-		filterByDateRange: mock(() => []),
+		textSearch: mock(async () => []),
+		filterByMetadata: mock(async () => []),
+		filterByDateRange: mock(async () => []),
 		advancedSearch: mock(async () => []),
-		getById: mock(() => undefined),
-		getAll: mock(() => []),
-		getTopics: mock(() => []),
-		filterByTopic: mock(() => []),
+		getById: mock(async () => undefined),
+		getAll: mock(async () => []),
+		getTopics: mock(async () => []),
+		filterByTopic: mock(async () => []),
 		recommend: mock(async () => []),
-		findDuplicates: mock(() => []),
+		findDuplicates: mock(async () => []),
 		checkDuplicate: mock(async () => ({ isDuplicate: false })),
 		compendium: mock(async () => ({
 			compendiumId: 'comp-1',
@@ -59,11 +59,14 @@ function createMockLibrary(): Library {
 			deletedOriginals: false,
 		})),
 		setTextGenerator: mock(() => {}),
+		recordFeedback: mock(async () => {}),
 		delete: mock(async () => true),
 		deleteBatch: mock(async () => 0),
 		clear: mock(async () => {}),
-		patronProfile: undefined,
-		size: 1,
+		patronProfile: Promise.resolve(undefined),
+		size: Promise.resolve(1),
+		shelves: mock(async () => []),
+		query: mock(async () => []),
 		isInitialized: true,
 		isDirty: false,
 		embeddingAgent: undefined,
@@ -200,7 +203,7 @@ describe('registerLibraryTools', () => {
 	});
 
 	it('library_catalog formats topics with indent and counts', async () => {
-		(library.getTopics as ReturnType<typeof mock>).mockReturnValue([
+		(library.getTopics as ReturnType<typeof mock>).mockResolvedValue([
 			{ topic: 'code', entryCount: 5 },
 			{ topic: 'code/js', entryCount: 3 },
 			{ topic: 'notes', entryCount: 2 },
@@ -217,7 +220,7 @@ describe('registerLibraryTools', () => {
 	});
 
 	it('library_catalog filters by topic', async () => {
-		(library.getTopics as ReturnType<typeof mock>).mockReturnValue([
+		(library.getTopics as ReturnType<typeof mock>).mockResolvedValue([
 			{ topic: 'code', entryCount: 5 },
 			{ topic: 'code/js', entryCount: 3 },
 			{ topic: 'notes', entryCount: 2 },
@@ -249,7 +252,7 @@ describe('registerLibraryTools', () => {
 	});
 
 	it('library_compact creates compendium when volumes exist', async () => {
-		(library.filterByTopic as ReturnType<typeof mock>).mockReturnValue([
+		(library.filterByTopic as ReturnType<typeof mock>).mockResolvedValue([
 			{ id: 'v1', text: 'a' },
 			{ id: 'v2', text: 'b' },
 		]);

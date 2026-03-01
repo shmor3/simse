@@ -1,7 +1,15 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { fileURLToPath } from 'node:url';
 import type { EmbeddingProvider, LibraryConfig } from 'simse-vector';
 import { createLibrary, type Library } from 'simse-vector';
-import { createMemoryStorage, createSilentLogger } from './utils/mocks.js';
+import { createSilentLogger } from './utils/mocks.js';
+
+const ENGINE_PATH = fileURLToPath(
+	new URL(
+		'../simse-vector/engine/target/debug/simse-vector-engine.exe',
+		import.meta.url,
+	),
+);
 
 function createMockEmbedder(dim = 3): EmbeddingProvider {
 	let callCount = 0;
@@ -33,15 +41,17 @@ describe('Shelf', () => {
 
 	beforeEach(async () => {
 		library = createLibrary(createMockEmbedder(), defaultConfig, {
-			storage: createMemoryStorage(),
+			enginePath: ENGINE_PATH,
 			logger: createSilentLogger(),
 			stacksOptions: {
-				autoSave: true,
-				flushIntervalMs: 0,
 				learning: { enabled: false },
 			},
 		});
 		await library.initialize();
+	});
+
+	afterEach(async () => {
+		await library?.dispose();
 	});
 
 	it('library.shelf() returns a Shelf with the given name', () => {
@@ -52,7 +62,7 @@ describe('Shelf', () => {
 	it('shelf.add() stores with shelf metadata', async () => {
 		const shelf = library.shelf('researcher');
 		const id = await shelf.add('finding about APIs', { topic: 'api' });
-		const volume = library.getById(id);
+		const volume = await library.getById(id);
 		expect(volume).toBeDefined();
 		expect(volume?.metadata.shelf).toBe('researcher');
 	});
@@ -83,7 +93,7 @@ describe('Shelf', () => {
 		await shelf.add('note 1');
 		await shelf.add('note 2');
 		await library.add('unscoped note');
-		const vols = shelf.volumes();
+		const vols = await shelf.volumes();
 		expect(vols.length).toBe(2);
 		for (const v of vols) {
 			expect(v.metadata.shelf).toBe('test');
@@ -94,7 +104,7 @@ describe('Shelf', () => {
 		library.shelf('alpha');
 		library.shelf('beta');
 		await library.shelf('alpha').add('note');
-		const names = library.shelves();
+		const names = await library.shelves();
 		expect(names).toContain('alpha');
 	});
 });

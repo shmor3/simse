@@ -2,3 +2,4 @@
 
 pub mod conversation;
 pub mod permissions;
+pub mod session;

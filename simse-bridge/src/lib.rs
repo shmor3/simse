@@ -9,4 +9,4 @@ pub mod client;
 pub mod config;
 pub mod json_io;
 pub mod protocol;
-pub mod storage;
+pub mod session_store;

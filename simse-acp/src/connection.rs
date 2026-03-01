@@ -22,8 +22,10 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{oneshot, Mutex};
 
 use crate::error::AcpError;
+use crate::permission::resolve_permission;
 use crate::protocol::{
-	ClientInfo, InitializeParams, InitializeResult, JsonRpcNotification, PermissionPolicy,
+	ClientInfo, InitializeParams, InitializeResult, JsonRpcNotification, JsonRpcResponse,
+	PermissionPolicy, PermissionRequestParams, PermissionResult,
 };
 
 // ---------------------------------------------------------------------------
@@ -128,7 +130,9 @@ pub struct AcpConnection {
 	/// The result of the `initialize` handshake, if completed.
 	server_info: Mutex<Option<InitializeResult>>,
 	/// Current permission policy for tool-use requests.
-	permission_policy: Mutex<PermissionPolicy>,
+	permission_policy: Arc<Mutex<PermissionPolicy>>,
+	/// Pending permission requests awaiting external resolution (Prompt policy).
+	pending_permissions: Arc<Mutex<HashMap<u64, PermissionRequestParams>>>,
 	/// Default timeout for requests (ms).
 	default_timeout_ms: u64,
 	/// Timeout for the initialize handshake (ms).
@@ -187,6 +191,9 @@ impl AcpConnection {
 		let notification_handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
 			Arc::new(RwLock::new(HashMap::new()));
 		let connected = Arc::new(AtomicBool::new(true));
+		let permission_policy = Arc::new(Mutex::new(PermissionPolicy::default()));
+		let pending_permissions: Arc<Mutex<HashMap<u64, PermissionRequestParams>>> =
+			Arc::new(Mutex::new(HashMap::new()));
 
 		// We create the connection first, then spawn the reader tasks that
 		// share references into it via Arc clones of pending/handlers.
@@ -200,7 +207,8 @@ impl AcpConnection {
 			notification_handlers: Arc::clone(&notification_handlers),
 			connected: Arc::clone(&connected),
 			server_info: Mutex::new(None),
-			permission_policy: Mutex::new(PermissionPolicy::default()),
+			permission_policy: Arc::clone(&permission_policy),
+			pending_permissions: Arc::clone(&pending_permissions),
 			default_timeout_ms: config.timeout_ms,
 			init_timeout_ms: config.init_timeout_ms,
 			client_name: config.client_name,
@@ -215,6 +223,9 @@ impl AcpConnection {
 			let handlers_clone = Arc::clone(&notification_handlers);
 			let connected_clone = Arc::clone(&connected);
 			let pending_for_exit = Arc::clone(&pending);
+			let stdin_clone = Arc::clone(&stdin);
+			let policy_clone = Arc::clone(&permission_policy);
+			let perms_clone = Arc::clone(&pending_permissions);
 			let handle = tokio::spawn(async move {
 				let mut reader = BufReader::new(stdout);
 				let mut line_buf = String::new();
@@ -243,6 +254,9 @@ impl AcpConnection {
 								&parsed,
 								&pending_clone,
 								&handlers_clone,
+								&stdin_clone,
+								&policy_clone,
+								&perms_clone,
 							)
 							.await;
 						}
@@ -577,6 +591,47 @@ impl AcpConnection {
 		*self.permission_policy.lock().await = policy;
 	}
 
+	/// Return all pending permission requests awaiting external resolution.
+	///
+	/// Only populated when the permission policy is `Prompt`. Each entry
+	/// is the JSON-RPC request ID paired with the permission request params.
+	pub async fn pending_permission_requests(
+		&self,
+	) -> Vec<(u64, PermissionRequestParams)> {
+		let guard = self.pending_permissions.lock().await;
+		guard.iter().map(|(id, p)| (*id, p.clone())).collect()
+	}
+
+	/// Respond to a pending permission request (Prompt policy).
+	///
+	/// The `request_id` must match an outstanding permission request. The
+	/// `result` is sent as the JSON-RPC response to the agent process.
+	pub async fn respond_to_permission(
+		&self,
+		request_id: u64,
+		result: PermissionResult,
+	) -> Result<(), AcpError> {
+		// Remove from pending set.
+		{
+			let mut guard = self.pending_permissions.lock().await;
+			if guard.remove(&request_id).is_none() {
+				return Err(AcpError::ProtocolError(format!(
+					"No pending permission request with id {request_id}"
+				)));
+			}
+		}
+
+		// Build and send the JSON-RPC response.
+		let response = JsonRpcResponse::success(
+			request_id,
+			serde_json::to_value(&result)
+				.map_err(|e| AcpError::Serialization(e.to_string()))?,
+		);
+		let value = serde_json::to_value(&response)
+			.map_err(|e| AcpError::Serialization(e.to_string()))?;
+		self.write_line(&value).await
+	}
+
 	// -------------------------------------------------------------------
 	// Internal: write to stdin
 	// -------------------------------------------------------------------
@@ -608,6 +663,9 @@ impl AcpConnection {
 		msg: &serde_json::Value,
 		pending: &Mutex<HashMap<u64, PendingRequest>>,
 		notification_handlers: &RwLock<HashMap<String, Vec<HandlerEntry>>>,
+		stdin: &Mutex<Option<ChildStdin>>,
+		permission_policy: &Mutex<PermissionPolicy>,
+		pending_permissions: &Mutex<HashMap<u64, PermissionRequestParams>>,
 	) {
 		let has_id = msg.get("id").is_some();
 		let has_method = msg.get("method").is_some();
@@ -650,12 +708,30 @@ impl AcpConnection {
 			}
 		} else if has_id && has_method {
 			// Server-initiated request (e.g. session/request_permission).
-			// For now we log it; full permission handling is in Task 5.
+			let id = match msg.get("id").and_then(|v| v.as_u64()) {
+				Some(id) => id,
+				None => {
+					tracing::warn!("ACP: server request with non-u64 id");
+					return;
+				}
+			};
 			let method = msg
 				.get("method")
 				.and_then(|v| v.as_str())
 				.unwrap_or("<unknown>");
-			tracing::debug!("ACP: server request '{method}' — not yet handled");
+
+			if method == "session/request_permission" {
+				Self::handle_permission_request(
+					id,
+					msg.get("params").cloned().unwrap_or(serde_json::Value::Null),
+					stdin,
+					permission_policy,
+					pending_permissions,
+				)
+				.await;
+			} else {
+				tracing::debug!("ACP: unhandled server request '{method}' (id={id})");
+			}
 		} else if !has_id && has_method {
 			// Notification from the agent.
 			let method = match msg.get("method").and_then(|v| v.as_str()) {
@@ -682,6 +758,91 @@ impl AcpConnection {
 			tracing::debug!("ACP: ignoring message with no id and no method");
 		}
 	}
+
+	// -------------------------------------------------------------------
+	// Internal: handle an incoming permission request
+	// -------------------------------------------------------------------
+
+	async fn handle_permission_request(
+		request_id: u64,
+		raw_params: serde_json::Value,
+		stdin: &Mutex<Option<ChildStdin>>,
+		permission_policy: &Mutex<PermissionPolicy>,
+		pending_permissions: &Mutex<HashMap<u64, PermissionRequestParams>>,
+	) {
+		let params: PermissionRequestParams = match serde_json::from_value(raw_params) {
+			Ok(p) => p,
+			Err(e) => {
+				tracing::warn!("ACP: failed to parse permission request params: {e}");
+				// Respond with a protocol error so the agent doesn't hang.
+				let response = JsonRpcResponse::error(
+					request_id,
+					crate::protocol::INVALID_PARAMS,
+					format!("Invalid permission request params: {e}"),
+				);
+				Self::send_json_rpc_response(stdin, &response).await;
+				return;
+			}
+		};
+
+		let policy = permission_policy.lock().await.clone();
+
+		match resolve_permission(policy, &params) {
+			Some(result) => {
+				// AutoApprove or Deny — send the response immediately.
+				let result_value = match serde_json::to_value(&result) {
+					Ok(v) => v,
+					Err(e) => {
+						tracing::warn!("ACP: failed to serialize permission result: {e}");
+						return;
+					}
+				};
+				let response = JsonRpcResponse::success(request_id, result_value);
+				Self::send_json_rpc_response(stdin, &response).await;
+			}
+			None => {
+				// Prompt — store for external resolution.
+				tracing::debug!(
+					"ACP: permission request {request_id} queued for external resolution"
+				);
+				let mut guard = pending_permissions.lock().await;
+				guard.insert(request_id, params);
+			}
+		}
+	}
+
+	// -------------------------------------------------------------------
+	// Internal: send a JSON-RPC response to the child process
+	// -------------------------------------------------------------------
+
+	async fn send_json_rpc_response(
+		stdin: &Mutex<Option<ChildStdin>>,
+		response: &JsonRpcResponse,
+	) {
+		let json = match serde_json::to_value(response) {
+			Ok(v) => v,
+			Err(e) => {
+				tracing::warn!("ACP: failed to serialize response: {e}");
+				return;
+			}
+		};
+
+		let mut stdin_guard = stdin.lock().await;
+		if let Some(writer) = stdin_guard.as_mut() {
+			let mut data = match serde_json::to_vec(&json) {
+				Ok(d) => d,
+				Err(e) => {
+					tracing::warn!("ACP: failed to encode response: {e}");
+					return;
+				}
+			};
+			data.push(b'\n');
+			if let Err(e) = writer.write_all(&data).await {
+				tracing::warn!("ACP: failed to write permission response: {e}");
+			}
+			let _ = writer.flush().await;
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -696,26 +857,48 @@ mod tests {
 	// NDJSON parsing tests
 	// -------------------------------------------------------------------
 
-	/// Helper: create pending + handlers maps, then dispatch a message.
-	async fn dispatch(
-		msg: &str,
-		pending: &Mutex<HashMap<u64, PendingRequest>>,
-		handlers: &RwLock<HashMap<String, Vec<HandlerEntry>>>,
-	) {
+	/// Helper: create standard test fixtures for dispatch_message.
+	struct DispatchFixtures {
+		pending: Arc<Mutex<HashMap<u64, PendingRequest>>>,
+		handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>>,
+		stdin: Arc<Mutex<Option<ChildStdin>>>,
+		policy: Arc<Mutex<PermissionPolicy>>,
+		perms: Arc<Mutex<HashMap<u64, PermissionRequestParams>>>,
+	}
+
+	impl DispatchFixtures {
+		fn new() -> Self {
+			Self {
+				pending: Arc::new(Mutex::new(HashMap::new())),
+				handlers: Arc::new(RwLock::new(HashMap::new())),
+				stdin: Arc::new(Mutex::new(None)),
+				policy: Arc::new(Mutex::new(PermissionPolicy::default())),
+				perms: Arc::new(Mutex::new(HashMap::new())),
+			}
+		}
+	}
+
+	/// Helper: dispatch a message using the given fixtures.
+	async fn dispatch(msg: &str, f: &DispatchFixtures) {
 		let parsed: serde_json::Value = serde_json::from_str(msg).unwrap();
-		AcpConnection::dispatch_message(&parsed, pending, handlers).await;
+		AcpConnection::dispatch_message(
+			&parsed,
+			&f.pending,
+			&f.handlers,
+			&f.stdin,
+			&f.policy,
+			&f.perms,
+		)
+		.await;
 	}
 
 	#[tokio::test]
 	async fn test_dispatch_response_success() {
-		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
-			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(RwLock::new(HashMap::new()));
+		let f = DispatchFixtures::new();
 
 		let (tx, rx) = oneshot::channel();
 		{
-			let mut p = pending.lock().await;
+			let mut p = f.pending.lock().await;
 			p.insert(
 				1,
 				PendingRequest {
@@ -729,8 +912,7 @@ mod tests {
 
 		dispatch(
 			r#"{"jsonrpc":"2.0","id":1,"result":{"ok":true}}"#,
-			&pending,
-			&handlers,
+			&f,
 		)
 		.await;
 
@@ -738,19 +920,16 @@ mod tests {
 		assert_eq!(result, serde_json::json!({"ok": true}));
 
 		// Pending should be empty now.
-		assert!(pending.lock().await.is_empty());
+		assert!(f.pending.lock().await.is_empty());
 	}
 
 	#[tokio::test]
 	async fn test_dispatch_response_error() {
-		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
-			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(RwLock::new(HashMap::new()));
+		let f = DispatchFixtures::new();
 
 		let (tx, rx) = oneshot::channel();
 		{
-			let mut p = pending.lock().await;
+			let mut p = f.pending.lock().await;
 			p.insert(
 				2,
 				PendingRequest {
@@ -764,8 +943,7 @@ mod tests {
 
 		dispatch(
 			r#"{"jsonrpc":"2.0","id":2,"error":{"code":-32600,"message":"bad request"}}"#,
-			&pending,
-			&handlers,
+			&f,
 		)
 		.await;
 
@@ -781,16 +959,13 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_dispatch_notification_routes_to_handler() {
-		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
-			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(RwLock::new(HashMap::new()));
+		let f = DispatchFixtures::new();
 
 		let received = Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
 		let received_clone = Arc::clone(&received);
 
 		{
-			let mut h = handlers.write().unwrap();
+			let mut h = f.handlers.write().unwrap();
 			h.entry("session/update".to_string())
 				.or_default()
 				.push(HandlerEntry {
@@ -803,8 +978,7 @@ mod tests {
 
 		dispatch(
 			r#"{"jsonrpc":"2.0","method":"session/update","params":{"delta":"hello"}}"#,
-			&pending,
-			&handlers,
+			&f,
 		)
 		.await;
 
@@ -815,10 +989,7 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_dispatch_notification_inactive_handler_removed() {
-		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
-			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(RwLock::new(HashMap::new()));
+		let f = DispatchFixtures::new();
 
 		let call_count = Arc::new(AtomicU64::new(0));
 		let call_count_clone = Arc::clone(&call_count);
@@ -829,7 +1000,7 @@ mod tests {
 		};
 
 		{
-			let mut h = handlers.write().unwrap();
+			let mut h = f.handlers.write().unwrap();
 			h.entry("test/notify".to_string())
 				.or_default()
 				.push(HandlerEntry {
@@ -843,8 +1014,7 @@ mod tests {
 		// First dispatch — handler is active.
 		dispatch(
 			r#"{"jsonrpc":"2.0","method":"test/notify","params":{}}"#,
-			&pending,
-			&handlers,
+			&f,
 		)
 		.await;
 		assert_eq!(call_count.load(Ordering::SeqCst), 1);
@@ -855,8 +1025,7 @@ mod tests {
 		// Second dispatch — handler should be pruned.
 		dispatch(
 			r#"{"jsonrpc":"2.0","method":"test/notify","params":{}}"#,
-			&pending,
-			&handlers,
+			&f,
 		)
 		.await;
 		assert_eq!(call_count.load(Ordering::SeqCst), 1); // not incremented
@@ -864,37 +1033,134 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_dispatch_unknown_response_id_is_ignored() {
-		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
-			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(RwLock::new(HashMap::new()));
+		let f = DispatchFixtures::new();
 
 		// No pending request with id=99 — should not panic.
 		dispatch(
 			r#"{"jsonrpc":"2.0","id":99,"result":"orphan"}"#,
-			&pending,
-			&handlers,
+			&f,
 		)
 		.await;
 	}
 
 	#[tokio::test]
 	async fn test_dispatch_empty_and_invalid_lines_skipped() {
-		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
-			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(RwLock::new(HashMap::new()));
+		let f = DispatchFixtures::new();
 
 		// Empty line — would be skipped by the reader loop (not reaching dispatch).
 		// Invalid JSON — the reader loop skips it; dispatch only receives valid JSON.
 		// Message with neither id nor method — should be silently ignored.
 		dispatch(
 			r#"{"jsonrpc":"2.0"}"#,
-			&pending,
-			&handlers,
+			&f,
 		)
 		.await;
 		// No panic or error — just ignored.
+	}
+
+	// -----------------------------------------------------------------------
+	// Permission dispatch tests
+	// -----------------------------------------------------------------------
+
+	/// Build a permission request JSON-RPC message.
+	fn make_permission_request(id: u64, options_json: &str) -> String {
+		format!(
+			r#"{{"jsonrpc":"2.0","id":{id},"method":"session/request_permission","params":{{"title":"Run bash","options":{options_json}}}}}"#
+		)
+	}
+
+	#[tokio::test]
+	async fn test_dispatch_permission_auto_approve() {
+		let f = DispatchFixtures::new();
+		*f.policy.lock().await = PermissionPolicy::AutoApprove;
+
+		let msg = make_permission_request(
+			10,
+			r#"[{"optionId":"rej","kind":"reject_once"},{"optionId":"once","kind":"allow_once"},{"optionId":"always","kind":"allow_always"}]"#,
+		);
+		dispatch(&msg, &f).await;
+
+		// Should NOT be in pending_permissions (auto-resolved).
+		assert!(f.perms.lock().await.is_empty());
+	}
+
+	#[tokio::test]
+	async fn test_dispatch_permission_deny() {
+		let f = DispatchFixtures::new();
+		*f.policy.lock().await = PermissionPolicy::Deny;
+
+		let msg = make_permission_request(
+			11,
+			r#"[{"optionId":"once","kind":"allow_once"},{"optionId":"rej","kind":"reject_once"}]"#,
+		);
+		dispatch(&msg, &f).await;
+
+		// Should NOT be in pending_permissions (auto-resolved).
+		assert!(f.perms.lock().await.is_empty());
+	}
+
+	#[tokio::test]
+	async fn test_dispatch_permission_prompt_queues_request() {
+		let f = DispatchFixtures::new();
+		*f.policy.lock().await = PermissionPolicy::Prompt;
+
+		let msg = make_permission_request(
+			12,
+			r#"[{"optionId":"once","kind":"allow_once"},{"optionId":"always","kind":"allow_always"}]"#,
+		);
+		dispatch(&msg, &f).await;
+
+		// Should be in pending_permissions.
+		let guard = f.perms.lock().await;
+		assert_eq!(guard.len(), 1);
+		assert!(guard.contains_key(&12));
+		let params = &guard[&12];
+		assert_eq!(params.options.len(), 2);
+		assert_eq!(params.title.as_deref(), Some("Run bash"));
+	}
+
+	// -----------------------------------------------------------------------
+	// NDJSON reader integration tests
+	// -----------------------------------------------------------------------
+
+	/// Helper to spawn a reader task matching the real stdout reader's behavior.
+	fn spawn_reader_task(
+		reader: impl tokio::io::AsyncRead + Unpin + Send + 'static,
+		f: &DispatchFixtures,
+	) -> tokio::task::JoinHandle<()> {
+		let pending_clone = Arc::clone(&f.pending);
+		let handlers_clone = Arc::clone(&f.handlers);
+		let stdin_clone = Arc::clone(&f.stdin);
+		let policy_clone = Arc::clone(&f.policy);
+		let perms_clone = Arc::clone(&f.perms);
+		tokio::spawn(async move {
+			let mut buf_reader = BufReader::new(reader);
+			let mut line = String::new();
+			loop {
+				line.clear();
+				match buf_reader.read_line(&mut line).await {
+					Ok(0) => break,
+					Ok(_) => {
+						let trimmed = line.trim();
+						if trimmed.is_empty() {
+							continue;
+						}
+						if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+							AcpConnection::dispatch_message(
+								&parsed,
+								&pending_clone,
+								&handlers_clone,
+								&stdin_clone,
+								&policy_clone,
+								&perms_clone,
+							)
+							.await;
+						}
+					}
+					Err(_) => break,
+				}
+			}
+		})
 	}
 
 	#[tokio::test]
@@ -904,16 +1170,12 @@ mod tests {
 		use tokio::io::AsyncWriteExt;
 
 		let (mut writer, reader) = tokio::io::duplex(4096);
-
-		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
-			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(RwLock::new(HashMap::new()));
+		let f = DispatchFixtures::new();
 
 		let (tx1, rx1) = oneshot::channel();
 		let (tx2, rx2) = oneshot::channel();
 		{
-			let mut p = pending.lock().await;
+			let mut p = f.pending.lock().await;
 			p.insert(
 				1,
 				PendingRequest {
@@ -934,35 +1196,7 @@ mod tests {
 			);
 		}
 
-		let pending_clone = Arc::clone(&pending);
-		let handlers_clone = Arc::clone(&handlers);
-
-		// Spawn a reader task.
-		let reader_task = tokio::spawn(async move {
-			let mut buf_reader = BufReader::new(reader);
-			let mut line = String::new();
-			loop {
-				line.clear();
-				match buf_reader.read_line(&mut line).await {
-					Ok(0) => break,
-					Ok(_) => {
-						let trimmed = line.trim();
-						if trimmed.is_empty() {
-							continue;
-						}
-						if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-							AcpConnection::dispatch_message(
-								&parsed,
-								&pending_clone,
-								&handlers_clone,
-							)
-							.await;
-						}
-					}
-					Err(_) => break,
-				}
-			}
-		});
+		let reader_task = spawn_reader_task(reader, &f);
 
 		// Write two complete responses in one chunk (multiple lines in one read).
 		let data = concat!(
@@ -994,15 +1228,11 @@ mod tests {
 		use tokio::io::AsyncWriteExt;
 
 		let (mut writer, reader) = tokio::io::duplex(4096);
-
-		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
-			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(RwLock::new(HashMap::new()));
+		let f = DispatchFixtures::new();
 
 		let (tx, rx) = oneshot::channel();
 		{
-			let mut p = pending.lock().await;
+			let mut p = f.pending.lock().await;
 			p.insert(
 				1,
 				PendingRequest {
@@ -1014,34 +1244,7 @@ mod tests {
 			);
 		}
 
-		let pending_clone = Arc::clone(&pending);
-		let handlers_clone = Arc::clone(&handlers);
-
-		let reader_task = tokio::spawn(async move {
-			let mut buf_reader = BufReader::new(reader);
-			let mut line = String::new();
-			loop {
-				line.clear();
-				match buf_reader.read_line(&mut line).await {
-					Ok(0) => break,
-					Ok(_) => {
-						let trimmed = line.trim();
-						if trimmed.is_empty() {
-							continue;
-						}
-						if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-							AcpConnection::dispatch_message(
-								&parsed,
-								&pending_clone,
-								&handlers_clone,
-							)
-							.await;
-						}
-					}
-					Err(_) => break,
-				}
-			}
-		});
+		let reader_task = spawn_reader_task(reader, &f);
 
 		// Write a partial line first.
 		writer
@@ -1074,15 +1277,11 @@ mod tests {
 		use tokio::io::AsyncWriteExt;
 
 		let (mut writer, reader) = tokio::io::duplex(4096);
-
-		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
-			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(RwLock::new(HashMap::new()));
+		let f = DispatchFixtures::new();
 
 		let (tx, rx) = oneshot::channel();
 		{
-			let mut p = pending.lock().await;
+			let mut p = f.pending.lock().await;
 			p.insert(
 				1,
 				PendingRequest {
@@ -1094,34 +1293,7 @@ mod tests {
 			);
 		}
 
-		let pending_clone = Arc::clone(&pending);
-		let handlers_clone = Arc::clone(&handlers);
-
-		let reader_task = tokio::spawn(async move {
-			let mut buf_reader = BufReader::new(reader);
-			let mut line = String::new();
-			loop {
-				line.clear();
-				match buf_reader.read_line(&mut line).await {
-					Ok(0) => break,
-					Ok(_) => {
-						let trimmed = line.trim();
-						if trimmed.is_empty() {
-							continue;
-						}
-						if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-							AcpConnection::dispatch_message(
-								&parsed,
-								&pending_clone,
-								&handlers_clone,
-							)
-							.await;
-						}
-					}
-					Err(_) => break,
-				}
-			}
-		});
+		let reader_task = spawn_reader_task(reader, &f);
 
 		// Write empty lines interspersed with a real response.
 		let data = "\n\n{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":\"ok\"}\n\n";
@@ -1142,15 +1314,11 @@ mod tests {
 		use tokio::io::AsyncWriteExt;
 
 		let (mut writer, reader) = tokio::io::duplex(4096);
-
-		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
-			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(RwLock::new(HashMap::new()));
+		let f = DispatchFixtures::new();
 
 		let (tx, rx) = oneshot::channel();
 		{
-			let mut p = pending.lock().await;
+			let mut p = f.pending.lock().await;
 			p.insert(
 				1,
 				PendingRequest {
@@ -1162,35 +1330,7 @@ mod tests {
 			);
 		}
 
-		let pending_clone = Arc::clone(&pending);
-		let handlers_clone = Arc::clone(&handlers);
-
-		let reader_task = tokio::spawn(async move {
-			let mut buf_reader = BufReader::new(reader);
-			let mut line = String::new();
-			loop {
-				line.clear();
-				match buf_reader.read_line(&mut line).await {
-					Ok(0) => break,
-					Ok(_) => {
-						let trimmed = line.trim();
-						if trimmed.is_empty() {
-							continue;
-						}
-						if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-							AcpConnection::dispatch_message(
-								&parsed,
-								&pending_clone,
-								&handlers_clone,
-							)
-							.await;
-						}
-						// Invalid JSON is simply skipped (from_str returns Err).
-					}
-					Err(_) => break,
-				}
-			}
-		});
+		let reader_task = spawn_reader_task(reader, &f);
 
 		// Write invalid JSON followed by a valid response.
 		let data = concat!(
@@ -1220,39 +1360,10 @@ mod tests {
 		let (client_writer, server_reader) = tokio::io::duplex(4096);
 		let (mut server_writer, client_reader) = tokio::io::duplex(4096);
 
-		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
-			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(RwLock::new(HashMap::new()));
+		let f = DispatchFixtures::new();
 
 		// Spawn a reader on the "client reader" side (simulates stdout reading).
-		let pending_clone = Arc::clone(&pending);
-		let handlers_clone = Arc::clone(&handlers);
-		let reader_task = tokio::spawn(async move {
-			let mut buf_reader = BufReader::new(client_reader);
-			let mut line = String::new();
-			loop {
-				line.clear();
-				match buf_reader.read_line(&mut line).await {
-					Ok(0) => break,
-					Ok(_) => {
-						let trimmed = line.trim();
-						if trimmed.is_empty() {
-							continue;
-						}
-						if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
-							AcpConnection::dispatch_message(
-								&parsed,
-								&pending_clone,
-								&handlers_clone,
-							)
-							.await;
-						}
-					}
-					Err(_) => break,
-				}
-			}
-		});
+		let reader_task = spawn_reader_task(client_reader, &f);
 
 		// Spawn a "mock server" that reads requests and sends responses.
 		let server_task = tokio::spawn(async move {
@@ -1295,7 +1406,7 @@ mod tests {
 		let id = 1u64;
 		let (tx, rx) = oneshot::channel();
 		{
-			let mut p = pending.lock().await;
+			let mut p = f.pending.lock().await;
 			p.insert(
 				id,
 				PendingRequest {

@@ -1,0 +1,28 @@
+[package]
+name = "simse-acp-engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "ACP (Agent Client Protocol) engine over JSON-RPC 2.0 / NDJSON stdio"
+
+[lib]
+name = "simse_acp_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "simse-acp-engine"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+uuid = { version = "1", features = ["v4"] }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+
+[dev-dependencies]
+tempfile = "3"
+tokio-test = "0.4"

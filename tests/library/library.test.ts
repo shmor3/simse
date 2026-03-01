@@ -1,7 +1,15 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { fileURLToPath } from 'node:url';
 import { createLibrary, type Library } from '../../src/ai/library/library.js';
 import type { EmbeddingProvider, LibraryConfig } from '../../src/ai/library/types.js';
-import { createMemoryStorage, createSilentLogger } from './utils.js';
+import { createSilentLogger } from './utils.js';
+
+const ENGINE_PATH = fileURLToPath(
+	new URL(
+		'../../simse-vector/target/debug/simse-vector-engine.exe',
+		import.meta.url,
+	),
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -44,15 +52,18 @@ describe('Library', () => {
 	beforeEach(async () => {
 		embedder = createMockEmbedder();
 		library = createLibrary(embedder, defaultConfig, {
-			storage: createMemoryStorage(),
+			enginePath: ENGINE_PATH,
 			logger: createSilentLogger(),
 			stacksOptions: {
-				autoSave: true,
-				flushIntervalMs: 0,
+				duplicateThreshold: 1,
 				learning: { enabled: false },
 			},
 		});
 		await library.initialize();
+	});
+
+	afterEach(async () => {
+		await library?.dispose();
 	});
 
 	// -----------------------------------------------------------------------
@@ -77,11 +88,10 @@ describe('Library', () => {
 
 		it('deduplicates concurrent initialize calls', async () => {
 			const fresh = createLibrary(embedder, defaultConfig, {
-				storage: createMemoryStorage(),
+				enginePath: ENGINE_PATH,
 				logger: createSilentLogger(),
 				stacksOptions: {
-					autoSave: true,
-					flushIntervalMs: 0,
+					duplicateThreshold: 1,
 					learning: { enabled: false },
 				},
 			});
@@ -91,6 +101,7 @@ describe('Library', () => {
 				fresh.initialize(),
 			]);
 			expect(fresh.isInitialized).toBe(true);
+			await fresh.dispose();
 		});
 	});
 
@@ -109,12 +120,12 @@ describe('Library', () => {
 		it('adds a volume and returns an ID', async () => {
 			const id = await library.add('hello world');
 			expect(id).toBeTruthy();
-			expect(library.size).toBe(1);
+			expect(await library.size).toBe(1);
 		});
 
 		it('adds a volume with metadata', async () => {
 			const id = await library.add('hello', { topic: 'greeting' });
-			const volume = library.getById(id);
+			const volume = await library.getById(id);
 			expect(volume).toBeDefined();
 			expect(volume!.metadata).toEqual({ topic: 'greeting' });
 		});
@@ -129,11 +140,10 @@ describe('Library', () => {
 
 		it('throws when not initialized', async () => {
 			const fresh = createLibrary(embedder, defaultConfig, {
-				storage: createMemoryStorage(),
+				enginePath: ENGINE_PATH,
 				logger: createSilentLogger(),
 				stacksOptions: {
-					autoSave: true,
-					flushIntervalMs: 0,
+					duplicateThreshold: 1,
 					learning: { enabled: false },
 				},
 			});
@@ -149,7 +159,7 @@ describe('Library', () => {
 				{ text: 'three' },
 			]);
 			expect(ids).toHaveLength(3);
-			expect(library.size).toBe(3);
+			expect(await library.size).toBe(3);
 		});
 
 		it('returns empty array for empty batch', async () => {
@@ -168,8 +178,8 @@ describe('Library', () => {
 				{ text: 'one', metadata: { k: 'v1' } },
 				{ text: 'two', metadata: { k: 'v2' } },
 			]);
-			const e1 = library.getById(ids[0]);
-			const e2 = library.getById(ids[1]);
+			const e1 = await library.getById(ids[0]);
+			const e2 = await library.getById(ids[1]);
 			expect(e1!.metadata).toEqual({ k: 'v1' });
 			expect(e2!.metadata).toEqual({ k: 'v2' });
 		});
@@ -182,10 +192,10 @@ describe('Library', () => {
 	describe('delete', () => {
 		it('removes a volume by ID', async () => {
 			const id = await library.add('to delete');
-			expect(library.size).toBe(1);
+			expect(await library.size).toBe(1);
 			const deleted = await library.delete(id);
 			expect(deleted).toBe(true);
-			expect(library.size).toBe(0);
+			expect(await library.size).toBe(0);
 		});
 
 		it('returns false for non-existent ID', async () => {
@@ -203,7 +213,7 @@ describe('Library', () => {
 			]);
 			const count = await library.deleteBatch([ids[0], ids[2]]);
 			expect(count).toBe(2);
-			expect(library.size).toBe(1);
+			expect(await library.size).toBe(1);
 		});
 
 		it('returns 0 for empty array', async () => {
@@ -254,13 +264,11 @@ describe('Library', () => {
 				},
 				defaultConfig,
 				{
-					storage: createMemoryStorage(),
+					enginePath: ENGINE_PATH,
 					logger: createSilentLogger(),
 					stacksOptions: {
-						autoSave: true,
-						flushIntervalMs: 0,
-						duplicateThreshold: 0.99,
-						duplicateBehavior: 'warn',
+						// Disable dedup on add so both entries are stored
+						duplicateThreshold: 1,
 						learning: { enabled: false },
 					},
 				},
@@ -269,8 +277,10 @@ describe('Library', () => {
 			await dm.add('volume 1');
 			await dm.add('volume 2');
 
-			const groups = dm.findDuplicates(0.99);
+			// Both stored; now check for duplicates at 0.99 threshold
+			const groups = await dm.findDuplicates(0.99);
 			expect(groups.length).toBeGreaterThan(0);
+			await dm.dispose();
 		});
 	});
 
@@ -307,7 +317,7 @@ describe('Library', () => {
 
 			const id1 = await library.add('first');
 			const id2 = await library.add('second');
-			const sizeBefore = library.size;
+			const sizeBefore = await library.size;
 
 			const result = await library.compendium({
 				ids: [id1, id2],
@@ -315,7 +325,7 @@ describe('Library', () => {
 			});
 			expect(result.deletedOriginals).toBe(true);
 			// Should have removed 2 originals and added 1 summary
-			expect(library.size).toBe(sizeBefore - 2 + 1);
+			expect(await library.size).toBe(sizeBefore - 2 + 1);
 		});
 
 		it('throws when fewer than 2 IDs provided', async () => {
@@ -336,10 +346,10 @@ describe('Library', () => {
 		it('removes all volumes', async () => {
 			await library.add('a');
 			await library.add('b');
-			expect(library.size).toBe(2);
+			expect(await library.size).toBe(2);
 
 			await library.clear();
-			expect(library.size).toBe(0);
+			expect(await library.size).toBe(0);
 		});
 	});
 });

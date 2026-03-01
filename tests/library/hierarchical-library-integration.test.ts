@@ -1,7 +1,18 @@
-import { beforeEach, describe, expect, it, mock } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { createLibrary, type Library } from '../../src/ai/library/library.js';
 import type { EmbeddingProvider, LibraryConfig } from '../../src/ai/library/types.js';
-import { createMemoryStorage, createSilentLogger } from './utils.js';
+import { createSilentLogger } from './utils.js';
+
+const ENGINE_PATH = fileURLToPath(
+	new URL(
+		'../../simse-vector/target/debug/simse-vector-engine.exe',
+		import.meta.url,
+	),
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -51,18 +62,20 @@ describe('Hierarchical Library System Integration', () => {
 	let library: Library;
 
 	beforeEach(async () => {
-		const storage = createMemoryStorage();
 		const embedder = createMockEmbedder();
 		library = createLibrary(embedder, defaultConfig, {
-			storage,
+			enginePath: ENGINE_PATH,
 			logger: createSilentLogger(),
 			stacksOptions: {
-				autoSave: true,
-				flushIntervalMs: 0,
+				duplicateThreshold: 1,
 				learning: { enabled: true },
 			},
 		});
 		await library.initialize();
+	});
+
+	afterEach(async () => {
+		await library?.dispose();
 	});
 
 	// -----------------------------------------------------------------------
@@ -81,7 +94,7 @@ describe('Hierarchical Library System Integration', () => {
 				topics: JSON.stringify(['cooking/italian']),
 			});
 
-			const topics = library.getTopics();
+			const topics = await library.getTopics();
 			const paths = topics.map((t) => t.topic);
 
 			// Auto-created parents should exist
@@ -106,7 +119,7 @@ describe('Hierarchical Library System Integration', () => {
 			});
 
 			// Querying the ancestor 'programming' should return both programming entries
-			const progEntries = library.filterByTopic(['programming']);
+			const progEntries = await library.filterByTopic(['programming']);
 			expect(progEntries.length).toBe(2);
 
 			const progTexts = progEntries.map((e) => e.text).sort();
@@ -114,12 +127,12 @@ describe('Hierarchical Library System Integration', () => {
 			expect(progTexts).toContain('Python async await');
 
 			// Querying a leaf topic should return only that entry
-			const rustEntries = library.filterByTopic(['programming/rust/ownership']);
+			const rustEntries = await library.filterByTopic(['programming/rust/ownership']);
 			expect(rustEntries.length).toBe(1);
 			expect(rustEntries[0].text).toBe('Rust ownership model');
 
 			// Querying 'cooking' should return only the cooking entry
-			const cookEntries = library.filterByTopic(['cooking']);
+			const cookEntries = await library.filterByTopic(['cooking']);
 			expect(cookEntries.length).toBe(1);
 			expect(cookEntries[0].text).toBe('Italian pasta recipes');
 		});
@@ -132,7 +145,7 @@ describe('Hierarchical Library System Integration', () => {
 				topics: JSON.stringify(['programming/rust/ownership']),
 			});
 
-			const topics = library.getTopics();
+			const topics = await library.getTopics();
 			const rustTopic = topics.find((t) => t.topic === 'programming/rust');
 
 			expect(rustTopic).toBeDefined();
@@ -152,7 +165,7 @@ describe('Hierarchical Library System Integration', () => {
 			await library.add('entry B', { score: '5', status: 'pending' });
 			await library.add('entry C', { score: '1', status: 'closed' });
 
-			const highScore = library.filterByMetadata([
+			const highScore = await library.filterByMetadata([
 				{ key: 'score', value: '5', mode: 'gt' },
 			]);
 			expect(highScore.length).toBe(1);
@@ -164,7 +177,7 @@ describe('Hierarchical Library System Integration', () => {
 			await library.add('entry B', { status: 'pending' });
 			await library.add('entry C', { status: 'closed' });
 
-			const activePending = library.filterByMetadata([
+			const activePending = await library.filterByMetadata([
 				{ key: 'status', value: ['active', 'pending'], mode: 'in' },
 			]);
 			expect(activePending.length).toBe(2);
@@ -179,7 +192,7 @@ describe('Hierarchical Library System Integration', () => {
 			await library.add('entry B', { score: '5' });
 			await library.add('entry C', { score: '1' });
 
-			const midRange = library.filterByMetadata([
+			const midRange = await library.filterByMetadata([
 				{ key: 'score', value: ['3', '8'], mode: 'between' },
 			]);
 			expect(midRange.length).toBe(1);
@@ -191,7 +204,7 @@ describe('Hierarchical Library System Integration', () => {
 			await library.add('entry B', { status: 'pending' });
 			await library.add('entry C', { status: 'closed' });
 
-			const notActivePending = library.filterByMetadata([
+			const notActivePending = await library.filterByMetadata([
 				{ key: 'status', value: ['active', 'pending'], mode: 'notIn' },
 			]);
 			expect(notActivePending.length).toBe(1);
@@ -203,12 +216,12 @@ describe('Hierarchical Library System Integration', () => {
 			await library.add('mid', { priority: '5' });
 			await library.add('high', { priority: '10' });
 
-			const gteResults = library.filterByMetadata([
+			const gteResults = await library.filterByMetadata([
 				{ key: 'priority', value: '5', mode: 'gte' },
 			]);
 			expect(gteResults.length).toBe(2);
 
-			const lteResults = library.filterByMetadata([
+			const lteResults = await library.filterByMetadata([
 				{ key: 'priority', value: '5', mode: 'lte' },
 			]);
 			expect(lteResults.length).toBe(2);
@@ -219,7 +232,7 @@ describe('Hierarchical Library System Integration', () => {
 			await library.add('entry B', { score: '5', status: 'active' });
 			await library.add('entry C', { score: '10', status: 'closed' });
 
-			const results = library.filterByMetadata([
+			const results = await library.filterByMetadata([
 				{ key: 'score', value: '5', mode: 'gt' },
 				{ key: 'status', value: 'active', mode: 'eq' },
 			]);
@@ -238,7 +251,7 @@ describe('Hierarchical Library System Integration', () => {
 			await library.add('python programming language scripting');
 			await library.add('cooking italian pasta recipes');
 
-			const results = library.textSearch({
+			const results = await library.textSearch({
 				query: 'programming',
 				mode: 'bm25',
 			});
@@ -253,7 +266,7 @@ describe('Hierarchical Library System Integration', () => {
 			await library.add('programming programming programming');
 			await library.add('programming language');
 
-			const results = library.textSearch({
+			const results = await library.textSearch({
 				query: 'programming',
 				mode: 'bm25',
 			});
@@ -305,11 +318,11 @@ describe('Hierarchical Library System Integration', () => {
 			});
 
 			// Use textSearch + filterByTopic to exercise the feature combination
-			const textResults = library.textSearch({
+			const textResults = await library.textSearch({
 				query: 'ownership',
 				mode: 'bm25',
 			});
-			const topicEntries = library.filterByTopic(['programming/rust']);
+			const topicEntries = await library.filterByTopic(['programming/rust']);
 			const topicIds = new Set(topicEntries.map((e) => e.id));
 
 			// Intersect: entries that match both text and topic
@@ -340,7 +353,7 @@ describe('Hierarchical Library System Integration', () => {
 			await library.add('cooking recipes pasta');
 
 			// Use textSearch with BM25 directly (the DSL default text mode)
-			const results = library.textSearch({
+			const results = await library.textSearch({
 				query: 'learning',
 				mode: 'bm25',
 			});
@@ -361,11 +374,11 @@ describe('Hierarchical Library System Integration', () => {
 			await library.search('entry');
 
 			// Provide feedback
-			library.recordFeedback(id1, true);
-			library.recordFeedback(id2, false);
+			await library.recordFeedback(id1, true);
+			await library.recordFeedback(id2, false);
 
 			// The learning profile should reflect the queries
-			const profile = library.patronProfile;
+			const profile = await library.patronProfile;
 			expect(profile).toBeDefined();
 			expect(profile!.totalQueries).toBeGreaterThanOrEqual(1);
 		});
@@ -375,12 +388,12 @@ describe('Hierarchical Library System Integration', () => {
 			await library.search('important');
 
 			// Record multiple positive feedback
-			library.recordFeedback(id, true);
-			library.recordFeedback(id, true);
-			library.recordFeedback(id, true);
+			await library.recordFeedback(id, true);
+			await library.recordFeedback(id, true);
+			await library.recordFeedback(id, true);
 
 			// Profile should still be valid
-			const profile = library.patronProfile;
+			const profile = await library.patronProfile;
 			expect(profile).toBeDefined();
 		});
 	});
@@ -402,7 +415,7 @@ describe('Hierarchical Library System Integration', () => {
 				await library.search(`entry topic ${i}`);
 			}
 
-			const profile = library.patronProfile;
+			const profile = await library.patronProfile;
 			expect(profile).toBeDefined();
 			// With mock embeddings, not every query may produce results,
 			// but we expect the majority to succeed
@@ -418,7 +431,7 @@ describe('Hierarchical Library System Integration', () => {
 				await library.search(`query variation ${i}`);
 			}
 
-			const profile = library.patronProfile;
+			const profile = await library.patronProfile;
 			expect(profile).toBeDefined();
 			expect(profile!.adaptedWeights).toBeDefined();
 			expect(profile!.adaptedWeights.vector).toBeGreaterThan(0);
@@ -432,17 +445,16 @@ describe('Hierarchical Library System Integration', () => {
 	// -----------------------------------------------------------------------
 
 	describe('save and reload lifecycle', () => {
-		it('persists and reloads entries through shared storage', async () => {
-			const sharedData = new Map<string, Buffer>();
-			const storage1 = createMemoryStorage(sharedData);
+		it('persists and reloads entries through disk storage', async () => {
+			const storageDir = mkdtempSync(join(tmpdir(), 'simse-lib-test-'));
 			const embedder = createMockEmbedder();
 
 			const library1 = createLibrary(embedder, defaultConfig, {
-				storage: storage1,
+				enginePath: ENGINE_PATH,
+				storagePath: storageDir,
 				logger: createSilentLogger(),
 				stacksOptions: {
-					autoSave: true,
-					flushIntervalMs: 0,
+					duplicateThreshold: 1,
 					learning: { enabled: true },
 				},
 			});
@@ -456,51 +468,57 @@ describe('Hierarchical Library System Integration', () => {
 
 			// Search and feedback
 			await library1.search('important');
-			library1.recordFeedback(id1, true);
+			await library1.recordFeedback(id1, true);
 
-			expect(library1.size).toBe(2);
+			expect(await library1.size).toBe(2);
 
 			// Dispose (triggers final save)
 			await library1.dispose();
 			expect(library1.isInitialized).toBe(false);
 
-			// Reload into a new library using the same shared storage
-			const storage2 = createMemoryStorage(sharedData);
+			// Reload into a new library using the same storage directory
 			const library2 = createLibrary(embedder, defaultConfig, {
-				storage: storage2,
+				enginePath: ENGINE_PATH,
+				storagePath: storageDir,
 				logger: createSilentLogger(),
 				stacksOptions: {
-					autoSave: true,
-					flushIntervalMs: 0,
+					duplicateThreshold: 1,
 					learning: { enabled: true },
 				},
 			});
 			await library2.initialize();
 
 			// Verify entries survived the round-trip
-			expect(library2.size).toBe(2);
-			const entry = library2.getById(id1);
+			expect(await library2.size).toBe(2);
+			const entry = await library2.getById(id1);
 			expect(entry).toBeDefined();
 			expect(entry!.text).toBe('important memory');
 			expect(entry!.metadata.priority).toBe('high');
 
 			// Verify learning state was restored
-			const profile = library2.patronProfile;
+			const profile = await library2.patronProfile;
 			expect(profile).toBeDefined();
 			expect(profile!.totalQueries).toBeGreaterThanOrEqual(1);
 
 			await library2.dispose();
+
+			// Clean up temp dir
+			try {
+				rmSync(storageDir, { recursive: true });
+			} catch {
+				// Ignore cleanup errors
+			}
 		});
 
 		it('clear removes all entries and resets state', async () => {
 			await library.add('entry one');
 			await library.add('entry two');
-			expect(library.size).toBe(2);
+			expect(await library.size).toBe(2);
 
 			await library.clear();
-			expect(library.size).toBe(0);
+			expect(await library.size).toBe(0);
 
-			const topics = library.getTopics();
+			const topics = await library.getTopics();
 			expect(topics.length).toBe(0);
 		});
 	});
@@ -525,11 +543,11 @@ describe('Hierarchical Library System Integration', () => {
 			});
 
 			// Filter by topic first
-			const rustEntries = library.filterByTopic(['programming/rust']);
+			const rustEntries = await library.filterByTopic(['programming/rust']);
 			expect(rustEntries.length).toBe(2);
 
 			// Filter by metadata
-			const beginnerEntries = library.filterByMetadata([
+			const beginnerEntries = await library.filterByMetadata([
 				{ key: 'level', value: 'beginner', mode: 'eq' },
 			]);
 			expect(beginnerEntries.length).toBe(2);

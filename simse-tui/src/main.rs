@@ -1,6 +1,8 @@
 //! SimSE TUI — Terminal interface for SimSE.
 
 mod app;
+mod banner;
+mod output;
 
 use std::io;
 

@@ -1,10 +1,10 @@
 //! Elm Architecture: Model, Update, View.
 
 use ratatui::{
-	layout::{Constraint, Direction, Layout},
-	style::{Color, Style},
+	layout::{Constraint, Direction, Layout, Rect},
+	style::{Color, Modifier, Style},
 	text::{Line, Span},
-	widgets::{Block, Borders, Paragraph},
+	widgets::{Block, Borders, Clear, Paragraph, Wrap},
 	Frame,
 };
 use simse_ui_core::app::{
@@ -15,6 +15,9 @@ use simse_ui_core::commands::registry::{
 };
 use simse_ui_core::input::state as input;
 use std::collections::BTreeMap;
+
+use crate::banner;
+use crate::output;
 
 // ── Screen ──────────────────────────────────────────────
 
@@ -608,12 +611,61 @@ pub fn view(app: &App, frame: &mut Frame) {
 		])
 		.split(area);
 
-	// Chat area placeholder
-	let chat = Paragraph::new("SimSE TUI - Chat area")
-		.block(Block::default().borders(Borders::ALL).title("SimSE"));
-	frame.render_widget(chat, chunks[0]);
+	// 1. Chat area
+	render_chat_area(app, frame, chunks[0]);
 
-	// Input
+	// 2. Input
+	render_input(app, frame, chunks[1]);
+
+	// 3. Status bar
+	let status = render_status_line(app, chunks[2].width);
+	frame.render_widget(Paragraph::new(status), chunks[2]);
+
+	// 4. Shortcuts overlay (on top of everything)
+	if app.screen == Screen::Shortcuts {
+		render_shortcuts_overlay(frame, area);
+	}
+}
+
+/// Render the chat area: either the banner or scrollable output.
+fn render_chat_area(app: &App, frame: &mut Frame, area: Rect) {
+	if app.banner_visible && app.output.is_empty() {
+		banner::render_banner(frame, area, app);
+		return;
+	}
+
+	// Build all output lines.
+	let mut lines = output::render_output_items(&app.output, area.width);
+
+	// If streaming, append the in-progress stream text.
+	if app.loop_status != LoopStatus::Idle && !app.stream_text.is_empty() {
+		for line in app.stream_text.lines() {
+			lines.push(Line::from(Span::raw(line.to_string())));
+		}
+	}
+
+	// Show active tool calls.
+	for tc in &app.active_tool_calls {
+		let tc_lines = output::render_output_item(&simse_ui_core::app::OutputItem::ToolCall(
+			tc.clone(),
+		));
+		lines.extend(tc_lines);
+	}
+
+	// Calculate scroll: we scroll from the bottom.
+	let visible_height = area.height as usize;
+	let total_lines = lines.len();
+	let max_scroll = total_lines.saturating_sub(visible_height);
+	let scroll = app.scroll_offset.min(max_scroll) as u16;
+
+	let chat = Paragraph::new(lines)
+		.wrap(Wrap { trim: false })
+		.scroll((scroll, 0));
+	frame.render_widget(chat, area);
+}
+
+/// Render the input area.
+fn render_input(app: &App, frame: &mut Frame, area: Rect) {
 	let input_display = if app.input.value.is_empty() {
 		if app.ctrl_c_pending {
 			Line::from(Span::styled(
@@ -631,16 +683,79 @@ pub fn view(app: &App, frame: &mut Frame) {
 	};
 	let input_widget = Paragraph::new(input_display)
 		.block(Block::default().borders(Borders::ALL).title("Input"));
-	frame.render_widget(input_widget, chunks[1]);
+	frame.render_widget(input_widget, area);
 
 	// Cursor position
-	let cursor_x = chunks[1].x + 1 + app.input.cursor as u16;
-	let cursor_y = chunks[1].y + 1;
+	let cursor_x = area.x + 1 + app.input.cursor as u16;
+	let cursor_y = area.y + 1;
 	frame.set_cursor_position((cursor_x, cursor_y));
+}
 
-	// Status bar
-	let status = render_status_line(app, chunks[2].width);
-	frame.render_widget(Paragraph::new(status), chunks[2]);
+/// Render a centered shortcuts overlay popup.
+fn render_shortcuts_overlay(frame: &mut Frame, area: Rect) {
+	let popup_width = 50u16.min(area.width.saturating_sub(4));
+	let popup_height = 16u16.min(area.height.saturating_sub(4));
+	let popup_x = (area.width.saturating_sub(popup_width)) / 2;
+	let popup_y = (area.height.saturating_sub(popup_height)) / 2;
+
+	let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+	let bold = Style::default().add_modifier(Modifier::BOLD);
+	let dim = Style::default().fg(Color::DarkGray);
+	let cyan = Style::default().fg(Color::Cyan);
+
+	let lines = vec![
+		Line::from(""),
+		Line::from(Span::styled(" Keyboard Shortcuts", bold)),
+		Line::from(""),
+		Line::from(vec![
+			Span::styled("  Enter       ", cyan),
+			Span::styled("Send message", dim),
+		]),
+		Line::from(vec![
+			Span::styled("  Escape      ", cyan),
+			Span::styled("Interrupt / dismiss", dim),
+		]),
+		Line::from(vec![
+			Span::styled("  Ctrl+C      ", cyan),
+			Span::styled("Quit (press twice)", dim),
+		]),
+		Line::from(vec![
+			Span::styled("  Ctrl+L      ", cyan),
+			Span::styled("Clear screen", dim),
+		]),
+		Line::from(vec![
+			Span::styled("  Shift+Tab   ", cyan),
+			Span::styled("Cycle permission mode", dim),
+		]),
+		Line::from(vec![
+			Span::styled("  PgUp/PgDn   ", cyan),
+			Span::styled("Scroll output", dim),
+		]),
+		Line::from(vec![
+			Span::styled("  Up/Down     ", cyan),
+			Span::styled("History navigation", dim),
+		]),
+		Line::from(vec![
+			Span::styled("  ?           ", cyan),
+			Span::styled("Toggle this overlay", dim),
+		]),
+		Line::from(""),
+		Line::from(Span::styled(
+			"  Press Escape to close",
+			Style::default().fg(Color::DarkGray),
+		)),
+	];
+
+	// Clear the area behind the popup, then render the bordered block.
+	frame.render_widget(Clear, popup_area);
+	let popup = Paragraph::new(lines).block(
+		Block::default()
+			.borders(Borders::ALL)
+			.border_style(Style::default().fg(Color::Cyan))
+			.title(" Shortcuts "),
+	);
+	frame.render_widget(popup, popup_area);
 }
 
 fn render_status_line(app: &App, width: u16) -> Line<'static> {

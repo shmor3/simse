@@ -26,7 +26,10 @@ pub fn selection_range(state: &InputState) -> Option<(usize, usize)> {
 }
 
 /// Find the previous word boundary from a position.
+///
+/// `pos` must be a valid byte offset on a char boundary in `text`.
 pub fn word_boundary_left(text: &str, pos: usize) -> usize {
+	debug_assert!(pos == 0 || pos == text.len() || text.is_char_boundary(pos));
 	let bytes = text.as_bytes();
 	let mut i = pos;
 	// Skip non-word chars left
@@ -41,7 +44,10 @@ pub fn word_boundary_left(text: &str, pos: usize) -> usize {
 }
 
 /// Find the next word boundary from a position.
+///
+/// `pos` must be a valid byte offset on a char boundary in `text`.
 pub fn word_boundary_right(text: &str, pos: usize) -> usize {
+	debug_assert!(pos == 0 || pos == text.len() || text.is_char_boundary(pos));
 	let bytes = text.as_bytes();
 	let len = bytes.len();
 	let mut i = pos;

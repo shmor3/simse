@@ -24,7 +24,7 @@ pub enum PermissionDecision {
 pub struct PermissionRule {
 	pub tool: String,
 	pub pattern: Option<String>,
-	pub policy: String, // "allow", "deny", "ask"
+	pub policy: PermissionDecision,
 }
 
 /// Permission state.

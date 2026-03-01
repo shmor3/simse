@@ -14,15 +14,15 @@ export default function Hero() {
         className="animate-fade-in-up mt-8 text-center text-[2.75rem] leading-[1.1] font-bold tracking-[-0.025em] text-white sm:text-[3.5rem] lg:text-[4rem]"
         style={{ animationDelay: "150ms" }}
       >
-        AI <Typewriter /> assistant
+        <Typewriter /> assistant
         <br />
-        that <span className="text-emerald-400">grows with you</span>
+        that <span className="text-emerald-400">evolves</span> with you
       </h1>
       <p
         className="animate-fade-in-up mt-6 max-w-lg text-center text-base leading-relaxed tracking-[-0.01em] text-zinc-400 sm:text-lg"
         style={{ animationDelay: "300ms" }}
       >
-        Context that carries over. Preferences that stick.
+        Use any ACP | MCP, Context carries over. Preferences stick.
         <br className="hidden sm:block" />
         An assistant that actually gets better the more you use it.
       </p>

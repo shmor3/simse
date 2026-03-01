@@ -67,6 +67,10 @@ export default function WaitlistForm() {
 				</button>
 			</div>
 
+			<p className="mt-3 text-center text-[11px] leading-relaxed text-zinc-600">
+				By signing up you agree to receive product updates. Unsubscribe anytime.
+			</p>
+
 			{state === 'error' && (
 				<p className="animate-fade-in mt-2 text-center font-mono text-xs text-red-400/80">
 					{errorMsg}.{' '}

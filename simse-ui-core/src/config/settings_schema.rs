@@ -319,7 +319,15 @@ pub fn all_config_schemas() -> Vec<ConfigFileSchema> {
 
 /// Returns the schema for a specific config filename, or `None` if unknown.
 pub fn get_config_schema(filename: &str) -> Option<ConfigFileSchema> {
-	all_config_schemas().into_iter().find(|s| s.filename == filename)
+	match filename {
+		"config.json" => Some(config_json_schema()),
+		"acp.json" => Some(acp_json_schema()),
+		"embed.json" => Some(embed_json_schema()),
+		"memory.json" => Some(memory_json_schema()),
+		"summarize.json" => Some(summarize_json_schema()),
+		"settings.json" => Some(settings_json_schema()),
+		_ => None,
+	}
 }
 
 // ---------------------------------------------------------------------------

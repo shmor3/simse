@@ -127,4 +127,14 @@ mod tests {
 		assert!(IMAGE_EXTENSIONS.contains(&"jpg"));
 		assert!(!IMAGE_EXTENSIONS.contains(&"txt"));
 	}
+
+	#[test]
+	fn extensions_regex_and_mime_in_sync() {
+		for ext in IMAGE_EXTENSIONS {
+			assert!(image_mime_type(ext).is_some(), "missing mime for {ext}");
+			let test_input = format!("test.{ext}");
+			let (_, paths) = detect_image_paths(&test_input);
+			assert!(!paths.is_empty(), "regex missed extension {ext}");
+		}
+	}
 }

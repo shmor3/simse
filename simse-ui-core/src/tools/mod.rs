@@ -118,7 +118,12 @@ pub fn truncate_output(output: &str, max_chars: usize) -> String {
 	if output.len() <= max_chars {
 		output.to_string()
 	} else {
-		let mut truncated = output[..max_chars].to_string();
+		// Find the largest char boundary <= max_chars
+		let mut boundary = max_chars;
+		while boundary > 0 && !output.is_char_boundary(boundary) {
+			boundary -= 1;
+		}
+		let mut truncated = output[..boundary].to_string();
 		truncated.push_str("[OUTPUT TRUNCATED]");
 		truncated
 	}
@@ -210,6 +215,14 @@ mod tests {
 		assert!(truncated.starts_with("xxxxxxxxxx"));
 		assert!(truncated.ends_with("[OUTPUT TRUNCATED]"));
 		assert_eq!(truncated.len(), 50 + "[OUTPUT TRUNCATED]".len());
+	}
+
+	#[test]
+	fn truncate_output_multibyte() {
+		// Truncating mid-emoji should not panic
+		let output = "Hello \u{1F600} world";
+		let truncated = truncate_output(output, 7);
+		assert!(truncated.ends_with("[OUTPUT TRUNCATED]"));
 	}
 
 	#[test]

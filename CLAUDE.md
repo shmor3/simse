@@ -67,34 +67,26 @@ src/
       logger.ts             # Minimal Logger + EventBus interfaces, createNoopLogger
                              # Shared by library/ and vfs/ (subset of root logger.ts)
     acp/
-      acp-client.ts         # ACP client: generate(), generateStream(), chat(), embed()
-                             # Session management: listSessions(), loadSession(), deleteSession()
-                             # Mode/model switching: setSessionMode(), setSessionModel()
-      acp-connection.ts      # JSON-RPC 2.0 over NDJSON stdio transport
-                             # Permission handling with ACP option selection
-                             # AbortSignal support for request cancellation
-                             # Stderr routing to logger
-                             # Connection health check: isHealthy (child process liveness)
-      acp-results.ts        # Response parsing: extractContentText, extractTokenUsage
-                             # Tool call extraction: extractToolCall, extractToolCallUpdate
+      acp-engine-client.ts  # JSON-RPC client spawning simse-acp Rust engine
+      acp-client.ts         # Thin client delegating to acp-engine-client
+                             # generate(), generateStream(), chat(), embed()
+                             # Session management, mode/model switching
       acp-adapters.ts       # EmbeddingProvider + TextGenerationProvider adapters for ACP
       local-embedder.ts     # In-process embedding via @huggingface/transformers
       tei-bridge.ts         # Text Embeddings Inference (TEI) HTTP bridge
       types.ts              # ACP types: sessions, content blocks, streaming, permissions,
                              # tool calls, sampling params, model/mode info
+      index.ts              # Barrel re-export
     mcp/
-      mcp-client.ts         # MCP client: tools, resources, prompts, completions
-                             # Logging: setLoggingLevel(), onLoggingMessage()
-                             # List-changed: onToolsChanged(), onResourcesChanged()
-                             # Roots: setRoots(), sendRootsListChanged()
-                             # Resource templates: listResourceTemplates()
-                             # Retry logic on tool calls and resource reads
-      mcp-server.ts         # MCP server: generate, run-chain, list-agents,
-                             # library-search, library-shelve, vfs-*, task-* tools
-                             # List-changed notifications
-                             # Logging support
+      mcp-engine-client.ts  # JSON-RPC client spawning simse-mcp Rust engine
+      mcp-client.ts         # Thin client delegating to mcp-engine-client
+                             # tools, resources, prompts, completions, logging, roots
+      mcp-server.ts         # MCP server with tool handler callback pattern
+                             # generate, run-chain, list-agents, library-search,
+                             # library-shelve, vfs-*, task-* tools
       types.ts              # MCP types: tools, resources, prompts, logging,
                              # completions, roots, resource templates, annotations
+      index.ts              # Barrel re-export
     agent/
       agent-executor.ts     # Step execution dispatcher (acp/mcp/library providers)
       types.ts              # AgentResult, AgentStepConfig, ParallelConfig, SwarmMerge
@@ -246,13 +238,13 @@ simse-mcp/                  # Pure Rust crate
 - **`toError(unknown)`**: Always wrap catch-block errors with `toError()` from `errors/index.js` before accessing `.message`.
 - **ESM-only**: All imports use `.js` extensions (`import { foo } from './bar.js'`). The `verbatimModuleSyntax` tsconfig flag is enabled — use `import type` for type-only imports.
 - **Shared logger interface**: `src/ai/shared/logger.ts` defines a minimal `Logger` + `EventBus` interface used by `library/` and `vfs/`. The root `src/logger.ts` is a superset — never import the root logger from library/vfs code.
-- **Rust engine subprocess pattern**: Both `library/client.ts` and `vfs/client.ts` spawn a Rust binary as a child process, communicate over JSON-RPC 2.0 / NDJSON stdio, and handle lifecycle (spawn, health check, dispose).
+- **Rust engine subprocess pattern**: `library/client.ts`, `vfs/client.ts`, `acp/acp-engine-client.ts`, and `mcp/mcp-engine-client.ts` each spawn a Rust binary as a child process, communicate over JSON-RPC 2.0 / NDJSON stdio, and handle lifecycle (spawn, health check, dispose).
 - **In-flight promise deduplication**: `load()`, `initialize()`, MCP `start()`, and MCP `connect()` use a stored promise to deduplicate concurrent callers. The pattern is: check for existing promise → create if missing → clear in `.finally()`.
 - **Doom loop detection**: The agentic loop tracks consecutive identical tool calls (same name + JSON-stringified args). After `maxIdenticalToolCalls` (default 3), it fires `onDoomLoop` callback, publishes `loop.doom_loop` event, and injects a system warning into the conversation.
 - **Tool output truncation**: `ToolRegistryOptions.maxOutputChars` (default 50,000) caps tool output to prevent context overflow. Per-tool `ToolDefinition.maxOutputChars` overrides the registry default. Truncated output gets an `[OUTPUT TRUNCATED]` suffix.
 - **Session forking**: `SessionManager.fork(id)` creates a new session with cloned conversation state via `toJSON()`/`fromJSON()`, a fresh event bus, and new ID/timestamp.
 - **Structured compaction**: When auto-compaction fires, the prompt requests 6 sections (Goal, Progress, Current State, Key Decisions, Relevant Files, Next Steps). `AgenticLoopOptions.compactionPrompt` overrides the default. `LoopCallbacks.onPreCompaction` can inject extra context before summarization.
-- **Connection health check**: `ACPConnection.isHealthy` verifies the child process is still running. `withResilience` auto-reconnects unhealthy connections before retry attempts.
+- **Connection health check**: ACP connection health is managed in Rust (`connection.rs` uses `Arc<AtomicBool>` updated on process EOF). `withResilience` auto-reconnects unhealthy connections before retry attempts.
 
 ### ACP Protocol
 

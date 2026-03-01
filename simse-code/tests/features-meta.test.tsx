@@ -105,14 +105,14 @@ describe('meta command state wiring', () => {
 		expect(cleared).toBe(true);
 	});
 
-	test('/context returns real usage', () => {
+	test('/context returns real usage', async () => {
 		const ctx = createMockContext({
 			getContextUsage: () => ({ usedChars: 80000, maxChars: 200000 }),
 		});
 		const cmds = createMetaCommands(ctx);
 		const contextCmd = cmds.find((c) => c.name === 'context');
 		expect(contextCmd).toBeDefined();
-		const result = contextCmd?.execute('');
+		const result = await contextCmd?.execute('');
 		expect(result).toBeDefined();
 		expect(result?.element).toBeDefined();
 	});

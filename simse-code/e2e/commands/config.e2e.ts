@@ -115,4 +115,4 @@ describe('Config Commands E2E', () => {
 		expect(screen).toContain('ollama');
 		expect(screen).toContain('copilot');
 	}, 30_000);
-}, 180_000);
+});

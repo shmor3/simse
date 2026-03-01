@@ -129,4 +129,4 @@ describe('Files Commands E2E', () => {
 		expect(screen).toContain('Showing all diffs');
 		expect(screen).not.toContain('Unknown command');
 	}, 30_000);
-}, 240_000);
+});

@@ -112,6 +112,7 @@ export function useAgenticLoop(
 				status: 'streaming',
 				streamText: '',
 				activeToolCalls: [],
+				pendingPermission: null,
 			});
 
 			const completedItems: OutputItem[] = [];

@@ -77,4 +77,4 @@ describe('AI Commands E2E', () => {
 		expect(screen).toContain('Running chain');
 		expect(screen).toContain('my-chain');
 	}, 30_000);
-}, 120_000);
+});

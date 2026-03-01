@@ -88,4 +88,4 @@ describe('Error States E2E', () => {
 		// (the input may wrap or scroll, but some 'A' chars should appear)
 		expect(screen).toContain('AAAA');
 	}, 30_000);
-}, 120_000);
+});

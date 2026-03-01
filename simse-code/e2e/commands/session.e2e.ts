@@ -157,4 +157,4 @@ describe('Session Commands E2E', () => {
 		expect(screen).toContain('Current model');
 		expect(screen).not.toContain('Unknown command');
 	}, 30_000);
-}, 300_000);
+});

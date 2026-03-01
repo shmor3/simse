@@ -221,6 +221,10 @@ export interface SearchOptions {
 	 * topic boost defined in `fieldBoosts.topic`.
 	 */
 	readonly topicFilter?: readonly string[];
+
+	// -- Graph boosting ---------------------------------------------------
+	/** Graph-based score boosting options. */
+	readonly graphBoost?: GraphBoostOptions;
 }
 
 export interface AdvancedLookup {
@@ -279,6 +283,8 @@ export interface WeightProfile {
 	readonly recency?: number;
 	/** Weight for frequency/access count score. Defaults to `0.2`. */
 	readonly frequency?: number;
+	/** Weight for graph-based score. */
+	readonly graph?: number;
 }
 
 export interface RecommendOptions {
@@ -301,11 +307,14 @@ export interface RecommendOptions {
 export interface Recommendation {
 	readonly volume: Volume;
 	readonly score: number;
-	readonly scores: {
-		readonly vector?: number;
-		readonly recency?: number;
-		readonly frequency?: number;
-	};
+	readonly scores: RecommendationScores;
+}
+
+export interface RecommendationScores {
+	readonly vector?: number;
+	readonly recency?: number;
+	readonly frequency?: number;
+	readonly graph?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -618,4 +627,41 @@ export interface CirculationDesk {
 	readonly dispose: () => void;
 	readonly pending: number;
 	readonly processing: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Graph Intelligence
+// ---------------------------------------------------------------------------
+
+export type GraphEdgeType =
+	| 'Related'
+	| 'Parent'
+	| 'Child'
+	| 'Extends'
+	| 'Contradicts'
+	| 'Similar'
+	| 'CoOccurs';
+
+export type GraphEdgeOrigin = 'Explicit' | 'Similarity' | 'Correlation';
+
+export interface GraphEdge {
+	readonly edgeType: GraphEdgeType;
+	readonly weight: number;
+	readonly origin: GraphEdgeOrigin;
+}
+
+export interface GraphNeighbor {
+	readonly volume: Volume;
+	readonly edge: GraphEdge;
+}
+
+export interface GraphTraversalNode {
+	readonly volume: Volume;
+	readonly depth: number;
+	readonly path: readonly string[];
+}
+
+export interface GraphBoostOptions {
+	readonly enabled?: boolean;
+	readonly weight?: number;
 }

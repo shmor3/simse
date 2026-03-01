@@ -50,22 +50,16 @@ pub struct JsonRpcNotification {
 
 /// Parse a line as either a response or notification.
 pub fn parse_message(line: &str) -> Result<RpcMessage, serde_json::Error> {
-    // Try response first (has id)
-    if let Ok(resp) = serde_json::from_str::<JsonRpcResponse>(line) {
-        if resp.id.is_some() {
-            return Ok(RpcMessage::Response(resp));
-        }
+    let value: serde_json::Value = serde_json::from_str(line)?;
+    if value.get("id").is_some_and(|v| !v.is_null()) {
+        serde_json::from_value(value).map(RpcMessage::Response)
+    } else {
+        serde_json::from_value(value).map(RpcMessage::Notification)
     }
-    // Try notification
-    if let Ok(notif) = serde_json::from_str::<JsonRpcNotification>(line) {
-        return Ok(RpcMessage::Notification(notif));
-    }
-    // Fallback: treat as response
-    serde_json::from_str::<JsonRpcResponse>(line).map(RpcMessage::Response)
 }
 
 /// A parsed RPC message.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RpcMessage {
     Response(JsonRpcResponse),
     Notification(JsonRpcNotification),

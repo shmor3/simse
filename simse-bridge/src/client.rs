@@ -2,8 +2,6 @@
 
 use thiserror::Error;
 
-use crate::protocol::{JsonRpcRequest, JsonRpcResponse};
-
 #[derive(Debug, Error)]
 pub enum BridgeError {
     #[error("Failed to spawn bridge process: {0}")]
@@ -21,6 +19,7 @@ pub enum BridgeError {
 }
 
 /// Bridge client configuration.
+#[derive(Debug, Clone)]
 pub struct BridgeConfig {
     pub command: String,       // e.g. "bun"
     pub args: Vec<String>,     // e.g. ["run", "bridge-server.ts"]

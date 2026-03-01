@@ -7,7 +7,9 @@ use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use crate::protocol::{JsonRpcRequest, JsonRpcResponse, RpcMessage, parse_message};
+use tokio::sync::mpsc;
+
+use crate::protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse, RpcMessage, parse_message};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -152,6 +154,43 @@ pub async fn request(
 	}
 }
 
+/// Send a JSON-RPC request and collect notifications until the response arrives.
+///
+/// Notifications received while waiting are forwarded to the provided channel.
+/// The final response is returned when a matching ID is found.
+pub async fn request_streaming(
+	bridge: &mut BridgeProcess,
+	method: &str,
+	params: Option<serde_json::Value>,
+	notification_tx: mpsc::UnboundedSender<JsonRpcNotification>,
+) -> Result<JsonRpcResponse, BridgeError> {
+	let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+	let req = JsonRpcRequest::new(id, method, params);
+	let json = serde_json::to_string(&req)?;
+
+	send_line(bridge, &json).await?;
+
+	let timeout = Duration::from_millis(bridge.timeout_ms);
+	let deadline = tokio::time::Instant::now() + timeout;
+
+	loop {
+		let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+		if remaining.is_zero() {
+			return Err(BridgeError::Timeout);
+		}
+
+		let line = read_line(bridge, remaining).await?;
+		let msg = parse_message(line.trim())?;
+		match msg {
+			RpcMessage::Response(resp) if resp.id == Some(id) => return Ok(resp),
+			RpcMessage::Response(_) => continue,
+			RpcMessage::Notification(notif) => {
+				let _ = notification_tx.send(notif);
+			}
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -265,4 +304,22 @@ mod tests {
 		kill_bridge(bridge).await;
 	}
 
+	#[tokio::test]
+	async fn request_streaming_collects_notifications() {
+		use crate::protocol::JsonRpcNotification;
+
+		// Use the notification infrastructure (doesn't need bridge server)
+		let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<JsonRpcNotification>();
+		tx.send(JsonRpcNotification {
+			jsonrpc: "2.0".into(),
+			method: "stream.delta".into(),
+			params: Some(serde_json::json!({"text": "hello"})),
+		})
+		.unwrap();
+		drop(tx);
+
+		let notif = rx.recv().await.unwrap();
+		assert_eq!(notif.method, "stream.delta");
+		assert_eq!(notif.params.unwrap()["text"].as_str().unwrap(), "hello");
+	}
 }

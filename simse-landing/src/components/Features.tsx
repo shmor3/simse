@@ -69,28 +69,16 @@ const features = [
 
 export default function Features() {
 	return (
-		<section className="relative px-6 py-24">
+		<section className="relative px-6 py-8">
 			{/* Section header */}
 			<div className="mx-auto max-w-5xl">
-				<div className="mb-16 max-w-lg">
-					<p className="animate-fade-in mb-3 font-mono text-xs tracking-widest text-emerald-500 uppercase">
-						Modules
-					</p>
-					<h2 className="animate-fade-in text-3xl font-bold tracking-tight text-zinc-50 sm:text-4xl">
-						Everything you need
-					</h2>
-					<p className="animate-fade-in mt-4 text-base leading-relaxed text-zinc-500">
-						Six composable modules. Wire them into pipelines, use them
-						standalone, or let the agentic loop orchestrate everything.
-					</p>
-				</div>
 
 				{/* Card grid */}
 				<div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 					{features.map((feature, i) => (
 						<article
 							key={feature.title}
-							className="group relative rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-6 opacity-0 animate-fade-in-up [animation-fill-mode:forwards] transition-all duration-300 hover:border-zinc-700 hover:bg-zinc-900/80"
+							className="group relative rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-5 opacity-0 animate-fade-in-up [animation-fill-mode:forwards] transition-all duration-300 hover:border-zinc-700 hover:bg-zinc-900/80"
 							style={{ animationDelay: `${i * 80}ms` }}
 						>
 							{/* Corner glow on hover */}

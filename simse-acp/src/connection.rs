@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use serde::de::DeserializeOwned;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -122,9 +122,9 @@ pub struct AcpConnection {
 	/// In-flight requests awaiting responses.
 	pending: Arc<Mutex<HashMap<u64, PendingRequest>>>,
 	/// Notification handlers keyed by method name.
-	notification_handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>>,
+	notification_handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>>,
 	/// Whether the connection is alive and usable.
-	connected: AtomicBool,
+	connected: Arc<AtomicBool>,
 	/// The result of the `initialize` handshake, if completed.
 	server_info: Mutex<Option<InitializeResult>>,
 	/// Current permission policy for tool-use requests.
@@ -184,9 +184,9 @@ impl AcpConnection {
 
 		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
 			Arc::new(Mutex::new(HashMap::new()));
-		let notification_handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
-		let connected = AtomicBool::new(true);
+		let notification_handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
+		let connected = Arc::new(AtomicBool::new(true));
 
 		// We create the connection first, then spawn the reader tasks that
 		// share references into it via Arc clones of pending/handlers.
@@ -198,7 +198,7 @@ impl AcpConnection {
 			next_id: AtomicU64::new(1),
 			pending: Arc::clone(&pending),
 			notification_handlers: Arc::clone(&notification_handlers),
-			connected,
+			connected: Arc::clone(&connected),
 			server_info: Mutex::new(None),
 			permission_policy: Mutex::new(PermissionPolicy::default()),
 			default_timeout_ms: config.timeout_ms,
@@ -213,15 +213,7 @@ impl AcpConnection {
 		if let Some(stdout) = stdout {
 			let pending_clone = Arc::clone(&pending);
 			let handlers_clone = Arc::clone(&notification_handlers);
-			// We read a raw pointer to the AtomicBool inside conn.connected.
-			// This is safe because AcpConnection is behind an Arc or lives
-			// long enough — but we don't need Arc<AtomicBool> since we use
-			// a separate mechanism: the task checks the bool each iteration.
-			// Instead we share a separate Arc<AtomicBool>.
-			let connected_flag = Arc::new(AtomicBool::new(true));
-			// Store a clone so close() can flip it.
-			// Actually, we need a shared flag. Let's refactor: use the
-			// pending map emptying + task abort on close instead.
+			let connected_clone = Arc::clone(&connected);
 			let pending_for_exit = Arc::clone(&pending);
 			let handle = tokio::spawn(async move {
 				let mut reader = BufReader::new(stdout);
@@ -261,6 +253,9 @@ impl AcpConnection {
 					}
 				}
 
+				// Mark connection as dead so is_healthy() / is_connected() see it.
+				connected_clone.store(false, Ordering::SeqCst);
+
 				// Child stdout closed — reject all pending requests.
 				let mut pending_guard = pending_for_exit.lock().await;
 				for (_id, req) in pending_guard.drain() {
@@ -270,7 +265,6 @@ impl AcpConnection {
 						)));
 					}
 				}
-				drop(connected_flag); // ensure the Arc is moved in
 			});
 			*conn.reader_handle.lock().await = Some(handle);
 		}
@@ -463,7 +457,7 @@ impl AcpConnection {
 	/// Register a handler for incoming notifications with the given method
 	/// name. Returns a [`SubscriptionHandle`] that removes the handler
 	/// when dropped.
-	pub async fn on_notification(
+	pub fn on_notification(
 		&self,
 		method: &str,
 		handler: NotificationHandler,
@@ -474,7 +468,10 @@ impl AcpConnection {
 			handler,
 		};
 
-		let mut handlers = self.notification_handlers.lock().await;
+		let mut handlers = self
+			.notification_handlers
+			.write()
+			.expect("notification_handlers lock poisoned");
 		handlers
 			.entry(method.to_string())
 			.or_default()
@@ -506,7 +503,10 @@ impl AcpConnection {
 
 		// Clear notification handlers.
 		{
-			let mut handlers = self.notification_handlers.lock().await;
+			let mut handlers = self
+				.notification_handlers
+				.write()
+				.expect("notification_handlers lock poisoned");
 			handlers.clear();
 		}
 
@@ -546,29 +546,11 @@ impl AcpConnection {
 
 	/// Returns `true` if the connection is marked connected and the child
 	/// process has not exited.
-	pub async fn is_healthy(&self) -> bool {
-		if !self.connected.load(Ordering::SeqCst) {
-			return false;
-		}
-
-		let mut child_guard = self.child.lock().await;
-		match *child_guard {
-			Some(ref mut child) => {
-				// try_wait returns Ok(Some(status)) if exited, Ok(None) if still running.
-				match child.try_wait() {
-					Ok(None) => true,
-					Ok(Some(_status)) => {
-						self.connected.store(false, Ordering::SeqCst);
-						false
-					}
-					Err(_) => {
-						self.connected.store(false, Ordering::SeqCst);
-						false
-					}
-				}
-			}
-			None => false,
-		}
+	///
+	/// This is a synchronous check — the reader task sets `connected` to
+	/// `false` on stdout EOF, so no Mutex lock is needed here.
+	pub fn is_healthy(&self) -> bool {
+		self.connected.load(Ordering::SeqCst)
 	}
 
 	// -------------------------------------------------------------------
@@ -625,7 +607,7 @@ impl AcpConnection {
 	async fn dispatch_message(
 		msg: &serde_json::Value,
 		pending: &Mutex<HashMap<u64, PendingRequest>>,
-		notification_handlers: &Mutex<HashMap<String, Vec<HandlerEntry>>>,
+		notification_handlers: &RwLock<HashMap<String, Vec<HandlerEntry>>>,
 	) {
 		let has_id = msg.get("id").is_some();
 		let has_method = msg.get("method").is_some();
@@ -685,7 +667,9 @@ impl AcpConnection {
 				.cloned()
 				.unwrap_or(serde_json::Value::Null);
 
-			let mut handlers_guard = notification_handlers.lock().await;
+			let mut handlers_guard = notification_handlers
+				.write()
+				.expect("notification_handlers lock poisoned");
 			if let Some(entries) = handlers_guard.get_mut(method) {
 				// Remove inactive entries first (handlers whose SubscriptionHandle was dropped).
 				entries.retain(|e| e.active.load(Ordering::SeqCst));
@@ -716,7 +700,7 @@ mod tests {
 	async fn dispatch(
 		msg: &str,
 		pending: &Mutex<HashMap<u64, PendingRequest>>,
-		handlers: &Mutex<HashMap<String, Vec<HandlerEntry>>>,
+		handlers: &RwLock<HashMap<String, Vec<HandlerEntry>>>,
 	) {
 		let parsed: serde_json::Value = serde_json::from_str(msg).unwrap();
 		AcpConnection::dispatch_message(&parsed, pending, handlers).await;
@@ -726,8 +710,8 @@ mod tests {
 	async fn test_dispatch_response_success() {
 		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
 			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
+		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
 
 		let (tx, rx) = oneshot::channel();
 		{
@@ -761,8 +745,8 @@ mod tests {
 	async fn test_dispatch_response_error() {
 		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
 			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
+		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
 
 		let (tx, rx) = oneshot::channel();
 		{
@@ -799,14 +783,14 @@ mod tests {
 	async fn test_dispatch_notification_routes_to_handler() {
 		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
 			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
+		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
 
 		let received = Arc::new(std::sync::Mutex::new(Vec::<serde_json::Value>::new()));
 		let received_clone = Arc::clone(&received);
 
 		{
-			let mut h = handlers.lock().await;
+			let mut h = handlers.write().unwrap();
 			h.entry("session/update".to_string())
 				.or_default()
 				.push(HandlerEntry {
@@ -833,8 +817,8 @@ mod tests {
 	async fn test_dispatch_notification_inactive_handler_removed() {
 		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
 			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
+		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
 
 		let call_count = Arc::new(AtomicU64::new(0));
 		let call_count_clone = Arc::clone(&call_count);
@@ -845,7 +829,7 @@ mod tests {
 		};
 
 		{
-			let mut h = handlers.lock().await;
+			let mut h = handlers.write().unwrap();
 			h.entry("test/notify".to_string())
 				.or_default()
 				.push(HandlerEntry {
@@ -882,8 +866,8 @@ mod tests {
 	async fn test_dispatch_unknown_response_id_is_ignored() {
 		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
 			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
+		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
 
 		// No pending request with id=99 — should not panic.
 		dispatch(
@@ -898,8 +882,8 @@ mod tests {
 	async fn test_dispatch_empty_and_invalid_lines_skipped() {
 		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
 			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
+		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
 
 		// Empty line — would be skipped by the reader loop (not reaching dispatch).
 		// Invalid JSON — the reader loop skips it; dispatch only receives valid JSON.
@@ -923,8 +907,8 @@ mod tests {
 
 		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
 			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
+		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
 
 		let (tx1, rx1) = oneshot::channel();
 		let (tx2, rx2) = oneshot::channel();
@@ -1013,8 +997,8 @@ mod tests {
 
 		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
 			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
+		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
 
 		let (tx, rx) = oneshot::channel();
 		{
@@ -1093,8 +1077,8 @@ mod tests {
 
 		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
 			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
+		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
 
 		let (tx, rx) = oneshot::channel();
 		{
@@ -1161,8 +1145,8 @@ mod tests {
 
 		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
 			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
+		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
 
 		let (tx, rx) = oneshot::channel();
 		{
@@ -1238,8 +1222,8 @@ mod tests {
 
 		let pending: Arc<Mutex<HashMap<u64, PendingRequest>>> =
 			Arc::new(Mutex::new(HashMap::new()));
-		let handlers: Arc<Mutex<HashMap<String, Vec<HandlerEntry>>>> =
-			Arc::new(Mutex::new(HashMap::new()));
+		let handlers: Arc<RwLock<HashMap<String, Vec<HandlerEntry>>>> =
+			Arc::new(RwLock::new(HashMap::new()));
 
 		// Spawn a reader on the "client reader" side (simulates stdout reading).
 		let pending_clone = Arc::clone(&pending);

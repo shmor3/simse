@@ -79,7 +79,7 @@ pub enum ToolCallStatus {
 }
 
 /// A pending permission request from the agent.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PermissionRequest {
 	pub id: String,
 	pub tool_name: String,
@@ -88,7 +88,7 @@ pub struct PermissionRequest {
 }
 
 /// An option in a permission request.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PermissionOption {
 	pub id: String,
 	pub label: String,

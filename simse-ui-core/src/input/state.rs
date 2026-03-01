@@ -119,6 +119,29 @@ pub fn backspace(state: &InputState) -> InputState {
 	}
 }
 
+/// Delete the selection, or one character after cursor if no selection.
+pub fn delete(state: &InputState) -> InputState {
+	if let Some((start, end)) = selection_range(state) {
+		let mut value = state.value[..start].to_string();
+		value.push_str(&state.value[end..]);
+		InputState {
+			value,
+			cursor: start,
+			anchor: None,
+		}
+	} else if state.cursor < state.value.len() {
+		let mut value = state.value[..state.cursor].to_string();
+		value.push_str(&state.value[state.cursor + 1..]);
+		InputState {
+			value,
+			cursor: state.cursor,
+			anchor: None,
+		}
+	} else {
+		state.clone()
+	}
+}
+
 /// Select all text.
 pub fn select_all(state: &InputState) -> InputState {
 	if state.value.is_empty() {

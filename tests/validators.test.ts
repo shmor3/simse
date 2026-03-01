@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { VFSSnapshot } from 'simse-vfs';
+import type { VFSSnapshot } from '../src/ai/vfs/types.js';
 import {
 	createDefaultValidators,
 	createEmptyFileValidator,
@@ -9,7 +9,7 @@ import {
 	createMixedLineEndingsValidator,
 	createTrailingWhitespaceValidator,
 	validateSnapshot,
-} from 'simse-vfs';
+} from '../src/ai/vfs/validators.js';
 
 // ---------------------------------------------------------------------------
 // Helpers

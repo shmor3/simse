@@ -6,7 +6,7 @@
 // ACP — use the acp-ollama-bridge to connect to a local Ollama instance.
 // ---------------------------------------------------------------------------
 
-import type { EmbeddingProvider, TextGenerationProvider } from 'simse-vector';
+import type { EmbeddingProvider, TextGenerationProvider } from '../library/types.js';
 import { toError } from '../../errors/base.js';
 import {
 	createEmbeddingError,

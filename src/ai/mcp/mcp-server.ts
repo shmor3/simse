@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import type { Library } from 'simse-vector';
-import type { VirtualFS } from 'simse-vfs';
+import type { Library } from '../library/library.js';
+import type { VirtualFS } from '../vfs/vfs.js';
 import { z } from 'zod';
 import { toError } from '../../errors/base.js';
 import type { ACPClient } from '../acp/acp-client.js';

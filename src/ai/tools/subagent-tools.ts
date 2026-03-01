@@ -5,7 +5,7 @@
 // Follows the same pattern as registerLibraryTools / registerTaskTools.
 // ---------------------------------------------------------------------------
 
-import type { Library } from 'simse-vector';
+import type { Library } from '../library/library.js';
 import { toError } from '../../errors/base.js';
 import type { ACPClient } from '../acp/acp-client.js';
 import { createConversation } from '../conversation/conversation.js';

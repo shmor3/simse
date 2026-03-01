@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { fileURLToPath } from 'node:url';
-import type { Library } from 'simse-vector';
-import { createVirtualFS, type VirtualFS } from 'simse-vfs';
+import type { Library } from '../src/ai/library/library.js';
+import { createVirtualFS, type VirtualFS } from '../src/ai/vfs/vfs.js';
 import type { TaskList } from '../src/ai/tasks/types.js';
 import {
 	registerLibraryTools,
@@ -14,7 +14,7 @@ import { createSilentLogger } from './utils/mocks.js';
 
 const ENGINE_PATH = fileURLToPath(
 	new URL(
-		'../simse-vfs/engine/target/debug/simse-vfs-engine.exe',
+		'../simse-vfs/target/debug/simse-vfs-engine.exe',
 		import.meta.url,
 	),
 );

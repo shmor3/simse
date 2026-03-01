@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { createVFSClient, type VFSClientEvent } from './client.js';
-import type { Logger } from './logger.js';
+import type { Logger } from '../shared/logger.js';
 import type {
 	VFSCallbacks,
 	VFSCopyOptions,

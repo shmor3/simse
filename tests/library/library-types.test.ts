@@ -11,7 +11,7 @@ import type {
 	Recommendation,
 	TextLookup,
 	Volume,
-} from '../src/types.js';
+} from '../../src/ai/library/types.js';
 
 describe('Library types', () => {
 	it('Volume has the correct shape', () => {

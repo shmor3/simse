@@ -13,12 +13,13 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createVFSDisk, createVirtualFS, type VirtualFS } from 'simse-vfs';
+import { createVFSDisk } from '../src/ai/vfs/vfs-disk.js';
+import { createVirtualFS, type VirtualFS } from '../src/ai/vfs/vfs.js';
 import { createToolRegistry as createLibToolRegistry } from '../src/ai/tools/index.js';
 
 const ENGINE_PATH = fileURLToPath(
 	new URL(
-		'../simse-vfs/engine/target/debug/simse-vfs-engine.exe',
+		'../simse-vfs/target/debug/simse-vfs-engine.exe',
 		import.meta.url,
 	),
 );

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, mock } from 'bun:test';
-import type { Library, Lookup } from 'simse-vector';
+import type { Library } from '../src/ai/library/library.js';
+import type { Lookup } from '../src/ai/library/types.js';
 import type { ACPClient } from '../src/ai/acp/acp-client.js';
 import type { ACPGenerateResult } from '../src/ai/acp/types.js';
 import type { ChainCallbacks } from '../src/ai/chain/index.js';

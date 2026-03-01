@@ -5,8 +5,8 @@
 import { mkdir, readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, relative, resolve, sep } from 'node:path';
 import { createVFSError } from './errors.js';
-import type { Logger } from './logger.js';
-import { createNoopLogger } from './logger.js';
+import type { Logger } from '../shared/logger.js';
+import { createNoopLogger } from '../shared/logger.js';
 import { toLocalPath, VFS_SCHEME } from './path-utils.js';
 import type {
 	VFSCommitOperation,

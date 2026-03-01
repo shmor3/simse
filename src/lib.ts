@@ -80,7 +80,7 @@ export type {
 	VectorErrorOptions,
 	Volume,
 	WeightProfile,
-} from 'simse-vector';
+} from './ai/library/index.js';
 export {
 	// Circulation desk
 	createCirculationDesk,
@@ -121,7 +121,7 @@ export {
 	parseQuery,
 	saveDefinition,
 	validateDefinition,
-} from 'simse-vector';
+} from './ai/library/index.js';
 // ---- Virtual Filesystem (from simse-vfs) ----------------------------------
 export type {
 	VFSCommitOperation,
@@ -160,7 +160,7 @@ export type {
 	VFSWriteOptions,
 	VirtualFS,
 	VirtualFSOptions,
-} from 'simse-vfs';
+} from './ai/vfs/index.js';
 export {
 	ancestorPaths,
 	baseName,
@@ -184,7 +184,7 @@ export {
 	validatePath,
 	validateSegment,
 	validateSnapshot,
-} from 'simse-vfs';
+} from './ai/vfs/index.js';
 export type {
 	ACPEmbedderOptions,
 	ACPGeneratorOptions,

@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { createVectorClient, type VectorClient } from './client.js';
-import { createNoopLogger, type Logger } from './logger.js';
+import { createNoopLogger, type Logger } from '../shared/logger.js';
 import type {
 	AdvancedLookup,
 	DateRange,

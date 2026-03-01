@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
 import { fileURLToPath } from 'node:url';
-import type { EmbeddingProvider, LibraryConfig } from 'simse-vector';
-import { createLibrary, type Library } from 'simse-vector';
+import type { EmbeddingProvider, LibraryConfig } from '../src/ai/library/types.js';
+import { createLibrary, type Library } from '../src/ai/library/library.js';
 import { createSilentLogger } from './utils/mocks.js';
 
 const ENGINE_PATH = fileURLToPath(
 	new URL(
-		'../simse-vector/engine/target/debug/simse-vector-engine.exe',
+		'../simse-vector/target/debug/simse-vector-engine.exe',
 		import.meta.url,
 	),
 );

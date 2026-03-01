@@ -10,7 +10,7 @@ import {
 	isStacksCorruptionError,
 	isStacksError,
 	isStacksIOError,
-} from '../src/errors.js';
+} from '../../src/ai/library/errors.js';
 
 describe('Library errors', () => {
 	it('createLibraryError creates a LIBRARY_ERROR', () => {

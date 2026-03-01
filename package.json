@@ -30,10 +30,6 @@
 		"typescript",
 		"bun"
 	],
-	"workspaces": [
-		"simse-vector",
-		"simse-vfs"
-	],
 	"license": "MIT",
 	"scripts": {
 		"build": "bun build ./src/lib.ts --outdir ./dist --target bun && tsc --project tsconfig.build.json",
@@ -42,11 +38,11 @@
 		"test:coverage": "bun test --coverage",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
-		"typecheck": "bun x tsc --noEmit"
+		"typecheck": "bun x tsc --noEmit",
+		"build:vector-engine": "cd simse-vector && cargo build --release",
+		"build:vfs-engine": "cd simse-vfs && cargo build --release"
 	},
 	"dependencies": {
-		"simse-vector": "workspace:*",
-		"simse-vfs": "workspace:*",
 		"@modelcontextprotocol/sdk": "^1.12.0",
 		"hono": "^4.12.2",
 		"ink": "^6.8.0",

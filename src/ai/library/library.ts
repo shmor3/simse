@@ -4,8 +4,8 @@ import {
 	isEmbeddingError,
 	toError,
 } from './errors.js';
-import type { EventBus } from './logger.js';
-import { createNoopLogger, type Logger } from './logger.js';
+import type { EventBus } from '../shared/logger.js';
+import { createNoopLogger, type Logger } from '../shared/logger.js';
 import { parseQuery } from './query-dsl.js';
 import { createShelf } from './shelf.js';
 import { createStacks, type StacksOptions } from './stacks.js';

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import { Buffer } from 'node:buffer';
-import { cosineSimilarity } from '../src/cosine.js';
-import { isLibraryError, isStacksCorruptionError } from '../src/errors.js';
-import { createNoopLogger, type Logger } from '../src/logger.js';
-import { encodeEmbedding } from '../src/preservation.js';
-import type { Stacks } from '../src/stacks.js';
-import type { StorageBackend } from '../src/storage.js';
+import { cosineSimilarity } from '../../src/ai/library/cosine.js';
+import { isLibraryError, isStacksCorruptionError } from '../../src/ai/library/errors.js';
+import { createNoopLogger, type Logger } from '../../src/ai/shared/logger.js';
+import { encodeEmbedding } from '../../src/ai/library/preservation.js';
+import type { Stacks } from '../../src/ai/library/stacks.js';
+import type { StorageBackend } from '../../src/ai/library/storage.js';
 import {
 	fuzzyScore,
 	levenshteinDistance,
@@ -15,8 +15,8 @@ import {
 	ngramSimilarity,
 	tokenize,
 	tokenOverlapScore,
-} from '../src/text-search.js';
-import type { Volume } from '../src/types.js';
+} from '../../src/ai/library/text-search.js';
+import type { Volume } from '../../src/ai/library/types.js';
 import { expectGuardedThrow } from './error-helpers.js';
 
 // ---------------------------------------------------------------------------
@@ -55,7 +55,7 @@ function createFailingStorage(error: Error): StorageBackend {
 	});
 }
 
-import { createStacks } from '../src/stacks.js';
+import { createStacks } from '../../src/ai/library/stacks.js';
 
 function createStore(options?: {
 	autoSave?: boolean;

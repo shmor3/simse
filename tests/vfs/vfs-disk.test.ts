@@ -4,12 +4,12 @@ import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isVFSError } from '../src/errors.js';
-import type { Logger } from '../src/logger.js';
-import { createNoopLogger } from '../src/logger.js';
-import type { VirtualFS } from '../src/vfs.js';
-import { createVirtualFS } from '../src/vfs.js';
-import { createVFSDisk } from '../src/vfs-disk.js';
+import type { Logger } from '../../src/ai/shared/logger.js';
+import { createNoopLogger } from '../../src/ai/shared/logger.js';
+import { isVFSError } from '../../src/ai/vfs/errors.js';
+import type { VirtualFS } from '../../src/ai/vfs/vfs.js';
+import { createVirtualFS } from '../../src/ai/vfs/vfs.js';
+import { createVFSDisk } from '../../src/ai/vfs/vfs-disk.js';
 import { expectGuardedThrow } from './utils/error-helpers';
 
 // ---------------------------------------------------------------------------
@@ -17,7 +17,7 @@ import { expectGuardedThrow } from './utils/error-helpers';
 // ---------------------------------------------------------------------------
 
 const ENGINE_PATH = fileURLToPath(
-	new URL('../engine/target/debug/simse-vfs-engine.exe', import.meta.url),
+	new URL('../../simse-vfs/target/debug/simse-vfs-engine.exe', import.meta.url),
 );
 
 function createSilentLogger(): Logger {

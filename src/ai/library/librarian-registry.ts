@@ -13,7 +13,7 @@ import {
 	saveDefinition,
 	validateDefinition,
 } from './librarian-definition.js';
-import { createNoopLogger, type Logger } from './logger.js';
+import { createNoopLogger, type Logger } from '../shared/logger.js';
 import type {
 	ArbitrationResult,
 	Librarian,

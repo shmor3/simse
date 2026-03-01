@@ -4,8 +4,8 @@ import type {
 	LibrarianLibraryAccess,
 	TextGenerationProvider,
 	Volume,
-} from 'simse-vector';
-import { createDefaultLibrarian, createLibrarian } from 'simse-vector';
+} from '../src/ai/library/types.js';
+import { createDefaultLibrarian, createLibrarian } from '../src/ai/library/librarian.js';
 
 function createMockGenerator(response: string): TextGenerationProvider {
 	return {

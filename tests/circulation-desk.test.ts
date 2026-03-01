@@ -4,8 +4,8 @@ import type {
 	Librarian,
 	LibrarianRegistry,
 	ManagedLibrarian,
-} from 'simse-vector';
-import { createCirculationDesk } from 'simse-vector';
+} from '../src/ai/library/types.js';
+import { createCirculationDesk } from '../src/ai/library/circulation-desk.js';
 
 // Mock librarian that returns a single extraction
 function createMockLibrarian(): Librarian {

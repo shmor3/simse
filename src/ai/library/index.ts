@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// simse-vector — public API surface
+// simse library — public API surface
 // ---------------------------------------------------------------------------
 
 // ---- Circulation desk (async job queue) ------------------------------------
@@ -41,8 +41,8 @@ export type {
 } from './library-services.js';
 export { createLibraryServices } from './library-services.js';
 // ---- Logger / EventBus -----------------------------------------------------
-export type { EventBus, Logger } from './logger.js';
-export { createNoopLogger } from './logger.js';
+export type { EventBus, Logger } from '../shared/logger.js';
+export { createNoopLogger } from '../shared/logger.js';
 // ---- Prompt injection (memory context formatting) --------------------------
 export type { PromptInjectionOptions } from './prompt-injection.js';
 export { formatMemoryContext } from './prompt-injection.js';

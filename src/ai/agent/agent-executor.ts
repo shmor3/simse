@@ -2,7 +2,7 @@
 // Agent Executor — createAgentExecutor factory
 // ---------------------------------------------------------------------------
 
-import type { Library } from 'simse-vector';
+import type { Library } from '../library/library.js';
 import { createChainError, createMCPToolError } from '../../errors/index.js';
 import { getDefaultLogger, type Logger } from '../../logger.js';
 import type { ACPClient } from '../acp/acp-client.js';

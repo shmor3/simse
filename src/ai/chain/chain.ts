@@ -2,7 +2,7 @@
 // Chain — createChain factory, createChainFromDefinition, runNamedChain
 // ---------------------------------------------------------------------------
 
-import type { Library } from 'simse-vector';
+import type { Library } from '../library/library.js';
 import type { AppConfig, ChainDefinition } from '../../config/settings.js';
 import {
 	createChainError,

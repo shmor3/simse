@@ -10,4 +10,4 @@ export {
 	isStacksCorruptionError,
 	isStacksError,
 	isStacksIOError,
-} from 'simse-vector';
+} from '../ai/library/errors.js';

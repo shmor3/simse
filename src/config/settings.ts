@@ -7,7 +7,7 @@
 // and returns a frozen, fully-resolved `AppConfig`.
 // ---------------------------------------------------------------------------
 
-import type { LibraryConfig } from 'simse-vector';
+import type { LibraryConfig } from '../ai/library/types.js';
 import type { ACPConfig, ACPServerEntry } from '../ai/acp/types.js';
 import type {
 	MCPClientConfig,

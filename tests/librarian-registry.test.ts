@@ -6,12 +6,12 @@ import type {
 	LibrarianDefinition,
 	LibrarianLibraryAccess,
 	TextGenerationProvider,
-} from 'simse-vector';
+} from '../src/ai/library/types.js';
 import {
 	createLibrarianRegistry,
 	type LibrarianRegistryOptions,
-	saveDefinition,
-} from 'simse-vector';
+} from '../src/ai/library/librarian-registry.js';
+import { saveDefinition } from '../src/ai/library/librarian-definition.js';
 import type { ACPConnection } from '../src/ai/acp/acp-connection.js';
 import { createLogger } from '../src/logger.js';
 

@@ -6,14 +6,14 @@ import type {
 	ArbitrationResult,
 	LibrarianBid,
 	LibrarianDefinition,
-} from 'simse-vector';
+} from '../src/ai/library/types.js';
 import {
 	loadAllDefinitions,
 	loadDefinition,
 	matchesTopic,
 	saveDefinition,
 	validateDefinition,
-} from 'simse-vector';
+} from '../src/ai/library/librarian-definition.js';
 
 describe('LibrarianDefinition types', () => {
 	it('allows constructing a valid LibrarianDefinition', () => {

@@ -16,11 +16,7 @@
 		"noPropertyAccessFromIndexSignature": false,
 		"forceConsistentCasingInFileNames": true,
 		"resolveJsonModule": true,
-		"types": ["@types/bun"],
-		"paths": {
-			"simse-vector": ["./simse-vector/src/lib.ts"],
-			"simse-vfs": ["./simse-vfs/src/lib.ts"]
-		}
+		"types": ["@types/bun"]
 	},
 	"include": ["src/**/*"],
 	"exclude": ["node_modules", "dist"]

@@ -1,23 +1,37 @@
 // ---------------------------------------------------------------------------
-// Vector Client — JSON-RPC 2.0 over NDJSON stdio transport to Rust subprocess
+// VFS Client — JSON-RPC 2.0 over NDJSON stdio transport to Rust subprocess
 // ---------------------------------------------------------------------------
 
 import { type ChildProcess, spawn } from 'node:child_process';
-import { createStacksError, toError } from './errors.js';
-import type { Logger } from './logger.js';
-import { createNoopLogger } from './logger.js';
+import { createVFSError, toError } from './errors.js';
+import type { Logger } from '../shared/logger.js';
+import { createNoopLogger } from '../shared/logger.js';
+import type { VFSHistoryOptions, VFSLimits } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-export interface VectorClientOptions {
+export interface VFSClientOptions {
 	readonly enginePath: string;
+	readonly limits?: VFSLimits;
+	readonly history?: VFSHistoryOptions;
 	readonly timeoutMs?: number;
+	readonly onEvent?: (event: VFSClientEvent) => void;
 	readonly logger?: Logger;
 }
 
-export interface VectorClient {
+export interface VFSClientEvent {
+	readonly type: 'write' | 'delete' | 'rename' | 'mkdir';
+	readonly path: string;
+	readonly size?: number;
+	readonly contentType?: string;
+	readonly isNew?: boolean;
+	readonly oldPath?: string;
+	readonly newPath?: string;
+}
+
+export interface VFSClient {
 	readonly request: <T>(method: string, params?: unknown) => Promise<T>;
 	readonly dispose: () => Promise<void>;
 	readonly isHealthy: boolean;
@@ -42,11 +56,19 @@ interface JsonRpcResponse {
 		readonly code: number;
 		readonly message: string;
 		readonly data?: {
-			readonly vectorCode?: string;
-			readonly message?: string;
+			readonly vfsCode?: string;
+			readonly metadata?: Readonly<Record<string, unknown>>;
 		};
 	};
 }
+
+interface JsonRpcNotification {
+	readonly jsonrpc: '2.0';
+	readonly method: string;
+	readonly params?: unknown;
+}
+
+type JsonRpcMessage = JsonRpcResponse | JsonRpcNotification;
 
 // ---------------------------------------------------------------------------
 // Pending request tracking
@@ -60,23 +82,26 @@ interface PendingRequest {
 }
 
 // ---------------------------------------------------------------------------
-// Message type guard
+// Message type guards
 // ---------------------------------------------------------------------------
 
-const isResponse = (msg: unknown): msg is JsonRpcResponse =>
-	typeof msg === 'object' &&
-	msg !== null &&
-	'id' in msg &&
-	typeof (msg as JsonRpcResponse).id === 'number';
+const isResponse = (msg: JsonRpcMessage): msg is JsonRpcResponse =>
+	'id' in msg && typeof (msg as JsonRpcResponse).id === 'number';
+
+const isNotification = (msg: JsonRpcMessage): msg is JsonRpcNotification =>
+	!('id' in msg) && 'method' in msg;
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
-export function createVectorClient(options: VectorClientOptions): VectorClient {
-	const timeoutMs = options.timeoutMs ?? 60_000;
+export async function createVFSClient(
+	options: VFSClientOptions,
+): Promise<VFSClient> {
+	const timeoutMs = options.timeoutMs ?? 30_000;
 	const logger = options.logger ?? createNoopLogger();
-	const log = logger.child('vector-client');
+	const log = logger.child('vfs-client');
+	const onEvent = options.onEvent;
 
 	let nextId = 1;
 	let child: ChildProcess | undefined;
@@ -93,35 +118,44 @@ export function createVectorClient(options: VectorClientOptions): VectorClient {
 		const trimmed = line.trim();
 		if (trimmed.length === 0) return;
 
-		let msg: unknown;
+		let msg: JsonRpcMessage;
 		try {
-			msg = JSON.parse(trimmed);
-			if (typeof msg !== 'object' || msg === null) return;
+			const parsed: unknown = JSON.parse(trimmed);
+			if (typeof parsed !== 'object' || parsed === null) return;
+			msg = parsed as JsonRpcMessage;
 		} catch {
 			log.debug('Skipping malformed JSON line', { line: trimmed });
 			return;
 		}
 
 		if (isResponse(msg)) {
-			const resp = msg as JsonRpcResponse;
-			const req = pending.get(resp.id);
+			const req = pending.get(msg.id);
 			if (!req) return;
 
-			pending.delete(resp.id);
+			pending.delete(msg.id);
 			clearTimeout(req.timer);
 
-			if (resp.error) {
-				const vectorCode = resp.error.data?.vectorCode ?? 'STACKS_ERROR';
+			if (msg.error) {
+				const vfsCode = msg.error.data?.vfsCode ?? 'VFS_ERROR';
+				const metadata = msg.error.data?.metadata ?? {};
 				req.reject(
-					createStacksError(resp.error.message, {
-						code: vectorCode,
+					createVFSError(msg.error.message, {
+						code: vfsCode,
+						metadata,
 					}),
 				);
 			} else {
-				req.resolve(resp.result);
+				req.resolve(msg.result);
+			}
+		} else if (isNotification(msg)) {
+			if (msg.method === 'vfs/event' && onEvent) {
+				try {
+					onEvent(msg.params as VFSClientEvent);
+				} catch {
+					// Swallow handler errors
+				}
 			}
 		}
-		// Notifications are ignored (vector engine doesn't emit them)
 	};
 
 	const onData = (data: Buffer): void => {
@@ -140,8 +174,8 @@ export function createVectorClient(options: VectorClientOptions): VectorClient {
 	const sendRequest = <T>(method: string, params?: unknown): Promise<T> => {
 		if (disposed || !child?.stdin?.writable) {
 			return Promise.reject(
-				createStacksError('Vector client is not connected', {
-					code: 'STACKS_ERROR',
+				createVFSError('VFS client is not connected', {
+					code: 'VFS_ERROR',
 					metadata: { reason: 'Client disposed or stdin not writable' },
 				}),
 			);
@@ -153,10 +187,10 @@ export function createVectorClient(options: VectorClientOptions): VectorClient {
 			const timer = setTimeout(() => {
 				pending.delete(id);
 				reject(
-					createStacksError(
-						`Vector request "${method}" timed out after ${timeoutMs}ms`,
+					createVFSError(
+						`VFS request "${method}" timed out after ${timeoutMs}ms`,
 						{
-							code: 'STACKS_ERROR',
+							code: 'VFS_ERROR',
 							metadata: { method, timeoutMs },
 						},
 					),
@@ -198,8 +232,8 @@ export function createVectorClient(options: VectorClientOptions): VectorClient {
 		disposed = true;
 
 		rejectAll(
-			createStacksError('Vector client disposed', {
-				code: 'STACKS_ERROR',
+			createVFSError('VFS client disposed', {
+				code: 'VFS_ERROR',
 				metadata: { reason: 'Client disposed' },
 			}),
 		);
@@ -212,7 +246,7 @@ export function createVectorClient(options: VectorClientOptions): VectorClient {
 	};
 
 	// -----------------------------------------------------------------------
-	// Spawn process
+	// Spawn + initialize
 	// -----------------------------------------------------------------------
 
 	child = spawn(options.enginePath, [], {
@@ -225,36 +259,43 @@ export function createVectorClient(options: VectorClientOptions): VectorClient {
 	child.stderr?.on('data', (data: Buffer) => {
 		const text = data.toString().trim();
 		if (text) {
-			log.debug('vector-engine stderr', { text });
+			log.debug('vfs-engine stderr', { text });
 		}
 	});
 
 	child.on('error', (err) => {
-		log.error('vector-engine process error', toError(err));
+		log.error('vfs-engine process error', toError(err));
 		rejectAll(
-			createStacksError(
-				`Vector engine process error: ${toError(err).message}`,
-				{
-					code: 'STACKS_ERROR',
-					cause: err,
-				},
-			),
+			createVFSError(`VFS engine process error: ${toError(err).message}`, {
+				code: 'VFS_ERROR',
+				cause: err,
+			}),
 		);
 	});
 
 	child.on('exit', (code) => {
 		if (!disposed) {
-			log.warn('vector-engine exited unexpectedly', { exitCode: code });
+			log.warn('vfs-engine exited unexpectedly', { exitCode: code });
 			rejectAll(
-				createStacksError(`Vector engine exited with code ${code}`, {
-					code: 'STACKS_ERROR',
+				createVFSError(`VFS engine exited with code ${code}`, {
+					code: 'VFS_ERROR',
 					metadata: { exitCode: code },
 				}),
 			);
 		}
 	});
 
-	log.info('Vector engine process spawned');
+	// Send initialize request with limits and history config
+	const initParams: Record<string, unknown> = {};
+	if (options.limits) {
+		initParams.limits = options.limits;
+	}
+	if (options.history) {
+		initParams.history = options.history;
+	}
+
+	await sendRequest('initialize', initParams);
+	log.info('VFS engine initialized');
 
 	// -----------------------------------------------------------------------
 	// Return frozen interface

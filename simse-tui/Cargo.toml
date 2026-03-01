@@ -1,0 +1,17 @@
+[package]
+name = "simse-tui"
+description = "SimSE terminal UI powered by ratatui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+simse-ui-core = { path = "../simse-ui-core" }
+simse-bridge = { path = "../simse-bridge" }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tui-textarea = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }

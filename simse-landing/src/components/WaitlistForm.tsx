@@ -9,8 +9,8 @@ export default function WaitlistForm() {
 	const [state, setState] = useState<FormState>('idle');
 	const [errorMsg, setErrorMsg] = useState('');
 
-	async function handleSubmit(e: FormEvent) {
-		e.preventDefault();
+	async function handleSubmit(e?: FormEvent) {
+		e?.preventDefault();
 
 		const result = waitlistSchema.safeParse({ email: email.trim() });
 		if (!result.success) {
@@ -83,7 +83,7 @@ export default function WaitlistForm() {
 					{errorMsg}.{' '}
 					<button
 						type="button"
-						onClick={() => setState('idle')}
+						onClick={() => handleSubmit()}
 						className="cursor-pointer underline underline-offset-2 hover:text-red-300"
 					>
 						Retry

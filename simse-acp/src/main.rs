@@ -1,4 +1,8 @@
-fn main() {
+use simse_acp_engine::server::AcpServer;
+use simse_acp_engine::transport::NdjsonTransport;
+
+#[tokio::main]
+async fn main() {
 	tracing_subscriber::fmt()
 		.with_writer(std::io::stderr)
 		.with_env_filter(
@@ -7,5 +11,13 @@ fn main() {
 		)
 		.init();
 
-	tracing::info!("simse-acp-engine ready (placeholder)");
+	let transport = NdjsonTransport::new();
+	let mut server = AcpServer::new(transport);
+
+	tracing::info!("simse-acp-engine ready");
+
+	if let Err(e) = server.run().await {
+		tracing::error!("Server error: {}", e);
+		std::process::exit(1);
+	}
 }

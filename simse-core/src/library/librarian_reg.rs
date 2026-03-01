@@ -13,6 +13,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::librarian::truncate_str;
+
 use async_trait::async_trait;
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -187,11 +189,9 @@ impl LibrarianRegistry {
 	/// Initialize the registry: create the default librarian and load
 	/// definitions from disk.
 	pub async fn initialize(&self) -> Result<(), SimseError> {
-		{
-			let init = self.initialized.lock().await;
-			if *init {
-				return Ok(());
-			}
+		let mut init = self.initialized.lock().await;
+		if *init {
+			return Ok(());
 		}
 
 		// Create default librarian
@@ -213,16 +213,12 @@ impl LibrarianRegistry {
 					libs.insert(def.name.clone(), Arc::new(managed));
 				}
 				Err(_) => {
-					// Skip failed librarians
+					// Skip failed librarians silently
 				}
 			}
 		}
 
-		{
-			let mut init = self.initialized.lock().await;
-			*init = true;
-		}
-
+		*init = true;
 		Ok(())
 	}
 
@@ -269,8 +265,8 @@ impl LibrarianRegistry {
 			));
 		}
 
-		{
-			let libs = self.librarians.lock().await;
+		let managed = {
+			let mut libs = self.librarians.lock().await;
 			if libs.contains_key(&definition.name) {
 				return Err(SimseError::library(
 					crate::error::LibraryErrorCode::InvalidInput,
@@ -280,14 +276,11 @@ impl LibrarianRegistry {
 					),
 				));
 			}
-		}
 
-		let managed = Arc::new(self.build_managed(definition.clone()).await?);
-
-		{
-			let mut libs = self.librarians.lock().await;
-			libs.insert(definition.name.clone(), Arc::clone(&managed));
-		}
+			let m = Arc::new(self.build_managed(definition.clone()).await?);
+			libs.insert(definition.name.clone(), Arc::clone(&m));
+			m
+		};
 
 		// Persist to disk (ignore errors)
 		let _ = save_definition(&self.librarians_dir, &definition).await;
@@ -342,12 +335,15 @@ impl LibrarianRegistry {
 
 	/// Get the default librarian.
 	///
-	/// Panics if the registry has not been initialized.
-	pub async fn default_librarian(&self) -> Arc<ManagedLibrarian> {
+	/// Returns an error if the registry has not been initialized.
+	pub async fn default_librarian(&self) -> Result<Arc<ManagedLibrarian>, SimseError> {
 		let libs = self.librarians.lock().await;
-		libs.get("default")
-			.cloned()
-			.expect("Registry not initialized: default librarian not available")
+		libs.get("default").cloned().ok_or_else(|| {
+			SimseError::library(
+				crate::error::LibraryErrorCode::NotInitialized,
+				"Registry not initialized: default librarian not available",
+			)
+		})
 	}
 
 	// -----------------------------------------------------------------------
@@ -435,11 +431,7 @@ impl LibrarianRegistry {
 			.collect::<Vec<_>>()
 			.join("\n");
 
-		let preview = if content.len() > 500 {
-			&content[..500]
-		} else {
-			content
-		};
+		let preview = truncate_str(content, 500);
 
 		let prompt = format!(
 			r#"You are arbitrating between librarians to decide who should manage new content.
@@ -495,11 +487,7 @@ Choose the best librarian. Return ONLY valid JSON:
 			.iter()
 			.take(5)
 			.map(|v| {
-				let preview = if v.text.len() > 100 {
-					&v.text[..100]
-				} else {
-					&v.text
-				};
+				let preview = truncate_str(&v.text, 100);
 				format!("- {}", preview)
 			})
 			.collect::<Vec<_>>()

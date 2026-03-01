@@ -183,8 +183,9 @@ impl CirculationDesk {
 		if self.disposed.load(Ordering::Relaxed) {
 			return;
 		}
-		let _ = self.sender.send(Job::Extraction(turn));
-		self.pending_count.fetch_add(1, Ordering::Relaxed);
+		if self.sender.send(Job::Extraction(turn)).is_ok() {
+			self.pending_count.fetch_add(1, Ordering::Relaxed);
+		}
 	}
 
 	/// Enqueue a compendium (summarization) job.
@@ -192,8 +193,9 @@ impl CirculationDesk {
 		if self.disposed.load(Ordering::Relaxed) {
 			return;
 		}
-		let _ = self.sender.send(Job::Compendium { topic });
-		self.pending_count.fetch_add(1, Ordering::Relaxed);
+		if self.sender.send(Job::Compendium { topic }).is_ok() {
+			self.pending_count.fetch_add(1, Ordering::Relaxed);
+		}
 	}
 
 	/// Enqueue a reorganization job.
@@ -201,8 +203,9 @@ impl CirculationDesk {
 		if self.disposed.load(Ordering::Relaxed) {
 			return;
 		}
-		let _ = self.sender.send(Job::Reorganization { topic });
-		self.pending_count.fetch_add(1, Ordering::Relaxed);
+		if self.sender.send(Job::Reorganization { topic }).is_ok() {
+			self.pending_count.fetch_add(1, Ordering::Relaxed);
+		}
 	}
 
 	/// Enqueue an optimization job.
@@ -210,8 +213,9 @@ impl CirculationDesk {
 		if self.disposed.load(Ordering::Relaxed) {
 			return;
 		}
-		let _ = self.sender.send(Job::Optimization { topic });
-		self.pending_count.fetch_add(1, Ordering::Relaxed);
+		if self.sender.send(Job::Optimization { topic }).is_ok() {
+			self.pending_count.fetch_add(1, Ordering::Relaxed);
+		}
 	}
 
 	// -----------------------------------------------------------------------
@@ -223,10 +227,16 @@ impl CirculationDesk {
 	/// Returns immediately if already processing or disposed.
 	/// Failed jobs are silently dropped.
 	pub async fn drain(&self) {
-		if self.processing.load(Ordering::Relaxed) || self.disposed.load(Ordering::Relaxed) {
+		if self.disposed.load(Ordering::Acquire) {
 			return;
 		}
-		self.processing.store(true, Ordering::Relaxed);
+		if self
+			.processing
+			.compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed)
+			.is_err()
+		{
+			return;
+		}
 
 		let mut receiver = self.receiver.lock().await;
 		while let Ok(job) = receiver.try_recv() {
@@ -234,7 +244,7 @@ impl CirculationDesk {
 			let _ = self.process_job(job).await;
 		}
 
-		self.processing.store(false, Ordering::Relaxed);
+		self.processing.store(false, Ordering::Release);
 	}
 
 	// -----------------------------------------------------------------------

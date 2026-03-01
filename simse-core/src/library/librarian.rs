@@ -13,6 +13,19 @@ use serde::Deserialize;
 use crate::error::SimseError;
 use crate::library::TextGenerationProvider;
 
+/// Truncate a string to at most `max_bytes` bytes, ensuring the result
+/// ends on a valid UTF-8 char boundary.
+pub(crate) fn truncate_str(s: &str, max_bytes: usize) -> &str {
+	if s.len() <= max_bytes {
+		return s;
+	}
+	let mut end = max_bytes;
+	while end > 0 && !s.is_char_boundary(end) {
+		end -= 1;
+	}
+	&s[..end]
+}
+
 // ---------------------------------------------------------------------------
 // Result types
 // ---------------------------------------------------------------------------
@@ -553,6 +566,9 @@ Respond with ONLY valid JSON."#,
 
 	/// Score confidence for managing a given topic/content pair.
 	///
+	/// The `_library` parameter is reserved for future use (enriching the
+	/// bid prompt with existing volume context). Currently unused.
+	///
 	/// Returns a zero-confidence bid on LLM or parse failure.
 	pub async fn bid(
 		&self,
@@ -560,11 +576,7 @@ Respond with ONLY valid JSON."#,
 		topic: &str,
 		_library: &dyn LibrarianLibraryAccess,
 	) -> LibrarianBid {
-		let preview = if content.len() > 500 {
-			&content[..500]
-		} else {
-			content
-		};
+		let preview = truncate_str(content, 500);
 
 		let prompt = format!(
 			r#"You are a specialist librarian named "{}".

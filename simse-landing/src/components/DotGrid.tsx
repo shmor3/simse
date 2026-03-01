@@ -87,17 +87,34 @@ export default function DotGrid() {
 			mouse.current.x = -1000;
 			mouse.current.y = -1000;
 		}
+		function onTouch(e: TouchEvent) {
+			const t = e.touches[0];
+			if (t) {
+				mouse.current.x = t.clientX;
+				mouse.current.y = t.clientY;
+			}
+		}
+		function onTouchEnd() {
+			mouse.current.x = -1000;
+			mouse.current.y = -1000;
+		}
 
 		resize();
 		addEventListener('resize', resize);
 		addEventListener('mousemove', onMove);
 		document.addEventListener('mouseleave', onLeave);
+		addEventListener('touchstart', onTouch, { passive: true });
+		addEventListener('touchmove', onTouch, { passive: true });
+		addEventListener('touchend', onTouchEnd);
 		raf.current = requestAnimationFrame(draw);
 
 		return () => {
 			removeEventListener('resize', resize);
 			removeEventListener('mousemove', onMove);
 			document.removeEventListener('mouseleave', onLeave);
+			removeEventListener('touchstart', onTouch);
+			removeEventListener('touchmove', onTouch);
+			removeEventListener('touchend', onTouchEnd);
 			cancelAnimationFrame(raf.current);
 		};
 	}, []);

@@ -3,7 +3,7 @@ import WaitlistForm from "./WaitlistForm";
 
 export default function Hero() {
   return (
-    <section className="flex flex-1 flex-col items-center justify-center px-5 pb-20 sm:px-6">
+    <section className="flex flex-1 flex-col items-center justify-center px-5 sm:px-6">
       <p
         className="animate-fade-in font-mono text-sm font-bold tracking-[0.35em] text-zinc-600"
         style={{ animationDelay: "50ms" }}

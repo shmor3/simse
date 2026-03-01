@@ -63,12 +63,12 @@ export default function WaitlistForm() {
 					placeholder="you@company.dev"
 					required
 					disabled={state === 'loading'}
-					className="h-12 min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-4 font-mono text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none disabled:opacity-50 sm:rounded-none sm:border-none sm:bg-transparent"
+					className="h-14 min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-4 font-mono text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none disabled:opacity-50 sm:h-12 sm:rounded-none sm:border-none sm:bg-transparent"
 				/>
 				<button
 					type="submit"
 					disabled={state === 'loading'}
-					className="h-12 shrink-0 cursor-pointer rounded-lg bg-emerald-500 px-6 font-mono text-sm font-medium text-zinc-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50 sm:rounded-none"
+					className="h-14 shrink-0 cursor-pointer rounded-lg bg-emerald-500 px-6 font-mono text-sm font-medium text-zinc-950 transition-colors hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-50 sm:h-12 sm:rounded-none"
 				>
 					{state === 'loading' ? 'Joining...' : 'Get early access'}
 				</button>

@@ -1,11 +1,15 @@
 //! JSON-RPC client that communicates with the TS core subprocess.
 
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use thiserror::Error;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use crate::protocol::{JsonRpcRequest, JsonRpcResponse, RpcMessage, parse_message};
+
+static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Error)]
 pub enum BridgeError {
@@ -114,6 +118,40 @@ pub async fn kill_bridge(mut bridge: BridgeProcess) {
 	let _ = bridge.child.kill().await;
 }
 
+/// Send a JSON-RPC request and wait for the matching response.
+///
+/// Reads lines from stdout until a response with the matching ID arrives.
+/// Notifications received while waiting are discarded.
+/// Returns `BridgeError::Timeout` if no matching response within config timeout.
+pub async fn request(
+	bridge: &mut BridgeProcess,
+	method: &str,
+	params: Option<serde_json::Value>,
+) -> Result<JsonRpcResponse, BridgeError> {
+	let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+	let req = JsonRpcRequest::new(id, method, params);
+	let json = serde_json::to_string(&req)?;
+
+	send_line(bridge, &json).await?;
+
+	let timeout = Duration::from_millis(bridge.timeout_ms);
+	let deadline = tokio::time::Instant::now() + timeout;
+
+	loop {
+		let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+		if remaining.is_zero() {
+			return Err(BridgeError::Timeout);
+		}
+
+		let line = read_line(bridge, remaining).await?;
+		let msg = parse_message(line.trim())?;
+		match msg {
+			RpcMessage::Response(resp) if resp.id == Some(id) => return Ok(resp),
+			_ => continue, // skip non-matching responses and notifications
+		}
+	}
+}
+
 #[cfg(test)]
 mod tests {
 	use super::*;
@@ -173,4 +211,58 @@ mod tests {
 		assert!(matches!(result, Err(BridgeError::Timeout)));
 		kill_bridge(bridge).await;
 	}
+
+	#[tokio::test]
+	async fn request_initialize_roundtrip() {
+		let config = BridgeConfig {
+			command: "bun".into(),
+			args: vec!["run".into(), "../simse-code/bridge-server.ts".into()],
+			data_dir: String::new(),
+			timeout_ms: 10_000,
+		};
+		let mut bridge = spawn_bridge(&config).await.unwrap();
+
+		let resp = request(&mut bridge, "initialize", None).await.unwrap();
+		let result = resp.result.unwrap();
+		assert_eq!(result["protocolVersion"], 1);
+		assert_eq!(result["name"], "simse-bridge");
+
+		kill_bridge(bridge).await;
+	}
+
+	#[tokio::test]
+	async fn request_unknown_method_returns_error() {
+		let config = BridgeConfig {
+			command: "bun".into(),
+			args: vec!["run".into(), "../simse-code/bridge-server.ts".into()],
+			data_dir: String::new(),
+			timeout_ms: 10_000,
+		};
+		let mut bridge = spawn_bridge(&config).await.unwrap();
+
+		let resp = request(&mut bridge, "nonexistent", None).await.unwrap();
+		assert!(resp.error.is_some());
+		assert_eq!(resp.error.unwrap().code, -32601);
+
+		kill_bridge(bridge).await;
+	}
+
+	#[tokio::test]
+	async fn request_multiple_sequential() {
+		let config = BridgeConfig {
+			command: "bun".into(),
+			args: vec!["run".into(), "../simse-code/bridge-server.ts".into()],
+			data_dir: String::new(),
+			timeout_ms: 10_000,
+		};
+		let mut bridge = spawn_bridge(&config).await.unwrap();
+
+		for _ in 0..3 {
+			let resp = request(&mut bridge, "initialize", None).await.unwrap();
+			assert!(resp.result.is_some());
+		}
+
+		kill_bridge(bridge).await;
+	}
+
 }

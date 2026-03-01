@@ -2,3 +2,4 @@
 // Links simse-acp, simse-mcp, simse-vector, simse-vfs as library dependencies
 
 pub mod error;
+pub mod logger;

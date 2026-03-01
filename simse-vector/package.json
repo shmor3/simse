@@ -16,7 +16,10 @@
 	},
 	"scripts": {
 		"build": "bun build ./src/lib.ts --outdir ./dist --target bun && tsc --project tsconfig.build.json",
+		"build:engine": "cd engine && cargo build --release",
+		"build:engine:debug": "cd engine && cargo build",
 		"test": "bun test",
+		"test:engine": "cd engine && cargo test",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"typecheck": "bun x tsc --noEmit"

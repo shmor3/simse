@@ -1,3 +1,6 @@
+use simse_mcp_engine::rpc_server::McpRpcServer;
+use simse_mcp_engine::rpc_transport::NdjsonTransport;
+
 #[tokio::main]
 async fn main() {
 	tracing_subscriber::fmt()
@@ -8,5 +11,13 @@ async fn main() {
 		)
 		.init();
 
-	tracing::info!("simse-mcp-engine ready (placeholder)");
+	let transport = NdjsonTransport::new();
+	let mut server = McpRpcServer::new(transport);
+
+	tracing::info!("simse-mcp-engine ready");
+
+	if let Err(e) = server.run().await {
+		tracing::error!("Server error: {}", e);
+		std::process::exit(1);
+	}
 }

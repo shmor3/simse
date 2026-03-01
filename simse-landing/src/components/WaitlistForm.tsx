@@ -63,7 +63,7 @@ export default function WaitlistForm() {
 					placeholder="you@company.dev"
 					required
 					disabled={state === 'loading'}
-					className="h-14 min-w-0 flex-1 rounded-lg border border-zinc-800 bg-zinc-900 px-4 font-mono text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none disabled:opacity-50 sm:h-12 sm:rounded-none sm:border-none sm:bg-transparent"
+					className="h-14 min-w-0 flex-1 rounded-lg border border-zinc-700 bg-zinc-800/60 px-4 font-mono text-sm text-zinc-200 placeholder:text-zinc-500 focus:border-zinc-600 focus:outline-none disabled:opacity-50 sm:h-12 sm:rounded-none sm:border-none sm:bg-transparent"
 				/>
 				<button
 					type="submit"

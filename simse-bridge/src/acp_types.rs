@@ -39,8 +39,6 @@ pub struct PromptMetadata {
 	pub top_k: Option<u32>,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub stop_sequences: Vec<String>,
-	#[serde(default, skip_serializing_if = "Vec::is_empty")]
-	pub images: Vec<String>,
 }
 
 /// Result from session/prompt.
@@ -121,7 +119,6 @@ pub struct GenerateOptions {
 	pub top_p: Option<f64>,
 	pub top_k: Option<u32>,
 	pub stop_sequences: Vec<String>,
-	pub images: Vec<String>,
 }
 
 /// A streaming event from generate_stream.
@@ -184,6 +181,24 @@ impl Default for AcpServerInfo {
 			init_timeout_ms: 30_000,
 		}
 	}
+}
+
+/// A permission request from the ACP agent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionRequestParams {
+	pub session_id: String,
+	pub tool_name: String,
+	pub args: serde_json::Value,
+	pub options: Vec<PermissionOptionDef>,
+}
+
+/// An option in a permission request.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PermissionOptionDef {
+	pub id: String,
+	pub label: String,
 }
 
 #[cfg(test)]
@@ -293,7 +308,6 @@ mod tests {
 		assert!(opts.system_prompt.is_none());
 		assert!(opts.temperature.is_none());
 		assert!(opts.max_tokens.is_none());
-		assert!(opts.images.is_empty());
 	}
 
 	#[test]
@@ -341,8 +355,6 @@ mod tests {
 		assert!(json.get("topP").is_none());
 		assert!(json.get("topK").is_none());
 		assert!(json.get("stopSequences").is_none());
-		// Empty images should be skipped too
-		assert!(json.get("images").is_none());
 	}
 
 	#[test]

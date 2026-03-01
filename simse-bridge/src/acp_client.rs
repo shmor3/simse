@@ -182,10 +182,10 @@ impl AcpClient {
 		let forward_tx = event_tx.clone();
 		let forward_handle = tokio::spawn(async move {
 			while let Some(notif) = notif_rx.recv().await {
-				if let Some(event) = parse_notification(&notif) {
-					if forward_tx.send(event).is_err() {
-						break; // consumer dropped
-					}
+				if parse_notification(&notif)
+					.is_some_and(|event| forward_tx.send(event).is_err())
+				{
+					break; // consumer dropped
 				}
 			}
 		});
@@ -210,18 +210,16 @@ impl AcpClient {
 			// Process the final response
 			match resp {
 				Ok(resp) => {
-					if let Some(result_value) = resp.result {
-						if let Ok(result) =
-							serde_json::from_value::<SessionPromptResult>(result_value)
+					if let Some(Ok(result)) = resp.result.map(
+						serde_json::from_value::<SessionPromptResult>,
+					) {
+						// Send usage if available
+						if let Some(usage) =
+							result.metadata.as_ref().and_then(|m| m.usage.clone())
 						{
-							// Send usage if available
-							if let Some(ref meta) = result.metadata {
-								if let Some(ref usage) = meta.usage {
-									let _ = event_tx.send(StreamEvent::Usage(usage.clone()));
-								}
-							}
-							let _ = event_tx.send(StreamEvent::Complete(result));
+							let _ = event_tx.send(StreamEvent::Usage(usage));
 						}
+						let _ = event_tx.send(StreamEvent::Complete(result));
 					}
 				}
 				Err(e) => {
@@ -279,12 +277,11 @@ impl AcpClient {
 		// Extract embeddings from data content blocks
 		let mut embeddings = Vec::new();
 		for block in &result.content {
-			if let ContentBlock::Data { data } = block {
-				if let Some(embedding) = data.get("embedding") {
-					if let Ok(vec) = serde_json::from_value::<Vec<f32>>(embedding.clone()) {
-						embeddings.push(vec);
-					}
-				}
+			if let ContentBlock::Data { data } = block
+				&& let Some(embedding) = data.get("embedding")
+				&& let Ok(vec) = serde_json::from_value::<Vec<f32>>(embedding.clone())
+			{
+				embeddings.push(vec);
 			}
 		}
 
@@ -364,19 +361,9 @@ impl AcpClient {
 		prompt: &str,
 		options: &GenerateOptions,
 	) -> SessionPromptParams {
-		let mut content = vec![ContentBlock::Text {
+		let content = vec![ContentBlock::Text {
 			text: prompt.to_string(),
 		}];
-
-		// Add image content blocks
-		for image in &options.images {
-			content.push(ContentBlock::Data {
-				data: serde_json::json!({
-					"type": "image",
-					"url": image,
-				}),
-			});
-		}
 
 		let has_metadata = options.agent_id.is_some()
 			|| options.system_prompt.is_some()
@@ -395,7 +382,6 @@ impl AcpClient {
 				top_p: options.top_p,
 				top_k: options.top_k,
 				stop_sequences: options.stop_sequences.clone(),
-				images: Vec::new(),
 			})
 		} else {
 			None
@@ -682,7 +668,6 @@ mod tests {
 				top_p: Some(0.9),
 				top_k: Some(40),
 				stop_sequences: vec!["STOP".into()],
-				images: vec![],
 			}),
 		};
 		let json = serde_json::to_value(&params).unwrap();

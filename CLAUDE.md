@@ -5,18 +5,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-bun run build          # Bundle with Bun → dist/
-bun run typecheck      # tsc --noEmit (strict mode)
-bun run lint           # Biome check
-bun run lint:fix       # Biome check --write
-bun test               # bun test
-bun test --watch       # bun test --watch
-bun test --coverage    # bun test --coverage
+bun run build              # Bundle with Bun → dist/
+bun run typecheck          # tsc --noEmit (strict mode)
+bun run lint               # Biome check
+bun run lint:fix           # Biome check --write
+bun test                   # bun test
+bun test --watch           # bun test --watch
+bun test --coverage        # bun test --coverage
+bun run build:vector-engine  # cd simse-vector && cargo build --release
+bun run build:vfs-engine     # cd simse-vfs && cargo build --release
+cd simse-vector && cargo test  # Rust vector engine tests
+cd simse-vfs && cargo test     # Rust VFS engine tests
 ```
 
 ## Architecture
 
 simse is a modular pipeline framework for orchestrating multi-step AI workflows. It connects to AI backends via **ACP** (Agent Client Protocol), exposes tools via **MCP** (Model Context Protocol), and provides a file-backed **library** (vector store) with compression, cataloging, deduplication, recommendation, and compendium (summarization).
+
+### Repository Layout
+
+```
+src/                        # TypeScript — main package
+simse-vector/               # Pure Rust crate — vector store engine (JSON-RPC over stdio)
+simse-vfs/                  # Pure Rust crate — virtual filesystem engine (JSON-RPC over stdio)
+simse-engine/               # Pure Rust crate — core engine (unchanged)
+```
+
+The Rust crates are standalone binaries spawned as child processes by the TS client code. They communicate over JSON-RPC 2.0 / NDJSON stdio.
 
 ### Module Layout
 
@@ -31,17 +46,20 @@ src/
     chain.ts                # Chain error factories + guards
     template.ts             # Template error factories + guards
     mcp.ts                  # MCP error factories + guards
-    library.ts              # Library/Embedding/Stacks error factories + guards
+    library.ts              # Re-exports library errors from ai/library/errors.ts
     loop.ts                 # Agentic loop error factories + guards
     resilience.ts           # CircuitBreaker/Timeout error factories + guards
     tasks.ts                # Task list error factories + guards
     tools.ts                # Tool registry error factories + guards
-    vfs.ts                  # Virtual filesystem error factories + guards
+    vfs.ts                  # Re-exports VFS errors from ai/vfs/errors.ts
     index.ts                # Barrel re-export
   config/
     schema.ts               # Typed config validation (semantic-only, no runtime type guards)
     settings.ts             # AppConfig type + defineConfig()
   ai/
+    shared/
+      logger.ts             # Minimal Logger + EventBus interfaces, createNoopLogger
+                             # Shared by library/ and vfs/ (subset of root logger.ts)
     acp/
       acp-client.ts         # ACP client: generate(), generateStream(), chat(), embed()
                              # Session management: listSessions(), loadSession(), deleteSession()
@@ -93,32 +111,32 @@ src/
                              # Structured compaction: compactionPrompt override, onPreCompaction hook
       types.ts              # AgenticLoopOptions, LoopTurn, AgenticLoopResult, LoopCallbacks
       index.ts              # Barrel re-export
-    library/
+    library/                # TS client layer for the vector store (talks to simse-vector Rust engine)
+      index.ts              # Barrel re-export (public API surface)
+      client.ts             # VectorClient: JSON-RPC client spawning simse-vector engine
       library.ts            # Library (createLibrary): add/search/recommend/compendium/findDuplicates
-      stacks.ts             # Stacks (createStacks): file-backed storage with indexes + compression
-      cosine.ts             # Pure cosineSimilarity function (clamped to [-1, 1])
-      stacks-persistence.ts # IndexEntry / IndexFile types + validation guards
-      stacks-search.ts      # Advanced search with field boosting + weighted ranking
-      text-search.ts        # Text search: exact, substring, fuzzy, regex, token modes
-      preservation.ts       # Float32 base64 embedding encode/decode, gzip wrappers
-      cataloging.ts         # TopicIndex, MetadataIndex, MagnitudeCache factories
-      deduplication.ts      # checkDuplicate, findDuplicateGroups (cosine-based)
-      recommendation.ts     # WeightProfile, recency/frequency scoring, computeRecommendationScore
-      storage.ts            # StorageBackend interface (pluggable persistence)
-      patron-learning.ts    # Adaptive learning engine: query tracking, weight adaptation
+      stacks.ts             # Stacks (createStacks): async wrapper over Rust engine
       shelf.ts              # Shelf (createShelf): agent-scoped library partition
-      topic-catalog.ts      # TopicCatalog (createTopicCatalog): hierarchical topic classification
-                             # Levenshtein-based fuzzy matching, aliases, resolve/relocate/merge
       librarian.ts          # Librarian (createLibrarian, createDefaultLibrarian):
                              # extract, summarize, classifyTopic, reorganize, optimize
-                             # createDefaultLibrarian wraps ACPClient for convenience
+      librarian-definition.ts  # LibrarianDefinition validation & persistence
+      librarian-registry.ts    # Multi-librarian management
       circulation-desk.ts   # CirculationDesk (createCirculationDesk): async background queue
-                             # for extraction, compendium, and reorganization jobs
       library-services.ts   # LibraryServices middleware (createLibraryServices)
-                             # Optional CirculationDesk integration for per-turn extraction
       prompt-injection.ts   # formatMemoryContext: structured/natural memory context for prompts
+      query-dsl.ts          # Query DSL parsing (parseQuery)
+      errors.ts             # Library/Embedding/Stacks error factories + guards
       types.ts              # All library/search/deduplication/recommendation/compendium types
-                             # Shelf, TopicCatalog, Librarian, CirculationDesk interfaces
+    vfs/                    # TS client layer for the virtual filesystem (talks to simse-vfs Rust engine)
+      index.ts              # Barrel re-export (public API surface)
+      client.ts             # VFSClient: JSON-RPC client spawning simse-vfs engine
+      vfs.ts                # VirtualFS (createVirtualFS): async wrapper over Rust engine
+      vfs-disk.ts           # VFSDisk (createVFSDisk): disk commit/load operations
+      exec.ts               # VFSExecutor: command execution passthrough
+      validators.ts         # File content validators (JSON syntax, trailing whitespace, etc.)
+      path-utils.ts         # Path validation & utilities (normalizePath, validatePath, etc.)
+      errors.ts             # VFS error factories + guards
+      types.ts              # VirtualFS, VFSDirEntry, VFSReadResult, VFSWriteOptions
     tasks/
       task-list.ts          # createTaskList factory: CRUD, dependencies, blocking
       types.ts              # TaskItem, TaskStatus, TaskList, TaskCreateInput, TaskUpdateInput
@@ -131,17 +149,54 @@ src/
                              # Shelf-scoped library integration for subagent isolation
       types.ts              # ToolDefinition, ToolHandler, ToolRegistry, ToolCallRequest
       index.ts              # Barrel re-export
-    vfs/
-      vfs.ts                # createVirtualFS: in-memory filesystem sandbox
-      vfs-disk.ts           # createVFSDisk: disk-backed VFS with snapshots
-      validators.ts         # File content validators (JSON syntax, trailing whitespace, etc.)
-      types.ts              # VirtualFS, VFSDirEntry, VFSReadResult, VFSWriteOptions
-      index.ts              # Barrel re-export
   utils/
     retry.ts                # Retry with exponential backoff + jitter, AbortSignal support
     circuit-breaker.ts      # Circuit breaker pattern for fault tolerance
     health-monitor.ts       # Health monitoring with sliding window stats
     timeout.ts              # withTimeout utility for Promise-based timeouts
+
+simse-vector/               # Pure Rust crate
+  Cargo.toml
+  src/
+    lib.rs                  # Library entry point
+    main.rs                 # Binary entry point (JSON-RPC server)
+    server.rs               # JSON-RPC request dispatcher
+    transport.rs            # Stdio & HTTP transport
+    protocol.rs             # JSON-RPC protocol definitions
+    types.rs                # Protocol & internal types
+    store.rs                # Main vector store implementation
+    cosine.rs               # Cosine similarity (clamped [-1,1])
+    persistence.rs          # Float32 base64 encoding, gzip, save/load
+    cataloging.rs           # TopicIndex, MetadataIndex, MagnitudeCache
+    deduplication.rs        # Duplicate detection & clustering
+    recommendation.rs       # Scoring with recency/frequency
+    text_search.rs          # Exact/substring/fuzzy/regex/token search
+    text_cache.rs           # Text content caching (LRU)
+    inverted_index.rs       # BM25 text search indexing
+    topic_catalog.rs        # Hierarchical topic classification
+    learning.rs             # Adaptive learning engine
+    query_dsl.rs            # Query DSL parsing
+    prompt_injection.rs     # Memory context formatting
+    error.rs                # Rust error types
+  tests/
+    integration.rs          # Integration tests
+
+simse-vfs/                  # Pure Rust crate
+  Cargo.toml
+  src/
+    lib.rs                  # Library entry point
+    main.rs                 # Binary entry point (JSON-RPC server)
+    server.rs               # JSON-RPC request dispatcher
+    transport.rs            # Stdio transport
+    protocol.rs             # JSON-RPC protocol definitions
+    vfs.rs                  # Core VFS implementation
+    diff.rs                 # Diff generation
+    glob.rs                 # Glob pattern matching
+    search.rs               # File search implementation
+    path.rs                 # Path utilities
+    error.rs                # Rust error types
+  tests/
+    integration.rs          # Integration tests
 ```
 
 ### Key Patterns
@@ -151,10 +206,9 @@ src/
 - **Error hierarchy**: `createSimseError` is the base; specialized factories (`createProviderError`, `createConfigError`, `createLibraryError`, etc.) add typed `code` fields. Type guards use duck-typing on `code`.
 - **`toError(unknown)`**: Always wrap catch-block errors with `toError()` from `errors/index.js` before accessing `.message`.
 - **ESM-only**: All imports use `.js` extensions (`import { foo } from './bar.js'`). The `verbatimModuleSyntax` tsconfig flag is enabled — use `import type` for type-only imports.
-- **Write-lock serialization**: `stacks.ts` uses a promise-chain (`writeLock`) to serialize concurrent mutations (add, delete, save). Never bypass the write lock for mutating operations.
+- **Shared logger interface**: `src/ai/shared/logger.ts` defines a minimal `Logger` + `EventBus` interface used by `library/` and `vfs/`. The root `src/logger.ts` is a superset — never import the root logger from library/vfs code.
+- **Rust engine subprocess pattern**: Both `library/client.ts` and `vfs/client.ts` spawn a Rust binary as a child process, communicate over JSON-RPC 2.0 / NDJSON stdio, and handle lifecycle (spawn, health check, dispose).
 - **In-flight promise deduplication**: `load()`, `initialize()`, MCP `start()`, and MCP `connect()` use a stored promise to deduplicate concurrent callers. The pattern is: check for existing promise → create if missing → clear in `.finally()`.
-- **Crash-safe persistence**: Stacks writes `.md` content files before the index file, so the index never references non-existent files.
-- **Compressed v2 format**: On-disk embeddings use Float32 base64 (not JSON arrays). The index file is gzipped. Loading auto-detects v1 (plain JSON array) vs v2 (gzipped `{ version: 2, entries }`).
 - **Doom loop detection**: The agentic loop tracks consecutive identical tool calls (same name + JSON-stringified args). After `maxIdenticalToolCalls` (default 3), it fires `onDoomLoop` callback, publishes `loop.doom_loop` event, and injects a system warning into the conversation.
 - **Tool output truncation**: `ToolRegistryOptions.maxOutputChars` (default 50,000) caps tool output to prevent context overflow. Per-tool `ToolDefinition.maxOutputChars` overrides the registry default. Truncated output gets an `[OUTPUT TRUNCATED]` suffix.
 - **Session forking**: `SessionManager.fork(id)` creates a new session with cloned conversation state via `toJSON()`/`fromJSON()`, a fresh event bus, and new ID/timestamp.
@@ -192,20 +246,27 @@ The MCP implementation uses `@modelcontextprotocol/sdk`:
 
 ### Library System
 
-The library subsystem uses a **library analogy** throughout. It has five storage layers plus four higher-level services:
+The library subsystem uses a **library analogy** throughout. The core storage engine is implemented in Rust (`simse-vector/`), while higher-level orchestration services are in TypeScript (`src/ai/library/`).
 
-**Storage layers:**
-1. **Preservation** (`preservation.ts`): `encodeEmbedding`/`decodeEmbedding` (Float32↔base64, ~75% size reduction), `compressText`/`decompressText` (gzip wrappers).
-2. **Cataloging** (`cataloging.ts`): `createTopicIndex` (auto-extracts topics from text or uses `metadata.topic`), `createMetadataIndex` (O(1) key-value lookups), `createMagnitudeCache` (skip recomputation during search).
-3. **Deduplication** (`deduplication.ts`): `checkDuplicate` (single-entry cosine check), `findDuplicateGroups` (greedy clustering, O(N²)).
-4. **Recommendation** (`recommendation.ts`): `computeRecommendationScore` combining vector similarity + exponential recency decay + logarithmic frequency scoring with configurable `WeightProfile`.
-5. **Compendium** (`library.ts`): `compendium()` requires a `TextGenerationProvider`, condenses multiple volumes into one, optionally deletes originals.
+**Rust engine** (`simse-vector/src/`) — handles all vector operations via JSON-RPC:
+- **Store** (`store.rs`): Add, search, delete, recommend, duplicate detection, topic operations
+- **Persistence** (`persistence.rs`): Float32↔base64 encoding (~75% size reduction), gzip compression, save/load
+- **Cataloging** (`cataloging.rs`): TopicIndex, MetadataIndex, MagnitudeCache
+- **Deduplication** (`deduplication.rs`): Cosine-based duplicate detection & clustering
+- **Recommendation** (`recommendation.rs`): Vector similarity + recency decay + frequency scoring
+- **Text search** (`text_search.rs`, `inverted_index.rs`): Exact/substring/fuzzy/regex/token/BM25 modes
+- **Learning** (`learning.rs`): Adaptive weight adaptation from query feedback
 
-**Higher-level services:**
-6. **Shelf** (`shelf.ts`): Agent-scoped library partitions. `createShelf(name, library)` returns a `Shelf` that auto-tags volumes with `metadata.shelf` and filters search results to the shelf. `library.shelf(name)` caches shelves. Subagents get dedicated shelves via `subagent-tools.ts`.
-7. **TopicCatalog** (`topic-catalog.ts`): Hierarchical topic classification with Levenshtein-based fuzzy matching (threshold 0.85). `resolve()` normalizes topics, `relocate()` moves volumes, `merge()` combines sections with alias redirection. Auto-creates ancestor topics.
-8. **Librarian** (`librarian.ts`): LLM-driven extraction, summarization, classification, reorganization, and optimization. `createDefaultLibrarian(acpClient)` wraps any ACP client. `optimize()` uses `generateWithModel()` for powerful-model maintenance.
-9. **CirculationDesk** (`circulation-desk.ts`): Async job queue with auto-escalation. Dual thresholds: per-topic (default 50) and global (default 500) trigger optimization with a powerful model. Fire-and-forget error handling.
+**TypeScript client layer** (`src/ai/library/`) — orchestration and LLM integration:
+1. **Library** (`library.ts`): High-level API wrapping the Rust engine client
+2. **Stacks** (`stacks.ts`): Async wrapper spawning the Rust engine subprocess
+3. **Client** (`client.ts`): JSON-RPC transport to the Rust engine
+4. **Shelf** (`shelf.ts`): Agent-scoped library partitions. Subagents get dedicated shelves via `subagent-tools.ts`.
+5. **Librarian** (`librarian.ts`): LLM-driven extraction, summarization, classification, reorganization. `createDefaultLibrarian(acpClient)` wraps any ACP client.
+6. **LibrarianDefinition** (`librarian-definition.ts`): Validation & file-based persistence of librarian configs.
+7. **LibrarianRegistry** (`librarian-registry.ts`): Multi-librarian management with connection lifecycle.
+8. **CirculationDesk** (`circulation-desk.ts`): Async job queue with auto-escalation. Dual thresholds trigger optimization with a powerful model.
+9. **LibraryServices** (`library-services.ts`): Middleware integrating library with the agentic loop.
 
 ### Formatting
 

@@ -246,6 +246,11 @@ export { createAgenticLoop } from './ai/loop/index.js';
 // ---- MCP (Model Context Protocol) ----------------------------------------
 export type { MCPClient } from './ai/mcp/mcp-client.js';
 export { createMCPClient } from './ai/mcp/mcp-client.js';
+export type {
+	McpEngineClient,
+	McpEngineClientOptions,
+} from './ai/mcp/mcp-engine-client.js';
+export { createMcpEngineClient } from './ai/mcp/mcp-engine-client.js';
 export type { MCPServerOptions, SimseMCPServer } from './ai/mcp/mcp-server.js';
 export { createMCPServer } from './ai/mcp/mcp-server.js';
 export type {

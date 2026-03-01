@@ -70,7 +70,7 @@ export default function WaitlistForm() {
 						disabled={state === 'loading'}
 						className="h-12 w-full rounded-l-lg border border-r-0 border-zinc-700 bg-zinc-900 px-4 font-mono text-sm text-zinc-100 placeholder:text-zinc-600 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/20 disabled:opacity-50"
 					/>
-					{state === 'idle' && (
+					{state === 'idle' && !email && (
 						<span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 animate-blink font-mono text-emerald-500/60">
 							_
 						</span>

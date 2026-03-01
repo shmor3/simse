@@ -19,10 +19,10 @@
 		color: #fafafa; /* zinc-50 */
 	}
 
-	/* Monospace utility — JetBrains Mono */
-	.font-mono {
-		font-family: "JetBrains Mono", ui-monospace, "Cascadia Mono", "Fira Code", monospace;
-	}
+}
+
+@theme {
+	--font-mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", "Fira Code", monospace;
 }
 
 /* ---- Dot grid background ---- */

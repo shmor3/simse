@@ -90,7 +90,7 @@ export default function Features() {
 					{features.map((feature, i) => (
 						<article
 							key={feature.title}
-							className="group relative rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-6 transition-all duration-300 hover:border-zinc-700 hover:bg-zinc-900/80"
+							className="group relative rounded-xl border border-zinc-800/80 bg-zinc-900/50 p-6 opacity-0 animate-fade-in-up [animation-fill-mode:forwards] transition-all duration-300 hover:border-zinc-700 hover:bg-zinc-900/80"
 							style={{ animationDelay: `${i * 80}ms` }}
 						>
 							{/* Corner glow on hover */}

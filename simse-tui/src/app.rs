@@ -206,6 +206,10 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 	match msg {
 		// ── Input ────────────────────────────────────
 		AppMessage::CharInput(c) => {
+			if app.screen == Screen::Shortcuts {
+				app.screen = Screen::Chat;
+				return app;
+			}
 			if c == '?' && app.input.value.is_empty() {
 				app.screen = Screen::Shortcuts;
 			} else {
@@ -470,7 +474,7 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 // ── Command dispatch ────────────────────────────────────
 
 fn dispatch_command(mut app: App, text: &str) -> App {
-	let without_slash = &text[1..];
+	let without_slash = text.strip_prefix('/').unwrap_or(text);
 	let mut parts = without_slash.splitn(2, ' ');
 	let cmd_name = parts.next().unwrap_or("");
 	let arg = parts.next().unwrap_or("").trim();
@@ -652,11 +656,13 @@ fn render_chat_area(app: &App, frame: &mut Frame, area: Rect) {
 		lines.extend(tc_lines);
 	}
 
-	// Calculate scroll: we scroll from the bottom.
+	// Calculate scroll: offset 0 = pinned to bottom (latest content visible).
+	// scroll_offset increases as user scrolls up (away from bottom).
 	let visible_height = area.height as usize;
 	let total_lines = lines.len();
 	let max_scroll = total_lines.saturating_sub(visible_height);
-	let scroll = app.scroll_offset.min(max_scroll) as u16;
+	let clamped_offset = app.scroll_offset.min(max_scroll);
+	let scroll = max_scroll.saturating_sub(clamped_offset) as u16;
 
 	let chat = Paragraph::new(lines)
 		.wrap(Wrap { trim: false })
@@ -685,8 +691,10 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
 		.block(Block::default().borders(Borders::ALL).title("Input"));
 	frame.render_widget(input_widget, area);
 
-	// Cursor position
-	let cursor_x = area.x + 1 + app.input.cursor as u16;
+	// Cursor position (clamped to input area width).
+	let cursor_x = area.x.saturating_add(1).saturating_add(
+		(app.input.cursor as u16).min(area.width.saturating_sub(2)),
+	);
 	let cursor_y = area.y + 1;
 	frame.set_cursor_position((cursor_x, cursor_y));
 }
@@ -785,7 +793,7 @@ fn render_status_line(app: &App, width: u16) -> Line<'static> {
 	}
 	let right = stats.join(sep);
 
-	let gap = (width as usize).saturating_sub(left.len() + right.len() + 2);
+	let gap = (width as usize).saturating_sub(left.chars().count() + right.chars().count() + 2);
 	let full = format!(" {left}{}{right} ", " ".repeat(gap));
 
 	Line::from(Span::styled(
@@ -1022,6 +1030,15 @@ mod tests {
 		app = update(app, AppMessage::CharInput('?'));
 		assert_eq!(app.screen, Screen::Chat);
 		assert!(app.input.value.contains('?'));
+	}
+
+	#[test]
+	fn any_key_dismisses_shortcuts() {
+		let mut app = App::new();
+		app.screen = Screen::Shortcuts;
+		app = update(app, AppMessage::CharInput('a'));
+		assert_eq!(app.screen, Screen::Chat);
+		assert!(app.input.value.is_empty()); // key should NOT be inserted
 	}
 
 	#[test]

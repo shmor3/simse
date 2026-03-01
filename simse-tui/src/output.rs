@@ -108,6 +108,23 @@ fn render_tool_call(tc: &ToolCallState) -> Vec<Line<'static>> {
 		]));
 	}
 
+	// Diff lines if present.
+	if let Some(ref diff) = tc.diff {
+		for line in diff.lines() {
+			let color = if line.starts_with('+') {
+				Color::Green
+			} else if line.starts_with('-') {
+				Color::Red
+			} else {
+				Color::DarkGray
+			};
+			lines.push(Line::from(vec![
+				Span::raw("  "),
+				Span::styled(line.to_string(), Style::default().fg(color)),
+			]));
+		}
+	}
+
 	lines
 }
 
@@ -185,6 +202,23 @@ mod tests {
 			text: "info msg".into(),
 		});
 		assert!(!lines.is_empty());
+	}
+
+	#[test]
+	fn render_tool_call_with_diff() {
+		let tc = ToolCallState {
+			id: "1".into(),
+			name: "write_file".into(),
+			args: "{}".into(),
+			status: ToolCallStatus::Completed,
+			started_at: 0,
+			duration_ms: Some(50),
+			summary: Some("Wrote file".into()),
+			error: None,
+			diff: Some("+added line\n-removed line\n context".into()),
+		};
+		let lines = render_output_item(&OutputItem::ToolCall(tc));
+		assert!(lines.len() >= 5); // name + summary + 3 diff lines
 	}
 
 	#[test]

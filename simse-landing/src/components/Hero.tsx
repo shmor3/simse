@@ -23,8 +23,8 @@ export default function Hero() {
         style={{ animationDelay: "300ms" }}
       >
         Use any ACP | MCP. Context carries over. Preferences stick.
-        <br className="hidden sm:block" />
-        {" "}An assistant that actually gets better the more you use it.
+        <br />
+        An assistant that actually gets better the more you use it.
       </p>
       <div
         className="animate-fade-in-up mt-10 w-full max-w-lg"

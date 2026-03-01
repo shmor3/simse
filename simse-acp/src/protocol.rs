@@ -13,7 +13,7 @@ pub const ACP_ERROR: i32 = -32000;
 // JSON-RPC 2.0 framing
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JsonRpcRequest {
 	pub id: u64,
 	pub method: String,

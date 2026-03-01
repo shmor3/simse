@@ -4,6 +4,7 @@
 //! Communication via stdin/stdout NDJSON.
 
 pub mod client;
-pub mod protocol;
 pub mod config;
+pub mod json_io;
+pub mod protocol;
 pub mod storage;

@@ -33,6 +33,12 @@ pub struct PromptMetadata {
 	pub temperature: Option<f64>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub max_tokens: Option<u32>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub top_p: Option<f64>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub top_k: Option<u32>,
+	#[serde(default, skip_serializing_if = "Vec::is_empty")]
+	pub stop_sequences: Vec<String>,
 	#[serde(default, skip_serializing_if = "Vec::is_empty")]
 	pub images: Vec<String>,
 }
@@ -112,6 +118,9 @@ pub struct GenerateOptions {
 	pub system_prompt: Option<String>,
 	pub temperature: Option<f64>,
 	pub max_tokens: Option<u32>,
+	pub top_p: Option<f64>,
+	pub top_k: Option<u32>,
+	pub stop_sequences: Vec<String>,
 	pub images: Vec<String>,
 }
 
@@ -131,6 +140,11 @@ pub enum StreamEvent {
 	},
 	Complete(SessionPromptResult),
 	Usage(TokenUsage),
+	/// Transport or protocol error encountered during streaming.
+	///
+	/// Sent before the channel closes so consumers can distinguish a clean
+	/// end-of-stream from a failure.
+	Error(String),
 }
 
 /// Result from a generate (non-streaming) call.
@@ -324,8 +338,38 @@ mod tests {
 		assert!(json.get("systemPrompt").is_none());
 		assert!(json.get("temperature").is_none());
 		assert!(json.get("maxTokens").is_none());
+		assert!(json.get("topP").is_none());
+		assert!(json.get("topK").is_none());
+		assert!(json.get("stopSequences").is_none());
 		// Empty images should be skipped too
 		assert!(json.get("images").is_none());
+	}
+
+	#[test]
+	fn prompt_metadata_with_sampling_params_deserializes() {
+		let json = r#"{
+			"temperature": 0.8,
+			"topP": 0.95,
+			"topK": 40,
+			"stopSequences": ["STOP", "END"],
+			"maxTokens": 2048
+		}"#;
+		let meta: PromptMetadata = serde_json::from_str(json).unwrap();
+		assert_eq!(meta.temperature, Some(0.8));
+		assert_eq!(meta.top_p, Some(0.95));
+		assert_eq!(meta.top_k, Some(40));
+		assert_eq!(meta.stop_sequences, vec!["STOP", "END"]);
+		assert_eq!(meta.max_tokens, Some(2048));
+	}
+
+	#[test]
+	fn prompt_metadata_sampling_params_default_when_absent() {
+		let json = r#"{"temperature": 0.5}"#;
+		let meta: PromptMetadata = serde_json::from_str(json).unwrap();
+		assert_eq!(meta.temperature, Some(0.5));
+		assert!(meta.top_p.is_none());
+		assert!(meta.top_k.is_none());
+		assert!(meta.stop_sequences.is_empty());
 	}
 
 	#[test]

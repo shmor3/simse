@@ -177,6 +177,19 @@ impl AcpClient {
 
 		let bridge = Arc::clone(&self.bridge);
 
+		// Spawn a concurrent task that progressively forwards notifications
+		// to StreamEvents as they arrive (not buffered until request completes).
+		let forward_tx = event_tx.clone();
+		let forward_handle = tokio::spawn(async move {
+			while let Some(notif) = notif_rx.recv().await {
+				if let Some(event) = parse_notification(&notif) {
+					if forward_tx.send(event).is_err() {
+						break; // consumer dropped
+					}
+				}
+			}
+		});
+
 		// Spawn a task that drives the streaming request
 		tokio::spawn(async move {
 			let mut guard = bridge.lock().await;
@@ -187,15 +200,12 @@ impl AcpClient {
 				notif_tx,
 			)
 			.await;
-			// Release the lock before processing
+			// Release the lock so other operations can proceed
 			drop(guard);
 
-			// Drain any notifications that arrived
-			while let Ok(notif) = notif_rx.try_recv() {
-				if let Some(event) = parse_notification(&notif) {
-					let _ = event_tx.send(event);
-				}
-			}
+			// Wait for the forwarding task to finish draining any remaining
+			// notifications (it will end once notif_tx is dropped above).
+			let _ = forward_handle.await;
 
 			// Process the final response
 			match resp {
@@ -214,8 +224,8 @@ impl AcpClient {
 						}
 					}
 				}
-				Err(_) => {
-					// Channel will close, signaling end of stream
+				Err(e) => {
+					let _ = event_tx.send(StreamEvent::Error(e.to_string()));
 				}
 			}
 		});
@@ -225,33 +235,28 @@ impl AcpClient {
 
 	/// Generate embeddings for a list of texts.
 	///
-	/// Sends a `session/prompt` with data content blocks containing the texts
-	/// and an optional model specification.
+	/// Sends a `session/prompt` with a single data content block containing
+	/// the embed action, texts array, and optional model name.
 	pub async fn embed(
 		&self,
 		session_id: &str,
 		texts: &[String],
 		model: Option<&str>,
 	) -> Result<EmbedResult, AcpError> {
-		let content: Vec<ContentBlock> = texts
-			.iter()
-			.map(|t| ContentBlock::Data {
-				data: serde_json::json!({
-					"type": "embed",
-					"text": t,
-				}),
-			})
-			.collect();
-
-		let mut metadata = PromptMetadata::default();
+		let mut data = serde_json::json!({
+			"action": "embed",
+			"texts": texts,
+		});
 		if let Some(m) = model {
-			metadata.agent_id = Some(m.to_string());
+			data["model"] = serde_json::Value::String(m.to_string());
 		}
+
+		let content = vec![ContentBlock::Data { data }];
 
 		let params = SessionPromptParams {
 			session_id: session_id.to_string(),
 			content,
-			metadata: Some(metadata),
+			metadata: None,
 		};
 		let params_value = serde_json::to_value(&params)?;
 
@@ -373,16 +378,23 @@ impl AcpClient {
 			});
 		}
 
-		let metadata = if options.agent_id.is_some()
+		let has_metadata = options.agent_id.is_some()
 			|| options.system_prompt.is_some()
 			|| options.temperature.is_some()
 			|| options.max_tokens.is_some()
-		{
+			|| options.top_p.is_some()
+			|| options.top_k.is_some()
+			|| !options.stop_sequences.is_empty();
+
+		let metadata = if has_metadata {
 			Some(PromptMetadata {
 				agent_id: options.agent_id.clone(),
 				system_prompt: options.system_prompt.clone(),
 				temperature: options.temperature,
 				max_tokens: options.max_tokens,
+				top_p: options.top_p,
+				top_k: options.top_k,
+				stop_sequences: options.stop_sequences.clone(),
 				images: Vec::new(),
 			})
 		} else {
@@ -667,6 +679,9 @@ mod tests {
 				system_prompt: Some("You are helpful".into()),
 				temperature: Some(0.7),
 				max_tokens: Some(1000),
+				top_p: Some(0.9),
+				top_k: Some(40),
+				stop_sequences: vec!["STOP".into()],
 				images: vec![],
 			}),
 		};
@@ -676,6 +691,9 @@ mod tests {
 		assert_eq!(meta["systemPrompt"], "You are helpful");
 		assert_eq!(meta["temperature"], 0.7);
 		assert_eq!(meta["maxTokens"], 1000);
+		assert_eq!(meta["topP"], 0.9);
+		assert_eq!(meta["topK"], 40);
+		assert_eq!(meta["stopSequences"][0], "STOP");
 	}
 
 	#[test]
@@ -716,5 +734,99 @@ mod tests {
 		assert_eq!(result.embeddings.len(), 2);
 		assert_eq!(result.embeddings[0], vec![0.1, 0.2, 0.3]);
 		assert_eq!(result.prompt_tokens, 42);
+	}
+
+	#[test]
+	fn stream_event_error_variant() {
+		let event = StreamEvent::Error("connection lost".into());
+		match event {
+			StreamEvent::Error(msg) => assert_eq!(msg, "connection lost"),
+			_ => panic!("Expected Error event"),
+		}
+	}
+
+	#[test]
+	fn embed_data_block_format_without_model() {
+		// Simulate what the embed method builds: a single data block with
+		// action + texts, no agent_id in metadata
+		let texts = vec!["hello".to_string(), "world".to_string()];
+		let data = serde_json::json!({
+			"action": "embed",
+			"texts": texts,
+		});
+		let content = vec![ContentBlock::Data { data }];
+		let params = SessionPromptParams {
+			session_id: "s1".into(),
+			content,
+			metadata: None,
+		};
+		let json = serde_json::to_value(&params).unwrap();
+		// metadata should be absent
+		assert!(json.get("metadata").is_none());
+		// data block should contain action and texts
+		let block = &json["content"][0];
+		assert_eq!(block["data"]["action"], "embed");
+		assert_eq!(block["data"]["texts"][0], "hello");
+		assert_eq!(block["data"]["texts"][1], "world");
+		// model should not be present
+		assert!(block["data"].get("model").is_none());
+	}
+
+	#[test]
+	fn embed_data_block_format_with_model() {
+		let texts = vec!["hello".to_string()];
+		let mut data = serde_json::json!({
+			"action": "embed",
+			"texts": texts,
+		});
+		data["model"] = serde_json::Value::String("text-embedding-3-small".into());
+		let content = vec![ContentBlock::Data { data }];
+		let params = SessionPromptParams {
+			session_id: "s1".into(),
+			content,
+			metadata: None,
+		};
+		let json = serde_json::to_value(&params).unwrap();
+		let block = &json["content"][0];
+		assert_eq!(block["data"]["action"], "embed");
+		assert_eq!(block["data"]["model"], "text-embedding-3-small");
+		assert_eq!(block["data"]["texts"][0], "hello");
+		// No metadata with agent_id
+		assert!(json.get("metadata").is_none());
+	}
+
+	#[test]
+	fn prompt_metadata_sampling_params_serialize() {
+		let meta = PromptMetadata {
+			temperature: Some(0.5),
+			top_p: Some(0.95),
+			top_k: Some(50),
+			stop_sequences: vec!["END".into(), "STOP".into()],
+			..Default::default()
+		};
+		let json = serde_json::to_value(&meta).unwrap();
+		assert_eq!(json["temperature"], 0.5);
+		assert_eq!(json["topP"], 0.95);
+		assert_eq!(json["topK"], 50);
+		assert_eq!(json["stopSequences"][0], "END");
+		assert_eq!(json["stopSequences"][1], "STOP");
+	}
+
+	#[test]
+	fn prompt_metadata_sampling_params_skip_empty() {
+		let meta = PromptMetadata::default();
+		let json = serde_json::to_value(&meta).unwrap();
+		// New fields should also be skipped when None/empty
+		assert!(json.get("topP").is_none());
+		assert!(json.get("topK").is_none());
+		assert!(json.get("stopSequences").is_none());
+	}
+
+	#[test]
+	fn generate_options_new_fields_default() {
+		let opts = GenerateOptions::default();
+		assert!(opts.top_p.is_none());
+		assert!(opts.top_k.is_none());
+		assert!(opts.stop_sequences.is_empty());
 	}
 }

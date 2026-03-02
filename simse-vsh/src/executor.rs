@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::time::Instant;
 
+use tokio::io::AsyncReadExt;
+
 use crate::error::VshError;
 
 /// Default shell for command execution.
@@ -22,10 +24,23 @@ pub struct ExecResult {
 	pub duration_ms: u64,
 }
 
+/// Apply output truncation to stdout and stderr if they exceed the limit.
+fn truncate_output(output: &mut String, max_bytes: usize) {
+	if output.len() > max_bytes {
+		let total = output.len();
+		output.truncate(max_bytes);
+		output.push_str(&format!(
+			"\n[truncated: {} bytes total, showing first {}]",
+			total, max_bytes
+		));
+	}
+}
+
 /// Execute a shell command with the given parameters.
 ///
 /// Spawns a real OS process using tokio, applies env/cwd, enforces timeout,
 /// and truncates output if it exceeds max_output_bytes.
+/// On timeout, the child process is explicitly killed to prevent orphans.
 pub async fn execute_command(
 	command: &str,
 	cwd: &Path,
@@ -38,73 +53,67 @@ pub async fn execute_command(
 	let start = Instant::now();
 	let duration = std::time::Duration::from_millis(timeout_ms);
 
-	let process_future = async {
-		let mut cmd = tokio::process::Command::new(shell);
-		cmd.arg("-c").arg(command).current_dir(cwd);
+	let mut cmd = tokio::process::Command::new(shell);
+	cmd.arg("-c").arg(command).current_dir(cwd);
 
-		// Apply environment variables (overlay on inherited env)
-		for (key, value) in env {
-			cmd.env(key, value);
+	// Apply environment variables (overlay on inherited env)
+	for (key, value) in env {
+		cmd.env(key, value);
+	}
+
+	// If stdin is provided, pipe it
+	if stdin_input.is_some() {
+		cmd.stdin(std::process::Stdio::piped());
+	}
+
+	cmd.stdout(std::process::Stdio::piped());
+	cmd.stderr(std::process::Stdio::piped());
+
+	let mut child = cmd.spawn().map_err(|e| {
+		VshError::ExecutionFailed(format!("Failed to spawn shell: {}", e))
+	})?;
+
+	// Write stdin if provided, then drop to signal EOF
+	if let Some(input) = stdin_input {
+		use tokio::io::AsyncWriteExt;
+		if let Some(mut stdin) = child.stdin.take() {
+			stdin.write_all(input.as_bytes()).await.map_err(|e| {
+				VshError::ExecutionFailed(format!("Failed to write stdin: {}", e))
+			})?;
+		}
+	}
+
+	// Take stdout/stderr handles so we can read them while retaining &mut child
+	let mut child_stdout = child.stdout.take();
+	let mut child_stderr = child.stderr.take();
+
+	let read_and_wait = async {
+		let mut stdout_buf = Vec::new();
+		let mut stderr_buf = Vec::new();
+
+		if let Some(ref mut out) = child_stdout {
+			out.read_to_end(&mut stdout_buf).await.ok();
+		}
+		if let Some(ref mut err) = child_stderr {
+			err.read_to_end(&mut stderr_buf).await.ok();
 		}
 
-		// If stdin is provided, pipe it
-		if stdin_input.is_some() {
-			cmd.stdin(std::process::Stdio::piped());
-		}
-
-		cmd.stdout(std::process::Stdio::piped());
-		cmd.stderr(std::process::Stdio::piped());
-
-		let mut child = cmd.spawn().map_err(|e| {
-			VshError::ExecutionFailed(format!("Failed to spawn shell: {}", e))
-		})?;
-
-		// Write stdin if provided
-		if let Some(input) = stdin_input {
-			use tokio::io::AsyncWriteExt;
-			if let Some(mut stdin) = child.stdin.take() {
-				stdin.write_all(input.as_bytes()).await.map_err(|e| {
-					VshError::ExecutionFailed(format!("Failed to write stdin: {}", e))
-				})?;
-				// Drop stdin to signal EOF
-			}
-		}
-
-		let output = child.wait_with_output().await.map_err(|e| {
+		let status = child.wait().await.map_err(|e| {
 			VshError::ExecutionFailed(format!("Failed to wait for process: {}", e))
 		})?;
 
-		let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-		let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-		let exit_code = output.status.code().unwrap_or(-1);
-
-		Ok::<(String, String, i32), VshError>((stdout, stderr, exit_code))
+		Ok::<_, VshError>((stdout_buf, stderr_buf, status))
 	};
 
-	match tokio::time::timeout(duration, process_future).await {
-		Ok(result) => {
-			let (mut stdout, mut stderr, exit_code) = result?;
+	match tokio::time::timeout(duration, read_and_wait).await {
+		Ok(Ok((stdout_buf, stderr_buf, status))) => {
+			let mut stdout = String::from_utf8_lossy(&stdout_buf).to_string();
+			let mut stderr = String::from_utf8_lossy(&stderr_buf).to_string();
+			let exit_code = status.code().unwrap_or(-1);
 			let elapsed = start.elapsed().as_millis() as u64;
 
-			// Truncate stdout if needed
-			if stdout.len() > max_output_bytes {
-				let total = stdout.len();
-				stdout.truncate(max_output_bytes);
-				stdout.push_str(&format!(
-					"\n[truncated: {} bytes total, showing first {}]",
-					total, max_output_bytes
-				));
-			}
-
-			// Truncate stderr if needed
-			if stderr.len() > max_output_bytes {
-				let total = stderr.len();
-				stderr.truncate(max_output_bytes);
-				stderr.push_str(&format!(
-					"\n[truncated: {} bytes total, showing first {}]",
-					total, max_output_bytes
-				));
-			}
+			truncate_output(&mut stdout, max_output_bytes);
+			truncate_output(&mut stderr, max_output_bytes);
 
 			Ok(ExecResult {
 				stdout,
@@ -113,7 +122,11 @@ pub async fn execute_command(
 				duration_ms: elapsed,
 			})
 		}
+		Ok(Err(e)) => Err(e),
 		Err(_) => {
+			// Timeout: explicitly kill the child to prevent orphan processes.
+			// tokio::process::Child::Drop does NOT kill the process.
+			let _ = child.kill().await;
 			let elapsed = start.elapsed().as_millis() as u64;
 			Err(VshError::Timeout(format!(
 				"Command timed out after {}ms",
@@ -126,39 +139,63 @@ pub async fn execute_command(
 /// Execute a git command with the given arguments.
 ///
 /// Convenience wrapper that runs `git <args>` directly (no shell wrapping).
+/// On timeout, the child process is explicitly killed to prevent orphans.
 pub async fn execute_git(
 	args: &[String],
 	cwd: &Path,
 	env: &HashMap<String, String>,
 	timeout_ms: u64,
+	max_output_bytes: usize,
 ) -> Result<ExecResult, VshError> {
 	let start = Instant::now();
 	let duration = std::time::Duration::from_millis(timeout_ms);
 
-	let process_future = async {
-		let mut cmd = tokio::process::Command::new("git");
-		cmd.args(args).current_dir(cwd);
+	let mut cmd = tokio::process::Command::new("git");
+	cmd.args(args).current_dir(cwd);
 
-		// Apply environment variables
-		for (key, value) in env {
-			cmd.env(key, value);
+	cmd.stdout(std::process::Stdio::piped());
+	cmd.stderr(std::process::Stdio::piped());
+
+	// Apply environment variables
+	for (key, value) in env {
+		cmd.env(key, value);
+	}
+
+	let mut child = cmd.spawn().map_err(|e| {
+		VshError::ExecutionFailed(format!("Failed to spawn git: {}", e))
+	})?;
+
+	// Take stdout/stderr handles so we can read them while retaining &mut child
+	let mut child_stdout = child.stdout.take();
+	let mut child_stderr = child.stderr.take();
+
+	let read_and_wait = async {
+		let mut stdout_buf = Vec::new();
+		let mut stderr_buf = Vec::new();
+
+		if let Some(ref mut out) = child_stdout {
+			out.read_to_end(&mut stdout_buf).await.ok();
+		}
+		if let Some(ref mut err) = child_stderr {
+			err.read_to_end(&mut stderr_buf).await.ok();
 		}
 
-		let output = cmd.output().await.map_err(|e| {
-			VshError::ExecutionFailed(format!("Failed to spawn git: {}", e))
+		let status = child.wait().await.map_err(|e| {
+			VshError::ExecutionFailed(format!("Failed to wait for git process: {}", e))
 		})?;
 
-		let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-		let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-		let exit_code = output.status.code().unwrap_or(-1);
-
-		Ok::<(String, String, i32), VshError>((stdout, stderr, exit_code))
+		Ok::<_, VshError>((stdout_buf, stderr_buf, status))
 	};
 
-	match tokio::time::timeout(duration, process_future).await {
-		Ok(result) => {
-			let (stdout, stderr, exit_code) = result?;
+	match tokio::time::timeout(duration, read_and_wait).await {
+		Ok(Ok((stdout_buf, stderr_buf, status))) => {
+			let mut stdout = String::from_utf8_lossy(&stdout_buf).trim().to_string();
+			let mut stderr = String::from_utf8_lossy(&stderr_buf).trim().to_string();
+			let exit_code = status.code().unwrap_or(-1);
 			let elapsed = start.elapsed().as_millis() as u64;
+
+			truncate_output(&mut stdout, max_output_bytes);
+			truncate_output(&mut stderr, max_output_bytes);
 
 			Ok(ExecResult {
 				stdout,
@@ -167,7 +204,10 @@ pub async fn execute_git(
 				duration_ms: elapsed,
 			})
 		}
+		Ok(Err(e)) => Err(e),
 		Err(_) => {
+			// Timeout: explicitly kill the child to prevent orphan processes.
+			let _ = child.kill().await;
 			let elapsed = start.elapsed().as_millis() as u64;
 			Err(VshError::Timeout(format!(
 				"Git command timed out after {}ms",

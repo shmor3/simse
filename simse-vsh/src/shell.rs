@@ -103,7 +103,11 @@ impl VirtualShell {
 	}
 
 	pub fn delete_session(&mut self, id: &str) -> Result<bool, VshError> {
-		Ok(self.sessions.remove(id).is_some())
+		if self.sessions.remove(id).is_some() {
+			Ok(true)
+		} else {
+			Err(VshError::SessionNotFound(id.to_string()))
+		}
 	}
 
 	// -- Execution ------------------------------------------------------------
@@ -144,32 +148,7 @@ impl VirtualShell {
 		)
 		.await;
 
-		// Record history + update session state
-		self.total_commands += 1;
-		match &result {
-			Ok(exec_result) => {
-				let session = self.sessions.get_mut(session_id).unwrap();
-				session.last_active_at = now_ms();
-				session.history.push(HistoryEntry {
-					command: command.to_string(),
-					exit_code: exec_result.exit_code,
-					timestamp: now_ms(),
-					duration_ms: exec_result.duration_ms,
-				});
-			}
-			Err(_) => {
-				self.total_errors += 1;
-				let session = self.sessions.get_mut(session_id).unwrap();
-				session.last_active_at = now_ms();
-				session.history.push(HistoryEntry {
-					command: command.to_string(),
-					exit_code: -1,
-					timestamp: now_ms(),
-					duration_ms: 0,
-				});
-			}
-		}
-
+		self.record_history(session_id, command, &result);
 		result
 	}
 
@@ -178,7 +157,12 @@ impl VirtualShell {
 		session_id: &str,
 		args: &[String],
 		timeout_ms: Option<u64>,
+		max_output_bytes: Option<usize>,
 	) -> Result<ExecResult, VshError> {
+		// Validate git command against blocked patterns
+		let command_str = format!("git {}", args.join(" "));
+		self.sandbox.check_command(&command_str)?;
+
 		let session = self
 			.sessions
 			.get(session_id)
@@ -187,35 +171,11 @@ impl VirtualShell {
 		let cwd = session.cwd.clone();
 		let env = session.env.clone();
 		let timeout = timeout_ms.unwrap_or(self.sandbox.default_timeout_ms);
+		let max_out = max_output_bytes.unwrap_or(self.sandbox.max_output_bytes);
 
-		let result = executor::execute_git(args, &cwd, &env, timeout).await;
+		let result = executor::execute_git(args, &cwd, &env, timeout, max_out).await;
 
-		self.total_commands += 1;
-		let command_str = format!("git {}", args.join(" "));
-		match &result {
-			Ok(exec_result) => {
-				let session = self.sessions.get_mut(session_id).unwrap();
-				session.last_active_at = now_ms();
-				session.history.push(HistoryEntry {
-					command: command_str,
-					exit_code: exec_result.exit_code,
-					timestamp: now_ms(),
-					duration_ms: exec_result.duration_ms,
-				});
-			}
-			Err(_) => {
-				self.total_errors += 1;
-				let session = self.sessions.get_mut(session_id).unwrap();
-				session.last_active_at = now_ms();
-				session.history.push(HistoryEntry {
-					command: command_str,
-					exit_code: -1,
-					timestamp: now_ms(),
-					duration_ms: 0,
-				});
-			}
-		}
-
+		self.record_history(session_id, &command_str, &result);
 		result
 	}
 
@@ -356,6 +316,39 @@ impl VirtualShell {
 	}
 
 	// -- Private helpers ------------------------------------------------------
+
+	/// Record a command execution in the session's history and update metrics.
+	fn record_history(
+		&mut self,
+		session_id: &str,
+		command: &str,
+		result: &Result<ExecResult, VshError>,
+	) {
+		self.total_commands += 1;
+		match result {
+			Ok(exec_result) => {
+				let session = self.sessions.get_mut(session_id).unwrap();
+				session.last_active_at = now_ms();
+				session.history.push(HistoryEntry {
+					command: command.to_string(),
+					exit_code: exec_result.exit_code,
+					timestamp: now_ms(),
+					duration_ms: exec_result.duration_ms,
+				});
+			}
+			Err(_) => {
+				self.total_errors += 1;
+				let session = self.sessions.get_mut(session_id).unwrap();
+				session.last_active_at = now_ms();
+				session.history.push(HistoryEntry {
+					command: command.to_string(),
+					exit_code: -1,
+					timestamp: now_ms(),
+					duration_ms: 0,
+				});
+			}
+		}
+	}
 
 	fn resolve_alias(&self, session_id: &str, command: &str) -> String {
 		if let Some(session) = self.sessions.get(session_id) {

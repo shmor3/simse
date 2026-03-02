@@ -23,5 +23,4 @@ tokio = { version = "1", features = ["process", "time", "rt-multi-thread", "macr
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
-serde_json = "1"
 tempfile = "3"

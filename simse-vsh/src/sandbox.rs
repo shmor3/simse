@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use crate::error::VshError;
 
@@ -28,21 +28,35 @@ impl Default for SandboxConfig {
 
 impl SandboxConfig {
 	/// Validate that a path is within the sandbox root or allowed paths.
+	///
+	/// Uses `std::fs::canonicalize()` to resolve symlinks and `..` sequences,
+	/// preventing sandbox escapes via path traversal.
 	pub fn validate_cwd(&self, path: &Path) -> Result<PathBuf, VshError> {
-		let canonical = if path.is_absolute() {
+		let joined = if path.is_absolute() {
 			path.to_path_buf()
 		} else {
 			self.root_directory.join(path)
 		};
 
+		// Canonicalize the input path to resolve symlinks and ".." sequences.
+		// If the path does not exist on disk, canonicalize will fail —
+		// fall back to a lexical normalization that still strips "..".
+		let canonical = std::fs::canonicalize(&joined).unwrap_or_else(|_| normalize_path(&joined));
+
+		// Canonicalize the root directory for consistent comparison.
+		let canonical_root = std::fs::canonicalize(&self.root_directory)
+			.unwrap_or_else(|_| normalize_path(&self.root_directory));
+
 		// Check if the path is within root_directory
-		if canonical.starts_with(&self.root_directory) {
+		if canonical.starts_with(&canonical_root) {
 			return Ok(canonical);
 		}
 
-		// Check allowed paths
+		// Check allowed paths (also canonicalized)
 		for allowed in &self.allowed_paths {
-			if canonical.starts_with(allowed) {
+			let canonical_allowed =
+				std::fs::canonicalize(allowed).unwrap_or_else(|_| normalize_path(allowed));
+			if canonical.starts_with(&canonical_allowed) {
 				return Ok(canonical);
 			}
 		}
@@ -66,4 +80,21 @@ impl SandboxConfig {
 		}
 		Ok(())
 	}
+}
+
+/// Lexically normalize a path by resolving `.` and `..` components without
+/// touching the filesystem. Used as a fallback when `std::fs::canonicalize`
+/// fails (e.g. path does not exist yet).
+fn normalize_path(path: &Path) -> PathBuf {
+	let mut out = PathBuf::new();
+	for component in path.components() {
+		match component {
+			Component::ParentDir => {
+				out.pop();
+			}
+			Component::CurDir => {}
+			other => out.push(other),
+		}
+	}
+	out
 }

@@ -223,7 +223,7 @@ impl VshServer {
 		let sh = self.shell.as_mut().ok_or(VshError::NotInitialized)?;
 
 		let result = sh
-			.exec_git_in_session(&p.session_id, &p.args, p.timeout_ms)
+			.exec_git_in_session(&p.session_id, &p.args, p.timeout_ms, p.max_output_bytes)
 			.await?;
 
 		Ok(serde_json::to_value(ExecResultResponse {
@@ -269,13 +269,9 @@ fn parse_params<T: serde::de::DeserializeOwned>(
 	serde_json::from_value(params).map_err(|e| VshError::InvalidParams(e.to_string()))
 }
 
-fn handle_session_create(
-	sh: &mut VirtualShell,
-	params: serde_json::Value,
-) -> Result<serde_json::Value, VshError> {
-	let p: SessionCreateParams = parse_params(params)?;
-	let session = sh.create_session(p.name, p.cwd, p.env)?;
-	Ok(serde_json::to_value(SessionInfo {
+/// Map a `ShellSession` to a `SessionInfo` response.
+fn session_to_info(session: &crate::shell::ShellSession) -> SessionInfo {
+	SessionInfo {
 		id: session.id.clone(),
 		name: session.name.clone(),
 		cwd: session.cwd.display().to_string(),
@@ -284,7 +280,16 @@ fn handle_session_create(
 		created_at: session.created_at,
 		last_active_at: session.last_active_at,
 		command_count: session.history.len(),
-	})?)
+	}
+}
+
+fn handle_session_create(
+	sh: &mut VirtualShell,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VshError> {
+	let p: SessionCreateParams = parse_params(params)?;
+	let session = sh.create_session(p.name, p.cwd, p.env)?;
+	Ok(serde_json::to_value(session_to_info(session))?)
 }
 
 fn handle_session_get(
@@ -293,16 +298,7 @@ fn handle_session_get(
 ) -> Result<serde_json::Value, VshError> {
 	let p: SessionIdParams = parse_params(params)?;
 	let session = sh.get_session(&p.session_id)?;
-	Ok(serde_json::to_value(SessionInfo {
-		id: session.id.clone(),
-		name: session.name.clone(),
-		cwd: session.cwd.display().to_string(),
-		env: session.env.clone(),
-		aliases: session.aliases.clone(),
-		created_at: session.created_at,
-		last_active_at: session.last_active_at,
-		command_count: session.history.len(),
-	})?)
+	Ok(serde_json::to_value(session_to_info(session))?)
 }
 
 fn handle_session_list(sh: &VirtualShell, _params: serde_json::Value) -> Result<serde_json::Value, VshError> {

@@ -80,6 +80,7 @@ pub struct ExecGitParams {
 	pub session_id: String,
 	pub args: Vec<String>,
 	pub timeout_ms: Option<u64>,
+	pub max_output_bytes: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]

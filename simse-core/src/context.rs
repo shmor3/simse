@@ -12,6 +12,8 @@ use crate::library::Library;
 use crate::logger::Logger;
 use crate::server::session::SessionManager;
 use crate::tasks::TaskList;
+use crate::tools::registry::ToolRegistry;
+use crate::tools::types::ToolRegistryOptions;
 use crate::vfs::VirtualFs;
 
 /// Top-level application context tying together shared infrastructure.
@@ -38,6 +40,7 @@ pub struct CoreContext {
 	pub task_list: TaskList,
 	pub hook_system: HookSystem,
 	pub session_manager: SessionManager,
+	pub tool_registry: ToolRegistry,
 	pub library: Option<Library>,
 	pub vfs: Option<VirtualFs>,
 }
@@ -50,6 +53,7 @@ impl CoreContext {
 	/// - Task list: default options (max 100 tasks)
 	/// - Hook system: empty
 	/// - Session manager: empty
+	/// - Tool registry: default options (50,000 char output limit)
 	/// - Library and VFS: `None` (attach later via builder methods)
 	pub fn new(config: AppConfig) -> Self {
 		Self {
@@ -59,6 +63,7 @@ impl CoreContext {
 			task_list: TaskList::new(None),
 			hook_system: HookSystem::new(),
 			session_manager: SessionManager::new(),
+			tool_registry: ToolRegistry::new(ToolRegistryOptions::default()),
 			library: None,
 			vfs: None,
 		}

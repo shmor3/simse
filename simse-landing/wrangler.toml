@@ -3,6 +3,6 @@ pages_build_output_dir = "./dist"
 compatibility_date = "2026-02-28"
 
 [[d1_databases]]
-binding = "DB"
-database_name = "simse-waitlist"
-database_id = "placeholder"
+binding = "simse_waitlist"
+database_name = "simse_waitlist"
+database_id = "3e482f1d-8f2e-460e-b2e9-621da7a95fcb"

@@ -11,7 +11,9 @@ use crate::rpc_protocol::*;
 use crate::rpc_transport::NdjsonTransport;
 use crate::server::session::{SessionInfo, SessionStatus};
 use crate::tasks::{TaskCreateInput, TaskStatus, TaskUpdateInput};
-use crate::tools::types::{ToolCallRequest, ToolCallResult};
+use crate::tools::types::{
+	ToolCallRequest, ToolCallResult, ToolDefinition, ToolHandler, ToolParameter,
+};
 
 pub struct CoreRpcServer {
 	transport: NdjsonTransport,
@@ -22,6 +24,8 @@ pub struct CoreRpcServer {
 		Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>>,
 	hook_unsubscribers: Arc<Mutex<HashMap<String, Box<dyn Fn() + Send>>>>,
 	next_hook_id: Arc<Mutex<u64>>,
+	pending_tool_calls:
+		Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>>,
 }
 
 impl CoreRpcServer {
@@ -34,6 +38,7 @@ impl CoreRpcServer {
 			pending_hook_calls: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
 			hook_unsubscribers: Arc::new(Mutex::new(HashMap::new())),
 			next_hook_id: Arc::new(Mutex::new(0)),
+			pending_tool_calls: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
 		}
 	}
 
@@ -107,6 +112,17 @@ impl CoreRpcServer {
 			"hook/unregister" => self.handle_hook_unregister(req).await,
 			"hook/result" => self.handle_hook_result(req).await,
 
+			// -- Tools ---------------------------------------------------
+			"tool/register" => self.handle_tool_register(req).await,
+			"tool/unregister" => self.handle_tool_unregister(req).await,
+			"tool/list" => self.handle_tool_list(req).await,
+			"tool/execute" => self.handle_tool_execute(req).await,
+			"tool/batchExecute" => self.handle_tool_batch_execute(req).await,
+			"tool/parse" => self.handle_tool_parse(req).await,
+			"tool/formatSystemPrompt" => self.handle_tool_format_system_prompt(req).await,
+			"tool/metrics" => self.handle_tool_metrics(req).await,
+			"tool/result" => self.handle_tool_result(req).await,
+
 			// -- Unknown -------------------------------------------------
 			_ => self.transport.write_error(
 				req.id,
@@ -128,6 +144,15 @@ impl CoreRpcServer {
 	) -> &Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>>
 	{
 		&self.pending_hook_calls
+	}
+
+	/// Expose pending tool calls for testing.
+	#[doc(hidden)]
+	pub fn pending_tool_calls(
+		&self,
+	) -> &Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>>
+	{
+		&self.pending_tool_calls
 	}
 
 	#[allow(dead_code)]
@@ -1342,6 +1367,340 @@ impl CoreRpcServer {
 		self.transport.write_response(req.id, serde_json::json!({}));
 	}
 
+	// ── Tool handlers ───────────────────────────────────────────────────
+
+	async fn handle_tool_register(&mut self, req: JsonRpcRequest) {
+		let ctx = match self.context.as_mut() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ToolRegisterParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		// Parse inputSchema into HashMap<String, ToolParameter>
+		let parameters = parse_input_schema(&params.input_schema);
+
+		let definition = ToolDefinition {
+			name: params.name.clone(),
+			description: params.description,
+			parameters,
+			category: Default::default(),
+			annotations: None,
+			timeout_ms: None,
+			max_output_chars: params.max_output_chars,
+		};
+
+		// Build a CallbackToolHandler — sends `tool/call` notification and waits
+		// for `tool/result` via pending_tool_calls oneshot channel.
+		let pending = Arc::clone(&self.pending_tool_calls);
+		let tool_name = params.name.clone();
+
+		let handler: ToolHandler = Arc::new(move |args: serde_json::Value| {
+			let pending = Arc::clone(&pending);
+			let tool_name = tool_name.clone();
+			Box::pin(async move {
+				let request_id = uuid::Uuid::new_v4().to_string();
+				let (tx, rx) = tokio::sync::oneshot::channel();
+
+				// Store the sender
+				{
+					let mut map = pending.lock().await;
+					map.insert(request_id.clone(), tx);
+				}
+
+				// Send notification to TS
+				let transport = NdjsonTransport::new();
+				transport.write_notification(
+					"tool/call",
+					serde_json::json!({
+						"requestId": request_id,
+						"name": &tool_name,
+						"args": &args,
+					}),
+				);
+
+				// Wait for result with 60s timeout
+				match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
+					Ok(Ok(result)) => {
+						let is_error = result
+							.get("isError")
+							.and_then(|v| v.as_bool())
+							.unwrap_or(false);
+						let output = result
+							.get("output")
+							.and_then(|v| v.as_str())
+							.unwrap_or("")
+							.to_string();
+						if is_error {
+							Err(crate::error::SimseError::tool(
+								crate::error::ToolErrorCode::ExecutionFailed,
+								output,
+							))
+						} else {
+							Ok(output)
+						}
+					}
+					Ok(Err(_)) => {
+						// Channel closed
+						Err(crate::error::SimseError::tool(
+							crate::error::ToolErrorCode::ExecutionFailed,
+							format!("Tool callback channel closed for '{}'", tool_name),
+						))
+					}
+					Err(_) => {
+						// Timeout — clean up
+						let mut map = pending.lock().await;
+						map.remove(&request_id);
+						Err(crate::error::SimseError::tool(
+							crate::error::ToolErrorCode::Timeout,
+							format!("Tool callback timed out (60s) for '{}'", tool_name),
+						))
+					}
+				}
+			})
+		});
+
+		ctx.tool_registry.register(definition, handler);
+		self.transport.write_response(req.id, serde_json::json!({}));
+	}
+
+	async fn handle_tool_unregister(&mut self, req: JsonRpcRequest) {
+		let ctx = match self.context.as_mut() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ToolNameParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let removed = ctx.tool_registry.unregister(&params.name);
+		self.transport
+			.write_response(req.id, serde_json::json!({ "removed": removed }));
+	}
+
+	async fn handle_tool_list(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let definitions: Vec<serde_json::Value> = ctx
+			.tool_registry
+			.get_tool_definitions()
+			.iter()
+			.map(|d| serde_json::to_value(d).unwrap_or_default())
+			.collect();
+
+		self.transport
+			.write_response(req.id, serde_json::json!({ "tools": definitions }));
+	}
+
+	async fn handle_tool_execute(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ToolExecuteParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let call = ToolCallRequest {
+			id: uuid::Uuid::new_v4().to_string(),
+			name: params.name,
+			arguments: params.args.unwrap_or(serde_json::json!({})),
+		};
+
+		let result = ctx.tool_registry.execute(&call).await;
+		self.transport.write_response(
+			req.id,
+			serde_json::json!({
+				"id": result.id,
+				"name": result.name,
+				"output": result.output,
+				"isError": result.is_error,
+				"durationMs": result.duration_ms,
+			}),
+		);
+	}
+
+	async fn handle_tool_batch_execute(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ToolBatchExecuteParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let calls: Vec<ToolCallRequest> = params
+			.calls
+			.into_iter()
+			.map(|c| ToolCallRequest {
+				id: uuid::Uuid::new_v4().to_string(),
+				name: c.name,
+				arguments: c.args.unwrap_or(serde_json::json!({})),
+			})
+			.collect();
+
+		let results = ctx.tool_registry.batch_execute(&calls, None).await;
+		let results_json: Vec<serde_json::Value> = results
+			.into_iter()
+			.map(|r| {
+				serde_json::json!({
+					"id": r.id,
+					"name": r.name,
+					"output": r.output,
+					"isError": r.is_error,
+					"durationMs": r.duration_ms,
+				})
+			})
+			.collect();
+
+		self.transport
+			.write_response(req.id, serde_json::json!({ "results": results_json }));
+	}
+
+	async fn handle_tool_parse(&self, req: JsonRpcRequest) {
+		let _ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ToolParseParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let parsed =
+			crate::tools::registry::ToolRegistry::parse_tool_calls(&params.text);
+		let calls: Vec<serde_json::Value> = parsed
+			.tool_calls
+			.iter()
+			.map(|c| {
+				serde_json::json!({
+					"id": c.id,
+					"name": c.name,
+					"arguments": c.arguments,
+				})
+			})
+			.collect();
+
+		self.transport.write_response(
+			req.id,
+			serde_json::json!({
+				"text": parsed.text,
+				"calls": calls,
+			}),
+		);
+	}
+
+	async fn handle_tool_format_system_prompt(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let prompt = ctx.tool_registry.format_for_system_prompt();
+		self.transport
+			.write_response(req.id, serde_json::json!({ "prompt": prompt }));
+	}
+
+	async fn handle_tool_metrics(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let metrics: Vec<serde_json::Value> = ctx
+			.tool_registry
+			.get_all_tool_metrics()
+			.iter()
+			.map(|m| serde_json::to_value(m).unwrap_or_default())
+			.collect();
+
+		self.transport
+			.write_response(req.id, serde_json::json!({ "metrics": metrics }));
+	}
+
+	async fn handle_tool_result(&self, req: JsonRpcRequest) {
+		// tool/result does not require context — it only resolves pending channels
+		let params: ToolResultParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let sender = {
+			let mut map = self.pending_tool_calls.lock().await;
+			map.remove(&params.request_id)
+		};
+
+		if let Some(tx) = sender {
+			let _ = tx.send(serde_json::json!({
+				"output": params.output,
+				"isError": params.is_error.unwrap_or(false),
+			}));
+		}
+
+		self.transport.write_response(req.id, serde_json::json!({}));
+	}
+
 	// ── Conversation handlers ────────────────────────────────────────────
 
 	async fn handle_conv_from_json(&self, req: JsonRpcRequest) {
@@ -1496,6 +1855,62 @@ struct HookResultParams {
 	result: serde_json::Value,
 }
 
+// -- Tool params -----------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolRegisterParams {
+	name: String,
+	description: String,
+	#[serde(default)]
+	input_schema: Option<serde_json::Value>,
+	#[serde(default)]
+	max_output_chars: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolNameParams {
+	name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolExecuteParams {
+	name: String,
+	#[serde(default)]
+	args: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolBatchCallParams {
+	name: String,
+	#[serde(default)]
+	args: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolBatchExecuteParams {
+	calls: Vec<ToolBatchCallParams>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolParseParams {
+	text: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ToolResultParams {
+	request_id: String,
+	output: String,
+	#[serde(default)]
+	is_error: Option<bool>,
+}
+
 // -- Event params ----------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -1553,4 +1968,47 @@ fn parse_task_status(s: &str) -> Option<TaskStatus> {
 		"deleted" => Some(TaskStatus::Deleted),
 		_ => None,
 	}
+}
+
+/// Parse an `inputSchema` JSON value into `HashMap<String, ToolParameter>`.
+///
+/// Expects a JSON object where each key maps to a parameter descriptor
+/// with `type`, `description`, and optional `required` fields:
+///
+/// ```json
+/// {
+///   "path": { "type": "string", "description": "File path", "required": true },
+///   "encoding": { "type": "string", "description": "File encoding" }
+/// }
+/// ```
+fn parse_input_schema(schema: &Option<serde_json::Value>) -> HashMap<String, ToolParameter> {
+	let mut params = HashMap::new();
+	let Some(serde_json::Value::Object(map)) = schema else {
+		return params;
+	};
+	for (key, value) in map {
+		let param_type = value
+			.get("type")
+			.and_then(|v| v.as_str())
+			.unwrap_or("string")
+			.to_string();
+		let description = value
+			.get("description")
+			.and_then(|v| v.as_str())
+			.unwrap_or("")
+			.to_string();
+		let required = value
+			.get("required")
+			.and_then(|v| v.as_bool())
+			.unwrap_or(false);
+		params.insert(
+			key.clone(),
+			ToolParameter {
+				param_type,
+				description,
+				required,
+			},
+		);
+	}
+	params
 }

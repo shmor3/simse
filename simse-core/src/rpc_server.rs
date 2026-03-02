@@ -15,17 +15,19 @@ use crate::tools::types::{
 	ToolCallRequest, ToolCallResult, ToolDefinition, ToolHandler, ToolParameter,
 };
 
+type UnsubscriberMap = Arc<Mutex<HashMap<String, Box<dyn Fn() + Send>>>>;
+type PendingCallsMap =
+	Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>>;
+
 pub struct CoreRpcServer {
 	transport: NdjsonTransport,
 	context: Option<CoreContext>,
-	event_unsubscribers: Arc<Mutex<HashMap<String, Box<dyn Fn() + Send>>>>,
+	event_unsubscribers: UnsubscriberMap,
 	next_subscription_id: Arc<Mutex<u64>>,
-	pending_hook_calls:
-		Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>>,
-	hook_unsubscribers: Arc<Mutex<HashMap<String, Box<dyn Fn() + Send>>>>,
+	pending_hook_calls: PendingCallsMap,
+	hook_unsubscribers: UnsubscriberMap,
 	next_hook_id: Arc<Mutex<u64>>,
-	pending_tool_calls:
-		Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>>,
+	pending_tool_calls: PendingCallsMap,
 }
 
 impl CoreRpcServer {

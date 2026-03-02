@@ -6,16 +6,22 @@ use tokio::io::AsyncBufReadExt;
 
 use crate::config::AppConfig;
 use crate::context::CoreContext;
+use crate::hooks::*;
 use crate::rpc_protocol::*;
 use crate::rpc_transport::NdjsonTransport;
 use crate::server::session::{SessionInfo, SessionStatus};
 use crate::tasks::{TaskCreateInput, TaskStatus, TaskUpdateInput};
+use crate::tools::types::{ToolCallRequest, ToolCallResult};
 
 pub struct CoreRpcServer {
 	transport: NdjsonTransport,
 	context: Option<CoreContext>,
 	event_unsubscribers: Arc<Mutex<HashMap<String, Box<dyn Fn() + Send>>>>,
 	next_subscription_id: Arc<Mutex<u64>>,
+	pending_hook_calls:
+		Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>>,
+	hook_unsubscribers: Arc<Mutex<HashMap<String, Box<dyn Fn() + Send>>>>,
+	next_hook_id: Arc<Mutex<u64>>,
 }
 
 impl CoreRpcServer {
@@ -25,6 +31,9 @@ impl CoreRpcServer {
 			context: None,
 			event_unsubscribers: Arc::new(Mutex::new(HashMap::new())),
 			next_subscription_id: Arc::new(Mutex::new(0)),
+			pending_hook_calls: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+			hook_unsubscribers: Arc::new(Mutex::new(HashMap::new())),
+			next_hook_id: Arc::new(Mutex::new(0)),
 		}
 	}
 
@@ -90,6 +99,14 @@ impl CoreRpcServer {
 			"event/unsubscribe" => self.handle_event_unsubscribe(req).await,
 			"event/publish" => self.handle_event_publish(req).await,
 
+			// -- Hooks ---------------------------------------------------
+			"hook/registerBefore" => self.handle_hook_register_before(req).await,
+			"hook/registerAfter" => self.handle_hook_register_after(req).await,
+			"hook/registerValidate" => self.handle_hook_register_validate(req).await,
+			"hook/registerTransform" => self.handle_hook_register_transform(req).await,
+			"hook/unregister" => self.handle_hook_unregister(req).await,
+			"hook/result" => self.handle_hook_result(req).await,
+
 			// -- Unknown -------------------------------------------------
 			_ => self.transport.write_error(
 				req.id,
@@ -102,6 +119,15 @@ impl CoreRpcServer {
 
 	fn require_context(&self) -> Option<&CoreContext> {
 		self.context.as_ref()
+	}
+
+	/// Expose pending hook calls for testing.
+	#[doc(hidden)]
+	pub fn pending_hook_calls(
+		&self,
+	) -> &Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>>
+	{
+		&self.pending_hook_calls
 	}
 
 	#[allow(dead_code)]
@@ -926,6 +952,396 @@ impl CoreRpcServer {
 		self.transport.write_response(req.id, serde_json::json!({}));
 	}
 
+	// ── Hook handlers ───────────────────────────────────────────────────
+
+	fn next_hook_id_string(&self) -> String {
+		let mut next = self.next_hook_id.lock().unwrap_or_else(|e| e.into_inner());
+		let id = *next;
+		*next = next.wrapping_add(1);
+		format!("hook_{}", id)
+	}
+
+	async fn handle_hook_register_before(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let hook_id = self.next_hook_id_string();
+		let pending = Arc::clone(&self.pending_hook_calls);
+		let hook_id_for_closure = hook_id.clone();
+
+		let handler: BeforeHandler = Arc::new(move |request: ToolCallRequest| {
+			let pending = Arc::clone(&pending);
+			let _hook_id = hook_id_for_closure.clone();
+			Box::pin(async move {
+				let request_id = uuid::Uuid::new_v4().to_string();
+				let (tx, rx) = tokio::sync::oneshot::channel();
+
+				// Store the sender
+				{
+					let mut map = pending.lock().await;
+					map.insert(request_id.clone(), tx);
+				}
+
+				// Send notification to TS
+				let transport = NdjsonTransport::new();
+				transport.write_notification(
+					"hook/execute",
+					serde_json::json!({
+						"requestId": request_id,
+						"hookType": "before",
+						"toolName": &request.name,
+						"args": &request.arguments,
+					}),
+				);
+
+				// Wait for result with 60s timeout
+				match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
+					Ok(Ok(result)) => {
+						if result.get("blocked").is_some() {
+							let reason = result["blocked"]
+								.as_str()
+								.unwrap_or("Blocked by hook")
+								.to_string();
+							BeforeHookResult::Blocked(BlockedResult { reason })
+						} else {
+							// Parse possibly modified request
+							let name = result
+								.get("name")
+								.and_then(|v| v.as_str())
+								.unwrap_or(&request.name)
+								.to_string();
+							let arguments = result
+								.get("args")
+								.cloned()
+								.unwrap_or_else(|| request.arguments.clone());
+							BeforeHookResult::Continue(ToolCallRequest {
+								id: request.id.clone(),
+								name,
+								arguments,
+							})
+						}
+					}
+					Ok(Err(_)) => {
+						// Channel closed — continue with original request
+						BeforeHookResult::Continue(request)
+					}
+					Err(_) => {
+						// Timeout — clean up and continue
+						let mut map = pending.lock().await;
+						map.remove(&request_id);
+						BeforeHookResult::Continue(request)
+					}
+				}
+			})
+		});
+
+		let unsub = ctx.hook_system.register_before(handler);
+
+		// Store unsubscribe closure
+		{
+			let mut unsubs = self
+				.hook_unsubscribers
+				.lock()
+				.unwrap_or_else(|e| e.into_inner());
+			unsubs.insert(hook_id.clone(), Box::new(unsub));
+		}
+
+		self.transport
+			.write_response(req.id, serde_json::json!({ "hookId": hook_id }));
+	}
+
+	async fn handle_hook_register_after(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let hook_id = self.next_hook_id_string();
+		let pending = Arc::clone(&self.pending_hook_calls);
+
+		let handler: AfterHandler = Arc::new(move |context: AfterHookContext| {
+			let pending = Arc::clone(&pending);
+			Box::pin(async move {
+				let request_id = uuid::Uuid::new_v4().to_string();
+				let (tx, rx) = tokio::sync::oneshot::channel();
+
+				{
+					let mut map = pending.lock().await;
+					map.insert(request_id.clone(), tx);
+				}
+
+				let transport = NdjsonTransport::new();
+				transport.write_notification(
+					"hook/execute",
+					serde_json::json!({
+						"requestId": request_id,
+						"hookType": "after",
+						"request": {
+							"id": &context.request.id,
+							"name": &context.request.name,
+							"args": &context.request.arguments,
+						},
+						"result": {
+							"id": &context.result.id,
+							"name": &context.result.name,
+							"output": &context.result.output,
+							"isError": context.result.is_error,
+						},
+					}),
+				);
+
+				match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
+					Ok(Ok(result)) => {
+						let output = result
+							.get("output")
+							.and_then(|v| v.as_str())
+							.unwrap_or(&context.result.output)
+							.to_string();
+						let is_error = result
+							.get("isError")
+							.and_then(|v| v.as_bool())
+							.unwrap_or(context.result.is_error);
+						ToolCallResult {
+							id: context.result.id,
+							name: context.result.name,
+							output,
+							is_error,
+							duration_ms: context.result.duration_ms,
+						}
+					}
+					Ok(Err(_)) => context.result,
+					Err(_) => {
+						let mut map = pending.lock().await;
+						map.remove(&request_id);
+						context.result
+					}
+				}
+			})
+		});
+
+		let unsub = ctx.hook_system.register_after(handler);
+
+		{
+			let mut unsubs = self
+				.hook_unsubscribers
+				.lock()
+				.unwrap_or_else(|e| e.into_inner());
+			unsubs.insert(hook_id.clone(), Box::new(unsub));
+		}
+
+		self.transport
+			.write_response(req.id, serde_json::json!({ "hookId": hook_id }));
+	}
+
+	async fn handle_hook_register_validate(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let hook_id = self.next_hook_id_string();
+		let pending = Arc::clone(&self.pending_hook_calls);
+
+		let handler: ValidateHandler = Arc::new(move |context: ValidateHookContext| {
+			let pending = Arc::clone(&pending);
+			Box::pin(async move {
+				let request_id = uuid::Uuid::new_v4().to_string();
+				let (tx, rx) = tokio::sync::oneshot::channel();
+
+				{
+					let mut map = pending.lock().await;
+					map.insert(request_id.clone(), tx);
+				}
+
+				let transport = NdjsonTransport::new();
+				transport.write_notification(
+					"hook/execute",
+					serde_json::json!({
+						"requestId": request_id,
+						"hookType": "validate",
+						"request": {
+							"id": &context.request.id,
+							"name": &context.request.name,
+							"args": &context.request.arguments,
+						},
+						"result": {
+							"id": &context.result.id,
+							"name": &context.result.name,
+							"output": &context.result.output,
+							"isError": context.result.is_error,
+						},
+					}),
+				);
+
+				match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
+					Ok(Ok(result)) => {
+						if let Some(messages) = result.get("messages") {
+							messages
+								.as_array()
+								.map(|arr| {
+									arr.iter()
+										.filter_map(|v| v.as_str().map(|s| s.to_string()))
+										.collect()
+								})
+								.unwrap_or_default()
+						} else {
+							Vec::new()
+						}
+					}
+					Ok(Err(_)) => Vec::new(),
+					Err(_) => {
+						let mut map = pending.lock().await;
+						map.remove(&request_id);
+						Vec::new()
+					}
+				}
+			})
+		});
+
+		let unsub = ctx.hook_system.register_validate(handler);
+
+		{
+			let mut unsubs = self
+				.hook_unsubscribers
+				.lock()
+				.unwrap_or_else(|e| e.into_inner());
+			unsubs.insert(hook_id.clone(), Box::new(unsub));
+		}
+
+		self.transport
+			.write_response(req.id, serde_json::json!({ "hookId": hook_id }));
+	}
+
+	async fn handle_hook_register_transform(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let hook_id = self.next_hook_id_string();
+		let pending = Arc::clone(&self.pending_hook_calls);
+
+		let handler: PromptTransformHandler = Arc::new(move |prompt: String| {
+			let pending = Arc::clone(&pending);
+			Box::pin(async move {
+				let request_id = uuid::Uuid::new_v4().to_string();
+				let (tx, rx) = tokio::sync::oneshot::channel();
+
+				{
+					let mut map = pending.lock().await;
+					map.insert(request_id.clone(), tx);
+				}
+
+				let transport = NdjsonTransport::new();
+				transport.write_notification(
+					"hook/execute",
+					serde_json::json!({
+						"requestId": request_id,
+						"hookType": "prompt_transform",
+						"prompt": &prompt,
+					}),
+				);
+
+				match tokio::time::timeout(std::time::Duration::from_secs(60), rx).await {
+					Ok(Ok(result)) => result
+						.get("prompt")
+						.and_then(|v| v.as_str())
+						.unwrap_or(&prompt)
+						.to_string(),
+					Ok(Err(_)) => prompt,
+					Err(_) => {
+						let mut map = pending.lock().await;
+						map.remove(&request_id);
+						prompt
+					}
+				}
+			})
+		});
+
+		let unsub = ctx.hook_system.register_prompt_transform(handler);
+
+		{
+			let mut unsubs = self
+				.hook_unsubscribers
+				.lock()
+				.unwrap_or_else(|e| e.into_inner());
+			unsubs.insert(hook_id.clone(), Box::new(unsub));
+		}
+
+		self.transport
+			.write_response(req.id, serde_json::json!({ "hookId": hook_id }));
+	}
+
+	async fn handle_hook_unregister(&self, req: JsonRpcRequest) {
+		let _ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: HookUnregisterParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let unsub = {
+			let mut unsubs = self
+				.hook_unsubscribers
+				.lock()
+				.unwrap_or_else(|e| e.into_inner());
+			unsubs.remove(&params.hook_id)
+		};
+
+		if let Some(unsub_fn) = unsub {
+			unsub_fn();
+		}
+
+		self.transport.write_response(req.id, serde_json::json!({}));
+	}
+
+	async fn handle_hook_result(&self, req: JsonRpcRequest) {
+		// hook/result does not require context — it only resolves pending channels
+		let params: HookResultParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let sender = {
+			let mut map = self.pending_hook_calls.lock().await;
+			map.remove(&params.request_id)
+		};
+
+		if let Some(tx) = sender {
+			let _ = tx.send(params.result);
+		}
+
+		self.transport.write_response(req.id, serde_json::json!({}));
+	}
+
 	// ── Conversation handlers ────────────────────────────────────────────
 
 	async fn handle_conv_from_json(&self, req: JsonRpcRequest) {
@@ -1063,6 +1479,21 @@ struct TaskUpdateParams {
 	add_blocks: Option<Vec<String>>,
 	#[serde(default)]
 	add_blocked_by: Option<Vec<String>>,
+}
+
+// -- Hook params -----------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HookUnregisterParams {
+	hook_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HookResultParams {
+	request_id: String,
+	result: serde_json::Value,
 }
 
 // -- Event params ----------------------------------------------------------

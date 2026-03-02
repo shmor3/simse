@@ -88,7 +88,7 @@ export default function Typewriter() {
 	return (
 		<span
 			ref={containerRef}
-			className={clsx('relative inline-block overflow-hidden text-emerald-400')}
+			className={clsx('relative inline-block overflow-clip text-emerald-400')}
 			style={{ maxWidth: '100%', width: maxWidth > 0 ? `${maxWidth}px` : undefined }}
 		>
 			<span

@@ -21,7 +21,7 @@ export default function Hero() {
 			</div>
 			<h1
 				className={clsx(
-					'animate-fade-in-up mt-6 text-center text-[1.625rem] leading-[1.2] font-bold tracking-[-0.02em] text-white',
+					'animate-fade-in-up mt-6 max-w-full overflow-hidden text-center text-[1.625rem] leading-[1.2] font-bold tracking-[-0.02em] text-white',
 					'min-[400px]:text-[1.875rem] sm:mt-8 sm:text-[3.5rem] sm:leading-[1.1] lg:text-[4rem]',
 				)}
 				style={{ animationDelay: '150ms' }}

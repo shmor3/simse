@@ -356,7 +356,9 @@ async fn stream_with_retry(
 			Ok(resp) => return Ok(resp),
 			Err(err) => {
 				if attempt + 1 < max && is_transient_error(&err) {
-					let delay = config.base_delay_ms * (1u64 << attempt as u64);
+					let delay = config
+						.base_delay_ms
+						.saturating_mul(1u64.checked_shl(attempt as u32).unwrap_or(u64::MAX));
 					tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
 					last_err = Some(err);
 				} else {
@@ -381,7 +383,9 @@ async fn execute_with_retry(
 
 	for attempt in 1..max {
 		if result.is_error && is_transient_tool_output(&result.output) {
-			let delay = config.base_delay_ms * (1u64 << attempt as u64);
+			let delay = config
+				.base_delay_ms
+				.saturating_mul(1u64.checked_shl(attempt as u32).unwrap_or(u64::MAX));
 			tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
 			result = executor.execute(call).await;
 		} else {
@@ -573,6 +577,15 @@ pub async fn run_agentic_loop(
 				if let Some(ref cb) = callbacks.on_error {
 					cb(&err);
 				}
+				emit(
+					&options.event_bus,
+					event_types::LOOP_COMPLETE,
+					json!({
+						"turns": turns.len(),
+						"error": true,
+						"error_message": err.to_string()
+					}),
+				);
 				return Err(err);
 			}
 		};
@@ -698,6 +711,11 @@ pub async fn run_agentic_loop(
 						),
 					});
 				}
+			}
+
+			// Keep recent_calls bounded
+			if max_ident > 0 && recent_calls.len() > max_ident {
+				recent_calls.drain(..recent_calls.len() - max_ident);
 			}
 
 			// Fire tool call start

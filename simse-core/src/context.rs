@@ -5,8 +5,6 @@
 //! and VFS. Library and VFS are `Option` because they require engine binaries
 //! (Rust subprocesses) that cannot be spawned during simple construction.
 
-use std::sync::Arc;
-
 use crate::config::AppConfig;
 use crate::events::EventBus;
 use crate::hooks::HookSystem;
@@ -35,7 +33,7 @@ use crate::vfs::VirtualFs;
 /// ```
 pub struct CoreContext {
 	pub config: AppConfig,
-	pub event_bus: Arc<EventBus>,
+	pub event_bus: EventBus,
 	pub logger: Logger,
 	pub task_list: TaskList,
 	pub hook_system: HookSystem,
@@ -47,7 +45,7 @@ pub struct CoreContext {
 impl CoreContext {
 	/// Create a new `CoreContext` with the given config and sensible defaults.
 	///
-	/// - Event bus: empty, shared via `Arc`
+	/// - Event bus: empty (already `Clone`-shared via internal `Arc`)
 	/// - Logger: root logger with context `"simse"`
 	/// - Task list: default options (max 100 tasks)
 	/// - Hook system: empty
@@ -56,7 +54,7 @@ impl CoreContext {
 	pub fn new(config: AppConfig) -> Self {
 		Self {
 			config,
-			event_bus: Arc::new(EventBus::new()),
+			event_bus: EventBus::new(),
 			logger: Logger::new("simse"),
 			task_list: TaskList::new(None),
 			hook_system: HookSystem::new(),

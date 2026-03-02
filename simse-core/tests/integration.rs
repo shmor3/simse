@@ -27,7 +27,7 @@ fn core_context_creation_with_defaults() {
 fn core_context_event_bus_is_shared() {
 	let ctx = CoreContext::new(AppConfig::default());
 
-	// The event bus should be wrapped in Arc for sharing
+	// EventBus is Clone-shared via internal Arc — cloning shares state
 	let bus_clone = ctx.event_bus.clone();
 	bus_clone.publish("test.event", serde_json::json!({"hello": "world"}));
 }
@@ -49,6 +49,19 @@ fn core_context_logger_child_creation() {
 fn core_context_task_list_is_empty() {
 	let ctx = CoreContext::new(AppConfig::default());
 	assert_eq!(ctx.task_list.task_count(), 0);
+}
+
+#[test]
+fn core_context_with_vfs_builder() {
+	use simse_core::vfs::VirtualFs;
+	use simse_vfs_engine::path::VfsLimits;
+
+	let ctx = CoreContext::new(AppConfig::default());
+	assert!(ctx.vfs.is_none());
+
+	let vfs = VirtualFs::new(VfsLimits::default(), 50);
+	let ctx = ctx.with_vfs(vfs);
+	assert!(ctx.vfs.is_some());
 }
 
 #[test]

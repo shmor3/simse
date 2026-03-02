@@ -70,8 +70,21 @@ export default function WelcomeEmail({ unsubscribeUrl }: WelcomeEmailProps) {
 								border={0}
 							>
 								<tr>
-									<td width="40" valign="top" style={{ paddingTop: 1 }}>
-										<div className="h-7 w-7 rounded-full bg-emerald text-center font-mono text-[12px] font-bold leading-7 text-surface">
+									<td width="40" valign="top">
+										<div
+											style={{
+												width: 28,
+												height: 28,
+												borderRadius: '50%',
+												backgroundColor: '#34d399',
+												textAlign: 'center',
+												fontFamily: 'monospace',
+												fontSize: 12,
+												fontWeight: 700,
+												lineHeight: '28px',
+												color: '#0a0a0b',
+											}}
+										>
 											&#10003;
 										</div>
 									</td>
@@ -100,8 +113,21 @@ export default function WelcomeEmail({ unsubscribeUrl }: WelcomeEmailProps) {
 								border={0}
 							>
 								<tr>
-									<td width="40" valign="top" style={{ paddingTop: 1 }}>
-										<div className="h-7 w-7 rounded-full border-2 border-border text-center font-mono text-[12px] font-bold leading-6 text-dim">
+									<td width="40" valign="top">
+										<div
+											style={{
+												width: 28,
+												height: 28,
+												borderRadius: '50%',
+												border: '2px solid #27272a',
+												textAlign: 'center',
+												fontFamily: 'monospace',
+												fontSize: 12,
+												fontWeight: 700,
+												lineHeight: '24px',
+												color: '#52525b',
+											}}
+										>
 											2
 										</div>
 									</td>
@@ -131,8 +157,21 @@ export default function WelcomeEmail({ unsubscribeUrl }: WelcomeEmailProps) {
 								border={0}
 							>
 								<tr>
-									<td width="40" valign="top" style={{ paddingTop: 1 }}>
-										<div className="h-7 w-7 rounded-full border-2 border-border text-center font-mono text-[12px] font-bold leading-6 text-dim">
+									<td width="40" valign="top">
+										<div
+											style={{
+												width: 28,
+												height: 28,
+												borderRadius: '50%',
+												border: '2px solid #27272a',
+												textAlign: 'center',
+												fontFamily: 'monospace',
+												fontSize: 12,
+												fontWeight: 700,
+												lineHeight: '24px',
+												color: '#52525b',
+											}}
+										>
 											3
 										</div>
 									</td>

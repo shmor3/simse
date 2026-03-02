@@ -1,6 +1,6 @@
 import { waitlistSchema } from '../../src/lib/schema';
 import { validateEmail } from '../lib/validate-email';
-import { sendWelcomeEmail } from '../lib/welcome-email';
+import { sendWelcomeEmail } from '../lib/send-email';
 
 interface Env {
 	simse_waitlist: D1Database;

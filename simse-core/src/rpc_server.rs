@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use serde::Deserialize;
 use tokio::io::AsyncBufReadExt;
 
@@ -6,6 +8,7 @@ use crate::context::CoreContext;
 use crate::rpc_protocol::*;
 use crate::rpc_transport::NdjsonTransport;
 use crate::server::session::{SessionInfo, SessionStatus};
+use crate::tasks::{TaskCreateInput, TaskStatus, TaskUpdateInput};
 
 pub struct CoreRpcServer {
 	transport: NdjsonTransport,
@@ -69,6 +72,14 @@ impl CoreRpcServer {
 			"conversation/toJson" => self.handle_conv_to_json(req).await,
 			"conversation/fromJson" => self.handle_conv_from_json(req).await,
 
+			// -- Tasks ---------------------------------------------------
+			"task/create" => self.handle_task_create(req).await,
+			"task/get" => self.handle_task_get(req).await,
+			"task/list" => self.handle_task_list(req).await,
+			"task/listAvailable" => self.handle_task_list_available(req).await,
+			"task/update" => self.handle_task_update(req).await,
+			"task/delete" => self.handle_task_delete(req).await,
+
 			// -- Unknown -------------------------------------------------
 			_ => self.transport.write_error(
 				req.id,
@@ -103,6 +114,15 @@ impl CoreRpcServer {
 			CORE_ERROR,
 			format!("Session not found: {}", session_id),
 			Some(serde_json::json!({ "coreCode": "SESSION_NOT_FOUND" })),
+		);
+	}
+
+	fn write_task_not_found(&self, req_id: u64, task_id: &str) {
+		self.transport.write_error(
+			req_id,
+			CORE_ERROR,
+			format!("Task not found: {}", task_id),
+			Some(serde_json::json!({ "coreCode": "TASK_NOT_FOUND" })),
 		);
 	}
 
@@ -569,6 +589,212 @@ impl CoreRpcServer {
 		}
 	}
 
+	// ── Task handlers ────────────────────────────────────────────────
+
+	async fn handle_task_create(&mut self, req: JsonRpcRequest) {
+		let ctx = match self.context.as_mut() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: TaskCreateParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let input = TaskCreateInput {
+			subject: params.subject,
+			description: params.description,
+			active_form: params.active_form,
+			owner: params.owner,
+			metadata: params.metadata,
+		};
+
+		match ctx.task_list.create_checked(input) {
+			Ok(task) => {
+				let value = serde_json::to_value(&task).unwrap();
+				self.transport.write_response(req.id, value);
+			}
+			Err(e) => {
+				self.transport.write_error(
+					req.id,
+					CORE_ERROR,
+					e.to_string(),
+					Some(e.to_json_rpc_error()),
+				);
+			}
+		}
+	}
+
+	async fn handle_task_get(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: TaskIdParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		match ctx.task_list.get(&params.id) {
+			Some(task) => {
+				let value = serde_json::to_value(task).unwrap();
+				self.transport.write_response(req.id, value);
+			}
+			None => {
+				self.write_task_not_found(req.id, &params.id);
+			}
+		}
+	}
+
+	async fn handle_task_list(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let tasks: Vec<serde_json::Value> = ctx
+			.task_list
+			.list()
+			.iter()
+			.map(|t| serde_json::to_value(t).unwrap())
+			.collect();
+
+		self.transport
+			.write_response(req.id, serde_json::json!({ "tasks": tasks }));
+	}
+
+	async fn handle_task_list_available(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let tasks: Vec<serde_json::Value> = ctx
+			.task_list
+			.list_available()
+			.iter()
+			.map(|t| serde_json::to_value(t).unwrap())
+			.collect();
+
+		self.transport
+			.write_response(req.id, serde_json::json!({ "tasks": tasks }));
+	}
+
+	async fn handle_task_update(&mut self, req: JsonRpcRequest) {
+		let params: TaskUpdateParams = match parse_params(req.params.clone()) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let status = if let Some(ref s) = params.status {
+			match parse_task_status(s) {
+				Some(status) => Some(status),
+				None => {
+					self.transport.write_error(
+						req.id,
+						INVALID_PARAMS,
+						format!(
+							"Invalid status: '{}'. Expected 'pending', 'in_progress', 'completed', or 'deleted'",
+							s
+						),
+						None,
+					);
+					return;
+				}
+			}
+		} else {
+			None
+		};
+
+		let ctx = match self.context.as_mut() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let input = TaskUpdateInput {
+			status,
+			subject: params.subject,
+			description: params.description,
+			active_form: params.active_form,
+			owner: params.owner,
+			metadata: params.metadata,
+			add_blocks: params.add_blocks,
+			add_blocked_by: params.add_blocked_by,
+		};
+
+		match ctx.task_list.update(&params.id, input) {
+			Ok(Some(task)) => {
+				let value = serde_json::to_value(&task).unwrap();
+				self.transport.write_response(req.id, value);
+			}
+			Ok(None) => {
+				self.write_task_not_found(req.id, &params.id);
+			}
+			Err(e) => {
+				self.transport.write_error(
+					req.id,
+					CORE_ERROR,
+					e.to_string(),
+					Some(e.to_json_rpc_error()),
+				);
+			}
+		}
+	}
+
+	async fn handle_task_delete(&mut self, req: JsonRpcRequest) {
+		let ctx = match self.context.as_mut() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: TaskIdParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let deleted = ctx.task_list.delete(&params.id);
+		self.transport
+			.write_response(req.id, serde_json::json!({ "deleted": deleted }));
+	}
+
+	// ── Conversation handlers ────────────────────────────────────────────
+
 	async fn handle_conv_from_json(&self, req: JsonRpcRequest) {
 		let ctx = match self.require_context() {
 			Some(c) => c,
@@ -663,6 +889,49 @@ struct ConvFromJsonParams {
 	json: String,
 }
 
+// -- Task params -----------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskIdParams {
+	id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskCreateParams {
+	subject: String,
+	description: String,
+	#[serde(default)]
+	active_form: Option<String>,
+	#[serde(default)]
+	owner: Option<String>,
+	#[serde(default)]
+	metadata: Option<HashMap<String, serde_json::Value>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskUpdateParams {
+	id: String,
+	#[serde(default)]
+	status: Option<String>,
+	#[serde(default)]
+	subject: Option<String>,
+	#[serde(default)]
+	description: Option<String>,
+	#[serde(default)]
+	active_form: Option<String>,
+	#[serde(default)]
+	owner: Option<String>,
+	#[serde(default)]
+	metadata: Option<HashMap<String, serde_json::Value>>,
+	#[serde(default)]
+	add_blocks: Option<Vec<String>>,
+	#[serde(default)]
+	add_blocked_by: Option<Vec<String>>,
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -684,6 +953,17 @@ fn parse_session_status(s: &str) -> Option<SessionStatus> {
 		"active" => Some(SessionStatus::Active),
 		"completed" => Some(SessionStatus::Completed),
 		"aborted" => Some(SessionStatus::Aborted),
+		_ => None,
+	}
+}
+
+/// Parse a status string into a `TaskStatus`.
+fn parse_task_status(s: &str) -> Option<TaskStatus> {
+	match s {
+		"pending" => Some(TaskStatus::Pending),
+		"in_progress" => Some(TaskStatus::InProgress),
+		"completed" => Some(TaskStatus::Completed),
+		"deleted" => Some(TaskStatus::Deleted),
 		_ => None,
 	}
 }

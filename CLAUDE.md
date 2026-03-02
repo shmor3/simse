@@ -16,10 +16,12 @@ bun run build:vector-engine  # cd simse-vector && cargo build --release
 bun run build:vfs-engine     # cd simse-vfs && cargo build --release
 bun run build:acp-engine     # cd simse-acp && cargo build --release
 bun run build:mcp-engine     # cd simse-mcp && cargo build --release
+bun run build:core           # cd simse-core && cargo build --release
 cd simse-vector && cargo test  # Rust vector engine tests
 cd simse-vfs && cargo test     # Rust VFS engine tests
 cd simse-acp && cargo test     # Rust ACP engine tests
 cd simse-mcp && cargo test     # Rust MCP engine tests
+cd simse-core && cargo test    # Rust core orchestration tests
 ```
 
 ## Architecture
@@ -30,6 +32,7 @@ simse is a modular pipeline framework for orchestrating multi-step AI workflows.
 
 ```tree
 src/                        # TypeScript — main package
+simse-core/                 # Pure Rust crate — orchestration library (links all engines)
 simse-vector/               # Pure Rust crate — vector store engine (JSON-RPC over stdio)
 simse-vfs/                  # Pure Rust crate — virtual filesystem engine (JSON-RPC over stdio)
 simse-acp/                  # Pure Rust crate — ACP engine (JSON-RPC over stdio)
@@ -152,6 +155,29 @@ src/
     circuit-breaker.ts      # Circuit breaker pattern for fault tolerance
     health-monitor.ts       # Health monitoring with sliding window stats
     timeout.ts              # withTimeout utility for Promise-based timeouts
+
+simse-core/                 # Pure Rust library crate — orchestration layer
+  Cargo.toml
+  src/
+    lib.rs                  # Module declarations + crate-root re-exports
+    context.rs              # CoreContext: top-level wiring struct
+    error.rs                # SimseError enum with domain variants
+    config.rs               # AppConfig + typed config structs
+    logger.rs               # Structured Logger with child loggers
+    events.rs               # EventBus: thread-safe pub/sub
+    conversation.rs         # Conversation: message management, JSON serialization
+    tasks.rs                # TaskList: CRUD, dependencies, blocking
+    prompts.rs              # SystemPromptBuilder
+    agentic_loop.rs         # run_agentic_loop: generate→parse→execute→repeat
+    hooks.rs                # HookSystem: 6 hook types with chaining/blocking
+    chain/                  # Chain execution (run_chain, ChainStep)
+    agent/                  # Agent executor (dispatch steps)
+    tools/                  # ToolRegistry, builtin/host/subagent tools
+    library/                # Library, Stacks, Shelf, Librarian, Registry, CirculationDesk
+    vfs/                    # VirtualFs, VfsDisk, VfsExec, validators
+    server/                 # SessionManager with fork support
+    utils/                  # retry, circuit_breaker, timeout
+  tests/                    # Integration tests (745 tests)
 
 simse-vector/               # Pure Rust crate
   Cargo.toml

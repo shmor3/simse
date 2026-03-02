@@ -31,31 +31,36 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 		return Response.json({ error: validation.reason }, { status: 422 });
 	}
 
+	let isNew = false;
 	try {
-		await context.env.simse_waitlist
+		const result = await context.env.simse_waitlist
 			.prepare(
 				'INSERT INTO waitlist (email) VALUES (?) ON CONFLICT (email) DO NOTHING',
 			)
 			.bind(email)
 			.run();
+		isNew = (result.meta?.changes ?? 0) > 0;
 	} catch (err) {
 		// log full error for debugging; keep response generic to avoid info leak
 		console.error('D1 insert failed', err);
 		return Response.json({ error: 'Database error' }, { status: 500 });
 	}
 
-	// Build an unsubscribe link and fire-and-forget the email send
-	const origin = new URL(context.request.url).origin;
-	const unsubscribeUrl = `${origin}/unsubscribe?email=${encodeURIComponent(email)}`;
+	// Only send welcome email for new signups (not duplicates)
+	if (isNew) {
+		const origin = new URL(context.request.url).origin;
+		const unsubscribeUrl = `${origin}/unsubscribe?email=${encodeURIComponent(email)}`;
 
-	context.waitUntil(
-		sendWelcomeEmail(
-			email,
-			context.env.RESEND_API_KEY,
-			context.env.FROM_EMAIL,
-			unsubscribeUrl,
-		).catch(() => {}),
-	);
+		context.waitUntil(
+			sendWelcomeEmail(
+				email,
+				context.env.RESEND_API_KEY,
+				context.env.FROM_EMAIL,
+				unsubscribeUrl,
+			).catch(() => {}),
+		);
+	}
 
+	// Always return success to avoid leaking whether the email is already on the list
 	return Response.json({ success: true });
 };

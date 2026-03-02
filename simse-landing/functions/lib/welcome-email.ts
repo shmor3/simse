@@ -9,6 +9,9 @@ export async function sendWelcomeEmail(
 ): Promise<void> {
 	const html = await render(WelcomeEmail({ unsubscribeUrl }));
 
+	// Format: "Simse <hello@simse.dev>" so the sender name shows properly
+	const sender = from.includes('<') ? from : `Simse <${from}>`;
+
 	await fetch('https://api.resend.com/emails', {
 		method: 'POST',
 		headers: {
@@ -16,7 +19,7 @@ export async function sendWelcomeEmail(
 			'Content-Type': 'application/json',
 		},
 		body: JSON.stringify({
-			from,
+			from: sender,
 			to: email,
 			subject: "You're on the simse waitlist",
 			html,

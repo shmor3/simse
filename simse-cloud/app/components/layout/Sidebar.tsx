@@ -1,6 +1,7 @@
 import clsx from 'clsx';
 import { NavLink } from 'react-router';
 import Avatar from '../ui/Avatar';
+import SimseLogo from '../ui/SimseLogo';
 
 interface NavItem {
 	label: string;
@@ -145,7 +146,8 @@ export default function Sidebar({
 	return (
 		<aside className="flex h-screen w-60 flex-col border-r border-zinc-800 bg-zinc-950">
 			{/* Logo */}
-			<div className="px-5 pt-6 pb-4">
+			<div className="flex items-center gap-2.5 px-5 pt-6 pb-4">
+				<SimseLogo size={20} className="text-zinc-500" />
 				<p className="font-mono text-[11px] font-bold uppercase tracking-[0.35em] text-zinc-500">
 					SIMSE
 				</p>

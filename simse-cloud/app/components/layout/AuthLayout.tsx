@@ -1,5 +1,6 @@
 import { Outlet } from 'react-router';
 import DotGrid from '../DotGrid';
+import SimseLogo from '../ui/SimseLogo';
 
 export default function AuthLayout() {
 	return (
@@ -7,9 +8,12 @@ export default function AuthLayout() {
 			<DotGrid />
 			<div className="relative z-10 w-full max-w-md">
 				{/* SIMSE header */}
-				<p className="mb-10 text-center font-mono text-[11px] font-bold uppercase tracking-[0.35em] text-zinc-600">
-					SIMSE
-				</p>
+				<div className="mb-10 flex items-center justify-center gap-2.5">
+					<SimseLogo size={20} className="text-zinc-600" />
+					<p className="font-mono text-[11px] font-bold uppercase tracking-[0.35em] text-zinc-600">
+						SIMSE
+					</p>
+				</div>
 
 				{/* Card */}
 				<div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/80 backdrop-blur-sm">

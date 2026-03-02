@@ -1,4 +1,5 @@
 import clsx from 'clsx';
+import SimseLogo from './SimseLogo';
 import Typewriter from './Typewriter';
 import WaitlistForm from './WaitlistForm';
 
@@ -9,14 +10,17 @@ export default function Hero() {
 				'flex flex-1 flex-col items-center justify-center px-5 sm:px-6',
 			)}
 		>
-			<p
+			<div
 				className={clsx(
-					'animate-fade-in font-mono text-sm font-bold tracking-[0.35em] text-zinc-600',
+					'animate-fade-in flex items-center gap-2.5',
 				)}
 				style={{ animationDelay: '50ms' }}
 			>
-				SIMSE
-			</p>
+				<SimseLogo size={20} className="text-zinc-600" />
+				<p className="font-mono text-sm font-bold tracking-[0.35em] text-zinc-600">
+					SIMSE
+				</p>
+			</div>
 			<h1
 				className={clsx(
 					'animate-fade-in-up mt-6 text-center text-[1.625rem] leading-[1.2] font-bold tracking-[-0.02em] text-white',

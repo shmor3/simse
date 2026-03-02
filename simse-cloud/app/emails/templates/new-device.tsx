@@ -12,6 +12,7 @@ import {
 	Text,
 } from '@react-email/components';
 import { emailTailwindConfig } from './tailwind-config';
+import SimseEmailLogo from './simse-logo';
 
 interface NewDeviceEmailProps {
 	device: string;
@@ -38,9 +39,7 @@ export default function NewDeviceEmail({
 					<div className="mx-auto h-1 max-w-[500px] bg-emerald" />
 
 					<Container className="mx-auto max-w-[500px] px-6 pb-14 pt-10">
-						<Text className="text-center font-mono text-[11px] font-bold uppercase tracking-[0.35em] text-subtle">
-							SIMSE
-						</Text>
+						<SimseEmailLogo />
 
 						<Heading className="mt-12 text-center text-[40px] font-bold leading-tight tracking-tight text-white">
 							New <span className="text-emerald">sign-in</span>.

@@ -3,9 +3,8 @@ import { validateEmail } from '../lib/validate-email';
 import { sendWelcomeEmail } from '../lib/welcome-email';
 
 interface Env {
-	simse_waitlist: D1Database; // matches binding name in wrangler.toml
+	simse_waitlist: D1Database;
 	RESEND_API_KEY: string;
-	FROM_EMAIL: string;
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -58,7 +57,6 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 			sendWelcomeEmail(
 				email,
 				context.env.RESEND_API_KEY,
-				context.env.FROM_EMAIL,
 				unsubscribeUrl,
 			).catch(() => {}),
 		);

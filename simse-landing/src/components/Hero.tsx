@@ -36,9 +36,7 @@ export default function Hero() {
         )}
         style={{ animationDelay: "300ms" }}
       >
-        Use any ACP | MCP.
-        <br />
-        Context carries over. Preferences stick
+        Context carries over, Preferences stick.
         <br />
         An assistant that gets better the more you use it.
       </p>

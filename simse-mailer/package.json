@@ -1,5 +1,5 @@
 {
-	"name": "simse-emails",
+	"name": "simse-mailer",
 	"private": true,
 	"type": "module",
 	"scripts": {

@@ -1,4 +1,4 @@
-name = "simse-emails"
+name = "simse-mailer"
 compatibility_date = "2025-04-01"
 main = "src/index.ts"
 

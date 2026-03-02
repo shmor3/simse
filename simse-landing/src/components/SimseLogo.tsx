@@ -15,6 +15,7 @@ export default function SimseLogo({ size = 22, className }: SimseLogoProps) {
 			height={size}
 			className={clsx(className)}
 		>
+			<title>simse</title>
 			<defs>
 				<clipPath id="simse-hex">
 					<polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" />

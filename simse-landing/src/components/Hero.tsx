@@ -11,9 +11,7 @@ export default function Hero() {
 			)}
 		>
 			<div
-				className={clsx(
-					'animate-fade-in flex items-center gap-2.5',
-				)}
+				className={clsx('animate-fade-in flex items-center gap-2.5')}
 				style={{ animationDelay: '50ms' }}
 			>
 				<SimseLogo size={20} className="text-zinc-600" />

@@ -3,7 +3,7 @@ import { validateEmail } from '../lib/validate-email';
 import { sendWelcomeEmail } from '../lib/welcome-email';
 
 interface Env {
-	simse_waitlist: D1Database;   // matches binding name in wrangler.toml
+	simse_waitlist: D1Database; // matches binding name in wrangler.toml
 	RESEND_API_KEY: string;
 	FROM_EMAIL: string;
 }
@@ -32,9 +32,10 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 	}
 
 	try {
-		await context.env.simse_waitlist.prepare(
-			'INSERT INTO waitlist (email) VALUES (?) ON CONFLICT (email) DO NOTHING',
-		)
+		await context.env.simse_waitlist
+			.prepare(
+				'INSERT INTO waitlist (email) VALUES (?) ON CONFLICT (email) DO NOTHING',
+			)
 			.bind(email)
 			.run();
 	} catch (err) {

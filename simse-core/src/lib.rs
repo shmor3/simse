@@ -8,6 +8,7 @@ pub mod config;
 pub mod conversation;
 pub mod error;
 pub mod events;
+pub mod hooks;
 pub mod library;
 pub mod logger;
 pub mod prompts;

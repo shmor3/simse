@@ -12,6 +12,7 @@ pub mod hooks;
 pub mod library;
 pub mod logger;
 pub mod prompts;
+pub mod server;
 pub mod tasks;
 pub mod tools;
 pub mod utils;

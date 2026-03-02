@@ -1,6 +1,6 @@
 import { Img } from '@react-email/components';
 
-const LOGO_URL = 'https://simse.dev/logo-email.svg';
+const LOGO_URL = 'https://simse.dev/logo-email.png';
 
 export default function SimseEmailLogo() {
 	return (
@@ -12,22 +12,8 @@ export default function SimseEmailLogo() {
 			style={{ margin: '0 auto' }}
 		>
 			<tr>
-				<td style={{ verticalAlign: 'middle', paddingRight: '8px' }}>
-					<Img src={LOGO_URL} width="18" height="18" alt="simse" />
-				</td>
 				<td style={{ verticalAlign: 'middle' }}>
-					<span
-						style={{
-							fontFamily: 'monospace',
-							fontSize: '11px',
-							fontWeight: 700,
-							textTransform: 'uppercase' as const,
-							letterSpacing: '0.35em',
-							color: '#71717a',
-						}}
-					>
-						SIMSE
-					</span>
+					<Img src={LOGO_URL} width="24" height="24" alt="simse" />
 				</td>
 			</tr>
 		</table>

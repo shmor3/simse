@@ -1,0 +1,21 @@
+name = "simse-cloud"
+compatibility_date = "2025-04-01"
+main = "./worker.ts"
+
+[vars]
+APP_URL = "https://app.simse.dev"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "simse-db"
+database_id = "placeholder-update-after-create"
+
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "placeholder-update-after-create"
+
+# Secrets (set via `wrangler secret put`):
+# STRIPE_SECRET_KEY
+# STRIPE_WEBHOOK_SECRET
+# RESEND_API_KEY
+# SESSION_SECRET

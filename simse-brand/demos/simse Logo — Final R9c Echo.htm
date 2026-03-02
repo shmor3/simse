@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8">
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>simse Logo — Final R9c Echo</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0b;
+    color: #fff;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    padding: 48px;
+    min-height: 100vh;
+  }
+  h1 {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 0.3em;
+    color: #71717a;
+    margin-bottom: 8px;
+    font-weight: 500;
+  }
+  h2 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: #3f3f46;
+    font-weight: 500;
+    margin-bottom: 20px;
+  }
+  .divider { width: 100%; height: 1px; background: #27272a; margin: 48px 0; }
+
+  /* Hero display */
+  .hero {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 32px;
+    padding: 64px 0;
+  }
+  .hero svg { width: 200px; height: 200px; }
+  .hero-label {
+    font-family: 'Courier New', monospace;
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: #e4e4e7;
+  }
+
+  /* Size scale */
+  .size-row {
+    display: flex;
+    gap: 40px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+  }
+  .size-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .size-label {
+    font-size: 10px;
+    color: #3f3f46;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+
+  /* Context mocks */
+  .context-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 32px;
+  }
+  .sidebar-mock {
+    background: #18181b;
+    border-radius: 12px;
+    border: 1px solid #27272a;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .sidebar-mock .brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #27272a;
+  }
+  .sidebar-mock .brand span {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+    color: #a1a1aa;
+  }
+  .sidebar-mock .nav-item {
+    font-size: 12px;
+    color: #52525b;
+    padding: 6px 8px;
+    border-radius: 6px;
+  }
+  .sidebar-mock .nav-item.active {
+    color: #e4e4e7;
+    background: #27272a;
+  }
+  .tab-bar {
+    display: inline-flex;
+    background: #27272a;
+    border-radius: 8px 8px 0 0;
+    overflow: hidden;
+  }
+  .tab {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    font-size: 11px;
+    color: #71717a;
+    border-right: 1px solid #3f3f46;
+  }
+  .tab.active {
+    background: #18181b;
+    color: #e4e4e7;
+  }
+  .light-strip {
+    display: flex;
+    gap: 40px;
+    align-items: flex-end;
+    background: #fafafa;
+    padding: 32px;
+    border-radius: 12px;
+    border: 1px solid #e4e4e7;
+    flex-wrap: wrap;
+  }
+  .light-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  .light-item .size-label { color: #a1a1aa; }
+
+  /* Emerald variant */
+  .emerald-strip {
+    display: flex;
+    gap: 40px;
+    align-items: flex-end;
+    background: #0a0a0b;
+    padding: 32px;
+    border-radius: 12px;
+    border: 1px solid #27272a;
+    flex-wrap: wrap;
+  }
+
+  .wordmark-row {
+    display: flex;
+    gap: 48px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .wordmark-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .wordmark-item span {
+    font-family: 'Courier New', monospace;
+    font-weight: 700;
+    letter-spacing: 0.35em;
+    text-transform: uppercase;
+    color: #e4e4e7;
+  }
+  .wordmark-item .lg span { font-size: 22px; }
+  .wordmark-item .sm span { font-size: 14px; }
+</style>
+</head>
+<body>
+
+<h1>simse logomark — r9c echo — final</h1>
+
+<!-- Hero -->
+<div class="hero">
+  <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <defs><clipPath id="hero-hex"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs>
+    <polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="white" stroke-width="2" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></polygon>
+    <g clip-path="url(#hero-hex)">
+      <path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="white" stroke-width="4" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path>
+      <path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="white" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.25" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path>
+      <path d="M54,-10 C100,15 104,35 60,50 C16,65 20,85 66,110" stroke="white" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.1" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path>
+    </g>
+  </svg>
+</div>
+
+<div class="divider"></div>
+
+<!-- Size scale -->
+<h2>Size scale</h2>
+<div class="size-row">
+  <div class="size-item">
+    <svg viewBox="0 0 100 100" width="128" height="128" fill="none"><defs><clipPath id="s128"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="white" stroke-width="2" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#s128)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="white" stroke-width="4" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="white" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.25" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path><path d="M54,-10 C100,15 104,35 60,50 C16,65 20,85 66,110" stroke="white" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.1" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">128px</div>
+  </div>
+  <div class="size-item">
+    <svg viewBox="0 0 100 100" width="64" height="64" fill="none"><defs><clipPath id="s64"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="white" stroke-width="2" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#s64)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="white" stroke-width="4" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="white" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.25" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path><path d="M54,-10 C100,15 104,35 60,50 C16,65 20,85 66,110" stroke="white" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.1" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">64px</div>
+  </div>
+  <div class="size-item">
+    <svg viewBox="0 0 100 100" width="48" height="48" fill="none"><defs><clipPath id="s48"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="white" stroke-width="2" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#s48)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="white" stroke-width="4" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="white" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.25" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path><path d="M54,-10 C100,15 104,35 60,50 C16,65 20,85 66,110" stroke="white" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.1" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">48px</div>
+  </div>
+  <div class="size-item">
+    <svg viewBox="0 0 100 100" width="32" height="32" fill="none"><defs><clipPath id="s32"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="white" stroke-width="3" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#s32)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="white" stroke-width="5.5" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="white" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.2" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">32px</div>
+  </div>
+  <div class="size-item">
+    <svg viewBox="0 0 100 100" width="24" height="24" fill="none"><defs><clipPath id="s24"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="white" stroke-width="3.5" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#s24)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="white" stroke-width="6" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="white" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.2" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">24px</div>
+  </div>
+  <div class="size-item">
+    <svg viewBox="0 0 100 100" width="16" height="16" fill="none"><defs><clipPath id="s16"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="white" stroke-width="5" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#s16)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="white" stroke-width="8" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">16px (favicon)</div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- Wordmark combos -->
+<h2>With wordmark</h2>
+<div class="wordmark-row">
+  <div class="wordmark-item">
+    <svg viewBox="0 0 100 100" width="36" height="36" fill="none"><defs><clipPath id="wm1"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="white" stroke-width="2" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#wm1)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="white" stroke-width="4" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="white" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.25" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path><path d="M54,-10 C100,15 104,35 60,50 C16,65 20,85 66,110" stroke="white" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.1" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path></g></svg>
+    <span style="font-family: &quot;Courier New&quot;, monospace; font-size: 22px; font-weight: 700; letter-spacing: 0.35em; text-transform: uppercase; color: rgb(228, 228, 231); --darkreader-inline-color: var(--darkreader-text-e4e4e7, #d8d5cf);" data-darkreader-inline-color="">simse</span>
+  </div>
+  <div class="wordmark-item">
+    <svg viewBox="0 0 100 100" width="24" height="24" fill="none"><defs><clipPath id="wm2"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="white" stroke-width="3.5" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#wm2)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="white" stroke-width="6" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="white" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.2" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path></g></svg>
+    <span style="font-family: &quot;Courier New&quot;, monospace; font-size: 14px; font-weight: 700; letter-spacing: 0.3em; text-transform: uppercase; color: rgb(161, 161, 170); --darkreader-inline-color: var(--darkreader-text-a1a1aa, #afa99e);" data-darkreader-inline-color="">simse</span>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- UI Context -->
+<h2>In context</h2>
+<div class="context-grid">
+  <div>
+    <div class="size-label" style="margin-bottom: 12px;">Sidebar</div>
+    <div class="sidebar-mock">
+      <div class="brand">
+        <svg viewBox="0 0 100 100" width="22" height="22" fill="none"><defs><clipPath id="sb"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="white" stroke-width="3.5" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#sb)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="white" stroke-width="6" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="white" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.2" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path></g></svg>
+        <span>simse</span>
+      </div>
+      <div class="nav-item active">Dashboard</div>
+      <div class="nav-item">Agents</div>
+      <div class="nav-item">Library</div>
+      <div class="nav-item">Settings</div>
+    </div>
+  </div>
+
+  <div>
+    <div class="size-label" style="margin-bottom: 12px;">Browser tab</div>
+    <div class="tab-bar">
+      <div class="tab active">
+        <svg viewBox="0 0 100 100" width="14" height="14" fill="none"><defs><clipPath id="tb"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="white" stroke-width="5" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#tb)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="white" stroke-width="8" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-ffffff, #e8e6e3);" data-darkreader-inline-stroke=""></path></g></svg>
+        simse — Dashboard
+      </div>
+      <div class="tab">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="6" stroke="#71717a" stroke-width="1.5" style="--darkreader-inline-stroke: var(--darkreader-text-71717a, #9e9589);" data-darkreader-inline-stroke=""></circle></svg>
+        GitHub
+      </div>
+      <div class="tab">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="none"><circle cx="8" cy="8" r="6" stroke="#71717a" stroke-width="1.5" style="--darkreader-inline-stroke: var(--darkreader-text-71717a, #9e9589);" data-darkreader-inline-stroke=""></circle></svg>
+        Gmail
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- Light background -->
+<h2>On light background</h2>
+<div class="light-strip">
+  <div class="light-item">
+    <svg viewBox="0 0 100 100" width="128" height="128" fill="none"><defs><clipPath id="l128"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="#0a0a0b" stroke-width="2" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#l128)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="#0a0a0b" stroke-width="4" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="#0a0a0b" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.25" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></path><path d="M54,-10 C100,15 104,35 60,50 C16,65 20,85 66,110" stroke="#0a0a0b" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.1" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">128px</div>
+  </div>
+  <div class="light-item">
+    <svg viewBox="0 0 100 100" width="64" height="64" fill="none"><defs><clipPath id="l64"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="#0a0a0b" stroke-width="2" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#l64)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="#0a0a0b" stroke-width="4" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="#0a0a0b" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.25" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></path><path d="M54,-10 C100,15 104,35 60,50 C16,65 20,85 66,110" stroke="#0a0a0b" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.1" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">64px</div>
+  </div>
+  <div class="light-item">
+    <svg viewBox="0 0 100 100" width="32" height="32" fill="none"><defs><clipPath id="l32"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="#0a0a0b" stroke-width="3" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#l32)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="#0a0a0b" stroke-width="5.5" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="#0a0a0b" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.2" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">32px</div>
+  </div>
+  <div class="light-item">
+    <svg viewBox="0 0 100 100" width="16" height="16" fill="none"><defs><clipPath id="l16"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="#0a0a0b" stroke-width="5" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#l16)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="#0a0a0b" stroke-width="8" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-0a0a0b, #e1dfdb);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">16px</div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- Emerald accent variant -->
+<h2>Emerald accent variant (optional)</h2>
+<div class="emerald-strip">
+  <div class="size-item">
+    <svg viewBox="0 0 100 100" width="128" height="128" fill="none"><defs><clipPath id="e128"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="#34d399" stroke-width="2" opacity="0.5" style="--darkreader-inline-stroke: var(--darkreader-text-34d399, #47d7a3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#e128)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="#34d399" stroke-width="4" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-34d399, #47d7a3);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.25" style="--darkreader-inline-stroke: var(--darkreader-text-34d399, #47d7a3);" data-darkreader-inline-stroke=""></path><path d="M54,-10 C100,15 104,35 60,50 C16,65 20,85 66,110" stroke="#34d399" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.1" style="--darkreader-inline-stroke: var(--darkreader-text-34d399, #47d7a3);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">Emerald 128px</div>
+  </div>
+  <div class="size-item">
+    <svg viewBox="0 0 100 100" width="64" height="64" fill="none"><defs><clipPath id="e64"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="#34d399" stroke-width="2" opacity="0.5" style="--darkreader-inline-stroke: var(--darkreader-text-34d399, #47d7a3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#e64)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="#34d399" stroke-width="4" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-34d399, #47d7a3);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="#34d399" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.25" style="--darkreader-inline-stroke: var(--darkreader-text-34d399, #47d7a3);" data-darkreader-inline-stroke=""></path><path d="M54,-10 C100,15 104,35 60,50 C16,65 20,85 66,110" stroke="#34d399" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.1" style="--darkreader-inline-stroke: var(--darkreader-text-34d399, #47d7a3);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">64px</div>
+  </div>
+  <div class="size-item">
+    <svg viewBox="0 0 100 100" width="32" height="32" fill="none"><defs><clipPath id="e32"><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5"></polygon></clipPath></defs><polygon points="50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5" fill="none" stroke="#34d399" stroke-width="3" opacity="0.5" style="--darkreader-inline-stroke: var(--darkreader-text-34d399, #47d7a3);" data-darkreader-inline-stroke=""></polygon><g clip-path="url(#e32)"><path d="M44,-10 C90,15 94,35 50,50 C6,65 10,85 56,110" stroke="#34d399" stroke-width="5.5" stroke-linecap="round" fill="none" style="--darkreader-inline-stroke: var(--darkreader-text-34d399, #47d7a3);" data-darkreader-inline-stroke=""></path><path d="M34,-10 C80,15 84,35 40,50 C-4,65 0,85 46,110" stroke="#34d399" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.2" style="--darkreader-inline-stroke: var(--darkreader-text-34d399, #47d7a3);" data-darkreader-inline-stroke=""></path></g></svg>
+    <div class="size-label">32px</div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<h2>Files</h2>
+<div style="font-size: 13px; color: rgb(82, 82, 91); line-height: 2; --darkreader-inline-color: var(--darkreader-text-52525b, #b1aba1);" data-darkreader-inline-color="">
+  <code style="color: rgb(161, 161, 170); --darkreader-inline-color: var(--darkreader-text-a1a1aa, #afa99e);" data-darkreader-inline-color="">logo-final.svg</code> — white on transparent (for dark backgrounds)<br>
+  <code style="color: rgb(161, 161, 170); --darkreader-inline-color: var(--darkreader-text-a1a1aa, #afa99e);" data-darkreader-inline-color="">logo-final-dark.svg</code> — dark on transparent (for light backgrounds)
+</div>
+
+
+</body></html>

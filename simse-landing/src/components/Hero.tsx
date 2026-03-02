@@ -15,7 +15,7 @@ export default function Hero() {
 				)}
 				style={{ animationDelay: '50ms' }}
 			>
-				SIMSE-CODE
+				SIMSE
 			</p>
 			<h1
 				className={clsx(

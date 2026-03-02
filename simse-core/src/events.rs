@@ -226,11 +226,14 @@ pub mod event_types {
 	pub const STREAM_END: &str = "stream.end";
 
 	// Loop events
+	pub const LOOP_START: &str = "loop.start";
+	pub const LOOP_COMPLETE: &str = "loop.complete";
 	pub const LOOP_TURN_START: &str = "loop.turn_start";
 	pub const LOOP_TURN_END: &str = "loop.turn_end";
 	pub const LOOP_TOOL_START: &str = "loop.tool_start";
 	pub const LOOP_TOOL_END: &str = "loop.tool_end";
 	pub const LOOP_DOOM_LOOP: &str = "loop.doom_loop";
+	pub const LOOP_COMPACTION: &str = "loop.compaction";
 
 	// Library events
 	pub const LIBRARY_SEARCH: &str = "library.search";

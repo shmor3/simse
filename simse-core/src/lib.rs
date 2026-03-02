@@ -2,6 +2,7 @@
 // Links simse-acp, simse-mcp, simse-vector, simse-vfs as library dependencies
 
 pub mod agent;
+pub mod agentic_loop;
 pub mod chain;
 pub mod config;
 pub mod conversation;

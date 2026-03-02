@@ -51,33 +51,22 @@ impl CoreRpcServer {
 	}
 
 	#[allow(dead_code)]
-	fn require_context(&self, req_id: u64) -> Option<&CoreContext> {
-		match &self.context {
-			Some(ctx) => Some(ctx),
-			None => {
-				self.transport.write_error(
-					req_id,
-					CORE_ERROR,
-					"Not initialized. Call core/initialize first.",
-					Some(serde_json::json!({ "coreCode": "NOT_INITIALIZED" })),
-				);
-				None
-			}
-		}
+	fn require_context(&self) -> Option<&CoreContext> {
+		self.context.as_ref()
 	}
 
 	#[allow(dead_code)]
-	fn require_context_mut(&mut self, req_id: u64) -> Option<&mut CoreContext> {
-		if self.context.is_none() {
-			self.transport.write_error(
-				req_id,
-				CORE_ERROR,
-				"Not initialized. Call core/initialize first.",
-				Some(serde_json::json!({ "coreCode": "NOT_INITIALIZED" })),
-			);
-			return None;
-		}
+	fn require_context_mut(&mut self) -> Option<&mut CoreContext> {
 		self.context.as_mut()
+	}
+
+	fn write_not_initialized(&self, req_id: u64) {
+		self.transport.write_error(
+			req_id,
+			CORE_ERROR,
+			"Not initialized. Call core/initialize first.",
+			Some(serde_json::json!({ "coreCode": "NOT_INITIALIZED" })),
+		);
 	}
 
 	async fn handle_initialize(&mut self, req: JsonRpcRequest) {

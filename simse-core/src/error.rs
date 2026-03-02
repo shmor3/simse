@@ -553,5 +553,16 @@ impl SimseError {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// JSON-RPC error conversion
+// ---------------------------------------------------------------------------
+
+impl SimseError {
+	/// Convert to a JSON-RPC error data payload with a `coreCode` key.
+	pub fn to_json_rpc_error(&self) -> serde_json::Value {
+		serde_json::json!({ "coreCode": self.code() })
+	}
+}
+
 /// Convenience type alias for Results using `SimseError`.
 pub type Result<T> = std::result::Result<T, SimseError>;

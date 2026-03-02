@@ -12,7 +12,7 @@ use crate::rpc_transport::NdjsonTransport;
 use crate::server::session::{SessionInfo, SessionStatus};
 use crate::tasks::{TaskCreateInput, TaskStatus, TaskUpdateInput};
 use crate::tools::types::{
-	ToolCallRequest, ToolCallResult, ToolDefinition, ToolHandler, ToolParameter,
+	ParsedResponse, ToolCallRequest, ToolCallResult, ToolDefinition, ToolHandler, ToolParameter,
 };
 
 use crate::agent::{
@@ -35,6 +35,7 @@ pub struct CoreRpcServer {
 	next_hook_id: Arc<Mutex<u64>>,
 	pending_tool_calls: PendingCallsMap,
 	pending_agent_calls: PendingCallsMap,
+	active_loops: Arc<Mutex<HashMap<String, crate::agentic_loop::CancellationToken>>>,
 }
 
 impl CoreRpcServer {
@@ -49,6 +50,7 @@ impl CoreRpcServer {
 			next_hook_id: Arc::new(Mutex::new(0)),
 			pending_tool_calls: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
 			pending_agent_calls: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+			active_loops: Arc::new(Mutex::new(HashMap::new())),
 		}
 	}
 
@@ -137,6 +139,10 @@ impl CoreRpcServer {
 			"chain/run" => self.handle_chain_run(req).await,
 			"chain/runNamed" => self.handle_chain_run_named(req).await,
 			"chain/stepResult" => self.handle_chain_step_result(req).await,
+
+			// -- Loop ----------------------------------------------------
+			"loop/run" => self.handle_loop_run(req).await,
+			"loop/cancel" => self.handle_loop_cancel(req).await,
 
 			// -- Unknown -------------------------------------------------
 			_ => self.transport.write_error(
@@ -1878,6 +1884,258 @@ impl CoreRpcServer {
 		self.transport.write_response(req.id, serde_json::json!({}));
 	}
 
+	// ── Loop handlers ───────────────────────────────────────────────────
+
+	async fn handle_loop_run(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: LoopRunParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		// Verify session exists and get conversation messages
+		let messages = match ctx.session_manager.with_session(&params.session_id, |session| {
+			session
+				.conversation
+				.messages()
+				.iter()
+				.map(|m| {
+					let role = match m.role {
+						crate::conversation::Role::Assistant => {
+							crate::agentic_loop::MessageRole::Assistant
+						}
+						crate::conversation::Role::System => {
+							crate::agentic_loop::MessageRole::System
+						}
+						_ => crate::agentic_loop::MessageRole::User,
+					};
+					crate::agentic_loop::Message {
+						role,
+						content: m.content.clone(),
+					}
+				})
+				.collect::<Vec<_>>()
+		}) {
+			Some(msgs) => msgs,
+			None => {
+				self.write_session_not_found(req.id, &params.session_id);
+				return;
+			}
+		};
+
+		let loop_id = uuid::Uuid::new_v4().to_string();
+		let cancel_token = crate::agentic_loop::CancellationToken::new();
+
+		// Store the cancellation token
+		{
+			let mut loops = self.active_loops.lock().unwrap_or_else(|e| e.into_inner());
+			loops.insert(loop_id.clone(), cancel_token.clone());
+		}
+
+		// Build options
+		let event_bus = ctx.event_bus.clone();
+		let options = crate::agentic_loop::AgenticLoopOptions {
+			max_turns: params.max_turns.unwrap_or(10),
+			auto_compact: params.auto_compact.unwrap_or(false),
+			compaction_prompt: params.compaction_prompt.clone(),
+			max_identical_tool_calls: params.max_identical_tool_calls.unwrap_or(3),
+			agent_manages_tools: false,
+			stream_retry: Default::default(),
+			tool_retry: Default::default(),
+			system_prompt: params.system_prompt.clone(),
+			event_bus: Some(Arc::new(event_bus)),
+		};
+
+		// Build callback-based AcpClient and ToolExecutor
+		let pending_acp = Arc::clone(&self.pending_agent_calls);
+		let pending_tool = Arc::clone(&self.pending_tool_calls);
+
+		let acp_client = CallbackLoopAcpClient {
+			pending: pending_acp,
+			loop_id: loop_id.clone(),
+		};
+		let tool_executor = CallbackLoopToolExecutor {
+			pending: pending_tool,
+			loop_id: loop_id.clone(),
+		};
+
+		// Spawn the loop as a background task
+		let loop_id_for_task = loop_id.clone();
+		let active_loops = Arc::clone(&self.active_loops);
+
+		// Build callbacks that emit notifications
+		let notify_loop_id = loop_id.clone();
+		let callbacks = crate::agentic_loop::LoopCallbacks {
+			on_turn_complete: Some(Box::new({
+				let lid = notify_loop_id.clone();
+				move |turn| {
+					let transport = NdjsonTransport::new();
+					transport.write_notification(
+						"loop/turnComplete",
+						serde_json::json!({
+							"loopId": &lid,
+							"turn": turn.turn,
+							"turnType": format!("{:?}", turn.turn_type),
+							"text": turn.text,
+							"durationMs": turn.duration_ms,
+						}),
+					);
+				}
+			})),
+			on_tool_call_start: Some(Box::new({
+				let lid = notify_loop_id.clone();
+				move |call| {
+					let transport = NdjsonTransport::new();
+					transport.write_notification(
+						"loop/toolCallStart",
+						serde_json::json!({
+							"loopId": &lid,
+							"toolName": &call.name,
+							"args": &call.arguments,
+						}),
+					);
+				}
+			})),
+			on_tool_call_end: Some(Box::new({
+				let lid = notify_loop_id.clone();
+				move |result| {
+					let transport = NdjsonTransport::new();
+					transport.write_notification(
+						"loop/toolCallEnd",
+						serde_json::json!({
+							"loopId": &lid,
+							"toolName": &result.name,
+							"output": &result.output,
+							"isError": result.is_error,
+						}),
+					);
+				}
+			})),
+			on_doom_loop: Some(Box::new({
+				let lid = notify_loop_id.clone();
+				move |tool_name, count| {
+					let transport = NdjsonTransport::new();
+					transport.write_notification(
+						"loop/doomLoop",
+						serde_json::json!({
+							"loopId": &lid,
+							"toolName": tool_name,
+							"count": count,
+						}),
+					);
+				}
+			})),
+			on_compaction: Some(Box::new({
+				let lid = notify_loop_id.clone();
+				move |summary| {
+					let transport = NdjsonTransport::new();
+					transport.write_notification(
+						"loop/compaction",
+						serde_json::json!({
+							"loopId": &lid,
+							"summary": summary,
+						}),
+					);
+				}
+			})),
+			..Default::default()
+		};
+
+		tokio::spawn(async move {
+			let mut msgs = messages;
+			let result = crate::agentic_loop::run_agentic_loop(
+				&acp_client,
+				&tool_executor,
+				&mut msgs,
+				options,
+				Some(callbacks),
+				Some(&cancel_token),
+				None,
+				None,
+			)
+			.await;
+
+			// Clean up active loop
+			{
+				let mut loops = active_loops.lock().unwrap_or_else(|e| e.into_inner());
+				loops.remove(&loop_id_for_task);
+			}
+
+			// Send completion notification
+			let transport = NdjsonTransport::new();
+			match result {
+				Ok(loop_result) => {
+					transport.write_notification(
+						"loop/complete",
+						serde_json::json!({
+							"loopId": &loop_id_for_task,
+							"finalText": &loop_result.final_text,
+							"totalTurns": loop_result.total_turns,
+							"hitTurnLimit": loop_result.hit_turn_limit,
+							"aborted": loop_result.aborted,
+							"totalDurationMs": loop_result.total_duration_ms,
+						}),
+					);
+				}
+				Err(e) => {
+					transport.write_notification(
+						"loop/complete",
+						serde_json::json!({
+							"loopId": &loop_id_for_task,
+							"error": e.to_string(),
+							"coreCode": e.code(),
+						}),
+					);
+				}
+			}
+		});
+
+		// Return immediately with the loop ID
+		self.transport
+			.write_response(req.id, serde_json::json!({ "loopId": loop_id }));
+	}
+
+	async fn handle_loop_cancel(&self, req: JsonRpcRequest) {
+		let _ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: LoopCancelParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let token = {
+			let loops = self.active_loops.lock().unwrap_or_else(|e| e.into_inner());
+			loops.get(&params.loop_id).cloned()
+		};
+
+		if let Some(token) = token {
+			token.cancel();
+		}
+
+		self.transport.write_response(req.id, serde_json::json!({}));
+	}
+
 	// ── Conversation handlers ────────────────────────────────────────────
 
 	async fn handle_conv_from_json(&self, req: JsonRpcRequest) {
@@ -2158,6 +2416,30 @@ fn parse_task_status(s: &str) -> Option<TaskStatus> {
 ///   "encoding": { "type": "string", "description": "File encoding" }
 /// }
 /// ```
+// -- Loop params -----------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoopRunParams {
+	session_id: String,
+	#[serde(default)]
+	max_turns: Option<usize>,
+	#[serde(default)]
+	auto_compact: Option<bool>,
+	#[serde(default)]
+	compaction_prompt: Option<String>,
+	#[serde(default)]
+	max_identical_tool_calls: Option<usize>,
+	#[serde(default)]
+	system_prompt: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LoopCancelParams {
+	loop_id: String,
+}
+
 // -- Chain params ----------------------------------------------------------
 
 #[derive(Deserialize)]
@@ -2336,6 +2618,164 @@ impl LibraryProvider for CallbackLibraryProvider {
 		};
 		callback_agent_call(&self.pending, "library", prompt, &config, serde_json::json!({}))
 			.await
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Callback types for agentic loop execution
+// ---------------------------------------------------------------------------
+
+/// Callback-based ACP client that sends `loop/generate` notifications
+/// to TS and waits for the response via a oneshot channel.
+struct CallbackLoopAcpClient {
+	pending: PendingCallsMap,
+	loop_id: String,
+}
+
+#[async_trait::async_trait]
+impl crate::agentic_loop::AcpClient for CallbackLoopAcpClient {
+	async fn generate(
+		&self,
+		messages: &[crate::agentic_loop::Message],
+		system: Option<&str>,
+	) -> Result<crate::agentic_loop::GenerateResponse, crate::error::SimseError> {
+		let request_id = uuid::Uuid::new_v4().to_string();
+		let (tx, rx) = tokio::sync::oneshot::channel();
+
+		{
+			let mut map = self.pending.lock().await;
+			map.insert(request_id.clone(), tx);
+		}
+
+		let msgs_json: Vec<serde_json::Value> = messages
+			.iter()
+			.map(|m| {
+				let role = match m.role {
+					crate::agentic_loop::MessageRole::User => "user",
+					crate::agentic_loop::MessageRole::Assistant => "assistant",
+					crate::agentic_loop::MessageRole::System => "system",
+				};
+				serde_json::json!({
+					"role": role,
+					"content": m.content,
+				})
+			})
+			.collect();
+
+		let transport = NdjsonTransport::new();
+		transport.write_notification(
+			"loop/generate",
+			serde_json::json!({
+				"requestId": request_id,
+				"loopId": self.loop_id,
+				"messages": msgs_json,
+				"system": system,
+			}),
+		);
+
+		match tokio::time::timeout(std::time::Duration::from_secs(300), rx).await {
+			Ok(Ok(result)) => {
+				let text = result
+					.get("text")
+					.and_then(|v| v.as_str())
+					.unwrap_or("")
+					.to_string();
+				let usage = result.get("usage").map(|u| crate::agentic_loop::TokenUsage {
+					prompt_tokens: u.get("promptTokens").and_then(|v| v.as_u64()),
+					completion_tokens: u.get("completionTokens").and_then(|v| v.as_u64()),
+					total_tokens: u.get("totalTokens").and_then(|v| v.as_u64()),
+				});
+				Ok(crate::agentic_loop::GenerateResponse { text, usage })
+			}
+			Ok(Err(_)) => Err(crate::error::SimseError::other(
+				"Loop generate callback channel closed",
+			)),
+			Err(_) => {
+				let mut map = self.pending.lock().await;
+				map.remove(&request_id);
+				Err(crate::error::SimseError::other(
+					"Loop generate callback timed out (300s)",
+				))
+			}
+		}
+	}
+}
+
+/// Callback-based tool executor that sends `loop/toolCall` notifications
+/// to TS and waits for the response via a oneshot channel.
+struct CallbackLoopToolExecutor {
+	pending: PendingCallsMap,
+	loop_id: String,
+}
+
+#[async_trait::async_trait]
+impl crate::agentic_loop::ToolExecutor for CallbackLoopToolExecutor {
+	fn parse_tool_calls(&self, response: &str) -> ParsedResponse {
+		crate::tools::registry::ToolRegistry::parse_tool_calls(response)
+	}
+
+	async fn execute(&self, call: &ToolCallRequest) -> ToolCallResult {
+		let request_id = uuid::Uuid::new_v4().to_string();
+		let (tx, rx) = tokio::sync::oneshot::channel();
+
+		{
+			let mut map = self.pending.lock().await;
+			map.insert(request_id.clone(), tx);
+		}
+
+		let transport = NdjsonTransport::new();
+		transport.write_notification(
+			"loop/toolCall",
+			serde_json::json!({
+				"requestId": request_id,
+				"loopId": self.loop_id,
+				"id": call.id,
+				"name": call.name,
+				"arguments": call.arguments,
+			}),
+		);
+
+		let start = std::time::Instant::now();
+
+		match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
+			Ok(Ok(result)) => {
+				let output = result
+					.get("output")
+					.and_then(|v| v.as_str())
+					.unwrap_or("")
+					.to_string();
+				let is_error = result
+					.get("isError")
+					.and_then(|v| v.as_bool())
+					.unwrap_or(false);
+				ToolCallResult {
+					id: call.id.clone(),
+					name: call.name.clone(),
+					output,
+					is_error,
+					duration_ms: Some(start.elapsed().as_millis() as u64),
+				}
+			}
+			Ok(Err(_)) => ToolCallResult {
+				id: call.id.clone(),
+				name: call.name.clone(),
+				output: "Tool callback channel closed".to_string(),
+				is_error: true,
+				duration_ms: Some(start.elapsed().as_millis() as u64),
+			},
+			Err(_) => {
+				// Clean up pending entry on timeout
+				let mut map = self.pending.lock().await;
+				map.remove(&request_id);
+				ToolCallResult {
+					id: call.id.clone(),
+					name: call.name.clone(),
+					output: "Tool callback timed out (120s)".to_string(),
+					is_error: true,
+					duration_ms: Some(start.elapsed().as_millis() as u64),
+				}
+			}
+		}
 	}
 }
 

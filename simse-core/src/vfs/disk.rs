@@ -12,7 +12,7 @@ use std::sync::{Arc, LazyLock};
 use crate::error::SimseError;
 
 use super::validators::{ValidationResult, VfsValidator, validate_snapshot};
-use super::vfs::VirtualFs;
+use super::vfs::{VirtualFs, WriteOptions};
 
 // ---------------------------------------------------------------------------
 // Base64 encode/decode (inline, avoids adding a crate dependency)
@@ -79,7 +79,7 @@ fn b64_decode(input: &str) -> Result<Vec<u8>, String> {
 static BINARY_EXTENSIONS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
 	[
 		// Images
-		"png", "jpg", "jpeg", "gif", "bmp", "ico", "tiff", "tif", "webp", "svg", "avif", "heic",
+		"png", "jpg", "jpeg", "gif", "bmp", "ico", "tiff", "tif", "webp", "avif", "heic",
 		"heif", "psd", "raw", "cr2", "nef",
 		// Audio
 		"mp3", "wav", "ogg", "flac", "aac", "wma", "m4a", "opus",
@@ -492,9 +492,23 @@ impl VfsDisk {
 					self.vfs
 						.write_file(&vfs_path, &b64, Some(write_opts))?;
 				} else {
-					let text = std::fs::read_to_string(&path)?;
-					self.vfs
-						.write_file(&vfs_path, &text, Some(write_opts))?;
+					// Try text first; fall back to binary if not valid UTF-8
+					match std::fs::read_to_string(&path) {
+						Ok(text) => {
+							self.vfs
+								.write_file(&vfs_path, &text, Some(write_opts))?;
+						}
+						Err(_) => {
+							let write_opts_bin = WriteOptions {
+								content_type: Some("binary".to_string()),
+								create_parents: true,
+							};
+							let data = std::fs::read(&path)?;
+							let b64 = b64_encode(&data);
+							self.vfs
+								.write_file(&vfs_path, &b64, Some(write_opts_bin))?;
+						}
+					}
 				}
 
 				result.bytes_written += file_size;

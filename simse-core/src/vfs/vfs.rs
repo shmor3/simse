@@ -334,7 +334,11 @@ impl VirtualFs {
 	/// Checkout (revert) a file to a specific version.
 	pub fn checkout(&self, path: &str, version: usize) -> Result<(), SimseError> {
 		let mut vfs = self.lock_inner();
-		Ok(vfs.checkout(path, version)?)
+		vfs.checkout(path, version)?;
+		let events = vfs.drain_events();
+		drop(vfs);
+		self.publish_engine_events(events);
+		Ok(())
 	}
 
 	// -- Snapshot & Restore -----------------------------------------------

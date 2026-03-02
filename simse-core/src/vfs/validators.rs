@@ -156,7 +156,7 @@ impl VfsValidator for MixedIndentationValidator {
 		let mut has_spaces = false;
 
 		for line in text.lines() {
-			let leading: String = line.chars().take_while(|c| c.is_whitespace()).collect();
+			let leading: String = line.chars().take_while(|c| *c == '\t' || *c == ' ').collect();
 			if leading.is_empty() {
 				continue;
 			}

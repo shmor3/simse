@@ -57,6 +57,18 @@ impl CoreRpcServer {
 			"session/updateStatus" => self.handle_session_update_status(req).await,
 			"session/fork" => self.handle_session_fork(req).await,
 
+			// -- Conversation --------------------------------------------
+			"conversation/addUser" => self.handle_conv_add_user(req).await,
+			"conversation/addAssistant" => self.handle_conv_add_assistant(req).await,
+			"conversation/addToolResult" => self.handle_conv_add_tool_result(req).await,
+			"conversation/setSystemPrompt" => self.handle_conv_set_system_prompt(req).await,
+			"conversation/getMessages" => self.handle_conv_get_messages(req).await,
+			"conversation/compact" => self.handle_conv_compact(req).await,
+			"conversation/clear" => self.handle_conv_clear(req).await,
+			"conversation/stats" => self.handle_conv_stats(req).await,
+			"conversation/toJson" => self.handle_conv_to_json(req).await,
+			"conversation/fromJson" => self.handle_conv_from_json(req).await,
+
 			// -- Unknown -------------------------------------------------
 			_ => self.transport.write_error(
 				req.id,
@@ -82,6 +94,15 @@ impl CoreRpcServer {
 			CORE_ERROR,
 			"Not initialized. Call core/initialize first.",
 			Some(serde_json::json!({ "coreCode": "NOT_INITIALIZED" })),
+		);
+	}
+
+	fn write_session_not_found(&self, req_id: u64, session_id: &str) {
+		self.transport.write_error(
+			req_id,
+			CORE_ERROR,
+			format!("Session not found: {}", session_id),
+			Some(serde_json::json!({ "coreCode": "SESSION_NOT_FOUND" })),
 		);
 	}
 
@@ -287,6 +308,292 @@ impl CoreRpcServer {
 			}
 		}
 	}
+
+	// ── Conversation handlers ────────────────────────────────────────────
+
+	async fn handle_conv_add_user(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ConvAddParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		match ctx.session_manager.with_session(&params.session_id, |session| {
+			session.conversation.add_user(&params.content);
+		}) {
+			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
+			None => self.write_session_not_found(req.id, &params.session_id),
+		}
+	}
+
+	async fn handle_conv_add_assistant(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ConvAddParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		match ctx.session_manager.with_session(&params.session_id, |session| {
+			session.conversation.add_assistant(&params.content);
+		}) {
+			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
+			None => self.write_session_not_found(req.id, &params.session_id),
+		}
+	}
+
+	async fn handle_conv_add_tool_result(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ConvToolResultParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let tool_name = params
+			.tool_name
+			.as_deref()
+			.unwrap_or(&params.tool_call_id);
+
+		match ctx.session_manager.with_session(&params.session_id, |session| {
+			session
+				.conversation
+				.add_tool_result(&params.tool_call_id, tool_name, &params.content);
+		}) {
+			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
+			None => self.write_session_not_found(req.id, &params.session_id),
+		}
+	}
+
+	async fn handle_conv_set_system_prompt(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ConvSetPromptParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		match ctx.session_manager.with_session(&params.session_id, |session| {
+			session.conversation.set_system_prompt(params.prompt.clone());
+		}) {
+			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
+			None => self.write_session_not_found(req.id, &params.session_id),
+		}
+	}
+
+	async fn handle_conv_get_messages(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ConvSessionParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		match ctx.session_manager.with_session(&params.session_id, |session| {
+			let messages = serde_json::to_value(session.conversation.messages())
+				.unwrap_or(serde_json::json!([]));
+			let system_prompt = session.conversation.system_prompt().map(|s| s.to_string());
+			(messages, system_prompt)
+		}) {
+			Some((messages, system_prompt)) => {
+				let mut result = serde_json::json!({ "messages": messages });
+				if let Some(prompt) = system_prompt {
+					result["systemPrompt"] = serde_json::json!(prompt);
+				}
+				self.transport.write_response(req.id, result);
+			}
+			None => self.write_session_not_found(req.id, &params.session_id),
+		}
+	}
+
+	async fn handle_conv_compact(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ConvCompactParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		match ctx.session_manager.with_session(&params.session_id, |session| {
+			session.conversation.compact(&params.summary);
+		}) {
+			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
+			None => self.write_session_not_found(req.id, &params.session_id),
+		}
+	}
+
+	async fn handle_conv_clear(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ConvSessionParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		match ctx.session_manager.with_session(&params.session_id, |session| {
+			session.conversation.clear();
+		}) {
+			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
+			None => self.write_session_not_found(req.id, &params.session_id),
+		}
+	}
+
+	async fn handle_conv_stats(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ConvSessionParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		match ctx.session_manager.with_session(&params.session_id, |session| {
+			serde_json::json!({
+				"estimatedChars": session.conversation.estimated_chars(),
+				"estimatedTokens": session.conversation.estimated_tokens(),
+				"needsCompaction": session.conversation.needs_compaction(),
+				"contextUsagePercent": session.conversation.context_usage_percent(),
+			})
+		}) {
+			Some(stats) => self.transport.write_response(req.id, stats),
+			None => self.write_session_not_found(req.id, &params.session_id),
+		}
+	}
+
+	async fn handle_conv_to_json(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ConvSessionParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		match ctx.session_manager.with_session(&params.session_id, |session| {
+			session.conversation.to_json()
+		}) {
+			Some(json) => {
+				self.transport
+					.write_response(req.id, serde_json::json!({ "json": json }));
+			}
+			None => self.write_session_not_found(req.id, &params.session_id),
+		}
+	}
+
+	async fn handle_conv_from_json(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ConvFromJsonParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		match ctx.session_manager.with_session(&params.session_id, |session| {
+			session.conversation.from_json(&params.json);
+		}) {
+			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
+			None => self.write_session_not_found(req.id, &params.session_id),
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +617,50 @@ struct SessionIdParams {
 struct SessionUpdateStatusParams {
 	id: String,
 	status: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConvSessionParams {
+	session_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConvAddParams {
+	session_id: String,
+	content: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConvToolResultParams {
+	session_id: String,
+	tool_call_id: String,
+	#[serde(default)]
+	tool_name: Option<String>,
+	content: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConvSetPromptParams {
+	session_id: String,
+	prompt: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConvCompactParams {
+	session_id: String,
+	summary: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ConvFromJsonParams {
+	session_id: String,
+	json: String,
 }
 
 // ---------------------------------------------------------------------------

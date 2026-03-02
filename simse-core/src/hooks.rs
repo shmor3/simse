@@ -32,7 +32,7 @@ type HandlerId = u64;
 // ---------------------------------------------------------------------------
 
 /// Returned by a before-hook to block tool execution.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockedResult {
 	/// Human-readable reason why execution was blocked.
 	pub reason: String,
@@ -503,6 +503,10 @@ impl HookSystem {
 	// -- Utility -----------------------------------------------------------
 
 	/// Remove all registered hooks.
+	///
+	/// Note: the internal handler ID counter is intentionally *not* reset,
+	/// preventing stale unsubscribe closures from matching newly-registered
+	/// handlers that would otherwise recycle the same IDs.
 	pub fn clear(&self) {
 		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 		inner.before_handlers.clear();

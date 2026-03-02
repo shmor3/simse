@@ -7,6 +7,10 @@ edition = "2021"
 name = "simse_core"
 path = "src/lib.rs"
 
+[[bin]]
+name = "simse-core-engine"
+path = "src/main.rs"
+
 [dependencies]
 simse-acp-engine = { path = "../simse-acp" }
 simse-mcp-engine = { path = "../simse-mcp" }

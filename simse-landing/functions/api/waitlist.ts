@@ -38,10 +38,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 			.bind(email)
 			.run();
 	} catch (err) {
-		// log full error for debugging; D1 errors often contain a message
+		// log full error for debugging; keep response generic to avoid info leak
 		console.error('D1 insert failed', err);
-		const message = err instanceof Error ? err.message : String(err);
-		return Response.json({ error: message }, { status: 500 });
+		return Response.json({ error: 'Database error' }, { status: 500 });
 	}
 
 	// Build an unsubscribe link and fire-and-forget the email send

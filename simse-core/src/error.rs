@@ -152,6 +152,8 @@ pub enum LibraryErrorCode {
 	EmbeddingFailed,
 	NotInitialized,
 	DuplicateDetected,
+	NotFound,
+	InvalidInput,
 }
 
 impl LibraryErrorCode {
@@ -161,6 +163,8 @@ impl LibraryErrorCode {
 			Self::EmbeddingFailed => "LIBRARY_EMBEDDING_FAILED",
 			Self::NotInitialized => "LIBRARY_NOT_INITIALIZED",
 			Self::DuplicateDetected => "LIBRARY_DUPLICATE_DETECTED",
+			Self::NotFound => "LIBRARY_NOT_FOUND",
+			Self::InvalidInput => "LIBRARY_INVALID_INPUT",
 		}
 	}
 }
@@ -546,6 +550,17 @@ impl SimseError {
 
 	pub fn other(message: impl Into<String>) -> Self {
 		Self::Other(message.into())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// JSON-RPC error conversion
+// ---------------------------------------------------------------------------
+
+impl SimseError {
+	/// Convert to a JSON-RPC error data payload with a `coreCode` key.
+	pub fn to_json_rpc_error(&self) -> serde_json::Value {
+		serde_json::json!({ "coreCode": self.code() })
 	}
 }
 

@@ -13,6 +13,7 @@ const features = [
 				stroke="currentColor"
 				strokeWidth="1.5"
 			>
+				<title>ACP Client</title>
 				<path
 					strokeLinecap="round"
 					strokeLinejoin="round"
@@ -34,6 +35,7 @@ const features = [
 				stroke="currentColor"
 				strokeWidth="1.5"
 			>
+				<title>MCP Server</title>
 				<path
 					strokeLinecap="round"
 					strokeLinejoin="round"
@@ -55,6 +57,7 @@ const features = [
 				stroke="currentColor"
 				strokeWidth="1.5"
 			>
+				<title>Agentic Loop</title>
 				<path
 					strokeLinecap="round"
 					strokeLinejoin="round"
@@ -76,6 +79,7 @@ const features = [
 				stroke="currentColor"
 				strokeWidth="1.5"
 			>
+				<title>Vector Memory</title>
 				<path
 					strokeLinecap="round"
 					strokeLinejoin="round"
@@ -97,6 +101,7 @@ const features = [
 				stroke="currentColor"
 				strokeWidth="1.5"
 			>
+				<title>Virtual Filesystem</title>
 				<path
 					strokeLinecap="round"
 					strokeLinejoin="round"
@@ -118,6 +123,7 @@ const features = [
 				stroke="currentColor"
 				strokeWidth="1.5"
 			>
+				<title>Resilience</title>
 				<path
 					strokeLinecap="round"
 					strokeLinejoin="round"

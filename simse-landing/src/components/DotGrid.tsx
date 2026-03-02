@@ -15,10 +15,13 @@ export default function DotGrid() {
 	const raf = useRef(0);
 
 	useEffect(() => {
-		const canvas = canvasRef.current;
-		if (!canvas) return;
-		const ctx = canvas.getContext('2d');
-		if (!ctx) return;
+		const cvs = canvasRef.current;
+		if (!cvs) return;
+		const c = cvs.getContext('2d');
+		if (!c) return;
+		// Alias to satisfy TS strict null checks inside nested functions
+		const canvas: HTMLCanvasElement = cvs;
+		const ctx: CanvasRenderingContext2D = c;
 
 		let w = 0;
 		let h = 0;
@@ -27,18 +30,18 @@ export default function DotGrid() {
 			const dpr = devicePixelRatio || 1;
 			w = innerWidth;
 			h = innerHeight;
-			canvas!.width = w * dpr;
-			canvas!.height = h * dpr;
-			canvas!.style.width = `${w}px`;
-			canvas!.style.height = `${h}px`;
-			ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+			canvas.width = w * dpr;
+			canvas.height = h * dpr;
+			canvas.style.width = `${w}px`;
+			canvas.style.height = `${h}px`;
+			ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		}
 
 		function draw() {
 			const mx = mouse.current.x;
 			const my = mouse.current.y;
 
-			ctx!.clearRect(0, 0, w, h);
+			ctx.clearRect(0, 0, w, h);
 
 			const cx = w / 2;
 			const cy = h / 2;
@@ -70,10 +73,10 @@ export default function DotGrid() {
 					const cg = Math.round(255 - ease * 44);
 					const cb = Math.round(255 - ease * 102);
 
-					ctx!.beginPath();
-					ctx!.arc(x, y - rise, DOT_RADIUS * scale, 0, Math.PI * 2);
-					ctx!.fillStyle = `rgba(${cr},${cg},${cb},${alpha})`;
-					ctx!.fill();
+					ctx.beginPath();
+					ctx.arc(x, y - rise, DOT_RADIUS * scale, 0, Math.PI * 2);
+					ctx.fillStyle = `rgba(${cr},${cg},${cb},${alpha})`;
+					ctx.fill();
 				}
 			}
 
@@ -123,6 +126,7 @@ export default function DotGrid() {
 	return (
 		<canvas
 			ref={canvasRef}
+			tabIndex={-1}
 			className={clsx('pointer-events-none fixed inset-0 z-0')}
 			aria-hidden="true"
 		/>

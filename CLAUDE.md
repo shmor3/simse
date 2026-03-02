@@ -11,12 +11,14 @@ bun run build:vfs-engine     # cd simse-vfs && cargo build --release
 bun run build:acp-engine     # cd simse-acp && cargo build --release
 bun run build:mcp-engine     # cd simse-mcp && cargo build --release
 bun run build:core           # cd simse-core && cargo build --release
+bun run build:vsh-engine     # cd simse-vsh && cargo build --release
 
 # Rust tests
 cd simse-vector && cargo test  # Rust vector engine tests
 cd simse-vfs && cargo test     # Rust VFS engine tests
 cd simse-acp && cargo test     # Rust ACP engine tests
 cd simse-mcp && cargo test     # Rust MCP engine tests
+cd simse-vsh && cargo test     # Rust VSH engine tests
 cd simse-core && cargo test    # Rust core orchestration tests
 ```
 
@@ -34,6 +36,7 @@ simse-vector/               # Pure Rust crate — vector store engine (JSON-RPC 
 simse-vfs/                  # Pure Rust crate — virtual filesystem engine (JSON-RPC over stdio)
 simse-acp/                  # Pure Rust crate — ACP engine (JSON-RPC over stdio)
 simse-mcp/                  # Pure Rust crate — MCP engine (JSON-RPC over stdio)
+simse-vsh/                  # Pure Rust crate — virtual shell engine (JSON-RPC over stdio)
 simse-engine/               # Pure Rust crate — core engine
 simse-code/                 # TypeScript — CLI application (pending refactor)
 simse-cloud/                # TypeScript — SaaS web app (React Router + Cloudflare)
@@ -126,6 +129,16 @@ simse-mcp/                  # Pure Rust crate — MCP engine
     rpc_server.rs           # JSON-RPC dispatcher wrapping client + server
     stdio_transport.rs      # Stdio transport for MCP server connections
     http_transport.rs       # HTTP transport for remote MCP servers
+
+simse-vsh/                  # Pure Rust crate — virtual shell engine
+  src/
+    error.rs                # VshError enum with VSH_ code prefixes
+    protocol.rs             # JSON-RPC request/response types (19 methods)
+    transport.rs            # NdjsonTransport for JSON-RPC over stdio
+    sandbox.rs              # SandboxConfig: path validation, command filtering
+    executor.rs             # Command execution via tokio::process with timeouts
+    shell.rs                # VirtualShell: session management, env, aliases, history
+    server.rs               # VshServer: JSON-RPC dispatcher (async)
 ```
 
 ### Key Patterns

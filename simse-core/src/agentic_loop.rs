@@ -476,8 +476,8 @@ pub async fn run_agentic_loop(
 			}
 		}
 
-		// 2. Two-stage compaction (if auto_compact)
-		if options.auto_compact {
+		// 2. Two-stage compaction (if auto_compact and conversation is long enough)
+		if options.auto_compact && estimate_chars(messages) > 100_000 {
 			// Stage 1: prune (no LLM)
 			if let Some(pruner) = context_pruner {
 				let pruned = pruner.prune(messages);
@@ -657,6 +657,12 @@ pub async fn run_agentic_loop(
 		// 6. Execute tool calls with retry + doom loop detection
 		let mut tool_results: Vec<ToolCallResult> = Vec::new();
 
+		// Add assistant message once before executing tool calls
+		messages.push(Message {
+			role: MessageRole::Assistant,
+			content: response.text.clone(),
+		});
+
 		for call in &parsed.tool_calls {
 			// Doom loop detection
 			let args_hash = serde_json::to_string(&call.arguments).unwrap_or_default();
@@ -724,11 +730,7 @@ pub async fn run_agentic_loop(
 				}),
 			);
 
-			// Add assistant message with tool call and then the tool result
-			messages.push(Message {
-				role: MessageRole::Assistant,
-				content: response.text.clone(),
-			});
+			// Add tool result to conversation
 			messages.push(Message {
 				role: MessageRole::User,
 				content: format!(

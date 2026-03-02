@@ -94,14 +94,20 @@ export default function Usage({ loaderData }: Route.ComponentProps) {
 					{dailyTokens.map((d) => (
 						<div
 							key={d.day}
-							className="flex flex-1 flex-col items-center gap-2"
+							className="group flex flex-1 flex-col items-center gap-2"
 						>
 							<div
-								className="w-full flex flex-col items-center justify-end"
+								className="relative w-full flex flex-col items-center justify-end"
 								style={{ height: 100 }}
 							>
+								{/* Tooltip */}
+								<div className="pointer-events-none absolute -top-6 left-1/2 -translate-x-1/2 rounded bg-zinc-800 px-2 py-1 opacity-0 transition-opacity group-hover:opacity-100">
+									<span className="whitespace-nowrap font-mono text-[10px] text-zinc-300">
+										{d.tokens.toLocaleString()}
+									</span>
+								</div>
 								<div
-									className="w-full max-w-8 rounded-sm bg-emerald-400/20 transition-all hover:bg-emerald-400/40"
+									className="w-full max-w-8 rounded-sm bg-emerald-400/20 transition-all group-hover:bg-emerald-400/40"
 									style={{ height: `${Math.max(2, d.pct)}%` }}
 								/>
 							</div>
@@ -121,9 +127,26 @@ export default function Usage({ loaderData }: Route.ComponentProps) {
 					</p>
 				</div>
 				<div className="p-6">
-					<p className="text-center text-sm text-zinc-600">
-						No usage data yet. Start a session to see your breakdown.
-					</p>
+					<div className="flex flex-col items-center py-4">
+						<div className="flex h-10 w-10 items-center justify-center rounded-full bg-zinc-800">
+							<svg
+								className="h-5 w-5 text-zinc-600"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
+								strokeWidth={1.5}
+							>
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
+								/>
+							</svg>
+						</div>
+						<p className="mt-3 text-sm text-zinc-500">
+							No usage data yet. Start a session to see your breakdown.
+						</p>
+					</div>
 				</div>
 			</Card>
 		</>

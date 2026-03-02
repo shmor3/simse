@@ -1,5 +1,6 @@
 import clsx from 'clsx';
 import { NavLink } from 'react-router';
+import Avatar from '../ui/Avatar';
 
 interface NavItem {
 	label: string;
@@ -104,13 +105,43 @@ const nav: NavItem[] = [
 			</svg>
 		),
 	},
+	{
+		label: 'Account',
+		to: '/dashboard/account',
+		icon: (
+			<svg
+				className="h-4 w-4"
+				fill="none"
+				viewBox="0 0 24 24"
+				stroke="currentColor"
+				strokeWidth={2}
+			>
+				<path
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+				/>
+				<path
+					strokeLinecap="round"
+					strokeLinejoin="round"
+					d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+				/>
+			</svg>
+		),
+	},
 ];
 
 interface SidebarProps {
 	unreadCount?: number;
+	userName: string;
+	onClose?: () => void;
 }
 
-export default function Sidebar({ unreadCount = 0 }: SidebarProps) {
+export default function Sidebar({
+	unreadCount = 0,
+	userName,
+	onClose,
+}: SidebarProps) {
 	return (
 		<aside className="flex h-screen w-60 flex-col border-r border-zinc-800 bg-zinc-950">
 			{/* Logo */}
@@ -127,6 +158,7 @@ export default function Sidebar({ unreadCount = 0 }: SidebarProps) {
 						key={item.to}
 						to={item.to}
 						end={item.to === '/dashboard'}
+						onClick={() => onClose?.()}
 						className={({ isActive }) =>
 							clsx(
 								'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
@@ -147,29 +179,14 @@ export default function Sidebar({ unreadCount = 0 }: SidebarProps) {
 				))}
 			</nav>
 
-			{/* Bottom */}
+			{/* Bottom — user info */}
 			<div className="border-t border-zinc-800 p-4">
-				<form method="post" action="/auth/logout">
-					<button
-						type="submit"
-						className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-600 transition-colors hover:bg-zinc-800/40 hover:text-zinc-400"
-					>
-						<svg
-							className="h-4 w-4"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke="currentColor"
-							strokeWidth={2}
-						>
-							<path
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"
-							/>
-						</svg>
-						Sign out
-					</button>
-				</form>
+				<div className="flex items-center gap-3 px-3 py-2">
+					<Avatar name={userName} size="sm" />
+					<div className="min-w-0 flex-1">
+						<p className="truncate text-sm text-zinc-400">{userName}</p>
+					</div>
+				</div>
 			</div>
 		</aside>
 	);

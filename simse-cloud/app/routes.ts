@@ -17,6 +17,8 @@ export default [
 		route('auth/new-password', './routes/auth.new-password.tsx'),
 	]),
 
+	route('auth/logout', './routes/auth.logout.tsx'),
+
 	layout('./routes/dashboard.tsx', [
 		route('dashboard', './routes/dashboard._index.tsx'),
 		route('dashboard/usage', './routes/dashboard.usage.tsx'),
@@ -26,6 +28,7 @@ export default [
 		route('dashboard/team/plans', './routes/dashboard.team.plans.tsx'),
 		route('dashboard/team/invite', './routes/dashboard.team.invite.tsx'),
 		route('dashboard/notifications', './routes/dashboard.notifications.tsx'),
+		route('dashboard/account', './routes/dashboard.account.tsx'),
 	]),
 
 	...prefix('api', [

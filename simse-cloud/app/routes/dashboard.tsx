@@ -7,16 +7,35 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 	const session = await getSession(request, context.cloudflare.env);
 	if (!session) throw redirect('/auth/login');
 
+	const db = context.cloudflare.env.DB;
+
 	// Count unread notifications
-	const result = await context.cloudflare.env.DB.prepare(
-		'SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND read = 0',
-	)
+	const result = await db
+		.prepare(
+			'SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND read = 0',
+		)
 		.bind(session.userId)
 		.first<{ count: number }>();
 
-	return { unreadCount: result?.count ?? 0 };
+	// Get user info for header
+	const user = await db
+		.prepare('SELECT name, email FROM users WHERE id = ?')
+		.bind(session.userId)
+		.first<{ name: string; email: string }>();
+
+	return {
+		unreadCount: result?.count ?? 0,
+		userName: user?.name ?? '',
+		userEmail: user?.email ?? '',
+	};
 }
 
 export default function Dashboard({ loaderData }: Route.ComponentProps) {
-	return <DashboardLayout unreadCount={loaderData.unreadCount} />;
+	return (
+		<DashboardLayout
+			unreadCount={loaderData.unreadCount}
+			userName={loaderData.userName}
+			userEmail={loaderData.userEmail}
+		/>
+	);
 }

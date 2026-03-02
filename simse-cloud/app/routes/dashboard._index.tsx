@@ -1,3 +1,4 @@
+import { Link } from 'react-router';
 import PageHeader from '~/components/layout/PageHeader';
 import Badge from '~/components/ui/Badge';
 import Card from '~/components/ui/Card';
@@ -45,37 +46,43 @@ export default function DashboardIndex({ loaderData }: Route.ComponentProps) {
 
 			{/* Quick actions */}
 			<div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
-				<Card className="p-5 transition-colors hover:border-zinc-700">
-					<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
-						Quick action
-					</p>
-					<p className="mt-3 text-sm font-semibold text-white">New session</p>
-					<p className="mt-1 text-[13px] text-zinc-500">
-						Start a fresh AI session with your context.
-					</p>
-				</Card>
-				<Card className="p-5 transition-colors hover:border-zinc-700">
-					<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
-						Quick action
-					</p>
-					<p className="mt-3 text-sm font-semibold text-white">
-						Browse library
-					</p>
-					<p className="mt-1 text-[13px] text-zinc-500">
-						Search and manage your knowledge base.
-					</p>
-				</Card>
-				<Card className="p-5 transition-colors hover:border-zinc-700">
-					<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
-						Quick action
-					</p>
-					<p className="mt-3 text-sm font-semibold text-white">
-						Invite teammate
-					</p>
-					<p className="mt-1 text-[13px] text-zinc-500">
-						Add someone to your team workspace.
-					</p>
-				</Card>
+				<Link to="#" className="group">
+					<Card className="p-5 transition-all group-hover:-translate-y-0.5 group-hover:border-zinc-700">
+						<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
+							Quick action
+						</p>
+						<p className="mt-3 text-sm font-semibold text-white">New session</p>
+						<p className="mt-1 text-[13px] text-zinc-500">
+							Start a fresh AI session with your context.
+						</p>
+					</Card>
+				</Link>
+				<Link to="#" className="group">
+					<Card className="p-5 transition-all group-hover:-translate-y-0.5 group-hover:border-zinc-700">
+						<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
+							Quick action
+						</p>
+						<p className="mt-3 text-sm font-semibold text-white">
+							Browse library
+						</p>
+						<p className="mt-1 text-[13px] text-zinc-500">
+							Search and manage your knowledge base.
+						</p>
+					</Card>
+				</Link>
+				<Link to="/dashboard/team/invite" className="group">
+					<Card className="p-5 transition-all group-hover:-translate-y-0.5 group-hover:border-zinc-700">
+						<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
+							Quick action
+						</p>
+						<p className="mt-3 text-sm font-semibold text-white">
+							Invite teammate
+						</p>
+						<p className="mt-1 text-[13px] text-zinc-500">
+							Add someone to your team workspace.
+						</p>
+					</Card>
+				</Link>
 			</div>
 
 			{/* Recent sessions */}
@@ -85,9 +92,27 @@ export default function DashboardIndex({ loaderData }: Route.ComponentProps) {
 				</h2>
 
 				{recentSessions.length === 0 ? (
-					<Card className="mt-4 p-8 text-center">
-						<p className="text-sm text-zinc-500">
-							No sessions yet. Start your first session to see activity here.
+					<Card className="mt-4 p-10 text-center">
+						<div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-zinc-800">
+							<svg
+								className="h-6 w-6 text-zinc-600"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
+								strokeWidth={1.5}
+							>
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+								/>
+							</svg>
+						</div>
+						<p className="mt-4 text-sm font-medium text-zinc-400">
+							No sessions yet
+						</p>
+						<p className="mt-1 text-[13px] text-zinc-600">
+							Start your first session to see activity here.
 						</p>
 					</Card>
 				) : (

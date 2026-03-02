@@ -17,8 +17,6 @@
 	"dependencies": {
 		"@fontsource-variable/dm-sans": "^5.2.8",
 		"@fontsource/space-mono": "^5.2.9",
-		"@react-email/components": "^1.0.8",
-		"@react-email/render": "^2.0.4",
 		"@react-router/cloudflare": "^7.13.1",
 		"clsx": "^2.1.1",
 		"isbot": "^5.1.27",

@@ -1,29 +1,24 @@
 interface SendEmailOptions {
+	template: string;
 	to: string;
-	subject: string;
-	html: string;
+	props?: Record<string, unknown>;
 }
 
 export async function sendEmail(
-	apiKey: string,
-	{ to, subject, html }: SendEmailOptions,
+	env: { EMAIL_API_URL: string; EMAIL_API_SECRET: string },
+	{ template, to, props }: SendEmailOptions,
 ): Promise<void> {
-	const res = await fetch('https://api.resend.com/emails', {
+	const res = await fetch(`${env.EMAIL_API_URL}/send`, {
 		method: 'POST',
 		headers: {
-			Authorization: `Bearer ${apiKey}`,
+			Authorization: `Bearer ${env.EMAIL_API_SECRET}`,
 			'Content-Type': 'application/json',
 		},
-		body: JSON.stringify({
-			from: 'simse <noreply@simse.dev>',
-			to,
-			subject,
-			html,
-		}),
+		body: JSON.stringify({ template, to, props }),
 	});
 
 	if (!res.ok) {
 		const body = await res.text();
-		throw new Error(`Resend API error (${res.status}): ${body}`);
+		throw new Error(`Email API error (${res.status}): ${body}`);
 	}
 }

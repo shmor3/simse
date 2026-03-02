@@ -3,7 +3,8 @@ interface Env {
 	SESSIONS: KVNamespace;
 	STRIPE_SECRET_KEY: string;
 	STRIPE_WEBHOOK_SECRET: string;
-	RESEND_API_KEY: string;
+	EMAIL_API_URL: string;
+	EMAIL_API_SECRET: string;
 	SESSION_SECRET: string;
 	APP_URL: string;
 }

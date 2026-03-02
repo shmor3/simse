@@ -65,7 +65,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 		.bind(inviteId, team.id, email.toLowerCase(), role, session.userId)
 		.run();
 
-	// TODO: Send team invite email via Resend
+	// TODO: Send team invite email via email API
 
 	return redirect('/dashboard/team');
 }

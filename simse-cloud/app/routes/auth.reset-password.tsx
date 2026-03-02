@@ -36,7 +36,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 			.bind(tokenId, user.id, code)
 			.run();
 
-		// TODO: Send reset password email via Resend with resetUrl
+		// TODO: Send reset password email via email API with resetUrl
 	}
 
 	return { success: true };

@@ -76,7 +76,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 		.bind(tokenId, userId, code)
 		.run();
 
-	// TODO: Send verification email via Resend (Task 6)
+	// TODO: Send verification email via email API (Task 6)
 
 	const sessionId = await createSession(db, userId);
 

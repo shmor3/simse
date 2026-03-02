@@ -17,5 +17,6 @@ id = "placeholder-update-after-create"
 # Secrets (set via `wrangler secret put`):
 # STRIPE_SECRET_KEY
 # STRIPE_WEBHOOK_SECRET
-# RESEND_API_KEY
+# EMAIL_API_URL
+# EMAIL_API_SECRET
 # SESSION_SECRET

@@ -1,0 +1,7 @@
+name = "simse-emails"
+compatibility_date = "2025-04-01"
+main = "src/index.tsx"
+
+# Secrets (set via `wrangler secret put`):
+# RESEND_API_KEY
+# API_SECRET

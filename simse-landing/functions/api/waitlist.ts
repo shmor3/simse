@@ -3,10 +3,9 @@ import { validateEmail } from '../lib/validate-email';
 import { sendWelcomeEmail } from '../lib/welcome-email';
 
 interface Env {
-	DB: D1Database;
+	simse_waitlist: D1Database;   // matches binding name in wrangler.toml
 	RESEND_API_KEY: string;
 	FROM_EMAIL: string;
-	UNSUBSCRIBE_URL: string;
 }
 
 export const onRequestPost: PagesFunction<Env> = async (context) => {
@@ -33,22 +32,28 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 	}
 
 	try {
-		await context.env.DB.prepare(
+		await context.env.simse_waitlist.prepare(
 			'INSERT INTO waitlist (email) VALUES (?) ON CONFLICT (email) DO NOTHING',
 		)
 			.bind(email)
 			.run();
 	} catch (err) {
-		return Response.json({ error: 'Database error' }, { status: 500 });
+		// log full error for debugging; D1 errors often contain a message
+		console.error('D1 insert failed', err);
+		const message = err instanceof Error ? err.message : String(err);
+		return Response.json({ error: message }, { status: 500 });
 	}
 
-	// Fire-and-forget: don't block signup on email delivery
+	// Build an unsubscribe link and fire-and-forget the email send
+	const origin = new URL(context.request.url).origin;
+	const unsubscribeUrl = `${origin}/unsubscribe?email=${encodeURIComponent(email)}`;
+
 	context.waitUntil(
 		sendWelcomeEmail(
 			email,
 			context.env.RESEND_API_KEY,
 			context.env.FROM_EMAIL,
-			context.env.UNSUBSCRIBE_URL,
+			unsubscribeUrl,
 		).catch(() => {}),
 	);
 

@@ -1,4 +1,6 @@
+import { render } from '@react-email/render';
 import type { ComponentType } from 'react';
+import { createElement } from 'react';
 import EmailChange from './templates/email-change';
 import FeatureAnnouncement from './templates/feature-announcement';
 import FreeCredit from './templates/free-credit';
@@ -24,7 +26,7 @@ interface TemplateEntry {
 	subject: (props: any) => string;
 }
 
-export const templates: Record<string, TemplateEntry> = {
+const templates: Record<string, TemplateEntry> = {
 	verify: {
 		component: Verify,
 		subject: (p) => `Your simse verification code: ${p.verificationCode}`,
@@ -98,3 +100,18 @@ export const templates: Record<string, TemplateEntry> = {
 		subject: (p) => `${p.referrerName} thinks you'd like simse`,
 	},
 };
+
+export async function renderEmail(
+	template: string,
+	props: Record<string, unknown> = {},
+): Promise<{ subject: string; html: string }> {
+	const entry = templates[template];
+	if (!entry) {
+		throw new Error(`Unknown email template: ${template}`);
+	}
+
+	const subject = entry.subject(props);
+	const html = await render(createElement(entry.component, props));
+
+	return { subject, html };
+}

@@ -15,6 +15,12 @@ use crate::tools::types::{
 	ToolCallRequest, ToolCallResult, ToolDefinition, ToolHandler, ToolParameter,
 };
 
+use crate::agent::{
+	AcpProvider, AgentExecutor, AgentResult, AgentStepConfig, LibraryProvider, McpProvider,
+};
+use crate::chain::chain::{create_chain_from_definition, run_named_chain};
+use crate::chain::types::StepResult;
+
 type UnsubscriberMap = Arc<Mutex<HashMap<String, Box<dyn Fn() + Send>>>>;
 type PendingCallsMap =
 	Arc<tokio::sync::Mutex<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>>;
@@ -28,6 +34,7 @@ pub struct CoreRpcServer {
 	hook_unsubscribers: UnsubscriberMap,
 	next_hook_id: Arc<Mutex<u64>>,
 	pending_tool_calls: PendingCallsMap,
+	pending_agent_calls: PendingCallsMap,
 }
 
 impl CoreRpcServer {
@@ -41,6 +48,7 @@ impl CoreRpcServer {
 			hook_unsubscribers: Arc::new(Mutex::new(HashMap::new())),
 			next_hook_id: Arc::new(Mutex::new(0)),
 			pending_tool_calls: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+			pending_agent_calls: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
 		}
 	}
 
@@ -124,6 +132,11 @@ impl CoreRpcServer {
 			"tool/formatSystemPrompt" => self.handle_tool_format_system_prompt(req).await,
 			"tool/metrics" => self.handle_tool_metrics(req).await,
 			"tool/result" => self.handle_tool_result(req).await,
+
+			// -- Chain ---------------------------------------------------
+			"chain/run" => self.handle_chain_run(req).await,
+			"chain/runNamed" => self.handle_chain_run_named(req).await,
+			"chain/stepResult" => self.handle_chain_step_result(req).await,
 
 			// -- Unknown -------------------------------------------------
 			_ => self.transport.write_error(
@@ -1703,6 +1716,168 @@ impl CoreRpcServer {
 		self.transport.write_response(req.id, serde_json::json!({}));
 	}
 
+	// ── Chain handlers ──────────────────────────────────────────────────
+
+	/// Build a callback-based AgentExecutor that routes steps back to TS
+	/// via `chain/stepExecute` notifications and `chain/stepResult` responses.
+	fn make_callback_executor(&self) -> AgentExecutor {
+		let pending = Arc::clone(&self.pending_agent_calls);
+		let pending2 = Arc::clone(&self.pending_agent_calls);
+		let pending3 = Arc::clone(&self.pending_agent_calls);
+
+		AgentExecutor::new(
+			Box::new(CallbackAcpProvider {
+				pending: pending.clone(),
+			}),
+			Box::new(CallbackMcpProvider { pending: pending2 }),
+			Box::new(CallbackLibraryProvider { pending: pending3 }),
+		)
+	}
+
+	async fn handle_chain_run(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ChainRunParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		// Look up the chain definition from config
+		let chain_def = match ctx.config.chains.get(&params.name) {
+			Some(def) => def.clone(),
+			None => {
+				self.transport.write_error(
+					req.id,
+					CORE_ERROR,
+					format!("Chain not found: {}", params.name),
+					Some(serde_json::json!({ "coreCode": "CHAIN_NOT_FOUND" })),
+				);
+				return;
+			}
+		};
+
+		let chain = match create_chain_from_definition(&chain_def, Some(&params.name)) {
+			Ok(c) => c,
+			Err(e) => {
+				self.transport.write_error(
+					req.id,
+					CORE_ERROR,
+					e.to_string(),
+					Some(e.to_json_rpc_error()),
+				);
+				return;
+			}
+		};
+
+		let executor = self.make_callback_executor();
+		let cancel = tokio_util::sync::CancellationToken::new();
+
+		let mut initial_values = chain_def.initial_values.clone();
+		if let Some(overrides) = params.input {
+			initial_values.extend(overrides);
+		}
+
+		match chain.run(initial_values, &executor, cancel).await {
+			Ok(results) => {
+				let values = step_results_to_values(&results);
+				self.transport.write_response(
+					req.id,
+					serde_json::json!({
+						"values": values,
+						"steps": results.iter().map(step_result_to_json).collect::<Vec<_>>(),
+					}),
+				);
+			}
+			Err(e) => {
+				self.transport.write_error(
+					req.id,
+					CORE_ERROR,
+					e.to_string(),
+					Some(e.to_json_rpc_error()),
+				);
+			}
+		}
+	}
+
+	async fn handle_chain_run_named(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: ChainRunNamedParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let executor = self.make_callback_executor();
+		let cancel = tokio_util::sync::CancellationToken::new();
+
+		match run_named_chain(&params.name, &ctx.config, &executor, cancel, params.input).await {
+			Ok(results) => {
+				let values = step_results_to_values(&results);
+				self.transport.write_response(
+					req.id,
+					serde_json::json!({
+						"values": values,
+						"steps": results.iter().map(step_result_to_json).collect::<Vec<_>>(),
+					}),
+				);
+			}
+			Err(e) => {
+				self.transport.write_error(
+					req.id,
+					CORE_ERROR,
+					e.to_string(),
+					Some(e.to_json_rpc_error()),
+				);
+			}
+		}
+	}
+
+	async fn handle_chain_step_result(&self, req: JsonRpcRequest) {
+		// chain/stepResult does not require context — it only resolves pending channels
+		let params: ChainStepResultParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let sender = {
+			let mut map = self.pending_agent_calls.lock().await;
+			map.remove(&params.request_id)
+		};
+
+		if let Some(tx) = sender {
+			let _ = tx.send(serde_json::json!({
+				"output": params.output,
+				"model": params.model,
+			}));
+		}
+
+		self.transport.write_response(req.id, serde_json::json!({}));
+	}
+
 	// ── Conversation handlers ────────────────────────────────────────────
 
 	async fn handle_conv_from_json(&self, req: JsonRpcRequest) {
@@ -1983,6 +2158,209 @@ fn parse_task_status(s: &str) -> Option<TaskStatus> {
 ///   "encoding": { "type": "string", "description": "File encoding" }
 /// }
 /// ```
+// -- Chain params ----------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChainRunParams {
+	name: String,
+	#[serde(default)]
+	input: Option<HashMap<String, String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChainRunNamedParams {
+	name: String,
+	#[serde(default)]
+	input: Option<HashMap<String, String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ChainStepResultParams {
+	request_id: String,
+	output: String,
+	#[serde(default)]
+	model: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Callback providers for chain execution
+// ---------------------------------------------------------------------------
+
+/// Sends a `chain/stepExecute` notification and waits for `chain/stepResult`.
+async fn callback_agent_call(
+	pending: &PendingCallsMap,
+	provider_type: &str,
+	prompt: &str,
+	config: &AgentStepConfig,
+	extra: serde_json::Value,
+) -> Result<AgentResult, crate::error::SimseError> {
+	let request_id = uuid::Uuid::new_v4().to_string();
+	let (tx, rx) = tokio::sync::oneshot::channel();
+
+	{
+		let mut map = pending.lock().await;
+		map.insert(request_id.clone(), tx);
+	}
+
+	let transport = NdjsonTransport::new();
+	let mut notification_data = serde_json::json!({
+		"requestId": request_id,
+		"providerType": provider_type,
+		"stepName": &config.name,
+		"prompt": prompt,
+	});
+	if let serde_json::Value::Object(extra_map) = extra {
+		if let serde_json::Value::Object(ref mut data_map) = notification_data {
+			data_map.extend(extra_map);
+		}
+	}
+	transport.write_notification("chain/stepExecute", notification_data);
+
+	match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {
+		Ok(Ok(result)) => {
+			let output = result
+				.get("output")
+				.and_then(|v| v.as_str())
+				.unwrap_or("")
+				.to_string();
+			let model = result
+				.get("model")
+				.and_then(|v| v.as_str())
+				.map(|s| s.to_string());
+			Ok(AgentResult {
+				output,
+				model,
+				usage: None,
+				tool_metrics: None,
+			})
+		}
+		Ok(Err(_)) => Err(crate::error::SimseError::chain(
+			crate::error::ChainErrorCode::ExecutionFailed,
+			format!("Agent callback channel closed for step '{}'", config.name),
+		)),
+		Err(_) => {
+			let mut map = pending.lock().await;
+			map.remove(&request_id);
+			Err(crate::error::SimseError::chain(
+				crate::error::ChainErrorCode::ExecutionFailed,
+				format!("Agent callback timed out (120s) for step '{}'", config.name),
+			))
+		}
+	}
+}
+
+struct CallbackAcpProvider {
+	pending: PendingCallsMap,
+}
+
+#[async_trait::async_trait]
+impl AcpProvider for CallbackAcpProvider {
+	async fn generate(
+		&self,
+		prompt: &str,
+		config: &AgentStepConfig,
+		_cancel: tokio_util::sync::CancellationToken,
+	) -> Result<AgentResult, crate::error::SimseError> {
+		callback_agent_call(
+			&self.pending,
+			"acp",
+			prompt,
+			config,
+			serde_json::json!({
+				"agentId": config.agent_id,
+				"serverName": config.server_name,
+			}),
+		)
+		.await
+	}
+}
+
+struct CallbackMcpProvider {
+	pending: PendingCallsMap,
+}
+
+#[async_trait::async_trait]
+impl McpProvider for CallbackMcpProvider {
+	async fn call_tool(
+		&self,
+		server: &str,
+		tool: &str,
+		input: &str,
+		_cancel: tokio_util::sync::CancellationToken,
+	) -> Result<AgentResult, crate::error::SimseError> {
+		let config = AgentStepConfig {
+			name: format!("{}/{}", server, tool),
+			agent_id: None,
+			server_name: Some(server.to_string()),
+			timeout_ms: None,
+			max_tokens: None,
+			temperature: None,
+			system_prompt: None,
+		};
+		callback_agent_call(
+			&self.pending,
+			"mcp",
+			input,
+			&config,
+			serde_json::json!({
+				"serverName": server,
+				"toolName": tool,
+			}),
+		)
+		.await
+	}
+}
+
+struct CallbackLibraryProvider {
+	pending: PendingCallsMap,
+}
+
+#[async_trait::async_trait]
+impl LibraryProvider for CallbackLibraryProvider {
+	async fn query(
+		&self,
+		prompt: &str,
+		_cancel: tokio_util::sync::CancellationToken,
+	) -> Result<AgentResult, crate::error::SimseError> {
+		let config = AgentStepConfig {
+			name: "library_query".to_string(),
+			agent_id: None,
+			server_name: None,
+			timeout_ms: None,
+			max_tokens: None,
+			temperature: None,
+			system_prompt: None,
+		};
+		callback_agent_call(&self.pending, "library", prompt, &config, serde_json::json!({}))
+			.await
+	}
+}
+
+/// Convert step results to a values map (step_name -> output).
+fn step_results_to_values(results: &[StepResult]) -> HashMap<String, String> {
+	let mut values = HashMap::new();
+	for result in results {
+		values.insert(result.step_name.clone(), result.output.clone());
+	}
+	values
+}
+
+/// Convert a StepResult to JSON.
+fn step_result_to_json(result: &StepResult) -> serde_json::Value {
+	serde_json::json!({
+		"stepName": result.step_name,
+		"provider": result.provider.to_string(),
+		"model": result.model,
+		"input": result.input,
+		"output": result.output,
+		"durationMs": result.duration_ms,
+		"stepIndex": result.step_index,
+	})
+}
+
 fn parse_input_schema(schema: &Option<serde_json::Value>) -> HashMap<String, ToolParameter> {
 	let mut params = HashMap::new();
 	let Some(serde_json::Value::Object(map)) = schema else {

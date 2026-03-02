@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
 use serde::Deserialize;
 use tokio::io::AsyncBufReadExt;
@@ -13,6 +14,8 @@ use crate::tasks::{TaskCreateInput, TaskStatus, TaskUpdateInput};
 pub struct CoreRpcServer {
 	transport: NdjsonTransport,
 	context: Option<CoreContext>,
+	event_unsubscribers: Arc<Mutex<HashMap<String, Box<dyn Fn() + Send>>>>,
+	next_subscription_id: Arc<Mutex<u64>>,
 }
 
 impl CoreRpcServer {
@@ -20,6 +23,8 @@ impl CoreRpcServer {
 		Self {
 			transport,
 			context: None,
+			event_unsubscribers: Arc::new(Mutex::new(HashMap::new())),
+			next_subscription_id: Arc::new(Mutex::new(0)),
 		}
 	}
 
@@ -79,6 +84,11 @@ impl CoreRpcServer {
 			"task/listAvailable" => self.handle_task_list_available(req).await,
 			"task/update" => self.handle_task_update(req).await,
 			"task/delete" => self.handle_task_delete(req).await,
+
+			// -- Events --------------------------------------------------
+			"event/subscribe" => self.handle_event_subscribe(req).await,
+			"event/unsubscribe" => self.handle_event_unsubscribe(req).await,
+			"event/publish" => self.handle_event_publish(req).await,
 
 			// -- Unknown -------------------------------------------------
 			_ => self.transport.write_error(
@@ -793,6 +803,129 @@ impl CoreRpcServer {
 			.write_response(req.id, serde_json::json!({ "deleted": deleted }));
 	}
 
+	// ── Event handlers ───────────────────────────────────────────────────
+
+	async fn handle_event_subscribe(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: EventSubscribeParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		// Generate subscription ID
+		let sub_id = {
+			let mut next = self.next_subscription_id.lock().unwrap_or_else(|e| e.into_inner());
+			let id = *next;
+			*next = next.wrapping_add(1);
+			format!("sub_{}", id)
+		};
+
+		// Box the unsubscribe closures so subscribe() and subscribe_all()
+		// return types unify into a single `Box<dyn Fn() + Send>`.
+		let unsub: Box<dyn Fn() + Send> = if params.event_type == "*" {
+			let sub_id_for_closure = sub_id.clone();
+			let transport = NdjsonTransport::new();
+			let raw = ctx.event_bus.subscribe_all(move |event_type, payload| {
+				transport.write_notification(
+					"event/fired",
+					serde_json::json!({
+						"type": event_type,
+						"payload": payload,
+						"subscriptionId": sub_id_for_closure,
+					}),
+				);
+			});
+			Box::new(raw)
+		} else {
+			let sub_id_for_closure = sub_id.clone();
+			let transport = NdjsonTransport::new();
+			let event_type_for_notification = params.event_type.clone();
+			let raw = ctx.event_bus.subscribe(&params.event_type, move |payload| {
+				transport.write_notification(
+					"event/fired",
+					serde_json::json!({
+						"type": event_type_for_notification,
+						"payload": payload,
+						"subscriptionId": sub_id_for_closure,
+					}),
+				);
+			});
+			Box::new(raw)
+		};
+
+		// Store the unsubscribe closure
+		{
+			let mut unsubs = self.event_unsubscribers.lock().unwrap_or_else(|e| e.into_inner());
+			unsubs.insert(sub_id.clone(), Box::new(unsub));
+		}
+
+		self.transport
+			.write_response(req.id, serde_json::json!({ "subscriptionId": sub_id }));
+	}
+
+	async fn handle_event_unsubscribe(&self, req: JsonRpcRequest) {
+		let _ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: EventUnsubscribeParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		let unsub = {
+			let mut unsubs = self.event_unsubscribers.lock().unwrap_or_else(|e| e.into_inner());
+			unsubs.remove(&params.subscription_id)
+		};
+
+		if let Some(unsub_fn) = unsub {
+			unsub_fn();
+		}
+
+		self.transport.write_response(req.id, serde_json::json!({}));
+	}
+
+	async fn handle_event_publish(&self, req: JsonRpcRequest) {
+		let ctx = match self.require_context() {
+			Some(c) => c,
+			None => {
+				self.write_not_initialized(req.id);
+				return;
+			}
+		};
+
+		let params: EventPublishParams = match parse_params(req.params) {
+			Ok(p) => p,
+			Err(e) => {
+				self.transport
+					.write_error(req.id, INVALID_PARAMS, e, None);
+				return;
+			}
+		};
+
+		ctx.event_bus.publish(&params.event_type, params.payload);
+		self.transport.write_response(req.id, serde_json::json!({}));
+	}
+
 	// ── Conversation handlers ────────────────────────────────────────────
 
 	async fn handle_conv_from_json(&self, req: JsonRpcRequest) {
@@ -930,6 +1063,29 @@ struct TaskUpdateParams {
 	add_blocks: Option<Vec<String>>,
 	#[serde(default)]
 	add_blocked_by: Option<Vec<String>>,
+}
+
+// -- Event params ----------------------------------------------------------
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EventSubscribeParams {
+	event_type: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EventUnsubscribeParams {
+	subscription_id: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EventPublishParams {
+	#[serde(rename = "type")]
+	event_type: String,
+	#[serde(default)]
+	payload: serde_json::Value,
 }
 
 // ---------------------------------------------------------------------------

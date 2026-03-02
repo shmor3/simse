@@ -8,6 +8,7 @@
 //! and creates a fresh event bus for the new session.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -70,29 +71,24 @@ fn now_millis() -> u64 {
 }
 
 // ---------------------------------------------------------------------------
+// Global ID counter (matches TS module-level idCounter)
+// ---------------------------------------------------------------------------
+
+static ID_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Generate a session ID in the format `sess_{timestamp}_{counter_base36}`.
+fn generate_id() -> String {
+	let ts = now_millis();
+	let count = ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+	format!("sess_{ts}_{}", radix36(count))
+}
+
+// ---------------------------------------------------------------------------
 // SessionManagerInner
 // ---------------------------------------------------------------------------
 
 struct SessionManagerInner {
 	sessions: HashMap<String, Session>,
-	id_counter: u64,
-}
-
-impl SessionManagerInner {
-	fn new() -> Self {
-		Self {
-			sessions: HashMap::new(),
-			id_counter: 0,
-		}
-	}
-
-	/// Generate a session ID in the format `sess_{timestamp}_{counter_base36}`.
-	fn generate_id(&mut self) -> String {
-		let ts = now_millis();
-		let count = self.id_counter;
-		self.id_counter = self.id_counter.wrapping_add(1);
-		format!("sess_{ts}_{}", radix36(count))
-	}
 }
 
 /// Convert a `u64` to a base-36 string (digits + lowercase a-z).
@@ -127,7 +123,9 @@ impl SessionManager {
 	/// Create a new empty session manager.
 	pub fn new() -> Self {
 		Self {
-			inner: Arc::new(Mutex::new(SessionManagerInner::new())),
+			inner: Arc::new(Mutex::new(SessionManagerInner {
+				sessions: HashMap::new(),
+			})),
 		}
 	}
 
@@ -135,9 +133,9 @@ impl SessionManager {
 	///
 	/// Returns the generated session ID.
 	pub fn create(&self) -> String {
-		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-		let id = inner.generate_id();
+		let id = generate_id();
 		let now = now_millis();
+		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 		let session = Session {
 			id: id.clone(),
 			conversation: Conversation::new(None),
@@ -164,13 +162,18 @@ impl SessionManager {
 
 	/// Execute a closure with a mutable reference to a session.
 	///
+	/// Automatically updates `updated_at` after the closure runs.
 	/// Returns `None` if the session does not exist.
 	pub fn with_session<F, R>(&self, id: &str, f: F) -> Option<R>
 	where
 		F: FnOnce(&mut Session) -> R,
 	{
 		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-		inner.sessions.get_mut(id).map(f)
+		inner.sessions.get_mut(id).map(|session| {
+			let result = f(session);
+			session.updated_at = now_millis();
+			result
+		})
 	}
 
 	/// Delete a session by ID.
@@ -220,10 +223,11 @@ impl SessionManager {
 	///
 	/// Returns the new session ID, or `None` if the source session does not exist.
 	pub fn fork(&self, id: &str) -> Option<String> {
-		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+		let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 		let json = inner.sessions.get(id).map(|s| s.conversation.to_json())?;
+		drop(inner);
 
-		let new_id = inner.generate_id();
+		let new_id = generate_id();
 		let now = now_millis();
 
 		let mut new_conversation = Conversation::new(None);
@@ -237,6 +241,7 @@ impl SessionManager {
 			created_at: now,
 			updated_at: now,
 		};
+		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 		inner.sessions.insert(new_id.clone(), forked);
 		Some(new_id)
 	}

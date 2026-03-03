@@ -6,9 +6,10 @@ use base64::Engine;
 use regex::Regex;
 use sha2::{Sha256, Digest};
 
+use crate::diff::{compute_diff, DiffOutput};
 use crate::error::VfsError;
 use crate::glob::{expand_braces, match_parts};
-use crate::protocol::{DirEntry, ReadFileResult, SearchResult, StatResult};
+use crate::protocol::{DirEntry, HistoryEntry, ReadFileResult, SearchResult, StatResult};
 use crate::search::{search_text, SearchMode, SearchOptions};
 
 // ── Constants ───────────────────────────────────────────────────────────────
@@ -632,6 +633,118 @@ impl DiskFs {
                 .collect();
             Ok(DiskSearchResult::Matches(converted))
         }
+    }
+
+    /// Get version history for a file.
+    pub fn history(&self, path: &str) -> Result<Vec<HistoryEntry>, VfsError> {
+        let _ = self.resolve_path(path)?; // validate path is in sandbox
+        let history = self.history.as_ref().ok_or(VfsError::InvalidOperation(
+            "History not configured".into(),
+        ))?;
+        let versions = history.get_history(path)?;
+        Ok(versions
+            .into_iter()
+            .map(|v| {
+                let (content_type, data) = history
+                    .get_version_content(path, v.version)
+                    .unwrap_or_else(|_| ("text".to_string(), Vec::new()));
+                let (text, base64_data) = if content_type == "binary" {
+                    (None, Some(base64::engine::general_purpose::STANDARD.encode(&data)))
+                } else {
+                    (Some(String::from_utf8_lossy(&data).into_owned()), None)
+                };
+                HistoryEntry {
+                    version: v.version,
+                    content_type,
+                    text,
+                    base64: base64_data,
+                    size: v.size,
+                    timestamp: v.timestamp,
+                }
+            })
+            .collect())
+    }
+
+    /// Diff two files on disk. Returns raw diff output (paths added by server handler).
+    pub fn diff(
+        &self,
+        old_path: &str,
+        new_path: &str,
+        context: usize,
+    ) -> Result<DiffOutput, VfsError> {
+        let old_resolved = self.resolve_path(old_path)?;
+        let new_resolved = self.resolve_path(new_path)?;
+
+        let old_data = fs::read(&old_resolved).map_err(|e| map_io_error(e, old_path))?;
+        let new_data = fs::read(&new_resolved).map_err(|e| map_io_error(e, new_path))?;
+
+        let old_text = String::from_utf8_lossy(&old_data);
+        let new_text = String::from_utf8_lossy(&new_data);
+
+        let old_lines: Vec<&str> = old_text.lines().collect();
+        let new_lines: Vec<&str> = new_text.lines().collect();
+
+        compute_diff(&old_lines, &new_lines, context, u32::MAX).map_err(|e| {
+            VfsError::InvalidOperation(format!("Diff failed: {}", e))
+        })
+    }
+
+    /// Diff two versions of the same file. If `new_version` is None, diffs against current file.
+    pub fn diff_versions(
+        &self,
+        path: &str,
+        old_version: usize,
+        new_version: Option<usize>,
+        context: usize,
+    ) -> Result<DiffOutput, VfsError> {
+        let resolved = self.resolve_path(path)?;
+        let history = self.history.as_ref().ok_or(VfsError::InvalidOperation(
+            "History not configured".into(),
+        ))?;
+
+        let (_old_ct, old_data) = history.get_version_content(path, old_version)?;
+        let old_text = String::from_utf8_lossy(&old_data);
+
+        let new_text_owned = match new_version {
+            Some(ver) => {
+                let (_new_ct, new_data) = history.get_version_content(path, ver)?;
+                String::from_utf8_lossy(&new_data).into_owned()
+            }
+            None => {
+                let data = fs::read(&resolved).map_err(|e| map_io_error(e, path))?;
+                String::from_utf8_lossy(&data).into_owned()
+            }
+        };
+
+        let old_lines: Vec<&str> = old_text.lines().collect();
+        let new_lines: Vec<&str> = new_text_owned.lines().collect();
+
+        compute_diff(&old_lines, &new_lines, context, u32::MAX).map_err(|e| {
+            VfsError::InvalidOperation(format!("Diff failed: {}", e))
+        })
+    }
+
+    /// Checkout (revert) a file to a specific version.
+    /// Records the current content as a new version before reverting.
+    pub fn checkout(&self, path: &str, version: usize) -> Result<(), VfsError> {
+        let resolved = self.resolve_path(path)?;
+        let history = self.history.as_ref().ok_or(VfsError::InvalidOperation(
+            "History not configured".into(),
+        ))?;
+
+        // Record current content before reverting
+        if resolved.is_file() {
+            let current_data = fs::read(&resolved).map_err(|e| map_io_error(e, path))?;
+            let ct = if is_binary(&current_data) { "binary" } else { "text" };
+            let size = current_data.len() as u64;
+            history.record_version(path, &current_data, ct, size)?;
+        }
+
+        // Load the requested version and write it
+        let (_ct, data) = history.get_version_content(path, version)?;
+        fs::write(&resolved, &data).map_err(|e| map_io_error(e, path))?;
+
+        Ok(())
     }
 }
 

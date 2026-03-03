@@ -33,7 +33,7 @@ The entire core is implemented in **Rust**. Each crate is a standalone binary co
 ```tree
 simse-core/                 # Pure Rust crate — orchestration library + JSON-RPC binary server
 simse-vector/               # Pure Rust crate — vector store engine (JSON-RPC over stdio)
-simse-vfs/                  # Pure Rust crate — virtual filesystem engine (JSON-RPC over stdio)
+simse-vfs/                  # Pure Rust crate — virtual filesystem engine (vfs:// in-memory + file:// disk, JSON-RPC over stdio)
 simse-acp/                  # Pure Rust crate — ACP engine (JSON-RPC over stdio)
 simse-mcp/                  # Pure Rust crate — MCP engine (JSON-RPC over stdio)
 simse-vsh/                  # Pure Rust crate — virtual shell engine (JSON-RPC over stdio)
@@ -109,7 +109,8 @@ simse-vector/               # Pure Rust crate — vector store
 
 simse-vfs/                  # Pure Rust crate — virtual filesystem
   src/
-    vfs.rs                  # Core VFS implementation
+    vfs.rs                  # Core VFS implementation (vfs:// in-memory backend)
+    disk.rs                 # DiskFs: real filesystem operations (file:// backend)
     diff.rs                 # Diff generation
     glob.rs                 # Glob pattern matching
     search.rs               # File search implementation

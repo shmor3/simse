@@ -1227,3 +1227,309 @@ fn disk_vfs_still_works() {
         "snapshot should contain files"
     );
 }
+
+// ===========================================================================
+// Disk history / diff / checkout integration tests
+// ===========================================================================
+
+// ---------------------------------------------------------------------------
+// Disk history test 1: history tracks writes
+// ---------------------------------------------------------------------------
+
+#[test]
+fn disk_history_tracks_writes() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().to_str().unwrap();
+
+    let mut proc = VfsProcess::spawn();
+    proc.initialize_with_disk(root);
+
+    // First write — no history yet
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///test.txt", "content": "v1 content"}),
+    );
+
+    // Second write — overwrites, so "v1 content" is saved to history
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///test.txt", "content": "v2 content"}),
+    );
+
+    let history = proc.call("vfs/history", json!({"path": "file:///test.txt"}));
+    let entries = history["entries"]
+        .as_array()
+        .expect("history should return entries array");
+
+    assert_eq!(entries.len(), 1, "should have 1 history entry (pre-overwrite)");
+    assert_eq!(entries[0]["version"], 1);
+    assert_eq!(entries[0]["text"], "v1 content");
+    assert_eq!(entries[0]["contentType"], "text");
+}
+
+// ---------------------------------------------------------------------------
+// Disk history test 2: history tracks appends
+// ---------------------------------------------------------------------------
+
+#[test]
+fn disk_history_tracks_appends() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().to_str().unwrap();
+
+    let mut proc = VfsProcess::spawn();
+    proc.initialize_with_disk(root);
+
+    // First write
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///log.txt", "content": "original\n"}),
+    );
+
+    // Append — records "original\n" to history before mutation
+    proc.call(
+        "vfs/appendFile",
+        json!({"path": "file:///log.txt", "content": "appended\n"}),
+    );
+
+    let history = proc.call("vfs/history", json!({"path": "file:///log.txt"}));
+    let entries = history["entries"]
+        .as_array()
+        .expect("history should return entries array");
+
+    assert_eq!(entries.len(), 1, "should have 1 history entry (pre-append)");
+    assert_eq!(entries[0]["text"], "original\n");
+}
+
+// ---------------------------------------------------------------------------
+// Disk history test 3: diff two files
+// ---------------------------------------------------------------------------
+
+#[test]
+fn disk_diff_two_files() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().to_str().unwrap();
+
+    let mut proc = VfsProcess::spawn();
+    proc.initialize_with_disk(root);
+
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///a.txt", "content": "line one\nline two\n"}),
+    );
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///b.txt", "content": "line one\nline TWO modified\n"}),
+    );
+
+    let diff = proc.call(
+        "vfs/diff",
+        json!({"oldPath": "file:///a.txt", "newPath": "file:///b.txt"}),
+    );
+
+    assert_eq!(diff["oldPath"], "file:///a.txt");
+    assert_eq!(diff["newPath"], "file:///b.txt");
+
+    let hunks = diff["hunks"].as_array().expect("hunks should be array");
+    assert!(!hunks.is_empty(), "diff should produce at least one hunk");
+
+    let additions = diff["additions"].as_u64().unwrap();
+    let deletions = diff["deletions"].as_u64().unwrap();
+    assert!(additions > 0, "expected additions in diff");
+    assert!(deletions > 0, "expected deletions in diff");
+}
+
+// ---------------------------------------------------------------------------
+// Disk history test 4: diff versions
+// ---------------------------------------------------------------------------
+
+#[test]
+fn disk_diff_versions() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().to_str().unwrap();
+
+    let mut proc = VfsProcess::spawn();
+    proc.initialize_with_disk(root);
+
+    // Write three versions: v1 → v2 → v3 (current)
+    // After all three writes, history has 2 entries: version 1 ("version one\n") and version 2 ("version two\n")
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///doc.txt", "content": "version one\n"}),
+    );
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///doc.txt", "content": "version two\n"}),
+    );
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///doc.txt", "content": "version three\n"}),
+    );
+
+    // Diff version 1 against current (no newVersion → diff vs current)
+    let diff = proc.call(
+        "vfs/diffVersions",
+        json!({"path": "file:///doc.txt", "oldVersion": 1, "context": 3}),
+    );
+
+    let hunks = diff["hunks"].as_array().expect("hunks should be array");
+    assert!(!hunks.is_empty(), "diffVersions should produce at least one hunk");
+
+    let additions = diff["additions"].as_u64().unwrap_or(0);
+    let deletions = diff["deletions"].as_u64().unwrap_or(0);
+    assert!(
+        additions > 0 || deletions > 0,
+        "diffVersions should have additions or deletions"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Disk history test 5: checkout restores previous version
+// ---------------------------------------------------------------------------
+
+#[test]
+fn disk_checkout() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().to_str().unwrap();
+
+    let mut proc = VfsProcess::spawn();
+    proc.initialize_with_disk(root);
+
+    // Write original, then overwrite
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///revert.txt", "content": "original content"}),
+    );
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///revert.txt", "content": "new content"}),
+    );
+
+    // Checkout version 1 (the original)
+    proc.call(
+        "vfs/checkout",
+        json!({"path": "file:///revert.txt", "version": 1}),
+    );
+
+    // Read back — should be restored to original content
+    let result = proc.call("vfs/readFile", json!({"path": "file:///revert.txt"}));
+    assert_eq!(result["text"], "original content");
+}
+
+// ---------------------------------------------------------------------------
+// Disk history test 6: checkout records history entry
+// ---------------------------------------------------------------------------
+
+#[test]
+fn disk_checkout_records_history() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().to_str().unwrap();
+
+    let mut proc = VfsProcess::spawn();
+    proc.initialize_with_disk(root);
+
+    // Write v1
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///tracked.txt", "content": "v1"}),
+    );
+    // Write v2 — history entry 1: "v1"
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///tracked.txt", "content": "v2"}),
+    );
+    // Checkout version 1 — history entry 2: "v2" recorded before revert
+    proc.call(
+        "vfs/checkout",
+        json!({"path": "file:///tracked.txt", "version": 1}),
+    );
+
+    let history = proc.call("vfs/history", json!({"path": "file:///tracked.txt"}));
+    let entries = history["entries"]
+        .as_array()
+        .expect("history should return entries array");
+
+    assert_eq!(
+        entries.len(),
+        2,
+        "should have 2 history entries: v1 captured before v2 write, v2 captured before checkout"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Disk history test 7: new file has empty history
+// ---------------------------------------------------------------------------
+
+#[test]
+fn disk_history_empty_for_new_file() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().to_str().unwrap();
+
+    let mut proc = VfsProcess::spawn();
+    proc.initialize_with_disk(root);
+
+    // First write — no previous content to record
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///fresh.txt", "content": "new file"}),
+    );
+
+    let history = proc.call("vfs/history", json!({"path": "file:///fresh.txt"}));
+    let entries = history["entries"]
+        .as_array()
+        .expect("history should return entries array");
+
+    assert!(entries.is_empty(), "first write should have no history entries");
+}
+
+// ---------------------------------------------------------------------------
+// Disk history test 8: .simse directory is hidden from readdir/glob/tree
+// ---------------------------------------------------------------------------
+
+#[test]
+fn disk_simse_dir_hidden() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().to_str().unwrap();
+
+    let mut proc = VfsProcess::spawn();
+    proc.initialize_with_disk(root);
+
+    // Write then overwrite to trigger .simse directory creation via history
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///visible.txt", "content": "a"}),
+    );
+    proc.call(
+        "vfs/writeFile",
+        json!({"path": "file:///visible.txt", "content": "b"}),
+    );
+
+    // readdir should NOT show .simse
+    let readdir = proc.call(
+        "vfs/readdir",
+        json!({"path": "file:///", "recursive": false}),
+    );
+    let entries = readdir["entries"].as_array().expect("readdir entries");
+    for entry in entries {
+        let name = entry["name"].as_str().unwrap();
+        assert_ne!(name, ".simse", ".simse should not appear in readdir");
+    }
+
+    // glob should NOT match .simse
+    let glob_result = proc.call("vfs/glob", json!({"pattern": "file:///**/*"}));
+    let matches = glob_result["matches"].as_array().expect("glob matches");
+    for m in matches {
+        let path = m.as_str().unwrap();
+        assert!(
+            !path.contains(".simse"),
+            ".simse should not appear in glob results, found: {path}"
+        );
+    }
+
+    // tree should NOT contain .simse
+    let tree_result = proc.call("vfs/tree", json!({"path": "file:///"}));
+    let tree = tree_result["tree"].as_str().expect("tree should be a string");
+    assert!(
+        !tree.contains(".simse"),
+        ".simse should not appear in tree output"
+    );
+}

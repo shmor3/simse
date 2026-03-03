@@ -1,5 +1,6 @@
 use std::io::{self, BufRead};
 
+use crate::diff::DiffOutput;
 use crate::disk::{DiskFs, DiskSearchMode, DiskSearchOptions, DiskSearchResult};
 use crate::error::VfsError;
 use crate::path::VfsLimits;
@@ -308,45 +309,38 @@ impl VfsServer {
 			}
 
 			// ── VFS-only methods (10) ────────────────────────────────────
-			"vfs/history" => {
-				if matches!(detect_scheme(&req.params), Scheme::Disk) {
-					Err(VfsError::InvalidOperation(
-						"Operation not supported for file:// paths".into(),
-					))
-				} else {
-					self.with_vfs(|vfs| handle_history(vfs, req.params))
+			"vfs/history" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs(|vfs| handle_history(vfs, req.params)),
+				Scheme::Disk => self.with_disk(|disk| handle_disk_history(disk, req.params)),
+			},
+			"vfs/diff" => match detect_scheme_dual(&req.params, "oldPath", "newPath") {
+				Ok(Scheme::Vfs) => self.with_vfs(|vfs| handle_diff(vfs, req.params)),
+				Ok(Scheme::Disk) => self.with_disk(|disk| handle_disk_diff(disk, req.params)),
+				Err(e) => Err(e),
+			},
+			"vfs/diffVersions" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs(|vfs| handle_diff_versions(vfs, req.params)),
+				Scheme::Disk => {
+					self.with_disk(|disk| handle_disk_diff_versions(disk, req.params))
 				}
-			}
-			"vfs/diff" => {
-				if matches!(
-					detect_scheme_dual(&req.params, "oldPath", "newPath"),
-					Ok(Scheme::Disk) | Err(_)
-				) {
-					Err(VfsError::InvalidOperation(
-						"Operation not supported for file:// paths".into(),
-					))
-				} else {
-					self.with_vfs(|vfs| handle_diff(vfs, req.params))
+			},
+			"vfs/checkout" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs_mut(|vfs| handle_checkout(vfs, req.params)),
+				Scheme::Disk => {
+					let params_clone = req.params.clone();
+					let r = self.with_disk(|disk| handle_disk_checkout(disk, req.params));
+					if r.is_ok() {
+						disk_event = Some(DiskEvent {
+							params: serde_json::json!({
+								"type": "write",
+								"path": params_clone.get("path").and_then(|v| v.as_str()).unwrap_or(""),
+								"source": "disk"
+							}),
+						});
+					}
+					r
 				}
-			}
-			"vfs/diffVersions" => {
-				if matches!(detect_scheme(&req.params), Scheme::Disk) {
-					Err(VfsError::InvalidOperation(
-						"Operation not supported for file:// paths".into(),
-					))
-				} else {
-					self.with_vfs(|vfs| handle_diff_versions(vfs, req.params))
-				}
-			}
-			"vfs/checkout" => {
-				if matches!(detect_scheme(&req.params), Scheme::Disk) {
-					Err(VfsError::InvalidOperation(
-						"Operation not supported for file:// paths".into(),
-					))
-				} else {
-					self.with_vfs_mut(|vfs| handle_checkout(vfs, req.params))
-				}
-			}
+			},
 			"vfs/snapshot" => self.with_vfs(|vfs| handle_snapshot(vfs)),
 			"vfs/restore" => self.with_vfs_mut(|vfs| handle_restore(vfs, req.params)),
 			"vfs/clear" => self.with_vfs_mut(|vfs| handle_clear(vfs)),
@@ -756,6 +750,35 @@ fn convert_diff_output(d: DiffResultOutput) -> DiffResult {
 	}
 }
 
+fn convert_diff_output_from_raw(old_path: &str, new_path: &str, d: DiffOutput) -> DiffResult {
+	DiffResult {
+		old_path: old_path.to_string(),
+		new_path: new_path.to_string(),
+		additions: d.additions,
+		deletions: d.deletions,
+		hunks: d
+			.hunks
+			.into_iter()
+			.map(|h| DiffHunk {
+				old_start: h.old_start,
+				old_count: h.old_count,
+				new_start: h.new_start,
+				new_count: h.new_count,
+				lines: h
+					.lines
+					.into_iter()
+					.map(|l| DiffLineResult {
+						line_type: l.line_type.as_str().to_string(),
+						text: l.text,
+						old_line: l.old_line,
+						new_line: l.new_line,
+					})
+					.collect(),
+			})
+			.collect(),
+	}
+}
+
 fn handle_diff(
 	vfs: &VirtualFs,
 	params: serde_json::Value,
@@ -1056,4 +1079,49 @@ fn handle_disk_search(
 		DiskSearchResult::Matches(matches) => Ok(serde_json::json!({ "results": matches })),
 		DiskSearchResult::Count(count) => Ok(serde_json::json!({ "count": count })),
 	}
+}
+
+fn handle_disk_history(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: PathParams = parse_params(params)?;
+	let entries = disk.history(&p.path)?;
+	Ok(serde_json::json!({ "entries": entries }))
+}
+
+fn handle_disk_diff(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: DiffParams = parse_params(params)?;
+	let d = disk.diff(&p.old_path, &p.new_path, p.context.unwrap_or(3))?;
+	Ok(serde_json::to_value(convert_diff_output_from_raw(
+		&p.old_path, &p.new_path, d,
+	))?)
+}
+
+fn handle_disk_diff_versions(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: DiffVersionsParams = parse_params(params)?;
+	let d = disk.diff_versions(&p.path, p.old_version, p.new_version, p.context.unwrap_or(3))?;
+	let old_label = format!("{}@v{}", p.path, p.old_version);
+	let new_label = match p.new_version {
+		Some(v) => format!("{}@v{}", p.path, v),
+		None => format!("{} (current)", p.path),
+	};
+	Ok(serde_json::to_value(convert_diff_output_from_raw(
+		&old_label, &new_label, d,
+	))?)
+}
+
+fn handle_disk_checkout(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: CheckoutParams = parse_params(params)?;
+	disk.checkout(&p.path, p.version)?;
+	Ok(serde_json::json!({ "ok": true }))
 }

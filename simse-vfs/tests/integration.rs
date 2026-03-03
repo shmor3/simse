@@ -1108,17 +1108,15 @@ fn disk_vfs_only_method_rejected() {
         json!({"path": "file:///test.txt", "content": "hello"}),
     );
 
-    let error = proc.call_err(
+    // history is now routed to disk backend — should succeed with empty entries
+    // (first write doesn't record history, only overwrites do)
+    let result = proc.call(
         "vfs/history",
         json!({"path": "file:///test.txt"}),
     );
 
-    assert!(error.get("code").is_some());
-    let msg = error["message"].as_str().unwrap();
-    assert!(
-        msg.contains("not supported") || msg.contains("file://"),
-        "error message should indicate file:// is not supported for this operation, got: {msg}"
-    );
+    let entries = result["entries"].as_array().unwrap();
+    assert!(entries.is_empty(), "first write should have no history entries");
 }
 
 // ---------------------------------------------------------------------------

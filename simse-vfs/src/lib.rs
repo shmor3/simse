@@ -6,4 +6,5 @@ pub mod vfs;
 pub mod glob;
 pub mod search;
 pub mod diff;
+pub mod disk;
 pub mod server;

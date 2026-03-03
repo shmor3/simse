@@ -24,6 +24,7 @@ pub struct JsonRpcRequest {
 pub struct InitializeParams {
     pub limits: Option<LimitsParams>,
     pub history: Option<HistoryParams>,
+    pub disk: Option<DiskConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +43,13 @@ pub struct LimitsParams {
 #[serde(rename_all = "camelCase")]
 pub struct HistoryParams {
     pub max_entries_per_file: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiskConfig {
+    pub root_directory: String,
+    pub allowed_paths: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]

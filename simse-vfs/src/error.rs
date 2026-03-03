@@ -18,6 +18,10 @@ pub enum VfsError {
     LimitExceeded(String),
     #[error("Invalid operation: {0}")]
     InvalidOperation(String),
+    #[error("Permission denied: {0}")]
+    PermissionDenied(String),
+    #[error("Disk not configured")]
+    DiskNotConfigured,
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("JSON error: {0}")]
@@ -35,6 +39,8 @@ impl VfsError {
             Self::NotEmpty(_) => "VFS_NOT_EMPTY",
             Self::LimitExceeded(_) => "VFS_LIMIT_EXCEEDED",
             Self::InvalidOperation(_) => "VFS_INVALID_OPERATION",
+            Self::PermissionDenied(_) => "VFS_PERMISSION_DENIED",
+            Self::DiskNotConfigured => "VFS_DISK_NOT_CONFIGURED",
             Self::Io(_) => "VFS_IO_ERROR",
             Self::Json(_) => "VFS_JSON_ERROR",
         }

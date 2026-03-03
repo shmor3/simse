@@ -1,5 +1,6 @@
 use std::io::{self, BufRead};
 
+use crate::disk::{DiskFs, DiskSearchMode, DiskSearchOptions, DiskSearchResult};
 use crate::error::VfsError;
 use crate::path::VfsLimits;
 use crate::protocol::*;
@@ -9,10 +10,61 @@ use crate::vfs::{
 	VirtualFs,
 };
 
+// ── Scheme detection ────────────────────────────────────────────────────────
+
+enum Scheme {
+	Vfs,
+	Disk,
+}
+
+fn detect_scheme(params: &serde_json::Value) -> Scheme {
+	if let Some(path) = params.get("path").and_then(|v| v.as_str()) {
+		if path.starts_with("file://") {
+			return Scheme::Disk;
+		}
+	}
+	Scheme::Vfs
+}
+
+/// For methods with two paths (rename, copy), check both.
+fn detect_scheme_dual(
+	params: &serde_json::Value,
+	key1: &str,
+	key2: &str,
+) -> Result<Scheme, VfsError> {
+	let path1 = params.get(key1).and_then(|v| v.as_str()).unwrap_or("");
+	let path2 = params.get(key2).and_then(|v| v.as_str()).unwrap_or("");
+	let s1 = if path1.starts_with("file://") {
+		Scheme::Disk
+	} else {
+		Scheme::Vfs
+	};
+	let s2 = if path2.starts_with("file://") {
+		Scheme::Disk
+	} else {
+		Scheme::Vfs
+	};
+	match (&s1, &s2) {
+		(Scheme::Vfs, Scheme::Vfs) => Ok(Scheme::Vfs),
+		(Scheme::Disk, Scheme::Disk) => Ok(Scheme::Disk),
+		_ => Err(VfsError::InvalidOperation(
+			"Cannot mix vfs:// and file:// paths".into(),
+		)),
+	}
+}
+
+// ── Disk event info ─────────────────────────────────────────────────────────
+
+/// Information about a disk event to emit after a mutating operation.
+struct DiskEvent {
+	params: serde_json::Value,
+}
+
 /// VFS JSON-RPC server — dispatches incoming requests to VFS operations.
 pub struct VfsServer {
 	transport: NdjsonTransport,
 	vfs: Option<VirtualFs>,
+	disk: Option<DiskFs>,
 }
 
 impl VfsServer {
@@ -21,6 +73,7 @@ impl VfsServer {
 		Self {
 			transport,
 			vfs: None,
+			disk: None,
 		}
 	}
 
@@ -52,27 +105,248 @@ impl VfsServer {
 	// ── Dispatch ──────────────────────────────────────────────────────────
 
 	fn dispatch(&mut self, req: JsonRpcRequest) {
+		// Track disk events to emit after the operation.
+		let mut disk_event: Option<DiskEvent> = None;
+		let method = req.method.clone();
+
 		let result = match req.method.as_str() {
 			"initialize" => self.handle_initialize(req.params),
-			"vfs/readFile" => self.with_vfs(|vfs| handle_read_file(vfs, req.params)),
-			"vfs/writeFile" => self.with_vfs_mut(|vfs| handle_write_file(vfs, req.params)),
-			"vfs/appendFile" => self.with_vfs_mut(|vfs| handle_append_file(vfs, req.params)),
-			"vfs/deleteFile" => self.with_vfs_mut(|vfs| handle_delete_file(vfs, req.params)),
-			"vfs/mkdir" => self.with_vfs_mut(|vfs| handle_mkdir(vfs, req.params)),
-			"vfs/readdir" => self.with_vfs(|vfs| handle_readdir(vfs, req.params)),
-			"vfs/rmdir" => self.with_vfs_mut(|vfs| handle_rmdir(vfs, req.params)),
-			"vfs/stat" => self.with_vfs(|vfs| handle_stat(vfs, req.params)),
-			"vfs/exists" => self.with_vfs(|vfs| handle_exists(vfs, req.params)),
-			"vfs/rename" => self.with_vfs_mut(|vfs| handle_rename(vfs, req.params)),
-			"vfs/copy" => self.with_vfs_mut(|vfs| handle_copy(vfs, req.params)),
-			"vfs/glob" => self.with_vfs(|vfs| handle_glob(vfs, req.params)),
-			"vfs/tree" => self.with_vfs(|vfs| handle_tree(vfs, req.params)),
-			"vfs/du" => self.with_vfs(|vfs| handle_du(vfs, req.params)),
-			"vfs/search" => self.with_vfs(|vfs| handle_search(vfs, req.params)),
-			"vfs/history" => self.with_vfs(|vfs| handle_history(vfs, req.params)),
-			"vfs/diff" => self.with_vfs(|vfs| handle_diff(vfs, req.params)),
-			"vfs/diffVersions" => self.with_vfs(|vfs| handle_diff_versions(vfs, req.params)),
-			"vfs/checkout" => self.with_vfs_mut(|vfs| handle_checkout(vfs, req.params)),
+
+			// ── Dual-backend methods (15) ────────────────────────────────
+			"vfs/readFile" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs(|vfs| handle_read_file(vfs, req.params)),
+				Scheme::Disk => self.with_disk(|disk| handle_disk_read_file(disk, req.params)),
+			},
+			"vfs/writeFile" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs_mut(|vfs| handle_write_file(vfs, req.params)),
+				Scheme::Disk => {
+					let params_clone = req.params.clone();
+					let r = self.with_disk(|disk| handle_disk_write_file(disk, req.params));
+					if r.is_ok() {
+						disk_event = Some(DiskEvent {
+							params: serde_json::json!({
+								"type": "write",
+								"path": params_clone.get("path").and_then(|v| v.as_str()).unwrap_or(""),
+								"source": "disk"
+							}),
+						});
+					}
+					r
+				}
+			},
+			"vfs/appendFile" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs_mut(|vfs| handle_append_file(vfs, req.params)),
+				Scheme::Disk => {
+					let params_clone = req.params.clone();
+					let r = self.with_disk(|disk| handle_disk_append_file(disk, req.params));
+					if r.is_ok() {
+						disk_event = Some(DiskEvent {
+							params: serde_json::json!({
+								"type": "write",
+								"path": params_clone.get("path").and_then(|v| v.as_str()).unwrap_or(""),
+								"source": "disk"
+							}),
+						});
+					}
+					r
+				}
+			},
+			"vfs/deleteFile" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs_mut(|vfs| handle_delete_file(vfs, req.params)),
+				Scheme::Disk => {
+					let params_clone = req.params.clone();
+					let r = self.with_disk(|disk| handle_disk_delete_file(disk, req.params));
+					if r.is_ok() {
+						disk_event = Some(DiskEvent {
+							params: serde_json::json!({
+								"type": "delete",
+								"path": params_clone.get("path").and_then(|v| v.as_str()).unwrap_or(""),
+								"source": "disk"
+							}),
+						});
+					}
+					r
+				}
+			},
+			"vfs/mkdir" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs_mut(|vfs| handle_mkdir(vfs, req.params)),
+				Scheme::Disk => {
+					let params_clone = req.params.clone();
+					let r = self.with_disk(|disk| handle_disk_mkdir(disk, req.params));
+					if r.is_ok() {
+						disk_event = Some(DiskEvent {
+							params: serde_json::json!({
+								"type": "mkdir",
+								"path": params_clone.get("path").and_then(|v| v.as_str()).unwrap_or(""),
+								"source": "disk"
+							}),
+						});
+					}
+					r
+				}
+			},
+			"vfs/readdir" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs(|vfs| handle_readdir(vfs, req.params)),
+				Scheme::Disk => self.with_disk(|disk| handle_disk_readdir(disk, req.params)),
+			},
+			"vfs/rmdir" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs_mut(|vfs| handle_rmdir(vfs, req.params)),
+				Scheme::Disk => {
+					let params_clone = req.params.clone();
+					let r = self.with_disk(|disk| handle_disk_rmdir(disk, req.params));
+					if r.is_ok() {
+						disk_event = Some(DiskEvent {
+							params: serde_json::json!({
+								"type": "delete",
+								"path": params_clone.get("path").and_then(|v| v.as_str()).unwrap_or(""),
+								"source": "disk"
+							}),
+						});
+					}
+					r
+				}
+			},
+			"vfs/stat" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs(|vfs| handle_stat(vfs, req.params)),
+				Scheme::Disk => self.with_disk(|disk| handle_disk_stat(disk, req.params)),
+			},
+			"vfs/exists" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs(|vfs| handle_exists(vfs, req.params)),
+				Scheme::Disk => self.with_disk(|disk| handle_disk_exists(disk, req.params)),
+			},
+			"vfs/rename" => match detect_scheme_dual(&req.params, "oldPath", "newPath") {
+				Ok(Scheme::Vfs) => self.with_vfs_mut(|vfs| handle_rename(vfs, req.params)),
+				Ok(Scheme::Disk) => {
+					let params_clone = req.params.clone();
+					let r = self.with_disk(|disk| handle_disk_rename(disk, req.params));
+					if r.is_ok() {
+						disk_event = Some(DiskEvent {
+							params: serde_json::json!({
+								"type": "rename",
+								"oldPath": params_clone.get("oldPath").and_then(|v| v.as_str()).unwrap_or(""),
+								"newPath": params_clone.get("newPath").and_then(|v| v.as_str()).unwrap_or(""),
+								"source": "disk"
+							}),
+						});
+					}
+					r
+				}
+				Err(e) => Err(e),
+			},
+			"vfs/copy" => match detect_scheme_dual(&req.params, "src", "dest") {
+				Ok(Scheme::Vfs) => self.with_vfs_mut(|vfs| handle_copy(vfs, req.params)),
+				Ok(Scheme::Disk) => {
+					let params_clone = req.params.clone();
+					let r = self.with_disk(|disk| handle_disk_copy(disk, req.params));
+					if r.is_ok() {
+						disk_event = Some(DiskEvent {
+							params: serde_json::json!({
+								"type": "write",
+								"path": params_clone.get("dest").and_then(|v| v.as_str()).unwrap_or(""),
+								"source": "disk"
+							}),
+						});
+					}
+					r
+				}
+				Err(e) => Err(e),
+			},
+			"vfs/glob" => {
+				// Glob: check the first pattern to decide scheme.
+				let scheme = if let Some(pattern) = req.params.get("pattern") {
+					let first = match pattern {
+						serde_json::Value::String(s) => s.clone(),
+						serde_json::Value::Array(arr) => arr
+							.first()
+							.and_then(|v| v.as_str())
+							.unwrap_or("")
+							.to_string(),
+						_ => String::new(),
+					};
+					if first.starts_with("file://") {
+						Scheme::Disk
+					} else {
+						Scheme::Vfs
+					}
+				} else {
+					Scheme::Vfs
+				};
+				match scheme {
+					Scheme::Vfs => self.with_vfs(|vfs| handle_glob(vfs, req.params)),
+					Scheme::Disk => self.with_disk(|disk| handle_disk_glob(disk, req.params)),
+				}
+			}
+			"vfs/tree" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs(|vfs| handle_tree(vfs, req.params)),
+				Scheme::Disk => self.with_disk(|disk| handle_disk_tree(disk, req.params)),
+			},
+			"vfs/du" => match detect_scheme(&req.params) {
+				Scheme::Vfs => self.with_vfs(|vfs| handle_du(vfs, req.params)),
+				Scheme::Disk => self.with_disk(|disk| handle_disk_du(disk, req.params)),
+			},
+			"vfs/search" => {
+				// Search doesn't have a path field; detect from glob or default to VFS.
+				let scheme = if let Some(glob) = req
+					.params
+					.get("glob")
+					.and_then(|v| v.as_str())
+				{
+					if glob.starts_with("file://") {
+						Scheme::Disk
+					} else {
+						Scheme::Vfs
+					}
+				} else {
+					Scheme::Vfs
+				};
+				match scheme {
+					Scheme::Vfs => self.with_vfs(|vfs| handle_search(vfs, req.params)),
+					Scheme::Disk => {
+						self.with_disk(|disk| handle_disk_search(disk, req.params))
+					}
+				}
+			}
+
+			// ── VFS-only methods (10) ────────────────────────────────────
+			"vfs/history" => {
+				if matches!(detect_scheme(&req.params), Scheme::Disk) {
+					Err(VfsError::InvalidOperation(
+						"Operation not supported for file:// paths".into(),
+					))
+				} else {
+					self.with_vfs(|vfs| handle_history(vfs, req.params))
+				}
+			}
+			"vfs/diff" => {
+				if matches!(
+					detect_scheme_dual(&req.params, "oldPath", "newPath"),
+					Ok(Scheme::Disk) | Err(_)
+				) {
+					Err(VfsError::InvalidOperation(
+						"Operation not supported for file:// paths".into(),
+					))
+				} else {
+					self.with_vfs(|vfs| handle_diff(vfs, req.params))
+				}
+			}
+			"vfs/diffVersions" => {
+				if matches!(detect_scheme(&req.params), Scheme::Disk) {
+					Err(VfsError::InvalidOperation(
+						"Operation not supported for file:// paths".into(),
+					))
+				} else {
+					self.with_vfs(|vfs| handle_diff_versions(vfs, req.params))
+				}
+			}
+			"vfs/checkout" => {
+				if matches!(detect_scheme(&req.params), Scheme::Disk) {
+					Err(VfsError::InvalidOperation(
+						"Operation not supported for file:// paths".into(),
+					))
+				} else {
+					self.with_vfs_mut(|vfs| handle_checkout(vfs, req.params))
+				}
+			}
 			"vfs/snapshot" => self.with_vfs(|vfs| handle_snapshot(vfs)),
 			"vfs/restore" => self.with_vfs_mut(|vfs| handle_restore(vfs, req.params)),
 			"vfs/clear" => self.with_vfs_mut(|vfs| handle_clear(vfs)),
@@ -82,18 +356,23 @@ impl VfsServer {
 				self.transport.write_error(
 					req.id,
 					METHOD_NOT_FOUND,
-					format!("Unknown method: {}", req.method),
+					format!("Unknown method: {}", method),
 					None,
 				);
 				return;
 			}
 		};
 
-		// Drain events after every dispatch
+		// Drain VFS events after every dispatch
 		if let Some(ref mut vfs) = self.vfs {
 			for event in vfs.drain_events() {
 				let params = match &event {
-					VfsEvent::Write { path, size, content_type, is_new } => {
+					VfsEvent::Write {
+						path,
+						size,
+						content_type,
+						is_new,
+					} => {
 						serde_json::json!({"type": "write", "path": path, "size": size, "contentType": content_type, "isNew": is_new})
 					}
 					VfsEvent::Delete { path } => {
@@ -108,6 +387,11 @@ impl VfsServer {
 				};
 				self.transport.write_notification("vfs/event", params);
 			}
+		}
+
+		// Emit disk events
+		if let Some(event) = disk_event {
+			self.transport.write_notification("vfs/event", event.params);
 		}
 
 		match result {
@@ -140,6 +424,18 @@ impl VfsServer {
 		match &mut self.vfs {
 			Some(vfs) => f(vfs),
 			None => Err(VfsError::InvalidOperation("Not initialized".to_string())),
+		}
+	}
+
+	// ── Disk accessors ──────────────────────────────────────────────────
+
+	fn with_disk<F>(&self, f: F) -> Result<serde_json::Value, VfsError>
+	where
+		F: FnOnce(&DiskFs) -> Result<serde_json::Value, VfsError>,
+	{
+		match &self.disk {
+			Some(disk) => f(disk),
+			None => Err(VfsError::DiskNotConfigured),
 		}
 	}
 
@@ -183,6 +479,18 @@ impl VfsServer {
 
 		self.vfs = Some(VirtualFs::new(limits, max_history));
 
+		// Wire DiskFs from optional disk config.
+		self.disk = init_params.disk.map(|dc| {
+			DiskFs::new(
+				std::path::PathBuf::from(&dc.root_directory),
+				dc.allowed_paths
+					.unwrap_or_default()
+					.into_iter()
+					.map(std::path::PathBuf::from)
+					.collect(),
+			)
+		});
+
 		Ok(serde_json::json!({ "ok": true }))
 	}
 }
@@ -196,6 +504,8 @@ impl VfsServer {
 fn parse_params<T: serde::de::DeserializeOwned>(params: serde_json::Value) -> Result<T, VfsError> {
 	serde_json::from_value(params).map_err(VfsError::from)
 }
+
+// ── VFS handlers ────────────────────────────────────────────────────────────
 
 fn handle_read_file(
 	vfs: &VirtualFs,
@@ -572,4 +882,177 @@ fn handle_metrics(vfs: &VirtualFs) -> Result<serde_json::Value, VfsError> {
 		file_count: m.file_count,
 		directory_count: m.directory_count,
 	})?)
+}
+
+// ── Free-standing disk handler functions ────────────────────────────────────
+
+fn handle_disk_read_file(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: ReadFileParams = parse_params(params)?;
+	let r = disk.read_file(&p.path)?;
+	Ok(serde_json::to_value(r)?)
+}
+
+fn handle_disk_write_file(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: WriteFileParams = parse_params(params)?;
+	disk.write_file(
+		&p.path,
+		&p.content,
+		p.content_type.as_deref(),
+		p.create_parents.unwrap_or(false),
+	)?;
+	Ok(serde_json::json!({ "ok": true }))
+}
+
+fn handle_disk_append_file(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: AppendFileParams = parse_params(params)?;
+	disk.append_file(&p.path, &p.content)?;
+	Ok(serde_json::json!({ "ok": true }))
+}
+
+fn handle_disk_delete_file(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: PathParams = parse_params(params)?;
+	disk.delete_file(&p.path)?;
+	Ok(serde_json::json!({ "ok": true }))
+}
+
+fn handle_disk_stat(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: PathParams = parse_params(params)?;
+	let r = disk.stat(&p.path)?;
+	Ok(serde_json::to_value(r)?)
+}
+
+fn handle_disk_exists(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: PathParams = parse_params(params)?;
+	let exists = disk.exists(&p.path)?;
+	Ok(serde_json::json!({ "exists": exists }))
+}
+
+fn handle_disk_mkdir(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: MkdirParams = parse_params(params)?;
+	disk.mkdir(&p.path, p.recursive.unwrap_or(false))?;
+	Ok(serde_json::json!({ "ok": true }))
+}
+
+fn handle_disk_readdir(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: ReaddirParams = parse_params(params)?;
+	let entries = disk.readdir(&p.path, p.recursive.unwrap_or(false))?;
+	Ok(serde_json::json!({ "entries": entries }))
+}
+
+fn handle_disk_rmdir(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: RmdirParams = parse_params(params)?;
+	disk.rmdir(&p.path, p.recursive.unwrap_or(false))?;
+	Ok(serde_json::json!({ "ok": true }))
+}
+
+fn handle_disk_rename(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: RenameParams = parse_params(params)?;
+	disk.rename(&p.old_path, &p.new_path)?;
+	Ok(serde_json::json!({ "ok": true }))
+}
+
+fn handle_disk_copy(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: CopyParams = parse_params(params)?;
+	disk.copy(
+		&p.src,
+		&p.dest,
+		p.overwrite.unwrap_or(false),
+		p.recursive.unwrap_or(false),
+	)?;
+	Ok(serde_json::json!({ "ok": true }))
+}
+
+fn handle_disk_glob(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: GlobParams = parse_params(params)?;
+	let patterns: Vec<String> = match p.pattern {
+		serde_json::Value::String(s) => vec![s],
+		serde_json::Value::Array(arr) => arr
+			.into_iter()
+			.filter_map(|v| v.as_str().map(String::from))
+			.collect(),
+		_ => {
+			return Err(VfsError::InvalidOperation(
+				"pattern must be string or array".into(),
+			))
+		}
+	};
+	let matches = disk.glob(&patterns)?;
+	Ok(serde_json::json!({ "matches": matches }))
+}
+
+fn handle_disk_tree(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: PathParams = parse_params(params)?;
+	let tree = disk.tree(&p.path)?;
+	Ok(serde_json::json!({ "tree": tree }))
+}
+
+fn handle_disk_du(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: PathParams = parse_params(params)?;
+	let size = disk.du(&p.path)?;
+	Ok(serde_json::json!({ "size": size }))
+}
+
+fn handle_disk_search(
+	disk: &DiskFs,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, VfsError> {
+	let p: SearchParams = parse_params(params)?;
+	let opts = DiskSearchOptions {
+		max_results: p.max_results.unwrap_or(100),
+		mode: match p.mode.as_deref() {
+			Some("regex") => DiskSearchMode::Regex,
+			_ => DiskSearchMode::Substring,
+		},
+		context_before: p.context_before.unwrap_or(0),
+		context_after: p.context_after.unwrap_or(0),
+		count_only: p.count_only.unwrap_or(false),
+		glob: p.glob,
+	};
+	// SearchParams has no path field; default to file:/// (root of sandbox).
+	match disk.search("file:///", &p.query, &opts)? {
+		DiskSearchResult::Matches(matches) => Ok(serde_json::json!({ "results": matches })),
+		DiskSearchResult::Count(count) => Ok(serde_json::json!({ "count": count })),
+	}
 }

@@ -12,6 +12,7 @@ bun run build:acp-engine     # cd simse-acp && cargo build --release
 bun run build:mcp-engine     # cd simse-mcp && cargo build --release
 bun run build:core           # cd simse-core && cargo build --release
 bun run build:vsh-engine     # cd simse-vsh && cargo build --release
+bun run build:vnet-engine    # cd simse-vnet && cargo build --release
 
 # Rust tests
 cd simse-vector && cargo test  # Rust vector engine tests
@@ -19,6 +20,7 @@ cd simse-vfs && cargo test     # Rust VFS engine tests
 cd simse-acp && cargo test     # Rust ACP engine tests
 cd simse-mcp && cargo test     # Rust MCP engine tests
 cd simse-vsh && cargo test     # Rust VSH engine tests
+cd simse-vnet && cargo test    # Rust vnet engine tests
 cd simse-core && cargo test    # Rust core orchestration tests
 ```
 
@@ -37,6 +39,7 @@ simse-vfs/                  # Pure Rust crate — virtual filesystem engine (vfs
 simse-acp/                  # Pure Rust crate — ACP engine (JSON-RPC over stdio)
 simse-mcp/                  # Pure Rust crate — MCP engine (JSON-RPC over stdio)
 simse-vsh/                  # Pure Rust crate — virtual shell engine (JSON-RPC over stdio)
+simse-vnet/                 # Pure Rust crate — virtual network engine (JSON-RPC over stdio)
 simse-engine/               # Pure Rust crate — core engine
 simse-code/                 # TypeScript — CLI application (pending refactor)
 simse-cloud/                # TypeScript — SaaS web app (React Router + Cloudflare)
@@ -140,6 +143,17 @@ simse-vsh/                  # Pure Rust crate — virtual shell engine
     executor.rs             # Command execution via tokio::process with timeouts
     shell.rs                # VirtualShell: session management, env, aliases, history
     server.rs               # VshServer: JSON-RPC dispatcher (async)
+
+simse-vnet/                 # Pure Rust crate — virtual network engine
+  src/
+    error.rs                # VnetError enum with VNET_ code prefixes
+    protocol.rs             # JSON-RPC request/response types (19 methods)
+    transport.rs            # NdjsonTransport for JSON-RPC over stdio
+    sandbox.rs              # NetSandboxConfig: host/port/protocol allowlist validation
+    mock_store.rs           # MockStore: mock registry + glob pattern matching
+    session.rs              # SessionManager: persistent connection tracking (WS, TCP)
+    network.rs              # VirtualNetwork: core logic, mock HTTP, sandbox, metrics
+    server.rs               # VnetServer: 19-method JSON-RPC dispatch
 ```
 
 ### Key Patterns

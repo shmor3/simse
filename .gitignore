@@ -7,3 +7,4 @@ bun.lock
 .simse-example/
 .simse-app-example/
 .worktrees/
+target/

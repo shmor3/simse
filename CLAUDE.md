@@ -110,8 +110,8 @@ simse-vector/               # Pure Rust crate — vector store
 simse-vfs/                  # Pure Rust crate — virtual filesystem
   src/
     vfs.rs                  # Core VFS implementation (vfs:// in-memory backend)
-    disk.rs                 # DiskFs: real filesystem operations (file:// backend)
-    diff.rs                 # Diff generation
+    disk.rs                 # DiskFs: real filesystem operations (file:// backend, shadow history)
+    diff.rs                 # Diff generation (Myers algorithm, shared by both backends)
     glob.rs                 # Glob pattern matching
     search.rs               # File search implementation
 

@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use regex::Regex;
+use sha2::{Sha256, Digest};
 
 use crate::error::VfsError;
 use crate::glob::{expand_braces, match_parts};
@@ -24,6 +25,7 @@ const FILE_SCHEME: &str = "file://";
 pub struct DiskFs {
     root_directory: PathBuf,
     allowed_paths: Vec<PathBuf>,
+    history: Option<DiskHistory>,
 }
 
 impl DiskFs {
@@ -32,16 +34,18 @@ impl DiskFs {
     /// Canonicalizes `root_directory` and `allowed_paths` at construction
     /// time so that every subsequent sandbox check is a cheap prefix
     /// comparison instead of a syscall.
-    pub fn new(root_directory: PathBuf, allowed_paths: Vec<PathBuf>) -> Self {
+    pub fn new(root_directory: PathBuf, allowed_paths: Vec<PathBuf>, max_history: usize) -> Self {
         let canonical_root =
             fs::canonicalize(&root_directory).unwrap_or(root_directory);
         let canonical_allowed: Vec<PathBuf> = allowed_paths
             .iter()
             .filter_map(|p| fs::canonicalize(p).ok())
             .collect();
+        let history = DiskHistory::new(&canonical_root, max_history);
         Self {
             root_directory: canonical_root,
             allowed_paths: canonical_allowed,
+            history: Some(history),
         }
     }
 
@@ -187,6 +191,17 @@ impl DiskFs {
             self.resolve_parent_path(path)?
         };
 
+        // Record history before overwriting (if file exists)
+        if resolved.exists() && resolved.is_file() {
+            if let Some(ref history) = self.history {
+                if let Ok(old_data) = fs::read(&resolved) {
+                    let ct = if is_binary(&old_data) { "binary" } else { "text" };
+                    let size = old_data.len() as u64;
+                    let _ = history.record_version(path, &old_data, ct, size);
+                }
+            }
+        }
+
         let bytes = if content_type == Some("binary") {
             base64::engine::general_purpose::STANDARD
                 .decode(content)
@@ -205,6 +220,15 @@ impl DiskFs {
 
         if !resolved.is_file() {
             return Err(VfsError::NotAFile(path.to_string()));
+        }
+
+        // Record history before appending
+        if let Some(ref history) = self.history {
+            if let Ok(old_data) = fs::read(&resolved) {
+                let ct = if is_binary(&old_data) { "binary" } else { "text" };
+                let size = old_data.len() as u64;
+                let _ = history.record_version(path, &old_data, ct, size);
+            }
         }
 
         let mut file = OpenOptions::new().append(true).open(&resolved)?;
@@ -316,6 +340,10 @@ impl DiskFs {
                 let entry = entry?;
                 let meta = entry.metadata()?;
                 let name = entry.file_name().to_string_lossy().into_owned();
+                // Skip .simse shadow directory
+                if name == SIMSE_DIR {
+                    continue;
+                }
                 let node_type = if meta.is_file() {
                     "file"
                 } else if meta.is_dir() {
@@ -347,6 +375,10 @@ impl DiskFs {
             let ft = entry.file_type()?;
             if ft.is_symlink() {
                 continue; // Skip symlinks to prevent sandbox escapes
+            }
+
+            if entry.path().file_name().map(|n| n == SIMSE_DIR).unwrap_or(false) {
+                continue;
             }
 
             let rel = entry
@@ -603,6 +635,153 @@ impl DiskFs {
     }
 }
 
+// ── History ─────────────────────────────────────────────────────────────────
+
+const SIMSE_DIR: &str = ".simse";
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionEntry {
+    version: usize,
+    hash: String,
+    size: u64,
+    content_type: String,
+    timestamp: u64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FileManifest {
+    path: String,
+    versions: Vec<VersionEntry>,
+}
+
+pub struct DiskHistory {
+    objects_dir: PathBuf,
+    manifests_dir: PathBuf,
+    max_entries: usize,
+}
+
+impl DiskHistory {
+    pub fn new(root: &Path, max_entries: usize) -> Self {
+        let simse_dir = root.join(SIMSE_DIR);
+        Self {
+            objects_dir: simse_dir.join("objects"),
+            manifests_dir: simse_dir.join("manifests"),
+            max_entries,
+        }
+    }
+
+    fn ensure_dirs(&self) -> Result<(), VfsError> {
+        fs::create_dir_all(&self.objects_dir)?;
+        fs::create_dir_all(&self.manifests_dir)?;
+        Ok(())
+    }
+
+    fn hash(data: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update(data);
+        format!("{:x}", hasher.finalize())
+    }
+
+    pub fn store_content(&self, data: &[u8]) -> Result<String, VfsError> {
+        self.ensure_dirs()?;
+        let hash = Self::hash(data);
+        let dir = self.objects_dir.join(&hash[..2]);
+        fs::create_dir_all(&dir)?;
+        let object_path = dir.join(&hash[2..]);
+        if !object_path.exists() {
+            fs::write(&object_path, data)?;
+        }
+        Ok(hash)
+    }
+
+    pub fn load_content(&self, hash: &str) -> Result<Vec<u8>, VfsError> {
+        if hash.len() < 3 {
+            return Err(VfsError::InvalidOperation("Invalid hash".into()));
+        }
+        let object_path = self.objects_dir.join(&hash[..2]).join(&hash[2..]);
+        fs::read(&object_path).map_err(|_| {
+            VfsError::NotFound(format!("History object not found: {}", hash))
+        })
+    }
+
+    fn manifest_path(&self, file_path: &str) -> PathBuf {
+        let relative = file_path
+            .strip_prefix(FILE_SCHEME)
+            .unwrap_or(file_path)
+            .trim_start_matches('/');
+        let encoded = relative.replace('/', "%2F");
+        self.manifests_dir.join(format!("{}.json", encoded))
+    }
+
+    fn read_manifest(&self, file_path: &str) -> Result<FileManifest, VfsError> {
+        let path = self.manifest_path(file_path);
+        if !path.exists() {
+            return Ok(FileManifest {
+                path: file_path.to_string(),
+                versions: Vec::new(),
+            });
+        }
+        let data = fs::read_to_string(&path)?;
+        serde_json::from_str(&data).map_err(VfsError::from)
+    }
+
+    fn write_manifest(&self, manifest: &FileManifest) -> Result<(), VfsError> {
+        self.ensure_dirs()?;
+        let path = self.manifest_path(&manifest.path);
+        let json = serde_json::to_string_pretty(manifest)?;
+        fs::write(&path, json)?;
+        Ok(())
+    }
+
+    pub fn record_version(
+        &self,
+        file_path: &str,
+        data: &[u8],
+        content_type: &str,
+        size: u64,
+    ) -> Result<(), VfsError> {
+        let hash = self.store_content(data)?;
+        let mut manifest = self.read_manifest(file_path)?;
+        let version = manifest.versions.last().map(|v| v.version + 1).unwrap_or(1);
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        manifest.versions.push(VersionEntry {
+            version,
+            hash,
+            size,
+            content_type: content_type.to_string(),
+            timestamp,
+        });
+        if manifest.versions.len() > self.max_entries {
+            let drain = manifest.versions.len() - self.max_entries;
+            manifest.versions.drain(..drain);
+        }
+        self.write_manifest(&manifest)
+    }
+
+    pub fn get_history(&self, file_path: &str) -> Result<Vec<VersionEntry>, VfsError> {
+        let manifest = self.read_manifest(file_path)?;
+        Ok(manifest.versions)
+    }
+
+    pub fn get_version_content(
+        &self,
+        file_path: &str,
+        version: usize,
+    ) -> Result<(String, Vec<u8>), VfsError> {
+        let manifest = self.read_manifest(file_path)?;
+        let entry = manifest.versions.iter().find(|v| v.version == version).ok_or_else(|| {
+            VfsError::NotFound(format!("Version {} not found for {}", version, file_path))
+        })?;
+        let data = self.load_content(&entry.hash)?;
+        Ok((entry.content_type.clone(), data))
+    }
+}
+
 // ── Search types ────────────────────────────────────────────────────────────
 
 /// Search mode for disk operations.
@@ -685,6 +864,10 @@ fn walk_dir(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), VfsError> {
             continue; // Skip symlinks to prevent sandbox escapes
         }
         let path = entry.path();
+        // Skip .simse shadow directory
+        if path.file_name().map(|n| n == SIMSE_DIR).unwrap_or(false) {
+            continue;
+        }
         if path.is_dir() {
             walk_dir(&path, files)?;
         } else if path.is_file() {
@@ -732,6 +915,9 @@ fn copy_dir_recursive(src: &Path, dest: &Path, overwrite: bool) -> Result<(), Vf
 fn build_tree(dir: &Path, prefix: &str, output: &mut String) -> Result<(), VfsError> {
     let mut entries: Vec<_> = fs::read_dir(dir)?
         .filter_map(|e| e.ok())
+        .filter(|e| {
+            e.path().file_name().map(|n| n != SIMSE_DIR).unwrap_or(true)
+        })
         .collect();
 
     // Sort entries alphabetically.
@@ -816,7 +1002,7 @@ mod tests {
     /// Create a temp dir and return a DiskFs rooted there.
     fn temp_disk() -> (tempfile::TempDir, DiskFs) {
         let tmp = tempfile::tempdir().expect("failed to create tempdir");
-        let disk = DiskFs::new(tmp.path().to_path_buf(), vec![]);
+        let disk = DiskFs::new(tmp.path().to_path_buf(), vec![], 50);
         (tmp, disk)
     }
 

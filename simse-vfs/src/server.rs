@@ -488,6 +488,7 @@ impl VfsServer {
 					.into_iter()
 					.map(std::path::PathBuf::from)
 					.collect(),
+				max_history,
 			)
 		});
 

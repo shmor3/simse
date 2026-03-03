@@ -1,0 +1,30 @@
+[package]
+name = "simse-vnet-engine"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+description = "Virtual network server over JSON-RPC 2.0 / NDJSON stdio"
+
+[lib]
+name = "simse_vnet_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "simse-vnet-engine"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+tokio-tungstenite = "0.26"
+uuid = { version = "1", features = ["v4"] }
+regex = "1"
+
+[dev-dependencies]
+tempfile = "3"

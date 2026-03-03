@@ -198,7 +198,9 @@ impl DiskFs {
                 if let Ok(old_data) = fs::read(&resolved) {
                     let ct = if is_binary(&old_data) { "binary" } else { "text" };
                     let size = old_data.len() as u64;
-                    let _ = history.record_version(path, &old_data, ct, size);
+                    if let Err(e) = history.record_version(path, &old_data, ct, size) {
+                        tracing::warn!("Failed to record history for {}: {}", path, e);
+                    }
                 }
             }
         }
@@ -228,7 +230,9 @@ impl DiskFs {
             if let Ok(old_data) = fs::read(&resolved) {
                 let ct = if is_binary(&old_data) { "binary" } else { "text" };
                 let size = old_data.len() as u64;
-                let _ = history.record_version(path, &old_data, ct, size);
+                if let Err(e) = history.record_version(path, &old_data, ct, size) {
+                    tracing::warn!("Failed to record history for {}: {}", path, e);
+                }
             }
         }
 
@@ -1071,6 +1075,10 @@ fn disk_usage(path: &Path) -> Result<u64, VfsError> {
     let mut total: u64 = 0;
     for entry in fs::read_dir(path)? {
         let entry = entry?;
+        let ft = entry.file_type()?;
+        if ft.is_symlink() {
+            continue;
+        }
         let entry_path = entry.path();
         // Skip .simse shadow directory
         if entry_path.file_name().map(|n| n == SIMSE_DIR).unwrap_or(false) {

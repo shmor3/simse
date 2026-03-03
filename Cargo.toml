@@ -5,6 +5,15 @@ members = [
     "simse-tui",
     "simse-bridge",
 ]
+exclude = [
+    "simse-vfs",
+    "simse-vector",
+    "simse-acp",
+    "simse-mcp",
+    "simse-vsh",
+    "simse-core",
+    "simse-engine",
+]
 
 [workspace.package]
 version = "0.1.0"

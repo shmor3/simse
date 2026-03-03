@@ -437,3 +437,52 @@ fn tcp_connect_and_send() {
     let err = proc.call_err("session/get", json!({"sessionId": sid}));
     assert_eq!(err["data"]["vnetCode"], "VNET_SESSION_NOT_FOUND");
 }
+
+// ---------------------------------------------------------------------------
+// Test 15: UDP send with mock
+// ---------------------------------------------------------------------------
+
+#[test]
+fn udp_send_with_mock() {
+    let mut proc = VnetProcess::spawn();
+    proc.initialize();
+
+    // Register a mock for UDP
+    proc.call("mock/register", json!({
+        "urlPattern": "mock://dns-server:53",
+        "method": "udp",
+        "response": { "status": 200, "body": "udp-response-data", "bodyType": "text" }
+    }));
+
+    let resp = proc.call("net/udpSend", json!({
+        "host": "dns-server",
+        "port": 53,
+        "data": "query"
+    }));
+    assert_eq!(resp["response"], "udp-response-data");
+}
+
+// ---------------------------------------------------------------------------
+// Test 16: DNS resolve with mock
+// ---------------------------------------------------------------------------
+
+#[test]
+fn dns_resolve_with_mock() {
+    let mut proc = VnetProcess::spawn();
+    proc.initialize();
+
+    // Register a mock for DNS resolution
+    proc.call("mock/register", json!({
+        "urlPattern": "mock://dns/example.com",
+        "method": "dns",
+        "response": { "status": 200, "body": "[\"1.2.3.4\", \"5.6.7.8\"]", "bodyType": "text" }
+    }));
+
+    let resp = proc.call("net/resolve", json!({
+        "hostname": "example.com"
+    }));
+    let addrs = resp["addresses"].as_array().unwrap();
+    assert_eq!(addrs.len(), 2);
+    assert_eq!(addrs[0], "1.2.3.4");
+    assert_eq!(addrs[1], "5.6.7.8");
+}

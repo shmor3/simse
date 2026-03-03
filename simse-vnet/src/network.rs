@@ -25,6 +25,12 @@ pub struct VirtualNetwork {
     bytes_total: u64,
 }
 
+impl Default for VirtualNetwork {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl VirtualNetwork {
     pub fn new() -> Self {
         Self {

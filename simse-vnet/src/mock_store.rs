@@ -45,6 +45,12 @@ pub struct MockStore {
     hits: Vec<MockHit>,
 }
 
+impl Default for MockStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockStore {
     pub fn new() -> Self {
         Self {

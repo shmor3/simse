@@ -293,6 +293,8 @@ impl VnetServer {
                     "bytesReceived": bytes_received
                 }))
             }
+            // UDP is connectionless fire-and-forget — no mock match returns null
+            // response (unlike HTTP which errors). Design spec: response is optional.
             None => Ok(serde_json::json!({
                 "response": null,
                 "bytesReceived": 0

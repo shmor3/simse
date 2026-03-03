@@ -28,10 +28,20 @@ pub struct DiskFs {
 
 impl DiskFs {
     /// Create a new `DiskFs` rooted at `root_directory`.
+    ///
+    /// Canonicalizes `root_directory` and `allowed_paths` at construction
+    /// time so that every subsequent sandbox check is a cheap prefix
+    /// comparison instead of a syscall.
     pub fn new(root_directory: PathBuf, allowed_paths: Vec<PathBuf>) -> Self {
+        let canonical_root =
+            fs::canonicalize(&root_directory).unwrap_or(root_directory);
+        let canonical_allowed: Vec<PathBuf> = allowed_paths
+            .iter()
+            .filter_map(|p| fs::canonicalize(p).ok())
+            .collect();
         Self {
-            root_directory,
-            allowed_paths,
+            root_directory: canonical_root,
+            allowed_paths: canonical_allowed,
         }
     }
 
@@ -88,20 +98,17 @@ impl DiskFs {
     }
 
     /// Verify that a canonical path falls within the sandbox.
+    ///
+    /// Both `self.root_directory` and `self.allowed_paths` were
+    /// canonicalized at construction time, so no extra syscalls here.
     fn check_sandbox(&self, canonical: &Path, original: &str) -> Result<PathBuf, VfsError> {
-        let canonical_root = fs::canonicalize(&self.root_directory).map_err(|_| {
-            VfsError::InvalidOperation("Root directory does not exist".into())
-        })?;
-
-        if canonical.starts_with(&canonical_root) {
+        if canonical.starts_with(&self.root_directory) {
             return Ok(canonical.to_path_buf());
         }
 
         for allowed in &self.allowed_paths {
-            if let Ok(canonical_allowed) = fs::canonicalize(allowed) {
-                if canonical.starts_with(&canonical_allowed) {
-                    return Ok(canonical.to_path_buf());
-                }
+            if canonical.starts_with(allowed) {
+                return Ok(canonical.to_path_buf());
             }
         }
 
@@ -121,7 +128,7 @@ impl DiskFs {
             return Err(VfsError::NotAFile(path.to_string()));
         }
 
-        let data = fs::read(&resolved)?;
+        let data = fs::read(&resolved).map_err(|e| map_io_error(e, path))?;
         let size = data.len() as u64;
 
         if is_binary(&data) {
@@ -143,6 +150,9 @@ impl DiskFs {
     }
 
     /// Write content to a file on disk.
+    ///
+    /// When `create_parents` is true, validates the sandbox constraint
+    /// BEFORE creating any parent directories to prevent TOCTOU races.
     pub fn write_file(
         &self,
         path: &str,
@@ -151,12 +161,26 @@ impl DiskFs {
         create_parents: bool,
     ) -> Result<(), VfsError> {
         let resolved = if create_parents {
-            // Ensure parent directories exist before resolving.
             let local = strip_file_scheme(path)?;
             let local = local.strip_prefix('/').unwrap_or(local);
             let joined = self.root_directory.join(local);
+
+            // Validate sandbox BEFORE creating parent directories.
             if let Some(parent) = joined.parent() {
-                fs::create_dir_all(parent)?;
+                let mut check_path = parent;
+                while !check_path.exists() {
+                    check_path = check_path.parent().ok_or_else(|| {
+                        VfsError::InvalidPath("Cannot determine parent directory".into())
+                    })?;
+                }
+                let canonical_ancestor =
+                    fs::canonicalize(check_path).map_err(|e| {
+                        VfsError::NotFound(format!("{}: {}", check_path.display(), e))
+                    })?;
+                self.check_sandbox(&canonical_ancestor, path)?;
+
+                // Now safe to create parent directories.
+                fs::create_dir_all(parent).map_err(|e| map_io_error(e, path))?;
             }
             self.resolve_parent_path(path)?
         } else {
@@ -171,7 +195,7 @@ impl DiskFs {
             content.as_bytes().to_vec()
         };
 
-        fs::write(&resolved, &bytes)?;
+        fs::write(&resolved, &bytes).map_err(|e| map_io_error(e, path))?;
         Ok(())
     }
 
@@ -196,7 +220,7 @@ impl DiskFs {
             return Err(VfsError::NotAFile(path.to_string()));
         }
 
-        fs::remove_file(&resolved)?;
+        fs::remove_file(&resolved).map_err(|e| map_io_error(e, path))?;
         Ok(())
     }
 
@@ -246,26 +270,30 @@ impl DiskFs {
     }
 
     /// Create a directory.
+    ///
+    /// Validates the sandbox constraint BEFORE creating any directories
+    /// by walking up to the nearest existing ancestor and canonicalizing it.
     pub fn mkdir(&self, path: &str, recursive: bool) -> Result<(), VfsError> {
         let local = strip_file_scheme(path)?;
         let local = local.strip_prefix('/').unwrap_or(local);
         let joined = self.root_directory.join(local);
 
-        // Ensure the parent exists so we can canonicalize for sandbox check.
-        if recursive {
-            fs::create_dir_all(&joined)?;
-        } else {
-            fs::create_dir(&joined)?;
+        // Find the deepest existing ancestor to canonicalize for sandbox check.
+        let mut check_path = joined.as_path();
+        while !check_path.exists() {
+            check_path = check_path.parent().ok_or_else(|| {
+                VfsError::InvalidPath("Cannot determine parent directory".into())
+            })?;
         }
-
-        // Verify the created directory is within sandbox.
-        let canonical = fs::canonicalize(&joined).map_err(|e| {
-            VfsError::NotFound(format!("{}: {}", joined.display(), e))
+        let canonical_ancestor = fs::canonicalize(check_path).map_err(|e| {
+            VfsError::NotFound(format!("{}: {}", check_path.display(), e))
         })?;
-        if let Err(e) = self.check_sandbox(&canonical, path) {
-            // Clean up: remove what we just created if it's outside sandbox.
-            let _ = fs::remove_dir(&joined);
-            return Err(e);
+        self.check_sandbox(&canonical_ancestor, path)?;
+
+        if recursive {
+            fs::create_dir_all(&joined).map_err(|e| map_io_error(e, path))?;
+        } else {
+            fs::create_dir(&joined).map_err(|e| map_io_error(e, path))?;
         }
 
         Ok(())
@@ -306,6 +334,8 @@ impl DiskFs {
     }
 
     /// Recursively collect directory entries with relative paths.
+    ///
+    /// Symlinks are skipped to prevent sandbox escapes.
     fn readdir_recursive(
         &self,
         base: &Path,
@@ -314,7 +344,11 @@ impl DiskFs {
     ) -> Result<(), VfsError> {
         for entry in fs::read_dir(current)? {
             let entry = entry?;
-            let meta = entry.metadata()?;
+            let ft = entry.file_type()?;
+            if ft.is_symlink() {
+                continue; // Skip symlinks to prevent sandbox escapes
+            }
+
             let rel = entry
                 .path()
                 .strip_prefix(base)
@@ -322,9 +356,9 @@ impl DiskFs {
                 .to_string_lossy()
                 .replace('\\', "/");
 
-            let node_type = if meta.is_file() {
+            let node_type = if ft.is_file() {
                 "file"
-            } else if meta.is_dir() {
+            } else if ft.is_dir() {
                 "directory"
             } else {
                 "other"
@@ -335,7 +369,7 @@ impl DiskFs {
                 node_type: node_type.to_string(),
             });
 
-            if meta.is_dir() {
+            if ft.is_dir() {
                 self.readdir_recursive(base, &entry.path(), entries)?;
             }
         }
@@ -351,9 +385,12 @@ impl DiskFs {
         }
 
         if recursive {
-            fs::remove_dir_all(&resolved)?;
+            fs::remove_dir_all(&resolved).map_err(|e| map_io_error(e, path))?;
         } else {
             fs::remove_dir(&resolved).map_err(|e| {
+                if e.kind() == std::io::ErrorKind::PermissionDenied {
+                    return VfsError::PermissionDenied(format!("{}: {}", path, e));
+                }
                 if e.kind() == std::io::ErrorKind::Other
                     || e.to_string().contains("not empty")
                     || e.to_string().contains("directory is not empty")
@@ -411,20 +448,16 @@ impl DiskFs {
 
     /// Match files against glob patterns. Returns `file://`-prefixed paths.
     pub fn glob(&self, patterns: &[String]) -> Result<Vec<String>, VfsError> {
-        let canonical_root = fs::canonicalize(&self.root_directory).map_err(|_| {
-            VfsError::InvalidOperation("Root directory does not exist".into())
-        })?;
-
         let mut matched = Vec::new();
 
-        // Collect all files under root.
+        // Collect all files under root (already canonicalized at construction).
         let mut all_files = Vec::new();
-        walk_dir(&canonical_root, &mut all_files)?;
+        walk_dir(&self.root_directory, &mut all_files)?;
 
         for file_path in &all_files {
             // Build a file:// URI from the path relative to root.
             let rel = file_path
-                .strip_prefix(&canonical_root)
+                .strip_prefix(&self.root_directory)
                 .unwrap_or(file_path);
             let rel_str = rel.to_string_lossy().replace('\\', "/");
             let file_uri = format!("{}/{}", FILE_SCHEME, rel_str.trim_start_matches('/'));
@@ -476,9 +509,6 @@ impl DiskFs {
         opts: &DiskSearchOptions,
     ) -> Result<DiskSearchResult, VfsError> {
         let resolved = self.resolve_path(path)?;
-        let canonical_root = fs::canonicalize(&self.root_directory).map_err(|_| {
-            VfsError::InvalidOperation("Root directory does not exist".into())
-        })?;
 
         let search_opts = SearchOptions {
             max_results: opts.max_results,
@@ -512,7 +542,7 @@ impl DiskFs {
         for file_path in &all_files {
             // Build file:// URI.
             let rel = file_path
-                .strip_prefix(&canonical_root)
+                .strip_prefix(&self.root_directory)
                 .unwrap_or(file_path);
             let rel_str = rel.to_string_lossy().replace('\\', "/");
             let file_uri = format!("{}/{}", FILE_SCHEME, rel_str.trim_start_matches('/'));
@@ -615,6 +645,17 @@ pub enum DiskSearchResult {
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
+/// Map OS permission-denied errors to `VfsError::PermissionDenied`.
+///
+/// All other I/O errors pass through as `VfsError::Io`.
+fn map_io_error(e: std::io::Error, path: &str) -> VfsError {
+    if e.kind() == std::io::ErrorKind::PermissionDenied {
+        VfsError::PermissionDenied(format!("{}: {}", path, e))
+    } else {
+        VfsError::Io(e)
+    }
+}
+
 /// Strip the `file://` scheme prefix and return the local part.
 fn strip_file_scheme(path: &str) -> Result<&str, VfsError> {
     path.strip_prefix(FILE_SCHEME).ok_or_else(|| {
@@ -629,6 +670,9 @@ fn is_binary(data: &[u8]) -> bool {
 }
 
 /// Recursively walk a directory and collect all file paths.
+///
+/// Symlinks are skipped to prevent sandbox escapes — a symlink inside
+/// the root could point outside the sandbox, leaking data.
 fn walk_dir(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), VfsError> {
     if !dir.is_dir() {
         return Ok(());
@@ -636,6 +680,10 @@ fn walk_dir(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), VfsError> {
 
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
+        let ft = entry.file_type()?;
+        if ft.is_symlink() {
+            continue; // Skip symlinks to prevent sandbox escapes
+        }
         let path = entry.path();
         if path.is_dir() {
             walk_dir(&path, files)?;
@@ -648,6 +696,9 @@ fn walk_dir(dir: &Path, files: &mut Vec<PathBuf>) -> Result<(), VfsError> {
 }
 
 /// Recursively copy a directory.
+///
+/// Symlinks are skipped to prevent following links that point outside
+/// the sandbox.
 fn copy_dir_recursive(src: &Path, dest: &Path, overwrite: bool) -> Result<(), VfsError> {
     if !dest.exists() {
         fs::create_dir_all(dest)?;
@@ -655,10 +706,14 @@ fn copy_dir_recursive(src: &Path, dest: &Path, overwrite: bool) -> Result<(), Vf
 
     for entry in fs::read_dir(src)? {
         let entry = entry?;
+        let ft = entry.file_type()?;
+        if ft.is_symlink() {
+            continue; // Skip symlinks to prevent sandbox escapes
+        }
         let entry_path = entry.path();
         let dest_path = dest.join(entry.file_name());
 
-        if entry_path.is_dir() {
+        if ft.is_dir() {
             copy_dir_recursive(&entry_path, &dest_path, overwrite)?;
         } else {
             if dest_path.exists() && !overwrite {

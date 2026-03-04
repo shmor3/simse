@@ -6,6 +6,12 @@
 //! agentic loop requests execution.
 
 use std::collections::HashMap;
+use std::sync::Arc;
+
+use tokio::sync::Mutex as TokioMutex;
+
+use crate::client::{self, BridgeConfig, BridgeProcess};
+use crate::config::McpServerConfig;
 
 use simse_ui_core::tools::{
 	DEFAULT_MAX_OUTPUT_CHARS, ToolCallRequest, ToolCallResult, ToolDefinition, ToolHandlerOutput,
@@ -89,6 +95,160 @@ impl ToolHandler for StubHandler {
 		})
 	}
 }
+
+// ---------------------------------------------------------------------------
+// MCP tool handler
+// ---------------------------------------------------------------------------
+
+/// Handler that proxies tool execution to a running MCP server subprocess.
+///
+/// Holds a shared reference to the `BridgeProcess` so multiple MCP tools from
+/// the same server share one subprocess. Calls `tools/call` over JSON-RPC and
+/// extracts the text content from the MCP `ToolCallResult`.
+struct McpToolHandler {
+	/// The MCP server name (used for error reporting).
+	server_name: String,
+	/// The original MCP tool name (without the `mcp:server/` prefix).
+	tool_name: String,
+	/// Shared handle to the MCP server subprocess.
+	bridge: Arc<TokioMutex<BridgeProcess>>,
+}
+
+impl ToolHandler for McpToolHandler {
+	async fn execute(
+		&self,
+		args: serde_json::Value,
+	) -> Result<ToolHandlerOutput, ToolExecutionError> {
+		let params = serde_json::json!({
+			"name": self.tool_name,
+			"arguments": args,
+		});
+
+		let mut bridge = self.bridge.lock().await;
+		let resp = client::request(&mut bridge, "tools/call", Some(params))
+			.await
+			.map_err(|e| {
+				ToolExecutionError::HandlerError(format!(
+					"MCP server '{}' request failed: {}",
+					self.server_name, e
+				))
+			})?;
+
+		if let Some(err) = resp.error {
+			return Err(ToolExecutionError::HandlerError(format!(
+				"MCP server '{}' returned error: {}",
+				self.server_name, err.message
+			)));
+		}
+
+		let result = resp.result.unwrap_or(serde_json::json!({}));
+
+		// Extract text from MCP content items. The MCP ToolCallResult has:
+		//   { "content": [{ "type": "text", "text": "..." }, ...], "isError": bool }
+		let is_error = result
+			.get("isError")
+			.and_then(|v| v.as_bool())
+			.unwrap_or(false);
+
+		let output = extract_mcp_text_content(&result);
+
+		if is_error {
+			Err(ToolExecutionError::HandlerError(output))
+		} else {
+			Ok(ToolHandlerOutput { output, diff: None })
+		}
+	}
+}
+
+/// Extract text content from an MCP `ToolCallResult` JSON value.
+///
+/// Iterates over the `content` array and concatenates all `text` items. Falls
+/// back to the raw JSON string if no text items are found.
+fn extract_mcp_text_content(result: &serde_json::Value) -> String {
+	let content = match result.get("content").and_then(|c| c.as_array()) {
+		Some(arr) => arr,
+		None => return result.to_string(),
+	};
+
+	let mut texts = Vec::new();
+	for item in content {
+		if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
+			texts.push(text.to_string());
+		}
+	}
+
+	if texts.is_empty() {
+		result.to_string()
+	} else {
+		texts.join("\n")
+	}
+}
+
+/// Convert an MCP tool's JSON Schema `inputSchema` into the simse
+/// `HashMap<String, ToolParameter>` format.
+///
+/// The MCP `inputSchema` is typically:
+/// ```json
+/// {
+///   "type": "object",
+///   "properties": {
+///     "param_name": { "type": "string", "description": "..." },
+///     ...
+///   },
+///   "required": ["param_name"]
+/// }
+/// ```
+fn convert_mcp_input_schema(schema: &serde_json::Value) -> HashMap<String, ToolParameter> {
+	let mut params = HashMap::new();
+
+	let properties = match schema.get("properties").and_then(|p| p.as_object()) {
+		Some(props) => props,
+		None => return params,
+	};
+
+	let required_arr: Vec<&str> = schema
+		.get("required")
+		.and_then(|r| r.as_array())
+		.map(|arr| {
+			arr.iter()
+				.filter_map(|v| v.as_str())
+				.collect()
+		})
+		.unwrap_or_default();
+
+	for (name, prop) in properties {
+		let param_type = prop
+			.get("type")
+			.and_then(|t| t.as_str())
+			.unwrap_or("string")
+			.to_string();
+
+		let description = prop
+			.get("description")
+			.and_then(|d| d.as_str())
+			.unwrap_or("")
+			.to_string();
+
+		let required = required_arr.contains(&name.as_str());
+
+		params.insert(
+			name.clone(),
+			ToolParameter {
+				param_type,
+				description,
+				required,
+			},
+		);
+	}
+
+	params
+}
+
+/// The MCP protocol version to use during the initialize handshake.
+const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
+
+/// Default timeout for MCP server connections (30 seconds).
+const MCP_CONNECT_TIMEOUT_MS: u64 = 30_000;
 
 // ---------------------------------------------------------------------------
 // ToolRegistry
@@ -206,12 +366,13 @@ impl ToolRegistry {
 	/// Discover tools: clear existing tools, register built-ins, and discover
 	/// MCP tools from connected servers.
 	///
-	/// Currently registers built-in stubs only. MCP discovery will be wired in
-	/// a later task when the MCP client bridge is available.
-	pub async fn discover(&mut self) {
+	/// For each MCP server config, spawns the server subprocess, performs the
+	/// MCP initialize handshake, lists available tools, and registers each one
+	/// as `mcp:{server_name}/{tool_name}`.
+	pub async fn discover(&mut self, mcp_servers: &[McpServerConfig]) {
 		self.tools.clear();
 		self.register_builtins();
-		self.discover_mcp_tools().await;
+		self.discover_mcp_tools(mcp_servers).await;
 	}
 
 	/// Register built-in tool definitions with stub handlers.
@@ -393,12 +554,187 @@ impl ToolRegistry {
 
 	/// Discover MCP tools from connected servers.
 	///
-	/// Stub: actual MCP wiring comes in a later task. When implemented, this
-	/// will iterate connected MCP servers, list their tools, and register each
-	/// as `mcp:{server}/{name}`.
-	async fn discover_mcp_tools(&mut self) {
-		// TODO: Iterate MCP client connected servers, list tools, register as
-		// mcp:{server}/{name} with handlers that call mcpClient.callTool().
+	/// For each MCP server config:
+	/// 1. Spawn the server subprocess via `spawn_bridge`
+	/// 2. Send `initialize` with MCP protocol version
+	/// 3. Send `initialized` notification
+	/// 4. Send `tools/list` to discover available tools
+	/// 5. Register each tool as `mcp:{server_name}/{tool_name}`
+	///
+	/// Errors are logged to stderr and the server is skipped (graceful degradation).
+	async fn discover_mcp_tools(&mut self, servers: &[McpServerConfig]) {
+		for server_config in servers {
+			// Only stdio transport is supported for subprocess-based MCP servers.
+			if server_config.transport != "stdio" {
+				eprintln!(
+					"[mcp] Skipping server '{}': unsupported transport '{}'",
+					server_config.name, server_config.transport
+				);
+				continue;
+			}
+
+			let bridge_config = BridgeConfig {
+				command: server_config.command.clone(),
+				args: server_config.args.clone(),
+				data_dir: String::new(),
+				timeout_ms: MCP_CONNECT_TIMEOUT_MS,
+			};
+
+			// Spawn the MCP server subprocess.
+			let mut bridge = match client::spawn_bridge(&bridge_config).await {
+				Ok(b) => b,
+				Err(e) => {
+					eprintln!(
+						"[mcp] Failed to spawn server '{}': {}",
+						server_config.name, e
+					);
+					continue;
+				}
+			};
+
+			// Send the MCP `initialize` request.
+			let init_params = serde_json::json!({
+				"protocolVersion": MCP_PROTOCOL_VERSION,
+				"capabilities": {
+					"roots": { "listChanged": true }
+				},
+				"clientInfo": {
+					"name": "simse",
+					"version": "1.0.0"
+				}
+			});
+
+			let init_resp =
+				match client::request(&mut bridge, "initialize", Some(init_params)).await {
+					Ok(r) => r,
+					Err(e) => {
+						eprintln!(
+							"[mcp] Initialize failed for server '{}': {}",
+							server_config.name, e
+						);
+						client::kill_bridge(bridge).await;
+						continue;
+					}
+				};
+
+			if let Some(err) = &init_resp.error {
+				eprintln!(
+					"[mcp] Initialize error from server '{}': {}",
+					server_config.name, err.message
+				);
+				client::kill_bridge(bridge).await;
+				continue;
+			}
+
+			// Send the `initialized` notification (required by MCP protocol).
+			if let Err(e) = client::send_line(
+				&mut bridge,
+				&serde_json::to_string(&serde_json::json!({
+					"jsonrpc": "2.0",
+					"method": "notifications/initialized"
+				}))
+				.unwrap_or_default(),
+			)
+			.await
+			{
+				eprintln!(
+					"[mcp] Failed to send initialized notification to '{}': {}",
+					server_config.name, e
+				);
+				client::kill_bridge(bridge).await;
+				continue;
+			}
+
+			// Send `tools/list` to discover available tools.
+			let tools_resp =
+				match client::request(&mut bridge, "tools/list", Some(serde_json::json!({}))).await
+				{
+					Ok(r) => r,
+					Err(e) => {
+						eprintln!(
+							"[mcp] tools/list failed for server '{}': {}",
+							server_config.name, e
+						);
+						client::kill_bridge(bridge).await;
+						continue;
+					}
+				};
+
+			if let Some(err) = &tools_resp.error {
+				eprintln!(
+					"[mcp] tools/list error from server '{}': {}",
+					server_config.name, err.message
+				);
+				client::kill_bridge(bridge).await;
+				continue;
+			}
+
+			// Parse the tools list from the response.
+			let tools_result = match tools_resp.result {
+				Some(r) => r,
+				None => {
+					eprintln!(
+						"[mcp] Empty tools/list result from server '{}'",
+						server_config.name
+					);
+					client::kill_bridge(bridge).await;
+					continue;
+				}
+			};
+
+			let tools_array = tools_result
+				.get("tools")
+				.and_then(|t| t.as_array())
+				.cloned()
+				.unwrap_or_default();
+
+			if tools_array.is_empty() {
+				// No tools to register; keep the process alive in case it's needed later,
+				// but for now just clean up.
+				client::kill_bridge(bridge).await;
+				continue;
+			}
+
+			// Wrap the bridge in an Arc<Mutex> so all tools from this server share it.
+			let shared_bridge = Arc::new(TokioMutex::new(bridge));
+
+			for tool_value in &tools_array {
+				let tool_name = match tool_value.get("name").and_then(|n| n.as_str()) {
+					Some(n) => n.to_string(),
+					None => continue,
+				};
+
+				let description = tool_value
+					.get("description")
+					.and_then(|d| d.as_str())
+					.unwrap_or("")
+					.to_string();
+
+				let input_schema = tool_value
+					.get("inputSchema")
+					.cloned()
+					.unwrap_or(serde_json::json!({"type": "object"}));
+
+				let parameters = convert_mcp_input_schema(&input_schema);
+
+				let registry_name = format!("mcp:{}/{}", server_config.name, tool_name);
+
+				let definition = ToolDefinition {
+					name: registry_name,
+					description,
+					parameters,
+					max_output_chars: None,
+				};
+
+				let handler = McpToolHandler {
+					server_name: server_config.name.clone(),
+					tool_name: tool_name.clone(),
+					bridge: Arc::clone(&shared_bridge),
+				};
+
+				self.register(definition, handler);
+			}
+		}
 	}
 }
 
@@ -667,7 +1003,7 @@ mod tests {
 	#[tokio::test]
 	async fn discover_registers_builtins() {
 		let mut reg = ToolRegistry::new();
-		reg.discover().await;
+		reg.discover(&[]).await;
 		assert!(reg.tool_count() >= 6, "Expected at least 6 built-in tools");
 		let defs = reg.get_tool_definitions();
 		let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
@@ -684,7 +1020,7 @@ mod tests {
 		let mut reg = ToolRegistry::new();
 		reg.register(simple_tool_def("custom"), EchoHandler);
 		assert_eq!(reg.tool_count(), 1);
-		reg.discover().await;
+		reg.discover(&[]).await;
 		// custom should be gone, replaced by builtins
 		let defs = reg.get_tool_definitions();
 		let names: Vec<&str> = defs.iter().map(|d| d.name.as_str()).collect();
@@ -694,7 +1030,7 @@ mod tests {
 	#[tokio::test]
 	async fn builtin_stubs_return_placeholder() {
 		let mut reg = ToolRegistry::new();
-		reg.discover().await;
+		reg.discover(&[]).await;
 		let call = make_call_with_args("library_search", json!({"query": "test"}));
 		let result = reg.execute(&call).await;
 		assert!(!result.is_error);
@@ -704,7 +1040,7 @@ mod tests {
 	#[tokio::test]
 	async fn builtin_tool_definitions_have_correct_parameters() {
 		let mut reg = ToolRegistry::new();
-		reg.discover().await;
+		reg.discover(&[]).await;
 		let defs = reg.get_tool_definitions();
 
 		// library_search should have query (required) and maxResults (optional)
@@ -729,5 +1065,176 @@ mod tests {
 		let reg = ToolRegistry::default();
 		assert_eq!(reg.tool_count(), 0);
 		assert_eq!(reg.max_output_chars, DEFAULT_MAX_OUTPUT_CHARS);
+	}
+
+	// -- MCP schema conversion --
+
+	#[test]
+	fn convert_mcp_input_schema_full() {
+		let schema = json!({
+			"type": "object",
+			"properties": {
+				"query": { "type": "string", "description": "Search query" },
+				"limit": { "type": "number", "description": "Max results" }
+			},
+			"required": ["query"]
+		});
+		let params = convert_mcp_input_schema(&schema);
+		assert_eq!(params.len(), 2);
+
+		let query = params.get("query").unwrap();
+		assert_eq!(query.param_type, "string");
+		assert_eq!(query.description, "Search query");
+		assert!(query.required);
+
+		let limit = params.get("limit").unwrap();
+		assert_eq!(limit.param_type, "number");
+		assert_eq!(limit.description, "Max results");
+		assert!(!limit.required);
+	}
+
+	#[test]
+	fn convert_mcp_input_schema_empty_properties() {
+		let schema = json!({ "type": "object" });
+		let params = convert_mcp_input_schema(&schema);
+		assert!(params.is_empty());
+	}
+
+	#[test]
+	fn convert_mcp_input_schema_no_required() {
+		let schema = json!({
+			"type": "object",
+			"properties": {
+				"name": { "type": "string", "description": "A name" }
+			}
+		});
+		let params = convert_mcp_input_schema(&schema);
+		assert_eq!(params.len(), 1);
+		assert!(!params.get("name").unwrap().required);
+	}
+
+	#[test]
+	fn convert_mcp_input_schema_missing_description() {
+		let schema = json!({
+			"type": "object",
+			"properties": {
+				"id": { "type": "integer" }
+			},
+			"required": ["id"]
+		});
+		let params = convert_mcp_input_schema(&schema);
+		let id = params.get("id").unwrap();
+		assert_eq!(id.param_type, "integer");
+		assert_eq!(id.description, "");
+		assert!(id.required);
+	}
+
+	#[test]
+	fn convert_mcp_input_schema_missing_type() {
+		let schema = json!({
+			"type": "object",
+			"properties": {
+				"data": { "description": "Some data" }
+			}
+		});
+		let params = convert_mcp_input_schema(&schema);
+		// Missing type should default to "string"
+		assert_eq!(params.get("data").unwrap().param_type, "string");
+	}
+
+	// -- MCP text content extraction --
+
+	#[test]
+	fn extract_mcp_text_content_single_text() {
+		let result = json!({
+			"content": [{ "type": "text", "text": "Hello world" }],
+			"isError": false
+		});
+		assert_eq!(extract_mcp_text_content(&result), "Hello world");
+	}
+
+	#[test]
+	fn extract_mcp_text_content_multiple_text_items() {
+		let result = json!({
+			"content": [
+				{ "type": "text", "text": "Line 1" },
+				{ "type": "text", "text": "Line 2" }
+			]
+		});
+		assert_eq!(extract_mcp_text_content(&result), "Line 1\nLine 2");
+	}
+
+	#[test]
+	fn extract_mcp_text_content_no_content() {
+		let result = json!({ "isError": false });
+		// Falls back to JSON string
+		let output = extract_mcp_text_content(&result);
+		assert!(output.contains("isError"));
+	}
+
+	#[test]
+	fn extract_mcp_text_content_non_text_items() {
+		let result = json!({
+			"content": [
+				{ "type": "image", "data": "base64...", "mimeType": "image/png" }
+			]
+		});
+		// No text items, falls back to full JSON
+		let output = extract_mcp_text_content(&result);
+		assert!(output.contains("image"));
+	}
+
+	#[test]
+	fn extract_mcp_text_content_mixed_items() {
+		let result = json!({
+			"content": [
+				{ "type": "text", "text": "Result:" },
+				{ "type": "image", "data": "base64...", "mimeType": "image/png" },
+				{ "type": "text", "text": "Done." }
+			]
+		});
+		assert_eq!(extract_mcp_text_content(&result), "Result:\nDone.");
+	}
+
+	// -- MCP server discovery edge cases --
+
+	#[tokio::test]
+	async fn discover_skips_unsupported_transport() {
+		let mut reg = ToolRegistry::new();
+		let servers = vec![McpServerConfig {
+			name: "http-server".into(),
+			transport: "http".into(),
+			command: "node".into(),
+			args: vec![],
+			env: HashMap::new(),
+			required_env: vec![],
+		}];
+		reg.discover(&servers).await;
+		// Only builtins, no MCP tools
+		assert_eq!(reg.tool_count(), 6);
+	}
+
+	#[tokio::test]
+	async fn discover_skips_server_that_fails_to_spawn() {
+		let mut reg = ToolRegistry::new();
+		let servers = vec![McpServerConfig {
+			name: "bad-server".into(),
+			transport: "stdio".into(),
+			command: "this-command-definitely-does-not-exist-12345".into(),
+			args: vec![],
+			env: HashMap::new(),
+			required_env: vec![],
+		}];
+		reg.discover(&servers).await;
+		// Only builtins should be registered
+		assert_eq!(reg.tool_count(), 6);
+	}
+
+	#[tokio::test]
+	async fn discover_with_empty_server_list() {
+		let mut reg = ToolRegistry::new();
+		reg.discover(&[]).await;
+		// Only builtins
+		assert_eq!(reg.tool_count(), 6);
 	}
 }

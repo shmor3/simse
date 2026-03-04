@@ -6,6 +6,7 @@ pub mod autocomplete;
 mod banner;
 pub mod commands;
 pub mod dialogs;
+pub mod dispatch;
 pub mod markdown;
 mod output;
 pub mod overlays;

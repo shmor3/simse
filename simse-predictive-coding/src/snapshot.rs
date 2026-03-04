@@ -1,8 +1,14 @@
+use std::sync::Mutex;
+
 use serde::{Deserialize, Serialize};
 
 use crate::config::{LayerConfig, PcnConfig};
 use crate::network::PredictiveCodingNetwork;
 use crate::vocabulary::{VocabularyManager, VocabularyState};
+
+fn default_inference_rate() -> f64 {
+    0.1
+}
 
 /// An immutable, serializable snapshot of a trained predictive coding network.
 ///
@@ -11,7 +17,7 @@ use crate::vocabulary::{VocabularyManager, VocabularyState};
 /// network. This enables lock-free concurrent prediction reads.
 ///
 /// Created via [`ModelSnapshot::from_network`] and used via [`ModelSnapshot::predict`].
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelSnapshot {
     /// Dimensionality of the clamped input.
@@ -35,6 +41,33 @@ pub struct ModelSnapshot {
     pub epoch: usize,
     /// Total number of training samples seen at the time of snapshot.
     pub total_samples: usize,
+    /// Inference rate used during training. Stored so prediction uses the
+    /// same rate. Defaults to 0.1 for backward compatibility with old snapshots.
+    #[serde(default = "default_inference_rate")]
+    pub inference_rate: f64,
+    /// Lazily-built network for running inference. Skipped during
+    /// serialization — rebuilt on first predict() call.
+    #[serde(skip)]
+    cached_network: Mutex<Option<PredictiveCodingNetwork>>,
+}
+
+impl Clone for ModelSnapshot {
+    fn clone(&self) -> Self {
+        Self {
+            input_dim: self.input_dim,
+            layer_configs: self.layer_configs.clone(),
+            layer_weights: self.layer_weights.clone(),
+            layer_biases: self.layer_biases.clone(),
+            input_predictor_weights: self.input_predictor_weights.clone(),
+            input_predictor_bias: self.input_predictor_bias.clone(),
+            input_predictor_activation: self.input_predictor_activation,
+            vocabulary: self.vocabulary.clone(),
+            epoch: self.epoch,
+            total_samples: self.total_samples,
+            inference_rate: self.inference_rate,
+            cached_network: Mutex::new(None),
+        }
+    }
 }
 
 /// The result of running inference on a [`ModelSnapshot`].
@@ -127,18 +160,17 @@ impl ModelSnapshot {
             vocabulary: vocab.serialize(),
             epoch,
             total_samples,
+            inference_rate: net.inference_rate(),
+            cached_network: Mutex::new(None),
         }
     }
 
     /// Run inference on the snapshot and return a [`PredictionResult`].
     ///
-    /// Creates a temporary [`PredictiveCodingNetwork`] from the snapshot's
-    /// captured weights, runs inference for the given number of steps, and
-    /// returns energy, latent representation, energy breakdown, and
-    /// reconstruction.
-    ///
-    /// This does NOT modify the snapshot — the temporary network is discarded
-    /// after inference completes.
+    /// On the first call, a [`PredictiveCodingNetwork`] is lazily built from
+    /// the snapshot's captured weights and cached internally. Subsequent calls
+    /// reuse the cached network, avoiding repeated allocation and weight
+    /// copying.
     ///
     /// * `input` - the input vector (must match `self.input_dim`)
     /// * `inference_steps` - number of inference iterations
@@ -151,37 +183,37 @@ impl ModelSnapshot {
             self.input_dim
         );
 
-        // Build a PcnConfig from the snapshot's layer configs.
-        let config = PcnConfig {
-            layers: self.layer_configs.clone(),
-            inference_steps,
-            // Use reasonable defaults for rates — these only matter for
-            // training, but inference_rate is used in run_inference.
-            learning_rate: 0.0, // no learning during prediction
-            inference_rate: 0.1,
-            temporal_amortization: false,
-            ..Default::default()
-        };
+        let mut cache = self.cached_network.lock().unwrap();
 
-        // Create a fresh network from the config.
-        let mut net = PredictiveCodingNetwork::new(self.input_dim, &config);
+        if cache.is_none() {
+            let config = PcnConfig {
+                layers: self.layer_configs.clone(),
+                inference_steps,
+                learning_rate: 0.0,
+                inference_rate: self.inference_rate,
+                temporal_amortization: false,
+                ..Default::default()
+            };
 
-        // Overwrite weights and biases from the snapshot.
-        for l in 0..self.layer_configs.len() {
-            let layer = net.layer_mut(l);
-            layer.weights.clone_from(&self.layer_weights[l]);
-            layer.bias.clone_from(&self.layer_biases[l]);
+            let mut net = PredictiveCodingNetwork::new(self.input_dim, &config);
+
+            for l in 0..self.layer_configs.len() {
+                let layer = net.layer_mut(l);
+                layer.weights.clone_from(&self.layer_weights[l]);
+                layer.bias.clone_from(&self.layer_biases[l]);
+            }
+
+            let ip = net.input_predictor_mut();
+            ip.weights.clone_from(&self.input_predictor_weights);
+            ip.bias.clone_from(&self.input_predictor_bias);
+
+            *cache = Some(net);
         }
 
-        // Overwrite the input predictor weights and biases.
-        let ip = net.input_predictor_mut();
-        ip.weights.clone_from(&self.input_predictor_weights);
-        ip.bias.clone_from(&self.input_predictor_bias);
+        let net = cache.as_mut().unwrap();
 
-        // Run inference.
         let energy = net.infer(input, inference_steps);
 
-        // Collect results.
         let top_latent = net.get_top_latent();
         let energy_breakdown = net.energy_breakdown();
         let reconstruction = net.generate();
@@ -214,6 +246,8 @@ impl ModelSnapshot {
             },
             epoch: 0,
             total_samples: 0,
+            inference_rate: 0.1,
+            cached_network: Mutex::new(None),
         }
     }
 }
@@ -435,5 +469,64 @@ mod tests {
         assert!(result_b.energy.is_finite());
         assert_eq!(result_a.reconstruction.len(), 6);
         assert_eq!(result_b.reconstruction.len(), 6);
+    }
+
+    #[test]
+    fn snapshot_captures_inference_rate() {
+        let config = PcnConfig {
+            inference_rate: 0.05,
+            ..test_config()
+        };
+        let net = PredictiveCodingNetwork::new(6, &config);
+        let vocab = make_vocab();
+        let snapshot = ModelSnapshot::from_network(&net, &vocab, 1, 1);
+        assert!((snapshot.inference_rate - 0.05).abs() < 1e-15);
+    }
+
+    #[test]
+    fn snapshot_predict_uses_cached_network() {
+        let config = test_config();
+        let mut net = PredictiveCodingNetwork::new(6, &config);
+        let vocab = make_vocab();
+        let input = vec![1.0, 0.5, -0.3, 0.8, 0.0, -1.0];
+        for _ in 0..10 {
+            net.train_single(&input);
+        }
+        let snapshot = ModelSnapshot::from_network(&net, &vocab, 10, 10);
+
+        let r1 = snapshot.predict(&input, 10);
+        let r2 = snapshot.predict(&input, 10);
+        assert!(r1.energy.is_finite());
+        assert!(r2.energy.is_finite());
+        assert!((r1.energy - r2.energy).abs() < 1e-10);
+    }
+
+    #[test]
+    fn snapshot_clone_has_independent_cache() {
+        let config = test_config();
+        let net = PredictiveCodingNetwork::new(6, &config);
+        let vocab = make_vocab();
+        let snapshot = ModelSnapshot::from_network(&net, &vocab, 1, 1);
+
+        let _ = snapshot.predict(&[1.0, 0.5, -0.3, 0.8, 0.0, -1.0], 5);
+
+        let cloned = snapshot.clone();
+        assert_eq!(cloned.input_dim, snapshot.input_dim);
+        assert_eq!(cloned.epoch, snapshot.epoch);
+        assert!((cloned.inference_rate - snapshot.inference_rate).abs() < 1e-15);
+    }
+
+    #[test]
+    fn snapshot_deserialized_defaults_inference_rate() {
+        let config = test_config();
+        let net = PredictiveCodingNetwork::new(6, &config);
+        let vocab = make_vocab();
+        let snapshot = ModelSnapshot::from_network(&net, &vocab, 1, 1);
+        let mut json: serde_json::Value = serde_json::to_value(&snapshot).unwrap();
+
+        json.as_object_mut().unwrap().remove("inferenceRate");
+
+        let restored: ModelSnapshot = serde_json::from_value(json).unwrap();
+        assert!((restored.inference_rate - 0.1).abs() < 1e-15);
     }
 }

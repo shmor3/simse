@@ -542,6 +542,12 @@ fn dispatch_command(mut app: App, text: &str) -> App {
 				let text = format_table(&headers, &rows);
 				app.output.push(OutputItem::CommandResult { text });
 			}
+			CommandOutput::BridgeRequest(action) => {
+				// TODO(task-7): dispatch to TuiRuntime once wired
+				app.output.push(OutputItem::Info {
+					text: format!("Bridge request queued: {action:?}"),
+				});
+			}
 			CommandOutput::OpenOverlay(action) => match action {
 				OverlayAction::Settings => {
 					app.screen = Screen::Settings;

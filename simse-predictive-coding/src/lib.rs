@@ -4,5 +4,6 @@ pub mod error;
 pub mod layer;
 pub mod network;
 pub mod snapshot;
+pub mod trainer;
 pub mod transport;
 pub mod vocabulary;

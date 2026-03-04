@@ -9,6 +9,7 @@
 //! - `config.rs`  — Test config utilities (reserved for future ACP integration)
 //! - `harness.rs` — `SimseTestHarness`: TestBackend-based test driver
 
+mod acp_integration;
 mod autocomplete;
 mod commands_config;
 mod commands_files;

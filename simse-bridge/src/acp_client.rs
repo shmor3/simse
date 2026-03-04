@@ -277,11 +277,12 @@ impl AcpClient {
 		// Extract embeddings from data content blocks
 		let mut embeddings = Vec::new();
 		for block in &result.content {
-			if let ContentBlock::Data { data } = block
-				&& let Some(embedding) = data.get("embedding")
-				&& let Ok(vec) = serde_json::from_value::<Vec<f32>>(embedding.clone())
-			{
-				embeddings.push(vec);
+			if let ContentBlock::Data { data } = block {
+				if let Some(embedding) = data.get("embedding") {
+					if let Ok(vec) = serde_json::from_value::<Vec<f32>>(embedding.clone()) {
+						embeddings.push(vec);
+					}
+				}
 			}
 		}
 

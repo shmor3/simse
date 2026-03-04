@@ -114,39 +114,7 @@ impl ModelSnapshot {
             layer_biases.push(layer.bias.clone());
         }
 
-        // Capture the input predictor (separate from the latent layers array).
-        // We access it indirectly: we know the network has an input_predictor with
-        // dim = input_dim and input_dim = layers[0].dim. We need to reconstruct
-        // a temporary network to read it, or access it through the public API.
-        //
-        // Since input_predictor is a private field on PredictiveCodingNetwork,
-        // we reconstruct it by creating a fresh network with the same config and
-        // then... actually, we need a way to access it.
-        //
-        // Looking at PredictiveCodingNetwork: the input_predictor field is private.
-        // We'll access it through a helper that we add, or work around it.
-        //
-        // The generate() method uses input_predictor internally. For the snapshot,
-        // we need the actual weights. Let's add accessor methods to the network.
-        //
-        // For now, since we can't modify network.rs in this task, we'll use a
-        // workaround: create a network from config, run inference to populate
-        // the state, then use generate() to get the reconstruction. But that
-        // won't give us the input_predictor weights directly.
-        //
-        // Actually, looking more carefully at the struct definition, the fields
-        // are NOT pub. But layer() returns &PcnLayer which has all pub fields.
-        // The input_predictor is private. We need to either:
-        // 1. Add a pub accessor for input_predictor on PredictiveCodingNetwork
-        // 2. Work around it
-        //
-        // Let's add a minimal accessor. We'll need to modify network.rs.
-
-        // For the snapshot predict method, we reconstruct a full network from
-        // the snapshot data. We need the input_predictor weights for that.
-        // Since those aren't directly accessible, we'll need to add an accessor.
-        //
-        // Placeholder — will be filled by the accessor we add to network.rs:
+        // Capture the input predictor weights.
         let input_predictor = net.input_predictor();
 
         Self {

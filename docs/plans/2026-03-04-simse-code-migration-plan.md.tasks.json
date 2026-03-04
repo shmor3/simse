@@ -6,9 +6,9 @@
 		{"id": 2, "nativeId": "9", "subject": "Task 2: Permission Manager", "status": "completed"},
 		{"id": 3, "nativeId": "10", "subject": "Task 3: Keybinding Manager", "status": "completed"},
 		{"id": 4, "nativeId": "11", "subject": "Task 4: Non-Interactive Mode", "status": "completed"},
-		{"id": 5, "nativeId": "12", "subject": "Task 5: Tool Registry", "status": "completed", "blockedBy": [0, 1]},
-		{"id": 6, "nativeId": "13", "subject": "Task 6: Tool Call Parser", "status": "completed", "blockedBy": [5]},
-		{"id": 7, "nativeId": "14", "subject": "Task 7: Agentic Loop", "status": "completed", "blockedBy": [5, 6]},
+		{"id": 5, "nativeId": "12", "subject": "Task 5: Tool Registry", "status": "completed"},
+		{"id": 6, "nativeId": "13", "subject": "Task 6: Tool Call Parser", "status": "completed"},
+		{"id": 7, "nativeId": "14", "subject": "Task 7: Agentic Loop", "status": "completed"},
 		{"id": 8, "nativeId": "15", "subject": "Task 8: Markdown Renderer", "status": "completed"},
 		{"id": 9, "nativeId": "16", "subject": "Task 9: Thinking Spinner", "status": "completed"},
 		{"id": 10, "nativeId": "17", "subject": "Task 10: Permission Dialog", "status": "completed"},
@@ -18,12 +18,12 @@
 		{"id": 14, "nativeId": "21", "subject": "Task 14: Setup & Ollama Wizard", "status": "completed"},
 		{"id": 15, "nativeId": "22", "subject": "Task 15: Command Autocomplete", "status": "completed"},
 		{"id": 16, "nativeId": "23", "subject": "Task 16: @-Mention Autocomplete", "status": "completed"},
-		{"id": 17, "nativeId": "24", "subject": "Task 17-23: All Feature Commands", "status": "pending", "blockedBy": [7, 8, 9, 10, 11, 12, 13, 14, 15, 16]},
-		{"id": 18, "nativeId": "25", "subject": "Task 24: Full Command Dispatch Integration", "status": "pending", "blockedBy": [17]},
-		{"id": 19, "nativeId": "26", "subject": "Task 25-27: Event Loop, CLI Args, Onboarding", "status": "pending", "blockedBy": [18]},
-		{"id": 20, "nativeId": "27", "subject": "Task 28-30: UI Polish", "status": "pending", "blockedBy": [19]},
-		{"id": 21, "nativeId": "28", "subject": "Task 31-32: Integration Tests & Build System", "status": "pending", "blockedBy": [20]},
-		{"id": 22, "nativeId": "29", "subject": "Task 33-34: Final Verification & Delete simse-code", "status": "pending", "blockedBy": [21]}
+		{"id": 17, "nativeId": "24", "subject": "Task 17-23: All Feature Commands", "status": "completed"},
+		{"id": 18, "nativeId": "25", "subject": "Task 24: Full Command Dispatch Integration", "status": "completed"},
+		{"id": 19, "nativeId": "26", "subject": "Task 25-27: Event Loop, CLI Args, Onboarding", "status": "completed"},
+		{"id": 20, "nativeId": "27", "subject": "Task 28-30: UI Polish", "status": "completed"},
+		{"id": 21, "nativeId": "28", "subject": "Task 31-32: Integration Tests & Build System", "status": "completed"},
+		{"id": 22, "nativeId": "29", "subject": "Task 33-34: Final Verification & Delete simse-code", "status": "completed"}
 	],
-	"lastUpdated": "2026-03-04T22:00:00Z"
+	"lastUpdated": "2026-03-04T23:30:00Z"
 }

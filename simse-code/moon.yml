@@ -2,6 +2,8 @@ language: 'typescript'
 tags: ['app']
 
 tasks:
+  setup:
+    command: 'echo "deps managed by workspace root"'
   dev:
     command: 'bun run start'
     options:

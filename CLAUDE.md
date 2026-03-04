@@ -44,11 +44,13 @@ simse-acp/                  # Pure Rust crate — ACP engine (JSON-RPC over stdi
 simse-mcp/                  # Pure Rust crate — MCP engine (JSON-RPC over stdio)
 simse-vsh/                  # Pure Rust crate — virtual shell engine (JSON-RPC over stdio)
 simse-vnet/                 # Pure Rust crate — virtual network engine (JSON-RPC over stdio)
+simse-ui-core/              # Pure Rust crate — platform-agnostic UI logic (no I/O)
+simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Architecture)
+simse-bridge/               # Pure Rust crate — async I/O bridge (ACP client, config, sessions, storage)
 simse-engine/               # Pure Rust crate — core engine
-simse-code/                 # TypeScript — CLI application (pending refactor)
 simse-cloud/                # TypeScript — SaaS web app (React Router + Cloudflare)
 simse-landing/              # TypeScript — Landing page (Remix)
-simse-emails/               # TypeScript — Email templates
+simse-mailer/               # TypeScript — Email templates
 ```
 
 ### simse-core Module Layout
@@ -160,9 +162,57 @@ simse-vnet/                 # Pure Rust crate — virtual network engine
     server.rs               # VnetServer: 19-method JSON-RPC dispatch
 ```
 
+### TUI Crates (CLI Application)
+
+```tree
+simse-ui-core/              # Platform-agnostic UI logic (no I/O, no async)
+  src/
+    cli.rs                  # Non-interactive mode arg parsing
+    state/
+      conversation.rs       # ConversationBuffer with auto-compaction
+      permission_manager.rs # Permission modes, rules, glob matching
+      permissions.rs        # Permission mode/decision types
+    input/
+      keybindings.rs        # KeyCombo registry and matching
+    tools/
+      mod.rs                # Tool types, formatting, truncation
+      parser.rs             # Tool call parser (XML blocks from LLM responses)
+    commands/                # Command registry (34 commands)
+    config/                  # Settings schemas
+
+simse-tui/                  # Terminal UI (ratatui + crossterm + tokio)
+  src/
+    app.rs                  # App model (Elm Architecture: Model/Update/View)
+    event_loop.rs           # TuiRuntime: bridges App to simse-bridge
+    cli_args.rs             # CLI argument parsing
+    onboarding.rs           # First-run setup detection
+    dispatch.rs             # Command dispatch routing
+    markdown.rs             # Markdown→ratatui with syntax highlighting
+    spinner.rs              # Animated thinking spinner
+    autocomplete.rs         # /command autocomplete
+    at_mention.rs           # @file path autocomplete
+    status_bar.rs           # Status bar rendering
+    tool_call_box.rs        # Tool call display with diff
+    error_box.rs            # Error display
+    dialogs/                # Permission + confirm dialogs
+    overlays/               # Settings, librarian, setup, ollama wizard
+    commands/               # Feature command handlers (library, session, config, files, ai, tools, meta)
+
+simse-bridge/               # Async I/O bridge (tokio)
+  src/
+    client.rs               # JSON-RPC client (subprocess management)
+    acp_client.rs           # ACP client (connect, generate, stream, embed)
+    config.rs               # Config loading (8 files, agents, skills, SIMSE.md)
+    session_store.rs        # JSONL session persistence
+    storage.rs              # Binary storage backend (SIMK format, gzip, atomic writes)
+    tool_registry.rs        # Tool registry (register, discover, execute)
+    agentic_loop.rs         # Agentic loop (conversation→ACP→parse→execute→repeat)
+    json_io.rs              # JSON/JSONL utilities
+```
+
 ### Key Patterns
 
-- **Rust-first architecture**: All core logic is in Rust. TS packages (simse-code, simse-cloud, simse-landing, simse-emails) are application layers only.
+- **Rust-first architecture**: All core logic is in Rust. TS packages (simse-cloud, simse-landing, simse-mailer) are application layers only.
 - **JSON-RPC 2.0 / NDJSON stdio**: All Rust crates expose their APIs via JSON-RPC over newline-delimited JSON on stdin/stdout. Tracing/logs go to stderr.
 - **Callback pattern**: Tools, hooks, chains, and loops registered from external callers use oneshot channels + JSON-RPC notifications for async callback execution.
 - **CoreContext wiring**: `CoreContext` ties together EventBus, Logger, AppConfig, TaskList, HookSystem, SessionManager, ToolRegistry, and optional Library/VFS.

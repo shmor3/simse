@@ -293,8 +293,7 @@ fn concurrent_reads_during_snapshot() {
 
         let handle = std::thread::spawn(move || {
             let predictor = Predictor::new(snap_clone, steps);
-            let result = predictor.confidence(&input_clone);
-            result
+            predictor.confidence(&input_clone)
         });
         handles.push(handle);
     }

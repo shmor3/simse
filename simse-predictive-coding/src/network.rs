@@ -185,7 +185,7 @@ impl PredictiveCodingNetwork {
         };
 
         // Step 2: Hebbian weight update
-        self.update_all_weights(input);
+        self.update_all_weights();
 
         energy
     }
@@ -443,7 +443,7 @@ impl PredictiveCodingNetwork {
     /// Hebbian weight update for all layers after inference has converged.
     ///
     /// For each weight matrix, applies: W += lr * (f'(a) . e) * x_above^T
-    fn update_all_weights(&mut self, _input: &[f64]) {
+    fn update_all_weights(&mut self) {
         let lr = self.learning_rate;
 
         // Update input predictor weights.
@@ -579,7 +579,7 @@ mod tests {
         net.resize_input(10);
         assert_eq!(net.input_dim(), 10);
         // Should still be able to infer with new dim
-        let energy = net.infer(&vec![1.0; 10], 5);
+        let energy = net.infer(&[1.0; 10], 5);
         assert!(energy.is_finite());
     }
 

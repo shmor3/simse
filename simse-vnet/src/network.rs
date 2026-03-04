@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::backend::NetBackend;
 use crate::error::VnetError;
 use crate::mock_store::{self, MockStore};
 use crate::protocol::{HttpResponseResult, MetricsResult, MockDefinitionInfo, MockHitInfo, SessionInfo};
@@ -23,6 +24,7 @@ pub struct VirtualNetwork {
     pub(crate) total_requests: u64,
     pub(crate) total_errors: u64,
     bytes_total: u64,
+    backend: Option<Box<dyn NetBackend>>,
 }
 
 impl Default for VirtualNetwork {
@@ -41,6 +43,7 @@ impl VirtualNetwork {
             total_requests: 0,
             total_errors: 0,
             bytes_total: 0,
+            backend: None,
         }
     }
 
@@ -48,7 +51,11 @@ impl VirtualNetwork {
         self.initialized
     }
 
-    pub fn initialize(&mut self, sandbox: Option<SandboxInit>) {
+    pub fn initialize(
+        &mut self,
+        sandbox: Option<SandboxInit>,
+        backend: Option<Box<dyn NetBackend>>,
+    ) {
         if let Some(init) = sandbox {
             self.sandbox = NetSandboxConfig {
                 allowed_hosts: init.allowed_hosts.iter().map(|h| HostRule::parse(h)).collect(),
@@ -68,7 +75,13 @@ impl VirtualNetwork {
         } else {
             self.sandbox = NetSandboxConfig::default();
         }
+        self.backend = backend;
         self.initialized = true;
+    }
+
+    /// Returns a reference to the backend, if one has been set.
+    pub fn backend(&self) -> Option<&dyn NetBackend> {
+        self.backend.as_deref()
     }
 
     pub fn require_init(&self) -> Result<(), VnetError> {
@@ -107,6 +120,42 @@ impl VirtualNetwork {
             None => {
                 self.total_errors += 1;
                 Err(VnetError::NoMockMatch(url.to_string()))
+            }
+        }
+    }
+
+    // ── Net HTTP (backend-delegated) ──
+
+    /// Send an HTTP request through the backend (for `net://` scheme).
+    ///
+    /// The caller strips `net://` from the URL and provides the real URL.
+    /// This method increments metrics and delegates to the backend.
+    pub async fn net_http_request(
+        &mut self,
+        real_url: &str,
+        method: &str,
+        headers: &HashMap<String, String>,
+        body: Option<&str>,
+        timeout_ms: Option<u64>,
+    ) -> Result<HttpResponseResult, VnetError> {
+        self.require_init()?;
+        self.total_requests += 1;
+
+        let backend = self.backend.as_ref().ok_or_else(|| {
+            VnetError::ConnectionFailed("no network backend configured".to_string())
+        })?;
+
+        let timeout = timeout_ms.unwrap_or(self.sandbox.default_timeout_ms);
+        let max_bytes = self.sandbox.max_response_bytes;
+
+        match backend.http_request(real_url, method, headers, body, timeout, max_bytes).await {
+            Ok(result) => {
+                self.bytes_total += result.bytes_received;
+                Ok(result)
+            }
+            Err(e) => {
+                self.total_errors += 1;
+                Err(e)
             }
         }
     }
@@ -287,14 +336,14 @@ mod tests {
     #[test]
     fn initialize_sets_state() {
         let mut net = VirtualNetwork::new();
-        net.initialize(None);
+        net.initialize(None, None);
         assert!(net.is_initialized());
     }
 
     #[test]
     fn mock_http_request_no_match() {
         let mut net = VirtualNetwork::new();
-        net.initialize(None);
+        net.initialize(None, None);
         let err = net
             .mock_http_request("mock://api/test", Some("GET"), None, None)
             .unwrap_err();
@@ -304,7 +353,7 @@ mod tests {
     #[test]
     fn mock_http_request_success() {
         let mut net = VirtualNetwork::new();
-        net.initialize(None);
+        net.initialize(None, None);
         net.register_mock(
             Some("GET".into()),
             "mock://api/users",
@@ -327,7 +376,7 @@ mod tests {
     #[test]
     fn metrics_track_requests() {
         let mut net = VirtualNetwork::new();
-        net.initialize(None);
+        net.initialize(None, None);
         net.register_mock(
             None,
             "mock://api/*",
@@ -352,7 +401,7 @@ mod tests {
     #[test]
     fn metrics_track_errors() {
         let mut net = VirtualNetwork::new();
-        net.initialize(None);
+        net.initialize(None, None);
         let _ = net.mock_http_request("mock://no-match", None, None, None);
         let m = net.metrics();
         assert_eq!(m.total_requests, 1);
@@ -362,7 +411,7 @@ mod tests {
     #[test]
     fn sandbox_blocks_net_request() {
         let mut net = VirtualNetwork::new();
-        net.initialize(None); // empty allowlist = block all
+        net.initialize(None, None); // empty allowlist = block all
         let err = net
             .validate_net_request("evil.com", 80, "http")
             .unwrap_err();
@@ -380,7 +429,7 @@ mod tests {
             max_response_bytes: 10 * 1024 * 1024,
             max_connections: 50,
         };
-        net.initialize(Some(sandbox));
+        net.initialize(Some(sandbox), None);
         assert!(net
             .validate_net_request("api.example.com", 443, "https")
             .is_ok());
@@ -397,7 +446,7 @@ mod tests {
             max_response_bytes: 10 * 1024 * 1024,
             max_connections: 1,
         };
-        net.initialize(Some(sandbox));
+        net.initialize(Some(sandbox), None);
         net.sessions.create(
             crate::session::SessionType::Tcp,
             "a.com:80",
@@ -410,7 +459,7 @@ mod tests {
     #[test]
     fn mock_register_list_unregister_clear() {
         let mut net = VirtualNetwork::new();
-        net.initialize(None);
+        net.initialize(None, None);
 
         let id = net.register_mock(
             None,

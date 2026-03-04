@@ -1,6 +1,7 @@
 use std::io::{self, BufRead};
 
 use crate::error::VnetError;
+use crate::local_backend::LocalNetBackend;
 use crate::mock_store::MockResponse;
 use crate::network::{SandboxInit, VirtualNetwork};
 use crate::protocol::*;
@@ -40,7 +41,7 @@ impl VnetServer {
                 }
             };
 
-            self.dispatch(request);
+            self.dispatch(request).await;
         }
 
         Ok(())
@@ -48,12 +49,20 @@ impl VnetServer {
 
     // -- Dispatch -------------------------------------------------------------
 
-    fn dispatch(&mut self, req: JsonRpcRequest) {
+    async fn dispatch(&mut self, req: JsonRpcRequest) {
+        // Methods that may need async (net:// backend calls) are dispatched
+        // separately so we can .await them.
         let result = match req.method.as_str() {
             "initialize" => self.handle_initialize(req.params),
 
-            // Network
-            "net/httpRequest" => self.handle_http_request(req.params),
+            // Network -- async path for methods that may hit a real backend
+            "net/httpRequest" => {
+                let r = self.handle_http_request(req.params).await;
+                self.write_result(req.id, r);
+                return;
+            }
+
+            // Network -- sync paths (backend delegation for these is future work)
             "net/wsConnect" => self.handle_ws_connect(req.params),
             "net/wsMessage" => self.handle_ws_message(req.params),
             "net/wsClose" => self.handle_ws_close(req.params),
@@ -87,10 +96,14 @@ impl VnetServer {
             }
         };
 
+        self.write_result(req.id, result);
+    }
+
+    fn write_result(&mut self, id: u64, result: Result<serde_json::Value, VnetError>) {
         match result {
-            Ok(value) => self.transport.write_response(req.id, value),
+            Ok(value) => self.transport.write_response(id, value),
             Err(e) => self.transport.write_error(
-                req.id,
+                id,
                 VNET_ERROR,
                 e.to_string(),
                 Some(e.to_json_rpc_error()),
@@ -130,8 +143,10 @@ impl VnetServer {
             max_connections: s.max_connections.unwrap_or(50),
         });
 
+        let backend = LocalNetBackend::new();
+
         let mut network = VirtualNetwork::new();
-        network.initialize(sandbox_init);
+        network.initialize(sandbox_init, Some(Box::new(backend)));
         self.network = Some(network);
 
         Ok(serde_json::json!({ "ok": true }))
@@ -139,7 +154,7 @@ impl VnetServer {
 
     // -- net/httpRequest ------------------------------------------------------
 
-    fn handle_http_request(
+    async fn handle_http_request(
         &mut self,
         params: serde_json::Value,
     ) -> Result<serde_json::Value, VnetError> {
@@ -156,9 +171,23 @@ impl VnetServer {
             )?;
             Ok(serde_json::to_value(result)?)
         } else if url.starts_with("net://") {
-            Err(VnetError::ConnectionFailed(
-                "net:// HTTP not yet implemented".to_string(),
-            ))
+            // Strip the net:// prefix and reconstruct as a real URL.
+            // net://https://example.com/path -> https://example.com/path
+            // net://example.com/path         -> https://example.com/path (default)
+            let remainder = &url[6..]; // strip "net://"
+            let real_url = if remainder.starts_with("http://") || remainder.starts_with("https://") {
+                remainder.to_string()
+            } else {
+                format!("https://{remainder}")
+            };
+
+            let method = p.method.as_deref().unwrap_or("GET");
+            let headers = p.headers.unwrap_or_default();
+            let net = self.with_network_mut()?;
+            let result = net
+                .net_http_request(&real_url, method, &headers, p.body.as_deref(), p.timeout_ms)
+                .await?;
+            Ok(serde_json::to_value(result)?)
         } else {
             Err(VnetError::InvalidParams(format!(
                 "unsupported URL scheme: {url} (use mock:// or net://)"

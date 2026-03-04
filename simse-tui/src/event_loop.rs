@@ -123,7 +123,7 @@ impl TuiRuntime {
 		self.session_id = Some(session_id);
 		self.acp_client = Some(client);
 
-		// Discover tools (built-in stubs + MCP tools from connected servers)
+		// Discover tools (built-in + MCP tools from connected servers)
 		self.tool_registry.discover(&self.config.mcp_servers).await;
 
 		Ok(())

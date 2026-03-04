@@ -437,7 +437,48 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			};
 		}
 		AppMessage::Tab => {
-			// Tab completion will be handled in a future task.
+			match &app.prompt_mode {
+				PromptMode::Autocomplete { selected, matches } => {
+					// Accept the currently selected match.
+					if let Some(cmd) = matches.get(*selected) {
+						let completed = format!("/{cmd} ");
+						app.input = input::InputState {
+							value: completed.clone(),
+							cursor: completed.len(),
+							..Default::default()
+						};
+					}
+					app.prompt_mode = PromptMode::Normal;
+				}
+				PromptMode::Normal => {
+					// Activate autocomplete if input starts with `/`.
+					let value = &app.input.value;
+					if value.starts_with('/') {
+						let prefix = value[1..].to_lowercase();
+						let matches: Vec<String> = app
+							.commands
+							.iter()
+							.filter(|c| !c.hidden && c.name.starts_with(&prefix))
+							.map(|c| c.name.clone())
+							.collect();
+						if matches.len() == 1 {
+							// Single match — accept immediately.
+							let cmd = &matches[0];
+							let completed = format!("/{cmd} ");
+							app.input = input::InputState {
+								value: completed.clone(),
+								cursor: completed.len(),
+								..Default::default()
+							};
+						} else if !matches.is_empty() {
+							app.prompt_mode = PromptMode::Autocomplete {
+								selected: 0,
+								matches,
+							};
+						}
+					}
+				}
+			}
 		}
 		AppMessage::Quit => {
 			app.should_quit = true;

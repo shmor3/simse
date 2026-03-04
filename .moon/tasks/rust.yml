@@ -1,0 +1,25 @@
+inheritedBy:
+  toolchains: ['rust']
+
+fileGroups:
+  sources:
+    - 'src/**/*'
+    - 'Cargo.toml'
+
+tasks:
+  build:
+    command: 'cargo build --release'
+    inputs:
+      - '@globs(sources)'
+  dev:
+    command: 'cargo build'
+    inputs:
+      - '@globs(sources)'
+  test:
+    command: 'cargo test'
+    inputs:
+      - '@globs(sources)'
+  start:
+    command: 'cargo run --release'
+    inputs:
+      - '@globs(sources)'

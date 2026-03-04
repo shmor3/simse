@@ -1,0 +1,17 @@
+inheritedBy:
+  toolchains: ['javascript', 'typescript']
+
+tasks:
+  build:
+    command: 'bun run build'
+  dev:
+    command: 'bun run dev'
+    options:
+      persistent: true
+      runInCI: false
+  test:
+    command: 'bun run typecheck'
+  start:
+    command: 'bun run start'
+    options:
+      persistent: true

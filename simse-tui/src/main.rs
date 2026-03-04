@@ -2,6 +2,7 @@
 
 mod app;
 mod banner;
+pub mod markdown;
 mod output;
 
 use std::io;

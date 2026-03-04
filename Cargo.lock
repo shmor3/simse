@@ -1026,6 +1026,7 @@ dependencies = [
  "serde_json",
  "simse-bridge",
  "simse-ui-core",
+ "tempfile",
  "tokio",
  "tui-textarea",
 ]

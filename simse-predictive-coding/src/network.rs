@@ -109,6 +109,16 @@ impl PredictiveCodingNetwork {
         &mut self.layers[idx]
     }
 
+    /// Immutable reference to the input predictor layer.
+    pub fn input_predictor(&self) -> &PcnLayer {
+        &self.input_predictor
+    }
+
+    /// Mutable reference to the input predictor layer.
+    pub fn input_predictor_mut(&mut self) -> &mut PcnLayer {
+        &mut self.input_predictor
+    }
+
     /// Run T inference steps on a clamped input, randomizing latent values first.
     ///
     /// Returns the total energy (sum of squared prediction errors across all layers).

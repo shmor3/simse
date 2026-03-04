@@ -351,6 +351,68 @@ pub fn render_command_autocomplete(
 	frame.render_widget(popup, popup_area);
 }
 
+/// Render inline completion lines below the input (no border/popup).
+///
+/// Returns a list of `Line` items to be rendered in a dedicated layout chunk.
+/// Format: `   /name          description`
+/// Selected item is highlighted in cyan+bold.
+/// Max `MAX_VISIBLE_MATCHES` items shown.
+pub fn render_inline_completions<'a>(
+	state: &CommandAutocompleteState,
+	_width: u16,
+) -> Vec<Line<'a>> {
+	if !state.is_active() {
+		return Vec::new();
+	}
+
+	let visible = state.visible_matches();
+	if visible.is_empty() {
+		return Vec::new();
+	}
+
+	let selected_style = Style::default()
+		.fg(Color::Cyan)
+		.add_modifier(Modifier::BOLD);
+	let normal_name_style = Style::default().fg(Color::White);
+	let desc_style = Style::default().fg(Color::DarkGray);
+	let selected_desc_style = Style::default().fg(Color::Gray);
+
+	let max_name_len = visible
+		.iter()
+		.map(|m| m.name.len() + 1) // +1 for '/'
+		.max()
+		.unwrap_or(0);
+
+	visible
+		.iter()
+		.enumerate()
+		.map(|(i, m)| {
+			let is_selected = i == state.selected_index();
+			let indicator = if is_selected { " > " } else { "   " };
+			let name_style = if is_selected {
+				selected_style
+			} else {
+				normal_name_style
+			};
+			let d_style = if is_selected {
+				selected_desc_style
+			} else {
+				desc_style
+			};
+
+			let cmd_name = format!("/{}", m.name);
+			let padding = " ".repeat(max_name_len.saturating_sub(cmd_name.len()) + 2);
+
+			Line::from(vec![
+				Span::styled(indicator.to_string(), name_style),
+				Span::styled(cmd_name, name_style),
+				Span::styled(padding, desc_style),
+				Span::styled(m.description.clone(), d_style),
+			])
+		})
+		.collect()
+}
+
 // ── Tests ───────────────────────────────────────────────
 
 #[cfg(test)]
@@ -850,6 +912,24 @@ mod tests {
 
 		state.deactivate();
 		assert!(!state.is_active());
+	}
+
+	#[test]
+	fn render_inline_completions_produces_lines() {
+		let cmds = test_commands();
+		let mut state = CommandAutocompleteState::new();
+		state.activate("/h", &cmds);
+
+		let lines = render_inline_completions(&state, 60);
+		assert!(!lines.is_empty());
+		assert!(lines.len() >= 2);
+	}
+
+	#[test]
+	fn render_inline_completions_empty_when_inactive() {
+		let state = CommandAutocompleteState::new();
+		let lines = render_inline_completions(&state, 60);
+		assert!(lines.is_empty());
 	}
 
 	#[test]

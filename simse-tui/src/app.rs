@@ -14,7 +14,7 @@ use simse_ui_core::commands::registry::{all_commands, CommandCategory, CommandDe
 use simse_ui_core::input::state as input;
 use std::collections::BTreeMap;
 
-use crate::autocomplete::CommandAutocompleteState;
+use crate::autocomplete::{render_inline_completions, CommandAutocompleteState};
 use crate::banner;
 use crate::commands::{
 	format_table, AgentInfo, BridgeAction, CommandContext, CommandOutput, OverlayAction,
@@ -729,13 +729,30 @@ pub fn format_tokens(tokens: u64) -> String {
 /// View: render the model to the terminal.
 pub fn view(app: &App, frame: &mut Frame) {
 	let area = frame.area();
+
+	let completions_height = if app.autocomplete.is_active() {
+		(app.autocomplete.visible_matches().len() as u16).min(8)
+	} else {
+		0
+	};
+
 	let chunks = Layout::default()
 		.direction(Direction::Vertical)
-		.constraints([
-			Constraint::Min(1),
-			Constraint::Length(3),
-			Constraint::Length(1),
-		])
+		.constraints(if completions_height > 0 {
+			vec![
+				Constraint::Min(1),
+				Constraint::Length(3),
+				Constraint::Length(completions_height),
+				Constraint::Length(1),
+			]
+		} else {
+			vec![
+				Constraint::Min(1),
+				Constraint::Length(3),
+				Constraint::Length(0),
+				Constraint::Length(1),
+			]
+		})
 		.split(area);
 
 	// 1. Chat area
@@ -744,11 +761,18 @@ pub fn view(app: &App, frame: &mut Frame) {
 	// 2. Input
 	render_input(app, frame, chunks[1]);
 
-	// 3. Status bar
-	let status = render_status_line(app, chunks[2].width);
-	frame.render_widget(Paragraph::new(status), chunks[2]);
+	// 3. Completions (inline, below input)
+	if completions_height > 0 {
+		let lines = render_inline_completions(&app.autocomplete, chunks[2].width);
+		let completions = Paragraph::new(lines);
+		frame.render_widget(completions, chunks[2]);
+	}
 
-	// 4. Overlay screens (rendered on top of everything)
+	// 4. Status bar
+	let status = render_status_line(app, chunks[3].width);
+	frame.render_widget(Paragraph::new(status), chunks[3]);
+
+	// 5. Overlay screens (rendered on top of everything)
 	match &app.screen {
 		Screen::Shortcuts => render_shortcuts_overlay(frame, area),
 		Screen::Settings => {

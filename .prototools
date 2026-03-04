@@ -1,2 +1,3 @@
+bun = "latest"
 rust = "latest"
 moon = "latest"

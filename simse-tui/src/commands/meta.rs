@@ -7,7 +7,7 @@
 use simse_ui_core::commands::registry::{parse_bool_arg, CommandCategory, CommandDefinition};
 use std::collections::BTreeMap;
 
-use super::{CommandOutput, OverlayAction};
+use super::{BridgeAction, CommandOutput, OverlayAction};
 
 /// `/help [command]` -- show help information.
 pub fn handle_help(args: &str, commands: &[CommandDefinition]) -> Vec<CommandOutput> {
@@ -92,9 +92,7 @@ pub fn handle_context(total_tokens: u64, context_percent: u8) -> Vec<CommandOutp
 
 /// `/compact` -- request conversation compaction.
 pub fn handle_compact() -> Vec<CommandOutput> {
-	vec![CommandOutput::Info(
-		"Would call bridge to compact conversation history".into(),
-	)]
+	vec![CommandOutput::BridgeRequest(BridgeAction::Compact)]
 }
 
 /// `/shortcuts` -- open the shortcuts overlay.
@@ -302,9 +300,12 @@ mod tests {
 	// ── /compact ─────────────────────────────────────────
 
 	#[test]
-	fn compact_returns_info() {
+	fn compact_returns_bridge_request() {
 		let out = handle_compact();
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("compact")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::Compact)
+		));
 	}
 
 	// ── /shortcuts ───────────────────────────────────────

@@ -47,6 +47,7 @@ use ratatui::{
 	Frame,
 };
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex};
 
 // ── Constants ───────────────────────────────────────────
 
@@ -63,6 +64,36 @@ const EXCLUDED_DIRS: &[&str] = &[
 	".cache",
 	"__pycache__",
 ];
+
+// ── VFS Cache ───────────────────────────────────────────
+
+/// Cached VFS entries populated by the event loop. The `complete_vfs` function
+/// reads from this cache to provide VFS path completions synchronously, since
+/// the @-mention autocomplete runs on the main UI thread and cannot perform
+/// async I/O to the VFS subprocess.
+static VFS_CACHE: LazyLock<Mutex<Vec<MentionEntry>>> =
+	LazyLock::new(|| Mutex::new(Vec::new()));
+
+/// Populate the VFS cache with a fresh list of entries.
+///
+/// Call this from the event loop whenever the VFS file list is refreshed
+/// (e.g. on startup, after file mutations, or on a periodic timer).
+/// The entries should have `display` set to the VFS path segment shown in the
+/// popup (e.g. `"workspace/"` or `"workspace/file.txt"`) and `value` set to
+/// the full `vfs://` URI to insert (e.g. `"vfs://workspace/file.txt"`).
+pub fn set_vfs_cache(entries: Vec<MentionEntry>) {
+	if let Ok(mut cache) = VFS_CACHE.lock() {
+		*cache = entries;
+	}
+}
+
+/// Clear the VFS cache. Exposed for test isolation.
+#[cfg(test)]
+fn clear_vfs_cache() {
+	if let Ok(mut cache) = VFS_CACHE.lock() {
+		cache.clear();
+	}
+}
 
 // ── MentionEntry ────────────────────────────────────────
 
@@ -257,12 +288,24 @@ fn is_volume_id_prefix(s: &str) -> bool {
 
 /// Provide VFS path completions for `vfs://` prefixed mentions.
 ///
-/// VFS completion will be wired up to the VFS engine in a future task.
-/// For now, returns an empty list.
-fn complete_vfs(_prefix: &str) -> Vec<MentionEntry> {
-	// VFS completion is handled by the bridge/VFS engine layer.
-	// This placeholder will be replaced once the VFS integration is wired up.
-	Vec::new()
+/// Reads from the `VFS_CACHE` populated by the event loop and filters entries
+/// whose `display` or `value` fields match the given prefix (case-insensitive).
+fn complete_vfs(prefix: &str) -> Vec<MentionEntry> {
+	let cache = match VFS_CACHE.lock() {
+		Ok(guard) => guard,
+		Err(_) => return Vec::new(),
+	};
+
+	let lower_prefix = prefix.to_lowercase();
+
+	cache
+		.iter()
+		.filter(|entry| {
+			entry.display.to_lowercase().starts_with(&lower_prefix)
+				|| entry.value.to_lowercase().starts_with(&lower_prefix)
+		})
+		.cloned()
+		.collect()
 }
 
 // ── Filesystem scanning ─────────────────────────────────
@@ -916,13 +959,176 @@ mod tests {
 		assert_eq!(visible.len(), 1);
 	}
 
-	// ── VFS prefix detection ────────────────────────────
+	// ── VFS cache completion ────────────────────────────
+
+	/// Helper: build a set of VFS entries for testing.
+	fn setup_vfs_cache_entries() -> Vec<MentionEntry> {
+		vec![
+			MentionEntry {
+				display: "vfs://workspace/".to_string(),
+				value: "vfs://workspace/".to_string(),
+				is_directory: true,
+			},
+			MentionEntry {
+				display: "vfs://workspace/main.rs".to_string(),
+				value: "vfs://workspace/main.rs".to_string(),
+				is_directory: false,
+			},
+			MentionEntry {
+				display: "vfs://workspace/lib.rs".to_string(),
+				value: "vfs://workspace/lib.rs".to_string(),
+				is_directory: false,
+			},
+			MentionEntry {
+				display: "vfs://workspace/src/".to_string(),
+				value: "vfs://workspace/src/".to_string(),
+				is_directory: true,
+			},
+			MentionEntry {
+				display: "vfs://workspace/src/app.rs".to_string(),
+				value: "vfs://workspace/src/app.rs".to_string(),
+				is_directory: false,
+			},
+			MentionEntry {
+				display: "vfs://data/config.json".to_string(),
+				value: "vfs://data/config.json".to_string(),
+				is_directory: false,
+			},
+		]
+	}
 
 	#[test]
-	fn vfs_prefix_returns_empty_placeholder() {
-		let entries = resolve_entries("vfs://workspace/file.txt", None);
-		// VFS completion is a placeholder; returns empty.
+	fn vfs_cache_empty_returns_empty() {
+		clear_vfs_cache();
+		let entries = complete_vfs("vfs://");
 		assert!(entries.is_empty());
+	}
+
+	#[test]
+	fn vfs_cache_set_and_retrieve() {
+		clear_vfs_cache();
+		set_vfs_cache(setup_vfs_cache_entries());
+
+		let entries = complete_vfs("vfs://");
+		assert_eq!(entries.len(), 6);
+
+		clear_vfs_cache();
+	}
+
+	#[test]
+	fn vfs_cache_filters_by_prefix() {
+		clear_vfs_cache();
+		set_vfs_cache(setup_vfs_cache_entries());
+
+		let entries = complete_vfs("vfs://workspace/main");
+		assert_eq!(entries.len(), 1);
+		assert_eq!(entries[0].value, "vfs://workspace/main.rs");
+
+		clear_vfs_cache();
+	}
+
+	#[test]
+	fn vfs_cache_filters_by_directory_prefix() {
+		clear_vfs_cache();
+		set_vfs_cache(setup_vfs_cache_entries());
+
+		let entries = complete_vfs("vfs://workspace/src/");
+		assert_eq!(entries.len(), 2); // src/ directory + src/app.rs
+		assert!(entries.iter().any(|e| e.value == "vfs://workspace/src/"));
+		assert!(entries.iter().any(|e| e.value == "vfs://workspace/src/app.rs"));
+
+		clear_vfs_cache();
+	}
+
+	#[test]
+	fn vfs_cache_filters_case_insensitive() {
+		clear_vfs_cache();
+		set_vfs_cache(setup_vfs_cache_entries());
+
+		let entries = complete_vfs("VFS://WORKSPACE/MAIN");
+		assert_eq!(entries.len(), 1);
+		assert_eq!(entries[0].value, "vfs://workspace/main.rs");
+
+		clear_vfs_cache();
+	}
+
+	#[test]
+	fn vfs_cache_no_match_returns_empty() {
+		clear_vfs_cache();
+		set_vfs_cache(setup_vfs_cache_entries());
+
+		let entries = complete_vfs("vfs://nonexistent/");
+		assert!(entries.is_empty());
+
+		clear_vfs_cache();
+	}
+
+	#[test]
+	fn vfs_cache_separate_scheme_prefix() {
+		clear_vfs_cache();
+		set_vfs_cache(setup_vfs_cache_entries());
+
+		// Only "vfs://data/" should match, not "vfs://workspace/".
+		let entries = complete_vfs("vfs://data/");
+		assert_eq!(entries.len(), 1);
+		assert_eq!(entries[0].value, "vfs://data/config.json");
+
+		clear_vfs_cache();
+	}
+
+	#[test]
+	fn vfs_cache_overwrite_replaces_entries() {
+		clear_vfs_cache();
+		set_vfs_cache(setup_vfs_cache_entries());
+		assert_eq!(complete_vfs("vfs://").len(), 6);
+
+		// Overwrite with a smaller set.
+		set_vfs_cache(vec![MentionEntry {
+			display: "vfs://new/file.txt".to_string(),
+			value: "vfs://new/file.txt".to_string(),
+			is_directory: false,
+		}]);
+
+		let entries = complete_vfs("vfs://");
+		assert_eq!(entries.len(), 1);
+		assert_eq!(entries[0].value, "vfs://new/file.txt");
+
+		clear_vfs_cache();
+	}
+
+	#[test]
+	fn vfs_prefix_triggers_vfs_completion_in_resolve() {
+		clear_vfs_cache();
+		set_vfs_cache(setup_vfs_cache_entries());
+
+		// resolve_entries should dispatch to complete_vfs for vfs:// prefixes.
+		let entries = resolve_entries("vfs://workspace/lib", None);
+		assert_eq!(entries.len(), 1);
+		assert_eq!(entries[0].value, "vfs://workspace/lib.rs");
+
+		clear_vfs_cache();
+	}
+
+	#[test]
+	fn vfs_completion_integrates_with_at_mention_state() {
+		clear_vfs_cache();
+		set_vfs_cache(setup_vfs_cache_entries());
+
+		let mut state = AtMentionState::new();
+		state.activate("vfs://workspace/");
+
+		assert!(state.is_active());
+		assert_eq!(state.entries.len(), 5); // workspace/, main.rs, lib.rs, src/, src/app.rs
+		// All entries should have values starting with vfs://workspace/
+		for entry in &state.entries {
+			assert!(
+				entry.value.starts_with("vfs://workspace/"),
+				"Expected vfs://workspace/ prefix in value: {}",
+				entry.value,
+			);
+		}
+
+		clear_vfs_cache();
 	}
 
 	// ── round-trip workflow ─────────────────────────────

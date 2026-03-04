@@ -1,8 +1,8 @@
 //! Command handlers for the SimSE TUI.
 //!
 //! Each submodule exposes handler functions that parse command arguments and
-//! return `Vec<CommandOutput>`.  Bridge-dependent operations return placeholder
-//! `Info` items describing what *would* happen once the bridge is wired.
+//! return `Vec<CommandOutput>`.  Bridge-dependent operations return
+//! `BridgeRequest(BridgeAction)` items that the event loop executes async.
 
 pub mod ai;
 pub mod config;
@@ -101,6 +101,10 @@ pub enum BridgeAction {
 	// ── AI ───────────────────────────────────────────────────────────
 	/// Run a named chain with the given arguments.
 	RunChain { name: String, args: String },
+
+	// ── Meta ────────────────────────────────────────────────────────
+	/// Compact the conversation history.
+	Compact,
 }
 
 // ── Supporting info types ────────────────────────────────────────────────

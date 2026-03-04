@@ -7,12 +7,12 @@
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
-use simse_tui::app::{update, view, App, AppMessage, LoopStatus, PromptMode, Screen};
+use simse_tui::app::{update, view, App, AppMessage, LoopStatus, Screen};
 use simse_tui::autocomplete::CommandAutocompleteState;
 use simse_tui::cli_args::{parse_cli_args, CliArgs};
 use simse_tui::dialogs::confirm::ConfirmDialogState;
 use simse_tui::dispatch::{dispatch_command, parse_command_line, DispatchContext};
-use simse_tui::commands::{CommandOutput, OverlayAction};
+use simse_tui::commands::{BridgeAction, CommandContext, CommandOutput, OverlayAction};
 use simse_tui::overlays::settings::{SettingsExplorerState, SettingsLevel, CONFIG_FILES};
 use simse_ui_core::app::{
     OutputItem, PermissionOption, PermissionRequest, ToolCallState, ToolCallStatus,
@@ -201,10 +201,10 @@ fn dispatch_library_commands_produce_output() {
             !out.is_empty(),
             "Library command /{cmd} should produce output"
         );
-        // Library commands should return Info (placeholders) or OpenOverlay.
+        // Library commands should return BridgeRequest or OpenOverlay.
         assert!(
-            matches!(&out[0], CommandOutput::Info(_) | CommandOutput::OpenOverlay(_)),
-            "Library command /{cmd} should return Info or OpenOverlay, got {:?}",
+            matches!(&out[0], CommandOutput::BridgeRequest(_) | CommandOutput::OpenOverlay(_)),
+            "Library command /{cmd} should return BridgeRequest or OpenOverlay, got {:?}",
             out[0]
         );
     }
@@ -256,17 +256,23 @@ fn dispatch_config_commands_produce_correct_types() {
         CommandOutput::OpenOverlay(OverlayAction::Settings)
     ));
 
-    // /init -> Info
+    // /init -> BridgeRequest(InitConfig)
     let out = dispatch_command("init", "");
-    assert!(matches!(&out[0], CommandOutput::Info(_)));
+    assert!(matches!(
+        &out[0],
+        CommandOutput::BridgeRequest(BridgeAction::InitConfig { force: false })
+    ));
 
-    // /config -> Info
+    // /config with unknown key -> Error
     let out = dispatch_command("config", "key.path");
-    assert!(matches!(&out[0], CommandOutput::Info(_)));
+    assert!(matches!(&out[0], CommandOutput::Error(_)));
 
-    // /factory-reset -> Info
+    // /factory-reset -> BridgeRequest(FactoryReset)
     let out = dispatch_command("factory-reset", "");
-    assert!(matches!(&out[0], CommandOutput::Info(_)));
+    assert!(matches!(
+        &out[0],
+        CommandOutput::BridgeRequest(BridgeAction::FactoryReset)
+    ));
 }
 
 #[test]
@@ -291,7 +297,10 @@ fn dispatch_files_commands_produce_output() {
 #[test]
 fn dispatch_ai_commands_produce_output() {
     let out = dispatch_command("chain", "summarize");
-    assert!(matches!(&out[0], CommandOutput::Info(_)));
+    assert!(matches!(
+        &out[0],
+        CommandOutput::BridgeRequest(BridgeAction::RunChain { .. })
+    ));
 
     let out = dispatch_command("prompts", "");
     assert!(matches!(&out[0], CommandOutput::Info(_)));
@@ -330,9 +339,12 @@ fn dispatch_meta_commands_produce_correct_types() {
         CommandOutput::OpenOverlay(OverlayAction::Shortcuts)
     ));
 
-    // /compact -> Info
+    // /compact -> BridgeRequest(Compact)
     let out = dispatch_command("compact", "");
-    assert!(matches!(&out[0], CommandOutput::Info(_)));
+    assert!(matches!(
+        &out[0],
+        CommandOutput::BridgeRequest(BridgeAction::Compact)
+    ));
 }
 
 #[test]
@@ -369,6 +381,7 @@ fn dispatch_with_context_uses_state() {
         total_tokens: 50_000,
         context_percent: 75,
         commands: all_commands(),
+        cmd_ctx: CommandContext::default(),
     };
 
     // /verbose with no args should toggle from current (true -> off).

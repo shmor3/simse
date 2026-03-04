@@ -14,10 +14,17 @@ use simse_ui_core::commands::registry::{all_commands, CommandCategory, CommandDe
 use simse_ui_core::input::state as input;
 use std::collections::BTreeMap;
 
+use crate::autocomplete::{render_inline_completions, CommandAutocompleteState};
 use crate::banner;
-use crate::commands::{format_table, CommandOutput, OverlayAction};
+use crate::commands::{
+	format_table, AgentInfo, BridgeAction, CommandContext, CommandOutput, OverlayAction,
+	PromptInfo, SessionInfo, SkillInfo, ToolDefInfo,
+};
 use crate::dispatch::{parse_command_line, DispatchContext};
 use crate::output;
+use crate::overlays::librarian::{render_librarian_explorer, LibrarianExplorerState};
+use crate::overlays::settings::{render_settings_explorer, SettingsExplorerState};
+use crate::overlays::setup::{render_setup_selector, SetupSelectorState};
 
 // ── Screen ──────────────────────────────────────────────
 
@@ -27,20 +34,10 @@ pub enum Screen {
 	Chat,
 	Shortcuts,
 	Settings,
+	Librarians,
+	Setup { preset: Option<String> },
 	Confirm { message: String },
 	Permission(PermissionRequest),
-}
-
-// ── PromptMode ──────────────────────────────────────────
-
-/// Input prompt mode.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PromptMode {
-	Normal,
-	Autocomplete {
-		selected: usize,
-		matches: Vec<String>,
-	},
 }
 
 // ── LoopStatus ──────────────────────────────────────────
@@ -63,7 +60,8 @@ pub struct App {
 	pub active_tool_calls: Vec<ToolCallState>,
 	pub loop_status: LoopStatus,
 	pub screen: Screen,
-	pub prompt_mode: PromptMode,
+	/// Command autocomplete state.
+	pub autocomplete: CommandAutocompleteState,
 	pub scroll_offset: usize,
 	pub should_quit: bool,
 	pub ctrl_c_pending: bool,
@@ -80,6 +78,25 @@ pub struct App {
 	pub version: String,
 	pub server_name: Option<String>,
 	pub model_name: Option<String>,
+	pub session_id: Option<String>,
+	pub acp_connected: bool,
+	pub data_dir: Option<String>,
+	pub work_dir: Option<String>,
+	pub sessions: Vec<SessionInfo>,
+	pub tool_defs: Vec<ToolDefInfo>,
+	pub agents: Vec<AgentInfo>,
+	pub skills: Vec<SkillInfo>,
+	pub prompts: Vec<PromptInfo>,
+	pub config_values: Vec<(String, String)>,
+	pub pending_bridge_action: Option<BridgeAction>,
+	/// Overlay state for the settings explorer.
+	pub settings_state: SettingsExplorerState,
+	/// Overlay state for the settings explorer config data.
+	pub settings_config_data: serde_json::Value,
+	/// Overlay state for the librarian explorer.
+	pub librarian_state: LibrarianExplorerState,
+	/// Overlay state for the setup selector.
+	pub setup_state: SetupSelectorState,
 }
 
 impl App {
@@ -91,7 +108,7 @@ impl App {
 			active_tool_calls: Vec::new(),
 			loop_status: LoopStatus::Idle,
 			screen: Screen::Chat,
-			prompt_mode: PromptMode::Normal,
+			autocomplete: CommandAutocompleteState::new(),
 			scroll_offset: 0,
 			should_quit: false,
 			ctrl_c_pending: false,
@@ -108,6 +125,21 @@ impl App {
 			version: env!("CARGO_PKG_VERSION").into(),
 			server_name: None,
 			model_name: None,
+			session_id: None,
+			acp_connected: false,
+			data_dir: None,
+			work_dir: None,
+			sessions: Vec::new(),
+			tool_defs: Vec::new(),
+			agents: Vec::new(),
+			skills: Vec::new(),
+			prompts: Vec::new(),
+			config_values: Vec::new(),
+			pending_bridge_action: None,
+			settings_state: SettingsExplorerState::new(),
+			settings_config_data: serde_json::Value::Null,
+			librarian_state: LibrarianExplorerState::new(Vec::new()),
+			setup_state: SetupSelectorState::new(),
 		}
 	}
 }
@@ -184,6 +216,13 @@ pub enum AppMessage {
 		option_id: String,
 	},
 
+	// Bridge
+	BridgeResult {
+		text: String,
+		is_error: bool,
+	},
+	RefreshContext(CommandContext),
+
 	// Resize
 	Resize {
 		width: u16,
@@ -206,6 +245,12 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 	match msg {
 		// ── Input ────────────────────────────────────
 		AppMessage::CharInput(c) => {
+			match &app.screen {
+				Screen::Settings => { app.settings_state.type_char(c); return app; }
+				Screen::Librarians => { app.librarian_state.type_char(c); return app; }
+				Screen::Setup { .. } => { app.setup_state.type_char(c); return app; }
+				_ => {}
+			}
 			if app.screen == Screen::Shortcuts {
 				app.screen = Screen::Chat;
 				return app;
@@ -215,11 +260,28 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			} else {
 				app.input = input::insert(&app.input, &c.to_string());
 			}
+			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::Paste(text) => {
 			app.input = input::insert(&app.input, &text);
+			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::Submit => {
+			match &app.screen {
+				Screen::Settings => {
+					let current_value = get_settings_current_value(&app);
+					app.settings_state.enter(&current_value);
+					return app;
+				}
+				Screen::Librarians => { app.librarian_state.enter(); return app; }
+				Screen::Setup { .. } => {
+					let action = app.setup_state.enter();
+					handle_setup_action(&mut app, action);
+					return app;
+				}
+				_ => {}
+			}
+			app.autocomplete.deactivate();
 			let text = app.input.value.trim().to_string();
 			if text.is_empty() {
 				return app;
@@ -258,13 +320,22 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			}
 		}
 		AppMessage::Backspace => {
+			match &app.screen {
+				Screen::Settings => { app.settings_state.backspace(); return app; }
+				Screen::Librarians => { app.librarian_state.backspace(); return app; }
+				Screen::Setup { .. } => { app.setup_state.backspace(); return app; }
+				_ => {}
+			}
 			app.input = input::backspace(&app.input);
+			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::Delete => {
 			app.input = input::delete(&app.input);
+			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::DeleteWordBack => {
 			app.input = input::delete_word_back(&app.input);
+			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::CursorLeft => {
 			app.input = input::move_left(&app.input, false);
@@ -300,6 +371,16 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.input = input::select_all(&app.input);
 		}
 		AppMessage::HistoryUp => {
+			match &app.screen {
+				Screen::Settings => { app.settings_state.move_up(); return app; }
+				Screen::Librarians => { app.librarian_state.move_up(); return app; }
+				Screen::Setup { .. } => { app.setup_state.move_up(); return app; }
+				_ => {}
+			}
+			if app.autocomplete.is_active() {
+				app.autocomplete.move_up();
+				return app;
+			}
 			if app.history.is_empty() {
 				return app;
 			}
@@ -324,6 +405,31 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			}
 		}
 		AppMessage::HistoryDown => {
+			match &app.screen {
+				Screen::Settings => {
+					let count = match app.settings_state.level {
+						crate::overlays::settings::SettingsLevel::FileList => {
+							crate::overlays::settings::CONFIG_FILES.len()
+						}
+						_ => {
+							if let Some(obj) = app.settings_config_data.as_object() {
+								obj.len()
+							} else {
+								0
+							}
+						}
+					};
+					app.settings_state.move_down(count);
+					return app;
+				}
+				Screen::Librarians => { app.librarian_state.move_down(); return app; }
+				Screen::Setup { .. } => { app.setup_state.move_down(); return app; }
+				_ => {}
+			}
+			if app.autocomplete.is_active() {
+				app.autocomplete.move_down();
+				return app;
+			}
 			match app.history_index {
 				Some(idx) => {
 					if idx + 1 < app.history.len() {
@@ -367,13 +473,37 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.ctrl_c_pending = false;
 		}
 		AppMessage::Escape => {
-			if app.screen != Screen::Chat {
-				app.screen = Screen::Chat;
-			} else if app.loop_status != LoopStatus::Idle {
-				app.loop_status = LoopStatus::Idle;
-				app.output.push(OutputItem::Info {
-					text: "Interrupted.".into(),
-				});
+			if app.autocomplete.is_active() {
+				app.autocomplete.deactivate();
+			} else {
+				match &app.screen {
+					Screen::Settings => {
+						if app.settings_state.back() {
+							app.screen = Screen::Chat;
+						}
+					}
+					Screen::Librarians => {
+						if app.librarian_state.back() {
+							app.screen = Screen::Chat;
+						}
+					}
+					Screen::Setup { .. } => {
+						if app.setup_state.back() {
+							app.screen = Screen::Chat;
+						}
+					}
+					Screen::Chat => {
+						if app.loop_status != LoopStatus::Idle {
+							app.loop_status = LoopStatus::Idle;
+							app.output.push(OutputItem::Info {
+								text: "Interrupted.".into(),
+							});
+						}
+					}
+					_ => {
+						app.screen = Screen::Chat;
+					}
+				}
 			}
 		}
 		AppMessage::CtrlL => {
@@ -388,7 +518,22 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			};
 		}
 		AppMessage::Tab => {
-			// Tab completion will be handled in a future task.
+			match &app.screen {
+				Screen::Setup { .. } => { app.setup_state.toggle_field(); return app; }
+				_ => {}
+			}
+			if app.autocomplete.is_active() {
+				if let Some(completed) = app.autocomplete.accept() {
+					let with_space = format!("{completed} ");
+					app.input = input::InputState {
+						value: with_space.clone(),
+						cursor: with_space.len(),
+						..Default::default()
+					};
+				}
+			} else if app.input.value.starts_with('/') {
+				app.autocomplete.update_matches(&app.input.value, &app.commands);
+			}
 		}
 		AppMessage::Quit => {
 			app.should_quit = true;
@@ -463,6 +608,29 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.screen = Screen::Chat;
 		}
 
+		// ── Bridge ──────────────────────────────────
+		AppMessage::BridgeResult { text, is_error } => {
+			if is_error {
+				app.output.push(OutputItem::Error { message: text });
+			} else {
+				app.output.push(OutputItem::CommandResult { text });
+			}
+		}
+		AppMessage::RefreshContext(ctx) => {
+			app.sessions = ctx.sessions;
+			app.tool_defs = ctx.tool_defs;
+			app.agents = ctx.agents;
+			app.skills = ctx.skills;
+			app.prompts = ctx.prompts;
+			app.server_name = ctx.server_name;
+			app.model_name = ctx.model_name;
+			app.session_id = ctx.session_id;
+			app.acp_connected = ctx.acp_connected;
+			app.data_dir = ctx.data_dir;
+			app.work_dir = ctx.work_dir;
+			app.config_values = ctx.config_values;
+		}
+
 		// ── Resize ──────────────────────────────────
 		AppMessage::Resize { .. } => {
 			// Resize is handled by the terminal framework.
@@ -481,13 +649,29 @@ fn dispatch_command(mut app: App, text: &str) -> App {
 		return app;
 	};
 
-	// Build context from current app state for meta commands
+	// Build CommandContext from current app state
+	let cmd_ctx = CommandContext {
+		sessions: app.sessions.clone(),
+		tool_defs: app.tool_defs.clone(),
+		agents: app.agents.clone(),
+		skills: app.skills.clone(),
+		prompts: app.prompts.clone(),
+		server_name: app.server_name.clone(),
+		model_name: app.model_name.clone(),
+		session_id: app.session_id.clone(),
+		acp_connected: app.acp_connected,
+		data_dir: app.data_dir.clone(),
+		work_dir: app.work_dir.clone(),
+		config_values: app.config_values.clone(),
+	};
+
 	let ctx = DispatchContext {
 		verbose: app.verbose,
 		plan: app.plan_mode,
 		total_tokens: app.total_tokens,
 		context_percent: app.context_percent,
 		commands: app.commands.clone(),
+		cmd_ctx,
 	};
 
 	let results = ctx.dispatch(&command, &args);
@@ -543,30 +727,25 @@ fn dispatch_command(mut app: App, text: &str) -> App {
 				app.output.push(OutputItem::CommandResult { text });
 			}
 			CommandOutput::BridgeRequest(action) => {
-				// TODO(task-7): dispatch to TuiRuntime once wired
-				app.output.push(OutputItem::Info {
-					text: format!("Bridge request queued: {action:?}"),
-				});
+				// Store pending action for the event loop to pick up and execute.
+				app.pending_bridge_action = Some(action);
 			}
 			CommandOutput::OpenOverlay(action) => match action {
 				OverlayAction::Settings => {
+					app.settings_state = SettingsExplorerState::new();
 					app.screen = Screen::Settings;
 				}
 				OverlayAction::Shortcuts => {
 					app.screen = Screen::Shortcuts;
 				}
 				OverlayAction::Librarians => {
-					// Librarian explorer — switch screen
-					app.output.push(OutputItem::Info {
-						text: "Opening librarian explorer...".into(),
-					});
+					app.librarian_state =
+						LibrarianExplorerState::new(app.librarian_state.librarians.clone());
+					app.screen = Screen::Librarians;
 				}
 				OverlayAction::Setup(preset) => {
-					let msg = match preset {
-						Some(p) => format!("Opening setup wizard with preset: {p}"),
-						None => "Opening setup wizard...".into(),
-					};
-					app.output.push(OutputItem::Info { text: msg });
+					app.setup_state = SetupSelectorState::new();
+					app.screen = Screen::Setup { preset };
 				}
 			},
 		}
@@ -629,13 +808,30 @@ pub fn format_tokens(tokens: u64) -> String {
 /// View: render the model to the terminal.
 pub fn view(app: &App, frame: &mut Frame) {
 	let area = frame.area();
+
+	let completions_height = if app.autocomplete.is_active() {
+		(app.autocomplete.visible_matches().len() as u16).min(8)
+	} else {
+		0
+	};
+
 	let chunks = Layout::default()
 		.direction(Direction::Vertical)
-		.constraints([
-			Constraint::Min(1),
-			Constraint::Length(3),
-			Constraint::Length(1),
-		])
+		.constraints(if completions_height > 0 {
+			vec![
+				Constraint::Min(1),
+				Constraint::Length(3),
+				Constraint::Length(completions_height),
+				Constraint::Length(1),
+			]
+		} else {
+			vec![
+				Constraint::Min(1),
+				Constraint::Length(3),
+				Constraint::Length(0),
+				Constraint::Length(1),
+			]
+		})
 		.split(area);
 
 	// 1. Chat area
@@ -644,13 +840,30 @@ pub fn view(app: &App, frame: &mut Frame) {
 	// 2. Input
 	render_input(app, frame, chunks[1]);
 
-	// 3. Status bar
-	let status = render_status_line(app, chunks[2].width);
-	frame.render_widget(Paragraph::new(status), chunks[2]);
+	// 3. Completions (inline, below input)
+	if completions_height > 0 {
+		let lines = render_inline_completions(&app.autocomplete, chunks[2].width);
+		let completions = Paragraph::new(lines);
+		frame.render_widget(completions, chunks[2]);
+	}
 
-	// 4. Shortcuts overlay (on top of everything)
-	if app.screen == Screen::Shortcuts {
-		render_shortcuts_overlay(frame, area);
+	// 4. Status bar
+	let status = render_status_line(app, chunks[3].width);
+	frame.render_widget(Paragraph::new(status), chunks[3]);
+
+	// 5. Overlay screens (rendered on top of everything)
+	match &app.screen {
+		Screen::Shortcuts => render_shortcuts_overlay(frame, area),
+		Screen::Settings => {
+			render_settings_explorer(frame, area, &app.settings_state, &app.settings_config_data);
+		}
+		Screen::Librarians => {
+			render_librarian_explorer(frame, area, &app.librarian_state);
+		}
+		Screen::Setup { .. } => {
+			render_setup_selector(frame, area, &app.setup_state);
+		}
+		_ => {}
 	}
 }
 
@@ -695,6 +908,8 @@ fn render_chat_area(app: &App, frame: &mut Frame, area: Rect) {
 
 /// Render the input area.
 fn render_input(app: &App, frame: &mut Frame, area: Rect) {
+	let ghost = app.autocomplete.ghost_text();
+
 	let input_display = if app.input.value.is_empty() {
 		if app.ctrl_c_pending {
 			Line::from(Span::styled(
@@ -707,19 +922,27 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
 				Style::default().fg(Color::DarkGray),
 			))
 		}
+	} else if let Some(ref ghost_str) = ghost {
+		Line::from(vec![
+			Span::raw(app.input.value.clone()),
+			Span::styled(ghost_str.clone(), Style::default().fg(Color::DarkGray)),
+		])
 	} else {
 		Line::from(app.input.value.as_str())
 	};
+
 	let input_widget = Paragraph::new(input_display)
 		.block(Block::default().borders(Borders::ALL).title("Input"));
 	frame.render_widget(input_widget, area);
 
-	// Cursor position (clamped to input area width).
-	let cursor_x = area.x.saturating_add(1).saturating_add(
-		(app.input.cursor as u16).min(area.width.saturating_sub(2)),
-	);
-	let cursor_y = area.y + 1;
-	frame.set_cursor_position((cursor_x, cursor_y));
+	// Hide cursor when overlay is active
+	if app.screen == Screen::Chat {
+		let cursor_x = area.x.saturating_add(1).saturating_add(
+			(app.input.cursor as u16).min(area.width.saturating_sub(2)),
+		);
+		let cursor_y = area.y + 1;
+		frame.set_cursor_position((cursor_x, cursor_y));
+	}
 }
 
 /// Render a centered shortcuts overlay popup.
@@ -823,6 +1046,50 @@ fn render_status_line(app: &App, width: u16) -> Line<'static> {
 		full,
 		Style::default().fg(Color::DarkGray),
 	))
+}
+
+/// Get the current value string for the selected settings field.
+fn get_settings_current_value(app: &App) -> String {
+	if let Some(obj) = app.settings_config_data.as_object() {
+		let keys: Vec<&String> = obj.keys().collect();
+		if let Some(key) = keys.get(app.settings_state.selected_field) {
+			if let Some(val) = obj.get(*key) {
+				return match val {
+					serde_json::Value::String(s) => s.clone(),
+					other => other.to_string(),
+				};
+			}
+		}
+	}
+	String::new()
+}
+
+/// Handle a SetupAction returned by the setup selector.
+fn handle_setup_action(app: &mut App, action: crate::overlays::setup::SetupAction) {
+	use crate::overlays::setup::SetupAction;
+	match action {
+		SetupAction::SelectPreset(preset) => {
+			app.output.push(OutputItem::CommandResult {
+				text: format!("Selected preset: {}", preset.label()),
+			});
+			app.screen = Screen::Chat;
+		}
+		SetupAction::OpenOllamaWizard => {
+			app.output.push(OutputItem::Info {
+				text: "Opening Ollama wizard...".into(),
+			});
+		}
+		SetupAction::EnterCustomEdit => {
+			// Stay in Setup screen, now in custom edit mode
+		}
+		SetupAction::ConfirmCustom { command, args } => {
+			app.output.push(OutputItem::CommandResult {
+				text: format!("Custom ACP: {command} {args}"),
+			});
+			app.screen = Screen::Chat;
+		}
+		SetupAction::None => {}
+	}
 }
 
 // ── Tests ───────────────────────────────────────────────
@@ -1154,5 +1421,388 @@ mod tests {
 		app.input = input::insert(&app.input, "hello");
 		app = update(app, AppMessage::Submit);
 		assert_eq!(app.history.len(), 1);
+	}
+
+	// ── Overlay screen transition tests ─────────────
+
+	#[test]
+	fn librarians_overlay_opens_via_command() {
+		let mut app = App::new();
+		app.input = input::insert(&app.input, "/librarians");
+		app = update(app, AppMessage::Submit);
+		assert_eq!(app.screen, Screen::Librarians);
+	}
+
+	#[test]
+	fn setup_overlay_opens_via_command() {
+		let mut app = App::new();
+		app.input = input::insert(&app.input, "/setup");
+		app = update(app, AppMessage::Submit);
+		assert!(matches!(app.screen, Screen::Setup { preset: None }));
+	}
+
+	#[test]
+	fn escape_dismisses_librarians_overlay() {
+		let mut app = App::new();
+		app.screen = Screen::Librarians;
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn escape_dismisses_setup_overlay() {
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn escape_dismisses_settings_overlay() {
+		let mut app = App::new();
+		app.screen = Screen::Settings;
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn setup_overlay_with_preset() {
+		let mut app = App::new();
+		// Directly set through the overlay action path
+		app.setup_state = SetupSelectorState::new();
+		app.screen = Screen::Setup {
+			preset: Some("ollama".into()),
+		};
+		assert!(matches!(
+			app.screen,
+			Screen::Setup {
+				preset: Some(ref p)
+			} if p == "ollama"
+		));
+		// Escape dismisses it
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn dismiss_overlay_message_returns_to_chat_from_librarians() {
+		let mut app = App::new();
+		app.screen = Screen::Librarians;
+		app = update(app, AppMessage::DismissOverlay);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn dismiss_overlay_message_returns_to_chat_from_setup() {
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+		app = update(app, AppMessage::DismissOverlay);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn new_app_has_default_overlay_states() {
+		let app = App::new();
+		assert!(app.librarian_state.librarians.is_empty());
+		assert_eq!(app.setup_state.selected, 0);
+		assert_eq!(
+			app.settings_state.level,
+			crate::overlays::settings::SettingsLevel::FileList
+		);
+		assert_eq!(app.settings_config_data, serde_json::Value::Null);
+	}
+
+	#[test]
+	fn librarians_overlay_resets_state_on_open() {
+		let mut app = App::new();
+		// Simulate having some librarian data
+		use crate::overlays::librarian::LibrarianEntry;
+		app.librarian_state = LibrarianExplorerState::new(vec![LibrarianEntry::default_new()]);
+		app.librarian_state.selected = 1; // non-zero selection
+		// Open the overlay via command dispatch
+		app.input = input::insert(&app.input, "/librarians");
+		app = update(app, AppMessage::Submit);
+		assert_eq!(app.screen, Screen::Librarians);
+		// State should be reset: selection back to 0, but librarians preserved
+		assert_eq!(app.librarian_state.selected, 0);
+		assert_eq!(app.librarian_state.librarians.len(), 1);
+	}
+
+	#[test]
+	fn setup_overlay_resets_state_on_open() {
+		let mut app = App::new();
+		app.setup_state.selected = 3;
+		app.setup_state.editing_custom = true;
+		// Open the overlay via command dispatch
+		app.input = input::insert(&app.input, "/setup");
+		app = update(app, AppMessage::Submit);
+		assert!(matches!(app.screen, Screen::Setup { preset: None }));
+		// State should be freshly initialized
+		assert_eq!(app.setup_state.selected, 0);
+		assert!(!app.setup_state.editing_custom);
+	}
+
+	// ── Render smoke tests for new overlay screens ──
+
+	#[test]
+	fn render_librarians_overlay_does_not_panic() {
+		let backend = ratatui::backend::TestBackend::new(80, 24);
+		let mut terminal = ratatui::Terminal::new(backend).unwrap();
+		let mut app = App::new();
+		app.screen = Screen::Librarians;
+
+		terminal
+			.draw(|frame| {
+				view(&app, frame);
+			})
+			.unwrap();
+	}
+
+	#[test]
+	fn render_setup_overlay_does_not_panic() {
+		let backend = ratatui::backend::TestBackend::new(80, 24);
+		let mut terminal = ratatui::Terminal::new(backend).unwrap();
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+
+		terminal
+			.draw(|frame| {
+				view(&app, frame);
+			})
+			.unwrap();
+	}
+
+	#[test]
+	fn render_settings_overlay_does_not_panic() {
+		let backend = ratatui::backend::TestBackend::new(80, 24);
+		let mut terminal = ratatui::Terminal::new(backend).unwrap();
+		let mut app = App::new();
+		app.screen = Screen::Settings;
+
+		terminal
+			.draw(|frame| {
+				view(&app, frame);
+			})
+			.unwrap();
+	}
+
+	#[test]
+	fn render_librarians_with_entries_does_not_panic() {
+		let backend = ratatui::backend::TestBackend::new(80, 24);
+		let mut terminal = ratatui::Terminal::new(backend).unwrap();
+		let mut app = App::new();
+		use crate::overlays::librarian::LibrarianEntry;
+		app.librarian_state = LibrarianExplorerState::new(vec![
+			LibrarianEntry {
+				name: "my-lib".into(),
+				description: "General purpose".into(),
+				permissions: vec!["add".into(), "delete".into()],
+				topics: vec!["**".into()],
+			},
+			LibrarianEntry {
+				name: "code-reviewer".into(),
+				description: "Reviews code changes".into(),
+				permissions: vec!["add".into()],
+				topics: vec!["rust".into(), "web/**".into()],
+			},
+		]);
+		app.screen = Screen::Librarians;
+
+		terminal
+			.draw(|frame| {
+				view(&app, frame);
+			})
+			.unwrap();
+	}
+
+	#[test]
+	fn render_settings_with_config_data_does_not_panic() {
+		let backend = ratatui::backend::TestBackend::new(80, 24);
+		let mut terminal = ratatui::Terminal::new(backend).unwrap();
+		let mut app = App::new();
+		app.settings_config_data = serde_json::json!({
+			"host": "localhost",
+			"port": 8080,
+			"debug": true
+		});
+		app.screen = Screen::Settings;
+
+		terminal
+			.draw(|frame| {
+				view(&app, frame);
+			})
+			.unwrap();
+	}
+
+	#[test]
+	fn app_has_autocomplete_state() {
+		let app = App::new();
+		assert!(!app.autocomplete.is_active());
+	}
+
+	// ── Autocomplete integration tests ─────────────
+
+	#[test]
+	fn typing_slash_activates_autocomplete() {
+		let mut app = App::new();
+		app = update(app, AppMessage::CharInput('/'));
+		app = update(app, AppMessage::CharInput('h'));
+		assert!(app.autocomplete.is_active());
+		assert!(app.autocomplete.matches.iter().any(|m| m.name == "help"));
+	}
+
+	#[test]
+	fn tab_accepts_autocomplete_selection() {
+		let mut app = App::new();
+		app = update(app, AppMessage::CharInput('/'));
+		app = update(app, AppMessage::CharInput('h'));
+		app = update(app, AppMessage::CharInput('e'));
+		app = update(app, AppMessage::CharInput('l'));
+		assert!(app.autocomplete.is_active());
+		app = update(app, AppMessage::Tab);
+		assert!(!app.autocomplete.is_active());
+		assert!(app.input.value.starts_with("/help"));
+	}
+
+	#[test]
+	fn escape_deactivates_autocomplete() {
+		let mut app = App::new();
+		app = update(app, AppMessage::CharInput('/'));
+		app = update(app, AppMessage::CharInput('h'));
+		assert!(app.autocomplete.is_active());
+		app = update(app, AppMessage::Escape);
+		assert!(!app.autocomplete.is_active());
+	}
+
+	#[test]
+	fn up_down_navigate_autocomplete() {
+		let mut app = App::new();
+		app = update(app, AppMessage::CharInput('/'));
+		assert!(app.autocomplete.is_active());
+		let initial_selected = app.autocomplete.selected;
+		app = update(app, AppMessage::HistoryDown);
+		assert_eq!(app.autocomplete.selected, initial_selected + 1);
+		app = update(app, AppMessage::HistoryUp);
+		assert_eq!(app.autocomplete.selected, initial_selected);
+	}
+
+	#[test]
+	fn backspace_updates_autocomplete() {
+		let mut app = App::new();
+		app = update(app, AppMessage::CharInput('/'));
+		app = update(app, AppMessage::CharInput('h'));
+		app = update(app, AppMessage::CharInput('e'));
+		let count_he = app.autocomplete.matches.len();
+		app = update(app, AppMessage::Backspace);
+		assert!(app.autocomplete.matches.len() >= count_he);
+	}
+
+	#[test]
+	fn submit_deactivates_autocomplete() {
+		let mut app = App::new();
+		app = update(app, AppMessage::CharInput('/'));
+		app = update(app, AppMessage::CharInput('h'));
+		assert!(app.autocomplete.is_active());
+		app = update(app, AppMessage::Submit);
+		assert!(!app.autocomplete.is_active());
+	}
+
+	// ── Overlay focus routing tests ─────────────────
+
+	#[test]
+	fn settings_overlay_captures_arrow_keys() {
+		let mut app = App::new();
+		app.screen = Screen::Settings;
+		let initial = app.settings_state.selected_file;
+		app = update(app, AppMessage::HistoryDown);
+		assert_ne!(app.settings_state.selected_file, initial);
+	}
+
+	#[test]
+	fn settings_overlay_escape_dismisses() {
+		let mut app = App::new();
+		app.screen = Screen::Settings;
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn settings_overlay_enter_goes_to_field_list() {
+		use crate::overlays::settings::SettingsLevel;
+		let mut app = App::new();
+		app.screen = Screen::Settings;
+		app = update(app, AppMessage::Submit);
+		assert_eq!(app.settings_state.level, SettingsLevel::FieldList);
+	}
+
+	#[test]
+	fn settings_overlay_char_does_not_reach_input() {
+		let mut app = App::new();
+		app.screen = Screen::Settings;
+		let original = app.input.value.clone();
+		app = update(app, AppMessage::CharInput('a'));
+		assert_eq!(app.input.value, original);
+	}
+
+	#[test]
+	fn librarian_overlay_captures_navigation() {
+		let mut app = App::new();
+		app.screen = Screen::Librarians;
+		// No entries by default, but move_down/move_up should not crash
+		app = update(app, AppMessage::HistoryDown);
+		app = update(app, AppMessage::HistoryUp);
+		// Should still be on Librarians screen
+		assert_eq!(app.screen, Screen::Librarians);
+	}
+
+	#[test]
+	fn librarian_overlay_escape_dismisses() {
+		let mut app = App::new();
+		app.screen = Screen::Librarians;
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn setup_overlay_captures_navigation() {
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+		app = update(app, AppMessage::HistoryDown);
+		assert_eq!(app.setup_state.selected, 1);
+	}
+
+	#[test]
+	fn setup_overlay_escape_dismisses() {
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn setup_overlay_enter_selects_preset() {
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+		// First entry is "Claude Code"
+		app = update(app, AppMessage::Submit);
+		// Should transition back to Chat with a result message
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn setup_overlay_tab_toggles_field() {
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+		// Navigate to Custom (index 3)
+		app = update(app, AppMessage::HistoryDown);
+		app = update(app, AppMessage::HistoryDown);
+		app = update(app, AppMessage::HistoryDown);
+		// Enter Custom -> enters custom edit mode
+		app = update(app, AppMessage::Submit);
+		assert!(app.setup_state.editing_custom);
+		// Tab should toggle field
+		let field_before = app.setup_state.editing_field;
+		app = update(app, AppMessage::Tab);
+		assert_ne!(app.setup_state.editing_field, field_before);
 	}
 }

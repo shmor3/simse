@@ -9,17 +9,23 @@
 //! remains in `main.rs`. This module provides the runtime that `main.rs`
 //! orchestrates.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use simse_bridge::acp_client::AcpClient;
 use simse_bridge::acp_types::AcpServerInfo;
 use simse_bridge::agentic_loop::{self, AgenticLoopOptions, LoopCallbacks};
 use simse_bridge::config::LoadedConfig;
+use simse_bridge::session_store::SessionStore;
 use simse_bridge::tool_registry::ToolRegistry;
 use simse_ui_core::state::conversation::{ConversationBuffer, ConversationOptions};
 use simse_ui_core::state::permission_manager::PermissionManager;
 use simse_ui_core::state::permissions::PermissionMode;
+use simse_ui_core::tools::ToolCallRequest;
+
+use crate::commands::{
+	AgentInfo, BridgeAction, CommandContext, PromptInfo, SessionInfo, SkillInfo, ToolDefInfo,
+};
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -66,11 +72,14 @@ pub struct TuiRuntime {
 	abort_signal: Arc<AtomicBool>,
 	/// Whether verbose mode is enabled.
 	pub verbose: bool,
+	/// Session persistence store.
+	session_store: SessionStore,
 }
 
 impl TuiRuntime {
 	/// Create a new TUI runtime from a loaded configuration.
 	pub fn new(config: LoadedConfig) -> Self {
+		let session_store = SessionStore::new(&config.data_dir);
 		Self {
 			config,
 			acp_client: None,
@@ -80,6 +89,7 @@ impl TuiRuntime {
 			session_id: None,
 			abort_signal: Arc::new(AtomicBool::new(false)),
 			verbose: false,
+			session_store,
 		}
 	}
 
@@ -113,8 +123,8 @@ impl TuiRuntime {
 		self.session_id = Some(session_id);
 		self.acp_client = Some(client);
 
-		// Discover tools (built-in stubs + future MCP tools)
-		self.tool_registry.discover().await;
+		// Discover tools (built-in + MCP tools from connected servers)
+		self.tool_registry.discover(&self.config.mcp_servers).await;
 
 		Ok(())
 	}
@@ -143,7 +153,7 @@ impl TuiRuntime {
 
 		self.session_id = Some(session_id);
 		self.acp_client = Some(client);
-		self.tool_registry.discover().await;
+		self.tool_registry.discover(&self.config.mcp_servers).await;
 
 		Ok(())
 	}
@@ -304,9 +314,371 @@ impl TuiRuntime {
 		self.conversation = ConversationBuffer::new(ConversationOptions::default());
 	}
 
+	/// Build a `CommandContext` snapshot from the current runtime state.
+	///
+	/// This creates a read-only snapshot that command handlers can use for
+	/// sync operations (listing sessions, tools, config, etc.).
+	pub fn build_command_context(&self) -> CommandContext {
+		let sessions = self
+			.session_store
+			.list()
+			.into_iter()
+			.map(|m| SessionInfo {
+				id: m.id,
+				title: m.title,
+				created_at: m.created_at,
+				updated_at: m.updated_at,
+				message_count: m.message_count,
+				work_dir: m.work_dir,
+			})
+			.collect();
+
+		let tool_defs = self
+			.tool_registry
+			.get_tool_definitions()
+			.into_iter()
+			.map(|d| ToolDefInfo {
+				name: d.name,
+				description: d.description,
+			})
+			.collect();
+
+		let agents = self
+			.config
+			.agents
+			.iter()
+			.map(|a| AgentInfo {
+				name: a.name.clone(),
+				description: a.description.clone(),
+			})
+			.collect();
+
+		let skills = self
+			.config
+			.skills
+			.iter()
+			.map(|s| SkillInfo {
+				name: s.name.clone(),
+				description: s.description.clone(),
+			})
+			.collect();
+
+		let prompts = self
+			.config
+			.prompts
+			.iter()
+			.map(|(name, p)| PromptInfo {
+				name: name.clone(),
+				description: p.description.clone(),
+				step_count: p.steps.len(),
+			})
+			.collect();
+
+		let config_values = self.build_config_display();
+
+		CommandContext {
+			sessions,
+			tool_defs,
+			agents,
+			skills,
+			prompts,
+			server_name: self.config.default_server.clone(),
+			model_name: self.config.default_agent.clone(),
+			session_id: self.session_id.clone(),
+			acp_connected: self.is_connected(),
+			data_dir: Some(self.config.data_dir.display().to_string()),
+			work_dir: Some(self.config.work_dir.display().to_string()),
+			config_values,
+		}
+	}
+
+	/// Execute a bridge action asynchronously.
+	///
+	/// Returns a human-readable result string on success, or an error message.
+	pub async fn execute_bridge_action(
+		&mut self,
+		action: BridgeAction,
+	) -> Result<String, RuntimeError> {
+		match action {
+			// ── Session ─────────────────────────────────
+			BridgeAction::ResumeSession { id } => {
+				let meta = self
+					.session_store
+					.get(&id)
+					.ok_or_else(|| RuntimeError::Acp(format!("Session not found: {id}")))?;
+				let messages = self.session_store.load(&id);
+				self.conversation =
+					ConversationBuffer::new(ConversationOptions::default());
+				for msg in &messages {
+					match msg.role.as_str() {
+						"user" => self.conversation.add_user(&msg.content),
+						"assistant" => self.conversation.add_assistant(&msg.content),
+						_ => {}
+					}
+				}
+				self.session_id = Some(id.clone());
+				Ok(format!("Resumed session: {}", meta.title))
+			}
+			BridgeAction::RenameSession { title } => {
+				let sid = self.session_id.as_ref().ok_or(RuntimeError::NoSession)?;
+				self.session_store
+					.rename(sid, &title)
+					.map_err(|e| RuntimeError::Acp(e.to_string()))?;
+				Ok(format!("Session renamed to: {title}"))
+			}
+			BridgeAction::SwitchServer { name } => {
+				self.connect_to(&name).await?;
+				Ok(format!("Switched to server: {name}"))
+			}
+			BridgeAction::SwitchModel { name } => {
+				self.config.default_agent = Some(name.clone());
+				Ok(format!("Model set to: {name}"))
+			}
+			BridgeAction::McpRestart => {
+				self.tool_registry
+					.discover(&self.config.mcp_servers)
+					.await;
+				Ok("MCP tools rediscovered.".into())
+			}
+			BridgeAction::AcpRestart => {
+				if let Some(ref server) = self.config.default_server.clone() {
+					self.connect_to(server).await?;
+				} else {
+					self.connect().await?;
+				}
+				Ok("ACP connection restarted.".into())
+			}
+
+			// ── Config ──────────────────────────────────
+			BridgeAction::InitConfig { force } => {
+				let dir = self.config.work_dir.join(".simse");
+				if dir.exists() && !force {
+					return Ok("Project already initialized. Use --force to overwrite.".into());
+				}
+				std::fs::create_dir_all(&dir)
+					.map_err(|e| RuntimeError::Acp(e.to_string()))?;
+				Ok(format!("Initialized project config at {}", dir.display()))
+			}
+			BridgeAction::FactoryReset => {
+				let data_dir = &self.config.data_dir;
+				if data_dir.exists() {
+					std::fs::remove_dir_all(data_dir)
+						.map_err(|e| RuntimeError::Acp(e.to_string()))?;
+				}
+				Ok("Factory reset complete. Global configuration removed.".into())
+			}
+			BridgeAction::FactoryResetProject => {
+				let dir = self.config.work_dir.join(".simse");
+				if dir.exists() {
+					std::fs::remove_dir_all(&dir)
+						.map_err(|e| RuntimeError::Acp(e.to_string()))?;
+				}
+				Ok("Project configuration reset.".into())
+			}
+
+			// ── AI ──────────────────────────────────────
+			BridgeAction::RunChain { name, args } => {
+				// Chain execution requires the agentic loop
+				let acp_client = self
+					.acp_client
+					.as_ref()
+					.ok_or(RuntimeError::NotConnected)?;
+
+				self.conversation.add_user(&format!(
+					"[chain:{name}] {args}"
+				));
+
+				self.abort_signal.store(false, Ordering::Relaxed);
+
+				let options = AgenticLoopOptions {
+					max_turns: 10,
+					server_name: self.config.default_server.clone(),
+					agent_id: self.config.default_agent.clone(),
+					system_prompt: self.config.workspace_prompt.clone(),
+					agent_manages_tools: false,
+				};
+
+				let callbacks = simse_bridge::agentic_loop::NoopCallbacks;
+				let result = agentic_loop::run_agentic_loop(
+					&mut self.conversation,
+					acp_client,
+					&self.tool_registry,
+					&options,
+					&callbacks,
+					Arc::clone(&self.abort_signal),
+				)
+				.await;
+
+				if !result.final_text.is_empty() {
+					self.conversation.add_assistant(&result.final_text);
+				}
+
+				Ok(result.final_text)
+			}
+
+			// ── Library ─────────────────────────────────
+			BridgeAction::LibraryAdd { topic, text } => {
+				self.call_tool("library_shelve", serde_json::json!({
+					"topic": topic,
+					"text": text,
+				}))
+				.await
+			}
+			BridgeAction::LibrarySearch { query } => {
+				self.call_tool("library_search", serde_json::json!({
+					"query": query,
+				}))
+				.await
+			}
+			BridgeAction::LibraryRecommend { query } => {
+				self.call_tool("library_search", serde_json::json!({
+					"query": query,
+					"recommend": true,
+				}))
+				.await
+			}
+			BridgeAction::LibraryTopics => {
+				self.call_tool("library_search", serde_json::json!({
+					"query": "*",
+					"listTopics": true,
+				}))
+				.await
+			}
+			BridgeAction::LibraryVolumes { topic } => {
+				let mut params = serde_json::json!({"query": "*", "listVolumes": true});
+				if let Some(t) = topic {
+					params["topic"] = serde_json::Value::String(t);
+				}
+				self.call_tool("library_search", params).await
+			}
+			BridgeAction::LibraryGet { id } => {
+				self.call_tool("library_search", serde_json::json!({
+					"id": id,
+				}))
+				.await
+			}
+			BridgeAction::LibraryDelete { id } => {
+				self.call_tool("library_search", serde_json::json!({
+					"id": id,
+					"delete": true,
+				}))
+				.await
+			}
+
+			// ── Files ───────────────────────────────────
+			BridgeAction::ListFiles { path } => {
+				let params = match path {
+					Some(p) => serde_json::json!({"path": p}),
+					None => serde_json::json!({}),
+				};
+				self.call_tool("vfs_list", params).await
+			}
+			BridgeAction::SaveFiles { path } => {
+				let params = match path {
+					Some(p) => serde_json::json!({"path": p}),
+					None => serde_json::json!({}),
+				};
+				self.call_tool("vfs_write", params).await
+			}
+			BridgeAction::ValidateFiles { path } => {
+				let params = match path {
+					Some(p) => serde_json::json!({"path": p, "validate": true}),
+					None => serde_json::json!({"validate": true}),
+				};
+				self.call_tool("vfs_read", params).await
+			}
+			BridgeAction::DiscardFile { path } => {
+				self.call_tool("vfs_write", serde_json::json!({
+					"path": path,
+					"discard": true,
+				}))
+				.await
+			}
+			BridgeAction::DiffFiles { path } => {
+				let params = match path {
+					Some(p) => serde_json::json!({"path": p, "diff": true}),
+					None => serde_json::json!({"diff": true}),
+				};
+				self.call_tool("vfs_read", params).await
+			}
+
+			// ── Meta ────────────────────────────────────
+			BridgeAction::Compact => {
+				let msg_count = self.conversation.to_messages().len();
+				self.conversation
+					.compact("[User-requested compaction: conversation history summarized]");
+				Ok(format!(
+					"Conversation compacted ({msg_count} messages → 1 summary)."
+				))
+			}
+		}
+	}
+
 	// -----------------------------------------------------------------------
 	// Private helpers
 	// -----------------------------------------------------------------------
+
+	/// Execute a tool by name with the given arguments.
+	///
+	/// Wraps the tool registry's `execute()` API with a generated call ID.
+	async fn call_tool(
+		&self,
+		name: &str,
+		arguments: serde_json::Value,
+	) -> Result<String, RuntimeError> {
+		static CALL_COUNTER: AtomicU64 = AtomicU64::new(1);
+		let call = ToolCallRequest {
+			id: format!("call_{}", CALL_COUNTER.fetch_add(1, Ordering::Relaxed)),
+			name: name.into(),
+			arguments,
+		};
+		let result = self.tool_registry.execute(&call).await;
+		if result.is_error {
+			Err(RuntimeError::Acp(result.output))
+		} else {
+			Ok(result.output)
+		}
+	}
+
+	/// Build a flat list of config key-value pairs for display.
+	fn build_config_display(&self) -> Vec<(String, String)> {
+		let mut values = Vec::new();
+		values.push((
+			"log.level".into(),
+			self.config.log_level.clone(),
+		));
+		if let Some(ref server) = self.config.default_server {
+			values.push(("acp.default_server".into(), server.clone()));
+		}
+		if let Some(ref agent) = self.config.default_agent {
+			values.push(("acp.default_agent".into(), agent.clone()));
+		}
+		values.push((
+			"embedding.model".into(),
+			self.config.embedding_model.clone(),
+		));
+		values.push((
+			"data_dir".into(),
+			self.config.data_dir.display().to_string(),
+		));
+		values.push((
+			"work_dir".into(),
+			self.config.work_dir.display().to_string(),
+		));
+		for server in &self.config.acp.servers {
+			values.push((
+				format!("acp.servers.{}.command", server.name),
+				server.command.clone(),
+			));
+		}
+		for mcp in &self.config.mcp_servers {
+			values.push((
+				format!("mcp.servers.{}.command", mcp.name),
+				mcp.command.clone(),
+			));
+		}
+		values
+	}
 
 	/// Resolve an ACP server config by name, or use the default/first.
 	fn resolve_server(

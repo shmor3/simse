@@ -1,0 +1,27 @@
+{
+  "planPath": "docs/plans/2026-03-04-autocomplete-focus-e2e-plan.md",
+  "tasks": [
+    {"id": 68, "subject": "Task 0: Add --data-dir CLI flag", "status": "pending"},
+    {"id": 69, "subject": "Task 1: Integrate CommandAutocompleteState into App", "status": "pending", "blockedBy": [68]},
+    {"id": 70, "subject": "Task 2: Wire autocomplete handlers in update()", "status": "pending", "blockedBy": [69]},
+    {"id": 71, "subject": "Task 3: Create inline autocomplete renderer", "status": "pending", "blockedBy": [70]},
+    {"id": 72, "subject": "Task 4: Ghost text rendering", "status": "pending", "blockedBy": [71]},
+    {"id": 73, "subject": "Task 5: Overlay focus routing for all overlays", "status": "pending", "blockedBy": [69]},
+    {"id": 74, "subject": "Task 6: E2E test infrastructure and harness", "status": "pending", "blockedBy": [68]},
+    {"id": 75, "subject": "Task 7: E2E startup tests (5 tests)", "status": "pending", "blockedBy": [74]},
+    {"id": 76, "subject": "Task 8: E2E input tests (8 tests)", "status": "pending", "blockedBy": [74]},
+    {"id": 77, "subject": "Task 9: E2E autocomplete tests (7 tests)", "status": "pending", "blockedBy": [74, 72]},
+    {"id": 78, "subject": "Task 10: E2E meta command tests (9 tests)", "status": "pending", "blockedBy": [74]},
+    {"id": 79, "subject": "Task 11: E2E library command tests (7 tests)", "status": "pending", "blockedBy": [74]},
+    {"id": 80, "subject": "Task 12: E2E session command tests (7 tests)", "status": "pending", "blockedBy": [74]},
+    {"id": 81, "subject": "Task 13: E2E config command tests (5 tests)", "status": "pending", "blockedBy": [74]},
+    {"id": 82, "subject": "Task 14: E2E file command tests (5 tests)", "status": "pending", "blockedBy": [74]},
+    {"id": 83, "subject": "Task 15: E2E tool command tests (5 tests)", "status": "pending", "blockedBy": [74]},
+    {"id": 84, "subject": "Task 16: E2E overlay tests (8 tests)", "status": "pending", "blockedBy": [74, 73]},
+    {"id": 85, "subject": "Task 17: E2E setup wizard tests (10 tests)", "status": "pending", "blockedBy": [74, 73]},
+    {"id": 86, "subject": "Task 18: E2E error state tests (4 tests)", "status": "pending", "blockedBy": [74]},
+    {"id": 87, "subject": "Task 19: E2E ACP integration tests (8 tests)", "status": "pending", "blockedBy": [74]},
+    {"id": 88, "subject": "Task 20: Run full test suite and fix", "status": "pending", "blockedBy": [72, 73, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87]}
+  ],
+  "lastUpdated": "2026-03-04T00:00:00Z"
+}

@@ -1,7 +1,7 @@
 //! Library commands: `/add`, `/search`, `/recommend`, `/topics`, `/volumes`,
 //! `/get`, `/delete`, `/librarians`.
 
-use super::{CommandOutput, OverlayAction};
+use super::{BridgeAction, CommandOutput, OverlayAction};
 
 /// `/add <topic> <text>` -- add a volume to the library.
 pub fn handle_add(args: &str) -> Vec<CommandOutput> {
@@ -23,9 +23,10 @@ pub fn handle_add(args: &str) -> Vec<CommandOutput> {
 		)];
 	}
 
-	vec![CommandOutput::Info(format!(
-		"Would call bridge to add volume with topic=\"{topic}\" text=\"{text}\""
-	))]
+	vec![CommandOutput::BridgeRequest(BridgeAction::LibraryAdd {
+		topic: topic.into(),
+		text: text.into(),
+	})]
 }
 
 /// `/search <query>` -- search the library.
@@ -37,9 +38,9 @@ pub fn handle_search(args: &str) -> Vec<CommandOutput> {
 		)];
 	}
 
-	vec![CommandOutput::Info(format!(
-		"Would call bridge to search library for \"{query}\""
-	))]
+	vec![CommandOutput::BridgeRequest(BridgeAction::LibrarySearch {
+		query: query.into(),
+	})]
 }
 
 /// `/recommend <query>` -- get recommendations from the library.
@@ -51,30 +52,25 @@ pub fn handle_recommend(args: &str) -> Vec<CommandOutput> {
 		)];
 	}
 
-	vec![CommandOutput::Info(format!(
-		"Would call bridge to get recommendations for \"{query}\""
-	))]
+	vec![CommandOutput::BridgeRequest(BridgeAction::LibraryRecommend {
+		query: query.into(),
+	})]
 }
 
 /// `/topics` -- list all topics in the library.
 pub fn handle_topics(_args: &str) -> Vec<CommandOutput> {
-	vec![CommandOutput::Info(
-		"Would call bridge to list library topics".into(),
-	)]
+	vec![CommandOutput::BridgeRequest(BridgeAction::LibraryTopics)]
 }
 
 /// `/volumes [topic]` -- list volumes, optionally filtered by topic.
 pub fn handle_volumes(args: &str) -> Vec<CommandOutput> {
 	let topic = args.trim();
-	if topic.is_empty() {
-		vec![CommandOutput::Info(
-			"Would call bridge to list all library volumes".into(),
-		)]
+	let topic = if topic.is_empty() {
+		None
 	} else {
-		vec![CommandOutput::Info(format!(
-			"Would call bridge to list library volumes for topic \"{topic}\""
-		))]
-	}
+		Some(topic.into())
+	};
+	vec![CommandOutput::BridgeRequest(BridgeAction::LibraryVolumes { topic })]
 }
 
 /// `/get <id>` -- retrieve a volume by ID.
@@ -84,9 +80,9 @@ pub fn handle_get(args: &str) -> Vec<CommandOutput> {
 		return vec![CommandOutput::Error("Usage: /get <id>".into())];
 	}
 
-	vec![CommandOutput::Info(format!(
-		"Would call bridge to get volume \"{id}\""
-	))]
+	vec![CommandOutput::BridgeRequest(BridgeAction::LibraryGet {
+		id: id.into(),
+	})]
 }
 
 /// `/delete <id>` -- delete a volume by ID.
@@ -96,9 +92,9 @@ pub fn handle_delete(args: &str) -> Vec<CommandOutput> {
 		return vec![CommandOutput::Error("Usage: /delete <id>".into())];
 	}
 
-	vec![CommandOutput::Info(format!(
-		"Would call bridge to delete volume \"{id}\""
-	))]
+	vec![CommandOutput::BridgeRequest(BridgeAction::LibraryDelete {
+		id: id.into(),
+	})]
 }
 
 /// `/librarians` -- open the librarian explorer overlay.
@@ -130,16 +126,22 @@ mod tests {
 	fn add_valid() {
 		let out = handle_add("rust Ownership is important");
 		assert_eq!(out.len(), 1);
-		assert!(
-			matches!(&out[0], CommandOutput::Info(msg) if msg.contains("topic=\"rust\"") && msg.contains("text=\"Ownership is important\""))
-		);
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryAdd { topic, text })
+				if topic == "rust" && text == "Ownership is important"
+		));
 	}
 
 	#[test]
 	fn add_trims_whitespace() {
 		let out = handle_add("  topic   some text  ");
 		assert_eq!(out.len(), 1);
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("topic=\"topic\"")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryAdd { topic, .. })
+				if topic == "topic"
+		));
 	}
 
 	// ── /search ──────────────────────────────────────────
@@ -154,15 +156,21 @@ mod tests {
 	fn search_valid() {
 		let out = handle_search("ownership borrowing");
 		assert_eq!(out.len(), 1);
-		assert!(
-			matches!(&out[0], CommandOutput::Info(msg) if msg.contains("ownership borrowing"))
-		);
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibrarySearch { query })
+				if query == "ownership borrowing"
+		));
 	}
 
 	#[test]
 	fn search_trims() {
 		let out = handle_search("  hello  ");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("\"hello\"")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibrarySearch { query })
+				if query == "hello"
+		));
 	}
 
 	// ── /recommend ───────────────────────────────────────
@@ -176,16 +184,23 @@ mod tests {
 	#[test]
 	fn recommend_valid() {
 		let out = handle_recommend("async patterns");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("async patterns")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryRecommend { query })
+				if query == "async patterns"
+		));
 	}
 
 	// ── /topics ──────────────────────────────────────────
 
 	#[test]
-	fn topics_returns_info() {
+	fn topics_returns_bridge_request() {
 		let out = handle_topics("");
 		assert_eq!(out.len(), 1);
-		assert!(matches!(&out[0], CommandOutput::Info(_)));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryTopics)
+		));
 	}
 
 	// ── /volumes ─────────────────────────────────────────
@@ -193,13 +208,21 @@ mod tests {
 	#[test]
 	fn volumes_no_args() {
 		let out = handle_volumes("");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("all")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryVolumes { topic })
+				if topic.is_none()
+		));
 	}
 
 	#[test]
 	fn volumes_with_topic() {
 		let out = handle_volumes("rust");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("\"rust\"")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryVolumes { topic })
+				if topic.as_deref() == Some("rust")
+		));
 	}
 
 	// ── /get ─────────────────────────────────────────────
@@ -213,7 +236,11 @@ mod tests {
 	#[test]
 	fn get_valid() {
 		let out = handle_get("abc-123");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("abc-123")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryGet { id })
+				if id == "abc-123"
+		));
 	}
 
 	// ── /delete ──────────────────────────────────────────
@@ -227,7 +254,11 @@ mod tests {
 	#[test]
 	fn delete_valid() {
 		let out = handle_delete("xyz-789");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("xyz-789")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryDelete { id })
+				if id == "xyz-789"
+		));
 	}
 
 	// ── /librarians ──────────────────────────────────────

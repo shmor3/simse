@@ -29,3 +29,6 @@ russh = { version = "0.57", default-features = false, features = ["ring", "rsa",
 russh-sftp = "2.1"
 russh-keys = "0.49"
 base64 = "0.22"
+
+[features]
+ssh-test = []

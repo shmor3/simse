@@ -89,15 +89,16 @@ pub fn all_commands() -> Vec<CommandDefinition> {
 	use CommandCategory::*;
 
 	vec![
-		// ── Meta (7) ──────────────────────────────────────────
+		// ── Meta (8) ──────────────────────────────────────────
 		cmd("help", "Show help information", "help [command]", &["?"], Meta),
 		cmd("clear", "Clear the screen", "clear", &[], Meta),
 		cmd("verbose", "Toggle verbose output", "verbose [on|off]", &["v"], Meta),
 		cmd("plan", "Toggle plan mode", "plan [on|off]", &[], Meta),
 		cmd("context", "Show current context usage", "context", &[], Meta),
 		cmd("compact", "Compact conversation history", "compact", &[], Meta),
+		cmd("shortcuts", "Show keyboard shortcuts", "shortcuts", &[], Meta),
 		cmd("exit", "Exit the application", "exit", &["quit", "q"], Meta),
-		// ── Library (7) ───────────────────────────────────────
+		// ── Library (8) ───────────────────────────────────────
 		cmd("add", "Add a volume to the library", "add <text>", &[], Library),
 		cmd("search", "Search the library", "search <query>", &["s"], Library),
 		cmd("recommend", "Get library recommendations", "recommend [topic]", &["rec"], Library),
@@ -105,6 +106,7 @@ pub fn all_commands() -> Vec<CommandDefinition> {
 		cmd("volumes", "List library volumes", "volumes [topic]", &["ls"], Library),
 		cmd("get", "Get a library volume by ID", "get <id>", &[], Library),
 		cmd("delete", "Delete a library volume", "delete <id>", &["rm"], Library),
+		cmd("librarians", "Open librarian explorer", "librarians", &[], Library),
 		// ── Tools (3) ─────────────────────────────────────────
 		cmd("tools", "List available tools", "tools [filter]", &[], Tools),
 		cmd("agents", "List available agents", "agents", &[], Tools),
@@ -117,9 +119,13 @@ pub fn all_commands() -> Vec<CommandDefinition> {
 		cmd("model", "Show or change model", "model [name]", &[], Session),
 		cmd("mcp", "Manage MCP connections", "mcp [status|restart]", &[], Session),
 		cmd("acp", "Manage ACP connection", "acp [status|restart]", &[], Session),
-		// ── Config (2) ────────────────────────────────────────
+		// ── Config (6) ────────────────────────────────────────
 		cmd("config", "Show configuration", "config [key]", &[], Config),
 		cmd("settings", "View or change settings", "settings [key] [value]", &["set"], Config),
+		cmd("setup", "Run setup wizard", "setup [preset]", &[], Config),
+		cmd("init", "Initialize project configuration", "init [--force]", &[], Config),
+		cmd("factory-reset", "Reset all settings to defaults", "factory-reset", &[], Config),
+		cmd("factory-reset-project", "Reset project settings to defaults", "factory-reset-project", &[], Config),
 		// ── Files (5) ─────────────────────────────────────────
 		cmd("files", "List files in virtual filesystem", "files [path]", &[], Files),
 		cmd("save", "Save a virtual file to disk", "save <path>", &[], Files),
@@ -211,9 +217,9 @@ mod tests {
 	}
 
 	#[test]
-	fn all_commands_has_at_least_30() {
+	fn all_commands_has_at_least_38() {
 		let cmds = all_commands();
-		assert!(cmds.len() >= 30);
+		assert!(cmds.len() >= 38, "Expected >= 38 commands, got {}", cmds.len());
 	}
 
 	#[test]

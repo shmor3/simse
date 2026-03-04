@@ -4,6 +4,7 @@ mod app;
 mod banner;
 pub mod markdown;
 mod output;
+pub mod spinner;
 
 use std::io;
 

@@ -5,6 +5,7 @@
 
 pub mod acp_client;
 pub mod acp_types;
+pub mod agentic_loop;
 pub mod client;
 pub mod config;
 pub mod json_io;

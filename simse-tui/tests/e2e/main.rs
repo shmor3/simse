@@ -19,6 +19,7 @@ mod commands_tools;
 mod config;
 pub mod harness;
 mod input;
+mod overlays;
 mod startup;
 
 use harness::SimseTestHarness;

@@ -5,6 +5,8 @@ pages_build_output_dir = "./build/client"
 [vars]
 APP_URL = "https://app.simse.dev"
 
+routes = [{ pattern = "app.simse.dev", custom_domain = true }]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "simse-db"

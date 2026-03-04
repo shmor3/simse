@@ -2,6 +2,8 @@ name = "simse-landing"
 pages_build_output_dir = "./dist"
 compatibility_date = "2026-02-28"
 
+routes = [{ pattern = "simse.dev", custom_domain = true }]
+
 [[d1_databases]]
 binding = "simse_waitlist"
 database_name = "simse_waitlist"

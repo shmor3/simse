@@ -1,7 +1,8 @@
 use simse_vfs_engine::server::VfsServer;
 use simse_vfs_engine::transport::NdjsonTransport;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_env_filter(
@@ -15,7 +16,7 @@ fn main() {
 
     tracing::info!("simse-vfs-engine ready");
 
-    if let Err(e) = server.run() {
+    if let Err(e) = server.run().await {
         tracing::error!("Server error: {}", e);
         std::process::exit(1);
     }

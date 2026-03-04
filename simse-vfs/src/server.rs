@@ -1,8 +1,10 @@
-use std::io::{self, BufRead};
+use tokio::io::{AsyncBufReadExt, BufReader};
 
+use crate::backend::FsBackend;
 use crate::diff::DiffOutput;
 use crate::disk::{DiskFs, DiskSearchMode, DiskSearchOptions, DiskSearchResult};
 use crate::error::VfsError;
+use crate::local_backend::LocalFsBackend;
 use crate::path::VfsLimits;
 use crate::protocol::*;
 use crate::transport::NdjsonTransport;
@@ -65,7 +67,7 @@ struct DiskEvent {
 pub struct VfsServer {
 	transport: NdjsonTransport,
 	vfs: Option<VirtualFs>,
-	disk: Option<DiskFs>,
+	disk_backend: Option<Box<dyn FsBackend>>,
 }
 
 impl VfsServer {
@@ -74,17 +76,17 @@ impl VfsServer {
 		Self {
 			transport,
 			vfs: None,
-			disk: None,
+			disk_backend: None,
 		}
 	}
 
 	/// Main loop: read JSON-RPC messages from stdin, dispatch to handlers.
-	pub fn run(&mut self) -> Result<(), VfsError> {
-		let stdin = io::stdin();
-		let reader = stdin.lock();
+	pub async fn run(&mut self) -> Result<(), VfsError> {
+		let stdin = tokio::io::stdin();
+		let reader = BufReader::new(stdin);
+		let mut lines = reader.lines();
 
-		for line_result in reader.lines() {
-			let line = line_result?;
+		while let Some(line) = lines.next_line().await? {
 			if line.trim().is_empty() {
 				continue;
 			}
@@ -97,7 +99,7 @@ impl VfsServer {
 				}
 			};
 
-			self.dispatch(request);
+			self.dispatch(request).await;
 		}
 
 		Ok(())
@@ -105,7 +107,7 @@ impl VfsServer {
 
 	// ── Dispatch ──────────────────────────────────────────────────────────
 
-	fn dispatch(&mut self, req: JsonRpcRequest) {
+	async fn dispatch(&mut self, req: JsonRpcRequest) {
 		// Track disk events to emit after the operation.
 		let mut disk_event: Option<DiskEvent> = None;
 		let method = req.method.clone();
@@ -116,13 +118,21 @@ impl VfsServer {
 			// ── Dual-backend methods (15) ────────────────────────────────
 			"vfs/readFile" => match detect_scheme(&req.params) {
 				Scheme::Vfs => self.with_vfs(|vfs| handle_read_file(vfs, req.params)),
-				Scheme::Disk => self.with_disk(|disk| handle_disk_read_file(disk, req.params)),
+				Scheme::Disk => match self.get_disk_backend() {
+					Ok(backend) => handle_disk_read_file(backend, req.params).await,
+					Err(e) => Err(e),
+				},
 			},
 			"vfs/writeFile" => match detect_scheme(&req.params) {
 				Scheme::Vfs => self.with_vfs_mut(|vfs| handle_write_file(vfs, req.params)),
 				Scheme::Disk => {
 					let params_clone = req.params.clone();
-					let r = self.with_disk(|disk| handle_disk_write_file(disk, req.params));
+					let r = match self.get_disk_backend() {
+						Ok(backend) => {
+							handle_disk_write_file(backend, req.params).await
+						}
+						Err(e) => Err(e),
+					};
 					if r.is_ok() {
 						disk_event = Some(DiskEvent {
 							params: serde_json::json!({
@@ -139,7 +149,12 @@ impl VfsServer {
 				Scheme::Vfs => self.with_vfs_mut(|vfs| handle_append_file(vfs, req.params)),
 				Scheme::Disk => {
 					let params_clone = req.params.clone();
-					let r = self.with_disk(|disk| handle_disk_append_file(disk, req.params));
+					let r = match self.get_disk_backend() {
+						Ok(backend) => {
+							handle_disk_append_file(backend, req.params).await
+						}
+						Err(e) => Err(e),
+					};
 					if r.is_ok() {
 						disk_event = Some(DiskEvent {
 							params: serde_json::json!({
@@ -156,7 +171,12 @@ impl VfsServer {
 				Scheme::Vfs => self.with_vfs_mut(|vfs| handle_delete_file(vfs, req.params)),
 				Scheme::Disk => {
 					let params_clone = req.params.clone();
-					let r = self.with_disk(|disk| handle_disk_delete_file(disk, req.params));
+					let r = match self.get_disk_backend() {
+						Ok(backend) => {
+							handle_disk_delete_file(backend, req.params).await
+						}
+						Err(e) => Err(e),
+					};
 					if r.is_ok() {
 						disk_event = Some(DiskEvent {
 							params: serde_json::json!({
@@ -173,7 +193,10 @@ impl VfsServer {
 				Scheme::Vfs => self.with_vfs_mut(|vfs| handle_mkdir(vfs, req.params)),
 				Scheme::Disk => {
 					let params_clone = req.params.clone();
-					let r = self.with_disk(|disk| handle_disk_mkdir(disk, req.params));
+					let r = match self.get_disk_backend() {
+						Ok(backend) => handle_disk_mkdir(backend, req.params).await,
+						Err(e) => Err(e),
+					};
 					if r.is_ok() {
 						disk_event = Some(DiskEvent {
 							params: serde_json::json!({
@@ -188,13 +211,19 @@ impl VfsServer {
 			},
 			"vfs/readdir" => match detect_scheme(&req.params) {
 				Scheme::Vfs => self.with_vfs(|vfs| handle_readdir(vfs, req.params)),
-				Scheme::Disk => self.with_disk(|disk| handle_disk_readdir(disk, req.params)),
+				Scheme::Disk => match self.get_disk_backend() {
+					Ok(backend) => handle_disk_readdir(backend, req.params).await,
+					Err(e) => Err(e),
+				},
 			},
 			"vfs/rmdir" => match detect_scheme(&req.params) {
 				Scheme::Vfs => self.with_vfs_mut(|vfs| handle_rmdir(vfs, req.params)),
 				Scheme::Disk => {
 					let params_clone = req.params.clone();
-					let r = self.with_disk(|disk| handle_disk_rmdir(disk, req.params));
+					let r = match self.get_disk_backend() {
+						Ok(backend) => handle_disk_rmdir(backend, req.params).await,
+						Err(e) => Err(e),
+					};
 					if r.is_ok() {
 						disk_event = Some(DiskEvent {
 							params: serde_json::json!({
@@ -209,17 +238,28 @@ impl VfsServer {
 			},
 			"vfs/stat" => match detect_scheme(&req.params) {
 				Scheme::Vfs => self.with_vfs(|vfs| handle_stat(vfs, req.params)),
-				Scheme::Disk => self.with_disk(|disk| handle_disk_stat(disk, req.params)),
+				Scheme::Disk => match self.get_disk_backend() {
+					Ok(backend) => handle_disk_stat(backend, req.params).await,
+					Err(e) => Err(e),
+				},
 			},
 			"vfs/exists" => match detect_scheme(&req.params) {
 				Scheme::Vfs => self.with_vfs(|vfs| handle_exists(vfs, req.params)),
-				Scheme::Disk => self.with_disk(|disk| handle_disk_exists(disk, req.params)),
+				Scheme::Disk => match self.get_disk_backend() {
+					Ok(backend) => handle_disk_exists(backend, req.params).await,
+					Err(e) => Err(e),
+				},
 			},
 			"vfs/rename" => match detect_scheme_dual(&req.params, "oldPath", "newPath") {
 				Ok(Scheme::Vfs) => self.with_vfs_mut(|vfs| handle_rename(vfs, req.params)),
 				Ok(Scheme::Disk) => {
 					let params_clone = req.params.clone();
-					let r = self.with_disk(|disk| handle_disk_rename(disk, req.params));
+					let r = match self.get_disk_backend() {
+						Ok(backend) => {
+							handle_disk_rename(backend, req.params).await
+						}
+						Err(e) => Err(e),
+					};
 					if r.is_ok() {
 						disk_event = Some(DiskEvent {
 							params: serde_json::json!({
@@ -238,7 +278,10 @@ impl VfsServer {
 				Ok(Scheme::Vfs) => self.with_vfs_mut(|vfs| handle_copy(vfs, req.params)),
 				Ok(Scheme::Disk) => {
 					let params_clone = req.params.clone();
-					let r = self.with_disk(|disk| handle_disk_copy(disk, req.params));
+					let r = match self.get_disk_backend() {
+						Ok(backend) => handle_disk_copy(backend, req.params).await,
+						Err(e) => Err(e),
+					};
 					if r.is_ok() {
 						disk_event = Some(DiskEvent {
 							params: serde_json::json!({
@@ -274,16 +317,25 @@ impl VfsServer {
 				};
 				match scheme {
 					Scheme::Vfs => self.with_vfs(|vfs| handle_glob(vfs, req.params)),
-					Scheme::Disk => self.with_disk(|disk| handle_disk_glob(disk, req.params)),
+					Scheme::Disk => match self.get_disk_backend() {
+						Ok(backend) => handle_disk_glob(backend, req.params).await,
+						Err(e) => Err(e),
+					},
 				}
 			}
 			"vfs/tree" => match detect_scheme(&req.params) {
 				Scheme::Vfs => self.with_vfs(|vfs| handle_tree(vfs, req.params)),
-				Scheme::Disk => self.with_disk(|disk| handle_disk_tree(disk, req.params)),
+				Scheme::Disk => match self.get_disk_backend() {
+					Ok(backend) => handle_disk_tree(backend, req.params).await,
+					Err(e) => Err(e),
+				},
 			},
 			"vfs/du" => match detect_scheme(&req.params) {
 				Scheme::Vfs => self.with_vfs(|vfs| handle_du(vfs, req.params)),
-				Scheme::Disk => self.with_disk(|disk| handle_disk_du(disk, req.params)),
+				Scheme::Disk => match self.get_disk_backend() {
+					Ok(backend) => handle_disk_du(backend, req.params).await,
+					Err(e) => Err(e),
+				},
 			},
 			"vfs/search" => {
 				// Search doesn't have a path field; detect from glob or default to VFS.
@@ -302,33 +354,50 @@ impl VfsServer {
 				};
 				match scheme {
 					Scheme::Vfs => self.with_vfs(|vfs| handle_search(vfs, req.params)),
-					Scheme::Disk => {
-						self.with_disk(|disk| handle_disk_search(disk, req.params))
-					}
+					Scheme::Disk => match self.get_disk_backend() {
+						Ok(backend) => {
+							handle_disk_search(backend, req.params).await
+						}
+						Err(e) => Err(e),
+					},
 				}
 			}
 
 			// ── VFS-only methods (10) ────────────────────────────────────
 			"vfs/history" => match detect_scheme(&req.params) {
 				Scheme::Vfs => self.with_vfs(|vfs| handle_history(vfs, req.params)),
-				Scheme::Disk => self.with_disk(|disk| handle_disk_history(disk, req.params)),
+				Scheme::Disk => match self.get_disk_backend() {
+					Ok(backend) => handle_disk_history(backend, req.params).await,
+					Err(e) => Err(e),
+				},
 			},
 			"vfs/diff" => match detect_scheme_dual(&req.params, "oldPath", "newPath") {
 				Ok(Scheme::Vfs) => self.with_vfs(|vfs| handle_diff(vfs, req.params)),
-				Ok(Scheme::Disk) => self.with_disk(|disk| handle_disk_diff(disk, req.params)),
+				Ok(Scheme::Disk) => match self.get_disk_backend() {
+					Ok(backend) => handle_disk_diff(backend, req.params).await,
+					Err(e) => Err(e),
+				},
 				Err(e) => Err(e),
 			},
 			"vfs/diffVersions" => match detect_scheme(&req.params) {
 				Scheme::Vfs => self.with_vfs(|vfs| handle_diff_versions(vfs, req.params)),
-				Scheme::Disk => {
-					self.with_disk(|disk| handle_disk_diff_versions(disk, req.params))
-				}
+				Scheme::Disk => match self.get_disk_backend() {
+					Ok(backend) => {
+						handle_disk_diff_versions(backend, req.params).await
+					}
+					Err(e) => Err(e),
+				},
 			},
 			"vfs/checkout" => match detect_scheme(&req.params) {
 				Scheme::Vfs => self.with_vfs_mut(|vfs| handle_checkout(vfs, req.params)),
 				Scheme::Disk => {
 					let params_clone = req.params.clone();
-					let r = self.with_disk(|disk| handle_disk_checkout(disk, req.params));
+					let r = match self.get_disk_backend() {
+						Ok(backend) => {
+							handle_disk_checkout(backend, req.params).await
+						}
+						Err(e) => Err(e),
+					};
 					if r.is_ok() {
 						disk_event = Some(DiskEvent {
 							params: serde_json::json!({
@@ -341,11 +410,11 @@ impl VfsServer {
 					r
 				}
 			},
-			"vfs/snapshot" => self.with_vfs(|vfs| handle_snapshot(vfs)),
+			"vfs/snapshot" => self.with_vfs(handle_snapshot),
 			"vfs/restore" => self.with_vfs_mut(|vfs| handle_restore(vfs, req.params)),
-			"vfs/clear" => self.with_vfs_mut(|vfs| handle_clear(vfs)),
+			"vfs/clear" => self.with_vfs_mut(handle_clear),
 			"vfs/transaction" => self.with_vfs_mut(|vfs| handle_transaction(vfs, req.params)),
-			"vfs/metrics" => self.with_vfs(|vfs| handle_metrics(vfs)),
+			"vfs/metrics" => self.with_vfs(handle_metrics),
 			_ => {
 				self.transport.write_error(
 					req.id,
@@ -421,14 +490,11 @@ impl VfsServer {
 		}
 	}
 
-	// ── Disk accessors ──────────────────────────────────────────────────
+	// ── Disk backend accessor ──────────────────────────────────────────
 
-	fn with_disk<F>(&self, f: F) -> Result<serde_json::Value, VfsError>
-	where
-		F: FnOnce(&DiskFs) -> Result<serde_json::Value, VfsError>,
-	{
-		match &self.disk {
-			Some(disk) => f(disk),
+	fn get_disk_backend(&self) -> Result<&dyn FsBackend, VfsError> {
+		match &self.disk_backend {
+			Some(backend) => Ok(backend.as_ref()),
 			None => Err(VfsError::DiskNotConfigured),
 		}
 	}
@@ -473,9 +539,9 @@ impl VfsServer {
 
 		self.vfs = Some(VirtualFs::new(limits, max_history));
 
-		// Wire DiskFs from optional disk config.
-		self.disk = init_params.disk.map(|dc| {
-			DiskFs::new(
+		// Wire disk backend from optional disk config via LocalFsBackend.
+		self.disk_backend = init_params.disk.map(|dc| {
+			let disk = DiskFs::new(
 				std::path::PathBuf::from(&dc.root_directory),
 				dc.allowed_paths
 					.unwrap_or_default()
@@ -483,7 +549,8 @@ impl VfsServer {
 					.map(std::path::PathBuf::from)
 					.collect(),
 				max_history,
-			)
+			);
+			Box::new(LocalFsBackend::new(disk)) as Box<dyn FsBackend>
 		});
 
 		Ok(serde_json::json!({ "ok": true }))
@@ -908,119 +975,129 @@ fn handle_metrics(vfs: &VirtualFs) -> Result<serde_json::Value, VfsError> {
 	})?)
 }
 
-// ── Free-standing disk handler functions ────────────────────────────────────
+// ── Free-standing async disk handler functions ──────────────────────────────
+//
+// These take `&dyn FsBackend` and call the trait methods with `.await`.
 
-fn handle_disk_read_file(
-	disk: &DiskFs,
+async fn handle_disk_read_file(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: ReadFileParams = parse_params(params)?;
-	let r = disk.read_file(&p.path)?;
+	let r = backend.read_file(&p.path).await?;
 	Ok(serde_json::to_value(r)?)
 }
 
-fn handle_disk_write_file(
-	disk: &DiskFs,
+async fn handle_disk_write_file(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: WriteFileParams = parse_params(params)?;
-	disk.write_file(
-		&p.path,
-		&p.content,
-		p.content_type.as_deref(),
-		p.create_parents.unwrap_or(false),
-	)?;
+	backend
+		.write_file(
+			&p.path,
+			&p.content,
+			p.content_type.as_deref(),
+			p.create_parents.unwrap_or(false),
+		)
+		.await?;
 	Ok(serde_json::json!({ "ok": true }))
 }
 
-fn handle_disk_append_file(
-	disk: &DiskFs,
+async fn handle_disk_append_file(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: AppendFileParams = parse_params(params)?;
-	disk.append_file(&p.path, &p.content)?;
+	backend.append_file(&p.path, &p.content).await?;
 	Ok(serde_json::json!({ "ok": true }))
 }
 
-fn handle_disk_delete_file(
-	disk: &DiskFs,
+async fn handle_disk_delete_file(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: PathParams = parse_params(params)?;
-	disk.delete_file(&p.path)?;
+	backend.delete_file(&p.path).await?;
 	Ok(serde_json::json!({ "ok": true }))
 }
 
-fn handle_disk_stat(
-	disk: &DiskFs,
+async fn handle_disk_stat(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: PathParams = parse_params(params)?;
-	let r = disk.stat(&p.path)?;
+	let r = backend.stat(&p.path).await?;
 	Ok(serde_json::to_value(r)?)
 }
 
-fn handle_disk_exists(
-	disk: &DiskFs,
+async fn handle_disk_exists(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: PathParams = parse_params(params)?;
-	let exists = disk.exists(&p.path)?;
+	let exists = backend.exists(&p.path).await?;
 	Ok(serde_json::json!({ "exists": exists }))
 }
 
-fn handle_disk_mkdir(
-	disk: &DiskFs,
+async fn handle_disk_mkdir(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: MkdirParams = parse_params(params)?;
-	disk.mkdir(&p.path, p.recursive.unwrap_or(false))?;
+	backend.mkdir(&p.path, p.recursive.unwrap_or(false)).await?;
 	Ok(serde_json::json!({ "ok": true }))
 }
 
-fn handle_disk_readdir(
-	disk: &DiskFs,
+async fn handle_disk_readdir(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: ReaddirParams = parse_params(params)?;
-	let entries = disk.readdir(&p.path, p.recursive.unwrap_or(false))?;
+	let entries = backend
+		.readdir(&p.path, p.recursive.unwrap_or(false))
+		.await?;
 	Ok(serde_json::json!({ "entries": entries }))
 }
 
-fn handle_disk_rmdir(
-	disk: &DiskFs,
+async fn handle_disk_rmdir(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: RmdirParams = parse_params(params)?;
-	disk.rmdir(&p.path, p.recursive.unwrap_or(false))?;
+	backend
+		.rmdir(&p.path, p.recursive.unwrap_or(false))
+		.await?;
 	Ok(serde_json::json!({ "ok": true }))
 }
 
-fn handle_disk_rename(
-	disk: &DiskFs,
+async fn handle_disk_rename(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: RenameParams = parse_params(params)?;
-	disk.rename(&p.old_path, &p.new_path)?;
+	backend.rename(&p.old_path, &p.new_path).await?;
 	Ok(serde_json::json!({ "ok": true }))
 }
 
-fn handle_disk_copy(
-	disk: &DiskFs,
+async fn handle_disk_copy(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: CopyParams = parse_params(params)?;
-	disk.copy(
-		&p.src,
-		&p.dest,
-		p.overwrite.unwrap_or(false),
-		p.recursive.unwrap_or(false),
-	)?;
+	backend
+		.copy(
+			&p.src,
+			&p.dest,
+			p.overwrite.unwrap_or(false),
+			p.recursive.unwrap_or(false),
+		)
+		.await?;
 	Ok(serde_json::json!({ "ok": true }))
 }
 
-fn handle_disk_glob(
-	disk: &DiskFs,
+async fn handle_disk_glob(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: GlobParams = parse_params(params)?;
@@ -1036,30 +1113,30 @@ fn handle_disk_glob(
 			))
 		}
 	};
-	let matches = disk.glob(&patterns)?;
+	let matches = backend.glob(&patterns).await?;
 	Ok(serde_json::json!({ "matches": matches }))
 }
 
-fn handle_disk_tree(
-	disk: &DiskFs,
+async fn handle_disk_tree(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: PathParams = parse_params(params)?;
-	let tree = disk.tree(&p.path)?;
+	let tree = backend.tree(&p.path).await?;
 	Ok(serde_json::json!({ "tree": tree }))
 }
 
-fn handle_disk_du(
-	disk: &DiskFs,
+async fn handle_disk_du(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: PathParams = parse_params(params)?;
-	let size = disk.du(&p.path)?;
+	let size = backend.du(&p.path).await?;
 	Ok(serde_json::json!({ "size": size }))
 }
 
-fn handle_disk_search(
-	disk: &DiskFs,
+async fn handle_disk_search(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: SearchParams = parse_params(params)?;
@@ -1075,38 +1152,42 @@ fn handle_disk_search(
 		glob: p.glob,
 	};
 	// SearchParams has no path field; default to file:/// (root of sandbox).
-	match disk.search("file:///", &p.query, &opts)? {
+	match backend.search("file:///", &p.query, &opts).await? {
 		DiskSearchResult::Matches(matches) => Ok(serde_json::json!({ "results": matches })),
 		DiskSearchResult::Count(count) => Ok(serde_json::json!({ "count": count })),
 	}
 }
 
-fn handle_disk_history(
-	disk: &DiskFs,
+async fn handle_disk_history(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: PathParams = parse_params(params)?;
-	let entries = disk.history(&p.path)?;
+	let entries = backend.history(&p.path).await?;
 	Ok(serde_json::json!({ "entries": entries }))
 }
 
-fn handle_disk_diff(
-	disk: &DiskFs,
+async fn handle_disk_diff(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: DiffParams = parse_params(params)?;
-	let d = disk.diff(&p.old_path, &p.new_path, p.context.unwrap_or(3))?;
+	let d = backend
+		.diff(&p.old_path, &p.new_path, p.context.unwrap_or(3))
+		.await?;
 	Ok(serde_json::to_value(convert_diff_output_from_raw(
 		&p.old_path, &p.new_path, d,
 	))?)
 }
 
-fn handle_disk_diff_versions(
-	disk: &DiskFs,
+async fn handle_disk_diff_versions(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: DiffVersionsParams = parse_params(params)?;
-	let d = disk.diff_versions(&p.path, p.old_version, p.new_version, p.context.unwrap_or(3))?;
+	let d = backend
+		.diff_versions(&p.path, p.old_version, p.new_version, p.context.unwrap_or(3))
+		.await?;
 	let old_label = format!("{}@v{}", p.path, p.old_version);
 	let new_label = match p.new_version {
 		Some(v) => format!("{}@v{}", p.path, v),
@@ -1117,11 +1198,11 @@ fn handle_disk_diff_versions(
 	))?)
 }
 
-fn handle_disk_checkout(
-	disk: &DiskFs,
+async fn handle_disk_checkout(
+	backend: &dyn FsBackend,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, VfsError> {
 	let p: CheckoutParams = parse_params(params)?;
-	disk.checkout(&p.path, p.version)?;
+	backend.checkout(&p.path, p.version).await?;
 	Ok(serde_json::json!({ "ok": true }))
 }

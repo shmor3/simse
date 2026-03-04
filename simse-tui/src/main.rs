@@ -4,6 +4,7 @@ mod app;
 pub mod at_mention;
 pub mod autocomplete;
 mod banner;
+pub mod commands;
 pub mod dialogs;
 pub mod markdown;
 mod output;

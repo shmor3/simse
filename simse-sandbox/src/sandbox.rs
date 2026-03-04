@@ -135,6 +135,7 @@ pub struct Sandbox {
     initialized: bool,
 
     // Retained configs for engine re-creation on backend switch
+    vfs_init: Option<VfsInitConfig>,
     vsh_init: Option<VshInitConfig>,
     vnet_init: Option<VnetInitConfig>,
 }
@@ -150,6 +151,7 @@ impl Sandbox {
             vsh: None,
             vnet: None,
             initialized: false,
+            vfs_init: None,
             vsh_init: None,
             vnet_init: None,
         }
@@ -167,6 +169,7 @@ impl Sandbox {
         }
 
         // Store init configs for backend switching
+        self.vfs_init = config.vfs.clone();
         self.vsh_init = config.vsh.clone();
         self.vnet_init = config.vnet.clone();
 
@@ -183,7 +186,10 @@ impl Sandbox {
         self.create_backends_and_engines(&config, &ssh_pool)?;
 
         // Initialize VNet if present
-        self.initialize_vnet(&config.vnet, &config.backend, &ssh_pool);
+        if let Some(ref vnet_cfg) = config.vnet {
+            let net_backend = Self::create_net_backend(&config.backend, &ssh_pool)?;
+            self.vnet = Some(Self::build_vnet(vnet_cfg, net_backend));
+        }
 
         self.backend_config = Some(config.backend);
         self.ssh_pool = ssh_pool;
@@ -224,26 +230,24 @@ impl Sandbox {
             }
         };
 
-        // Rebuild the init config from stored values
-        let init_config = InitConfig {
-            backend: new_config.clone(),
-            vfs: None, // VFS in-memory state is preserved
-            vsh: self.vsh_init.clone(),
-            vnet: self.vnet_init.clone(),
-        };
-
-        // Replace fs_backend
-        self.fs_backend = Some(Self::create_fs_backend(&init_config, &ssh_pool)?);
+        // Replace fs_backend using stored VFS config
+        if self.fs_backend.is_some() {
+            let vfs_cfg = self.vfs_init.clone().unwrap_or_default();
+            self.fs_backend =
+                Some(Self::create_fs_backend_from_cfg(&vfs_cfg, &new_config, &ssh_pool)?);
+        }
 
         // Recreate VSH with new backend
         if let Some(ref vsh_cfg) = self.vsh_init {
-            let shell_backend = Self::create_shell_backend(&new_config, &ssh_pool);
+            let shell_backend = Self::create_shell_backend(&new_config, &ssh_pool)?;
             self.vsh = Some(Self::build_vsh(vsh_cfg, shell_backend));
         }
 
         // Recreate VNet with new backend
-        self.vnet = None;
-        self.initialize_vnet(&self.vnet_init.clone(), &new_config, &ssh_pool);
+        if let Some(ref vnet_cfg) = self.vnet_init.clone() {
+            let net_backend = Self::create_net_backend(&new_config, &ssh_pool)?;
+            self.vnet = Some(Self::build_vnet(vnet_cfg, net_backend));
+        }
 
         self.backend_config = Some(new_config);
         self.ssh_pool = ssh_pool;
@@ -293,6 +297,7 @@ impl Sandbox {
         self.fs_backend = None;
         self.vsh = None;
         self.vnet = None;
+        self.vfs_init = None;
         self.vsh_init = None;
         self.vnet_init = None;
         self.initialized = false;
@@ -369,22 +374,29 @@ impl Sandbox {
 
         // VSH
         if let Some(ref vsh_cfg) = config.vsh {
-            let shell_backend = Self::create_shell_backend(&config.backend, ssh_pool);
+            let shell_backend = Self::create_shell_backend(&config.backend, ssh_pool)?;
             self.vsh = Some(Self::build_vsh(vsh_cfg, shell_backend));
         }
 
         Ok(())
     }
 
-    /// Create the appropriate FsBackend based on the backend config.
+    /// Create the appropriate FsBackend from init config.
     fn create_fs_backend(
         config: &InitConfig,
         ssh_pool: &Option<Arc<SshPool>>,
     ) -> Result<Box<dyn FsBackend>, SandboxError> {
-        // Use VFS init config for root/allowed paths, fall back to defaults
         let vfs_cfg = config.vfs.as_ref().cloned().unwrap_or_default();
+        Self::create_fs_backend_from_cfg(&vfs_cfg, &config.backend, ssh_pool)
+    }
 
-        match &config.backend {
+    /// Create the appropriate FsBackend from explicit config.
+    fn create_fs_backend_from_cfg(
+        vfs_cfg: &VfsInitConfig,
+        backend: &BackendConfig,
+        ssh_pool: &Option<Arc<SshPool>>,
+    ) -> Result<Box<dyn FsBackend>, SandboxError> {
+        match backend {
             BackendConfig::Local => {
                 let disk = DiskFs::new(
                     PathBuf::from(&vfs_cfg.root_directory),
@@ -398,13 +410,8 @@ impl Sandbox {
                 Ok(Box::new(LocalFsBackend::new(disk)))
             }
             BackendConfig::Ssh(_) => {
-                let pool = ssh_pool
-                    .as_ref()
-                    .ok_or_else(|| {
-                        SandboxError::InvalidParams("SSH pool not available".into())
-                    })?
-                    .clone();
-                Ok(Box::new(SshFsBackend::new(pool, vfs_cfg.root_directory)))
+                let pool = Self::require_ssh_pool(ssh_pool)?;
+                Ok(Box::new(SshFsBackend::new(pool, vfs_cfg.root_directory.clone())))
             }
         }
     }
@@ -413,15 +420,12 @@ impl Sandbox {
     fn create_shell_backend(
         backend: &BackendConfig,
         ssh_pool: &Option<Arc<SshPool>>,
-    ) -> Box<dyn ShellBackend> {
+    ) -> Result<Box<dyn ShellBackend>, SandboxError> {
         match backend {
-            BackendConfig::Local => Box::new(LocalShellBackend),
+            BackendConfig::Local => Ok(Box::new(LocalShellBackend)),
             BackendConfig::Ssh(_) => {
-                let pool = ssh_pool
-                    .as_ref()
-                    .expect("SSH pool must be available for SSH backend")
-                    .clone();
-                Box::new(SshShellBackend::new(pool))
+                let pool = Self::require_ssh_pool(ssh_pool)?;
+                Ok(Box::new(SshShellBackend::new(pool)))
             }
         }
     }
@@ -430,17 +434,24 @@ impl Sandbox {
     fn create_net_backend(
         backend: &BackendConfig,
         ssh_pool: &Option<Arc<SshPool>>,
-    ) -> Box<dyn NetBackend> {
+    ) -> Result<Box<dyn NetBackend>, SandboxError> {
         match backend {
-            BackendConfig::Local => Box::new(LocalNetBackend::new()),
+            BackendConfig::Local => Ok(Box::new(LocalNetBackend::new())),
             BackendConfig::Ssh(_) => {
-                let pool = ssh_pool
-                    .as_ref()
-                    .expect("SSH pool must be available for SSH backend")
-                    .clone();
-                Box::new(SshNetBackend::new(pool))
+                let pool = Self::require_ssh_pool(ssh_pool)?;
+                Ok(Box::new(SshNetBackend::new(pool)))
             }
         }
+    }
+
+    /// Get the SSH pool, returning an error if not available.
+    fn require_ssh_pool(
+        ssh_pool: &Option<Arc<SshPool>>,
+    ) -> Result<Arc<SshPool>, SandboxError> {
+        ssh_pool
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| SandboxError::InvalidParams("SSH pool not available".into()))
     }
 
     /// Build a VirtualShell from init config and a backend.
@@ -456,27 +467,19 @@ impl Sandbox {
         VirtualShell::new(sandbox_config, cfg.shell.clone(), backend)
     }
 
-    /// Initialize VNet engine with the appropriate backend.
-    fn initialize_vnet(
-        &mut self,
-        vnet_cfg: &Option<VnetInitConfig>,
-        backend: &BackendConfig,
-        ssh_pool: &Option<Arc<SshPool>>,
-    ) {
-        if let Some(cfg) = vnet_cfg {
-            let net_backend = Self::create_net_backend(backend, ssh_pool);
-            let sandbox_init = VnetSandboxInit {
-                allowed_hosts: cfg.allowed_hosts.clone(),
-                allowed_ports: cfg.allowed_ports.clone(),
-                allowed_protocols: cfg.allowed_protocols.clone(),
-                default_timeout_ms: cfg.default_timeout_ms,
-                max_response_bytes: cfg.max_response_bytes,
-                max_connections: cfg.max_connections,
-            };
-            let mut vnet = VirtualNetwork::new();
-            vnet.initialize(Some(sandbox_init), Some(net_backend));
-            self.vnet = Some(vnet);
-        }
+    /// Build a VirtualNetwork from init config and a backend.
+    fn build_vnet(cfg: &VnetInitConfig, net_backend: Box<dyn NetBackend>) -> VirtualNetwork {
+        let sandbox_init = VnetSandboxInit {
+            allowed_hosts: cfg.allowed_hosts.clone(),
+            allowed_ports: cfg.allowed_ports.clone(),
+            allowed_protocols: cfg.allowed_protocols.clone(),
+            default_timeout_ms: cfg.default_timeout_ms,
+            max_response_bytes: cfg.max_response_bytes,
+            max_connections: cfg.max_connections,
+        };
+        let mut vnet = VirtualNetwork::new();
+        vnet.initialize(Some(sandbox_init), Some(net_backend));
+        vnet
     }
 }
 

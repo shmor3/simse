@@ -6,6 +6,7 @@ pub mod network;
 pub mod persistence;
 pub mod predictor;
 pub mod protocol;
+pub mod server;
 pub mod snapshot;
 pub mod trainer;
 pub mod transport;

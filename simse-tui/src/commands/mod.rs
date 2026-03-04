@@ -101,6 +101,10 @@ pub enum BridgeAction {
 	// ── AI ───────────────────────────────────────────────────────────
 	/// Run a named chain with the given arguments.
 	RunChain { name: String, args: String },
+
+	// ── Meta ────────────────────────────────────────────────────────
+	/// Compact the conversation history.
+	Compact,
 }
 
 // ── Supporting info types ────────────────────────────────────────────────

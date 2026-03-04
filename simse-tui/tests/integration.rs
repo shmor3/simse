@@ -339,9 +339,12 @@ fn dispatch_meta_commands_produce_correct_types() {
         CommandOutput::OpenOverlay(OverlayAction::Shortcuts)
     ));
 
-    // /compact -> Info
+    // /compact -> BridgeRequest(Compact)
     let out = dispatch_command("compact", "");
-    assert!(matches!(&out[0], CommandOutput::Info(_)));
+    assert!(matches!(
+        &out[0],
+        CommandOutput::BridgeRequest(BridgeAction::Compact)
+    ));
 }
 
 #[test]

@@ -573,7 +573,10 @@ mod tests {
 	#[test]
 	fn dispatch_compact() {
 		let out = dispatch_command("compact", "");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("compact")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::Compact)
+		));
 	}
 
 	#[test]

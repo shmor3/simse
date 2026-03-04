@@ -1,5 +1,7 @@
 //! Tool definitions, registry, execution types.
 
+pub mod parser;
+
 use serde::{Deserialize, Serialize};
 
 /// Default maximum output characters for tool results before truncation.

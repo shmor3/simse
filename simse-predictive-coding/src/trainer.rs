@@ -191,7 +191,7 @@ impl TrainingWorker {
                 "Batch training complete"
             );
 
-            // Swap the snapshot.
+            // Build new snapshot from current network state.
             let new_snapshot = ModelSnapshot::from_network(
                 network,
                 encoder.vocab(),
@@ -199,6 +199,21 @@ impl TrainingWorker {
                 stats.total_samples,
             );
 
+            // Auto-save before the RwLock swap to avoid re-locking.
+            if config.auto_save_epochs > 0
+                && stats.epochs % config.auto_save_epochs == 0
+            {
+                if let Some(ref storage_path) = config.storage_path {
+                    let path = format!("{}/pcn-auto-{}.json.gz", storage_path, stats.epochs);
+                    if let Err(e) = save_snapshot(&new_snapshot, &path, true) {
+                        warn!(error = %e, path, "Auto-save failed");
+                    } else {
+                        debug!(epoch = stats.epochs, path, "Auto-saved snapshot");
+                    }
+                }
+            }
+
+            // Swap the snapshot into the shared RwLock.
             match snapshot.write() {
                 Ok(mut guard) => {
                     *guard = new_snapshot;
@@ -212,21 +227,6 @@ impl TrainingWorker {
                         stats.epochs,
                         stats.total_samples,
                     );
-                }
-            }
-
-            // Auto-save periodically if configured.
-            if config.auto_save_epochs > 0
-                && stats.epochs % config.auto_save_epochs == 0
-            {
-                if let Some(ref storage_path) = config.storage_path {
-                    let path = format!("{}/pcn-auto-{}.json.gz", storage_path, stats.epochs);
-                    let snap_to_save = snapshot.read().unwrap();
-                    if let Err(e) = save_snapshot(&snap_to_save, &path, true) {
-                        warn!(error = %e, path, "Auto-save failed");
-                    } else {
-                        debug!(epoch = stats.epochs, path, "Auto-saved snapshot");
-                    }
                 }
             }
         }

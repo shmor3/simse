@@ -7,7 +7,7 @@
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
-use simse_tui::app::{update, view, App, AppMessage, LoopStatus, PromptMode, Screen};
+use simse_tui::app::{update, view, App, AppMessage, LoopStatus, Screen};
 use simse_tui::autocomplete::CommandAutocompleteState;
 use simse_tui::cli_args::{parse_cli_args, CliArgs};
 use simse_tui::dialogs::confirm::ConfirmDialogState;

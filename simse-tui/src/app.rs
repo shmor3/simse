@@ -14,6 +14,7 @@ use simse_ui_core::commands::registry::{all_commands, CommandCategory, CommandDe
 use simse_ui_core::input::state as input;
 use std::collections::BTreeMap;
 
+use crate::autocomplete::CommandAutocompleteState;
 use crate::banner;
 use crate::commands::{
 	format_table, AgentInfo, BridgeAction, CommandContext, CommandOutput, OverlayAction,
@@ -39,18 +40,6 @@ pub enum Screen {
 	Permission(PermissionRequest),
 }
 
-// ── PromptMode ──────────────────────────────────────────
-
-/// Input prompt mode.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PromptMode {
-	Normal,
-	Autocomplete {
-		selected: usize,
-		matches: Vec<String>,
-	},
-}
-
 // ── LoopStatus ──────────────────────────────────────────
 
 /// Current status of the agentic loop.
@@ -71,7 +60,8 @@ pub struct App {
 	pub active_tool_calls: Vec<ToolCallState>,
 	pub loop_status: LoopStatus,
 	pub screen: Screen,
-	pub prompt_mode: PromptMode,
+	/// Command autocomplete state.
+	pub autocomplete: CommandAutocompleteState,
 	pub scroll_offset: usize,
 	pub should_quit: bool,
 	pub ctrl_c_pending: bool,
@@ -118,7 +108,7 @@ impl App {
 			active_tool_calls: Vec::new(),
 			loop_status: LoopStatus::Idle,
 			screen: Screen::Chat,
-			prompt_mode: PromptMode::Normal,
+			autocomplete: CommandAutocompleteState::new(),
 			scroll_offset: 0,
 			should_quit: false,
 			ctrl_c_pending: false,
@@ -437,48 +427,7 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			};
 		}
 		AppMessage::Tab => {
-			match &app.prompt_mode {
-				PromptMode::Autocomplete { selected, matches } => {
-					// Accept the currently selected match.
-					if let Some(cmd) = matches.get(*selected) {
-						let completed = format!("/{cmd} ");
-						app.input = input::InputState {
-							value: completed.clone(),
-							cursor: completed.len(),
-							..Default::default()
-						};
-					}
-					app.prompt_mode = PromptMode::Normal;
-				}
-				PromptMode::Normal => {
-					// Activate autocomplete if input starts with `/`.
-					let value = &app.input.value;
-					if value.starts_with('/') {
-						let prefix = value[1..].to_lowercase();
-						let matches: Vec<String> = app
-							.commands
-							.iter()
-							.filter(|c| !c.hidden && c.name.starts_with(&prefix))
-							.map(|c| c.name.clone())
-							.collect();
-						if matches.len() == 1 {
-							// Single match — accept immediately.
-							let cmd = &matches[0];
-							let completed = format!("/{cmd} ");
-							app.input = input::InputState {
-								value: completed.clone(),
-								cursor: completed.len(),
-								..Default::default()
-							};
-						} else if !matches.is_empty() {
-							app.prompt_mode = PromptMode::Autocomplete {
-								selected: 0,
-								matches,
-							};
-						}
-					}
-				}
-			}
+			// Autocomplete wiring handled in Task 2
 		}
 		AppMessage::Quit => {
 			app.should_quit = true;
@@ -1499,5 +1448,11 @@ mod tests {
 				view(&app, frame);
 			})
 			.unwrap();
+	}
+
+	#[test]
+	fn app_has_autocomplete_state() {
+		let app = App::new();
+		assert!(!app.autocomplete.is_active());
 	}
 }

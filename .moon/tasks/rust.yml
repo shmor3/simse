@@ -7,6 +7,10 @@ fileGroups:
     - 'Cargo.toml'
 
 tasks:
+  setup:
+    command: 'cargo fetch'
+    inputs:
+      - '@globs(sources)'
   build:
     command: 'cargo build --release'
     inputs:

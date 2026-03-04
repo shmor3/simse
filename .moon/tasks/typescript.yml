@@ -2,6 +2,8 @@ inheritedBy:
   toolchains: ['bun', 'javascript', 'typescript']
 
 tasks:
+  setup:
+    command: 'bun install'
   build:
     command: 'bun run build'
   dev:

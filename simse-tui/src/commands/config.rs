@@ -84,12 +84,18 @@ pub fn handle_settings(_args: &str) -> Vec<CommandOutput> {
 
 /// `/factory-reset` -- reset all user settings to defaults.
 pub fn handle_factory_reset(_args: &str) -> Vec<CommandOutput> {
-	vec![CommandOutput::BridgeRequest(BridgeAction::FactoryReset)]
+	vec![CommandOutput::ConfirmAction {
+		message: "Are you sure? This will delete ALL global SimSE configuration.".into(),
+		action: BridgeAction::FactoryReset,
+	}]
 }
 
 /// `/factory-reset-project` -- reset project-level settings to defaults.
 pub fn handle_factory_reset_project(_args: &str) -> Vec<CommandOutput> {
-	vec![CommandOutput::BridgeRequest(BridgeAction::FactoryResetProject)]
+	vec![CommandOutput::ConfirmAction {
+		message: "Are you sure? This will delete all project-level SimSE configuration.".into(),
+		action: BridgeAction::FactoryResetProject,
+	}]
 }
 
 #[cfg(test)]
@@ -269,25 +275,59 @@ mod tests {
 	// ── /factory-reset ───────────────────────────────────
 
 	#[test]
-	fn factory_reset_returns_bridge_request() {
+	fn factory_reset_returns_confirm_action() {
 		let out = handle_factory_reset("");
 		assert_eq!(out.len(), 1);
 		assert!(matches!(
 			&out[0],
-			CommandOutput::BridgeRequest(BridgeAction::FactoryReset)
+			CommandOutput::ConfirmAction {
+				action: BridgeAction::FactoryReset,
+				..
+			}
 		));
+	}
+
+	#[test]
+	fn factory_reset_confirm_message_mentions_global() {
+		let out = handle_factory_reset("");
+		match &out[0] {
+			CommandOutput::ConfirmAction { message, .. } => {
+				assert!(
+					message.contains("global"),
+					"Confirm message should mention 'global', got: {message}"
+				);
+			}
+			other => panic!("expected ConfirmAction, got {:?}", other),
+		}
 	}
 
 	// ── /factory-reset-project ───────────────────────────
 
 	#[test]
-	fn factory_reset_project_returns_bridge_request() {
+	fn factory_reset_project_returns_confirm_action() {
 		let out = handle_factory_reset_project("");
 		assert_eq!(out.len(), 1);
 		assert!(matches!(
 			&out[0],
-			CommandOutput::BridgeRequest(BridgeAction::FactoryResetProject)
+			CommandOutput::ConfirmAction {
+				action: BridgeAction::FactoryResetProject,
+				..
+			}
 		));
+	}
+
+	#[test]
+	fn factory_reset_project_confirm_message_mentions_project() {
+		let out = handle_factory_reset_project("");
+		match &out[0] {
+			CommandOutput::ConfirmAction { message, .. } => {
+				assert!(
+					message.contains("project"),
+					"Confirm message should mention 'project', got: {message}"
+				);
+			}
+			other => panic!("expected ConfirmAction, got {:?}", other),
+		}
 	}
 
 }

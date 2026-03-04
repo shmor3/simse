@@ -428,7 +428,10 @@ mod tests {
 		let out = dispatch_command("factory-reset", "");
 		assert!(matches!(
 			&out[0],
-			CommandOutput::BridgeRequest(BridgeAction::FactoryReset)
+			CommandOutput::ConfirmAction {
+				action: BridgeAction::FactoryReset,
+				..
+			}
 		));
 	}
 
@@ -437,7 +440,10 @@ mod tests {
 		let out = dispatch_command("factory-reset-project", "");
 		assert!(matches!(
 			&out[0],
-			CommandOutput::BridgeRequest(BridgeAction::FactoryResetProject)
+			CommandOutput::ConfirmAction {
+				action: BridgeAction::FactoryResetProject,
+				..
+			}
 		));
 	}
 
@@ -691,7 +697,10 @@ mod tests {
 		let out = dispatch_command(&cmd, &args);
 		assert!(matches!(
 			&out[0],
-			CommandOutput::BridgeRequest(BridgeAction::FactoryReset)
+			CommandOutput::ConfirmAction {
+				action: BridgeAction::FactoryReset,
+				..
+			}
 		));
 	}
 

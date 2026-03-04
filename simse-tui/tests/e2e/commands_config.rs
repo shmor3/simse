@@ -99,11 +99,11 @@ fn setup_command_opens_overlay() {
 }
 
 // ===================================================================
-// 5. /factory-reset creates a FactoryReset bridge action
+// 5. /factory-reset opens confirmation dialog, then creates bridge action
 // ===================================================================
 
 #[test]
-fn factory_reset_creates_bridge_action() {
+fn factory_reset_opens_confirm_dialog() {
 	let mut h = SimseTestHarness::new();
 	assert!(
 		h.app.pending_bridge_action.is_none(),
@@ -112,11 +112,63 @@ fn factory_reset_creates_bridge_action() {
 
 	h.submit("/factory-reset");
 
+	// Should be on the Confirm screen, not yet a bridge action.
+	assert!(
+		matches!(&h.app.screen, Screen::Confirm { .. }),
+		"Expected Screen::Confirm after /factory-reset, got: {:?}",
+		h.app.screen
+	);
+	assert!(
+		h.app.pending_bridge_action.is_none(),
+		"Should NOT have a pending bridge action before confirming"
+	);
+	assert!(
+		h.app.pending_confirm_action.is_some(),
+		"Should have a pending confirm action"
+	);
+}
+
+#[test]
+fn factory_reset_confirm_creates_bridge_action() {
+	let mut h = SimseTestHarness::new();
+	h.submit("/factory-reset");
+
+	// Confirm by pressing Enter.
+	h.press_enter();
+
 	let action = h
 		.app
 		.pending_bridge_action
 		.as_ref()
-		.expect("Expected a pending bridge action after /factory-reset");
+		.expect("Expected a pending bridge action after confirming /factory-reset");
 
 	assert_eq!(*action, BridgeAction::FactoryReset);
+	assert_eq!(
+		h.app.screen,
+		Screen::Chat,
+		"Should return to Chat after confirming"
+	);
+}
+
+#[test]
+fn factory_reset_escape_cancels() {
+	let mut h = SimseTestHarness::new();
+	h.submit("/factory-reset");
+
+	// Cancel by pressing Escape.
+	h.press_escape();
+
+	assert!(
+		h.app.pending_bridge_action.is_none(),
+		"Should NOT have a pending bridge action after cancelling"
+	);
+	assert!(
+		h.app.pending_confirm_action.is_none(),
+		"Confirm action should be cleared after cancelling"
+	);
+	assert_eq!(
+		h.app.screen,
+		Screen::Chat,
+		"Should return to Chat after cancelling"
+	);
 }

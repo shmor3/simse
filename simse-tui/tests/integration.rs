@@ -273,11 +273,14 @@ fn dispatch_config_commands_produce_correct_types() {
     let out = dispatch_command("config", "key.path");
     assert!(matches!(&out[0], CommandOutput::Error(_)));
 
-    // /factory-reset -> BridgeRequest(FactoryReset)
+    // /factory-reset -> ConfirmAction(FactoryReset)
     let out = dispatch_command("factory-reset", "");
     assert!(matches!(
         &out[0],
-        CommandOutput::BridgeRequest(BridgeAction::FactoryReset)
+        CommandOutput::ConfirmAction {
+            action: BridgeAction::FactoryReset,
+            ..
+        }
     ));
 }
 

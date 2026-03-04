@@ -8,3 +8,5 @@ pub mod search;
 pub mod diff;
 pub mod disk;
 pub mod server;
+pub mod backend;
+pub mod local_backend;

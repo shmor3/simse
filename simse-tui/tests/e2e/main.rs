@@ -11,6 +11,7 @@
 
 mod config;
 pub mod harness;
+mod input;
 mod startup;
 
 use harness::SimseTestHarness;

@@ -2,8 +2,11 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Default maximum output characters for tool results before truncation.
+pub const DEFAULT_MAX_OUTPUT_CHARS: usize = 50_000;
+
 /// A tool parameter definition.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ToolParameter {
 	#[serde(rename = "type")]
 	pub param_type: String,
@@ -18,6 +21,10 @@ pub struct ToolDefinition {
 	pub name: String,
 	pub description: String,
 	pub parameters: std::collections::HashMap<String, ToolParameter>,
+	/// Per-tool override for maximum output characters. If `None`, the registry
+	/// default (`DEFAULT_MAX_OUTPUT_CHARS`) applies.
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub max_output_chars: Option<usize>,
 }
 
 /// A request to call a tool.
@@ -35,7 +42,33 @@ pub struct ToolCallResult {
 	pub name: String,
 	pub output: String,
 	pub is_error: bool,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub diff: Option<String>,
+}
+
+/// Raw output from a tool handler before it is wrapped into a [`ToolCallResult`].
+///
+/// Handlers return this so they can optionally include a diff alongside the
+/// textual output.
+#[derive(Debug, Clone)]
+pub struct ToolHandlerOutput {
+	pub output: String,
+	pub diff: Option<String>,
+}
+
+impl From<String> for ToolHandlerOutput {
+	fn from(output: String) -> Self {
+		Self { output, diff: None }
+	}
+}
+
+impl From<&str> for ToolHandlerOutput {
+	fn from(output: &str) -> Self {
+		Self {
+			output: output.to_string(),
+			diff: None,
+		}
+	}
 }
 
 /// Format a single tool definition for display or system prompt inclusion.
@@ -156,6 +189,7 @@ mod tests {
 			name: "library_search".into(),
 			description: "Search the library".into(),
 			parameters: params,
+			max_output_chars: None,
 		};
 		let formatted = format_tool_definition(&tool);
 		assert!(formatted.contains("### library_search"));
@@ -170,6 +204,7 @@ mod tests {
 			name: "list_tools".into(),
 			description: "List all tools".into(),
 			parameters: std::collections::HashMap::new(),
+			max_output_chars: None,
 		};
 		let formatted = format_tool_definition(&tool);
 		assert!(formatted.contains("### list_tools"));
@@ -182,6 +217,7 @@ mod tests {
 			name: "test_tool".into(),
 			description: "A test".into(),
 			parameters: std::collections::HashMap::new(),
+			max_output_chars: None,
 		};
 		let prompt = format_tools_for_system_prompt(&[tool]);
 		assert!(prompt.starts_with("<tool_use>"));
@@ -248,6 +284,7 @@ mod tests {
 			name: "test".into(),
 			description: "test".into(),
 			parameters: params,
+			max_output_chars: None,
 		};
 		let formatted = format_tool_definition(&tool);
 		let req_pos = formatted.find("required1").unwrap();
@@ -256,5 +293,87 @@ mod tests {
 			req_pos < opt_pos,
 			"Required params should come before optional"
 		);
+	}
+
+	#[test]
+	fn default_max_output_chars_value() {
+		assert_eq!(DEFAULT_MAX_OUTPUT_CHARS, 50_000);
+	}
+
+	#[test]
+	fn tool_handler_output_from_string() {
+		let output = ToolHandlerOutput::from("hello".to_string());
+		assert_eq!(output.output, "hello");
+		assert!(output.diff.is_none());
+	}
+
+	#[test]
+	fn tool_handler_output_from_str() {
+		let output = ToolHandlerOutput::from("world");
+		assert_eq!(output.output, "world");
+		assert!(output.diff.is_none());
+	}
+
+	#[test]
+	fn tool_handler_output_with_diff() {
+		let output = ToolHandlerOutput {
+			output: "wrote file".into(),
+			diff: Some("+new line".into()),
+		};
+		assert_eq!(output.output, "wrote file");
+		assert_eq!(output.diff.as_deref(), Some("+new line"));
+	}
+
+	#[test]
+	fn tool_definition_max_output_chars_serde() {
+		let tool = ToolDefinition {
+			name: "test".into(),
+			description: "test".into(),
+			parameters: std::collections::HashMap::new(),
+			max_output_chars: Some(10_000),
+		};
+		let json = serde_json::to_string(&tool).unwrap();
+		assert!(json.contains("max_output_chars"));
+		let parsed: ToolDefinition = serde_json::from_str(&json).unwrap();
+		assert_eq!(parsed.max_output_chars, Some(10_000));
+	}
+
+	#[test]
+	fn tool_definition_max_output_chars_omitted_when_none() {
+		let tool = ToolDefinition {
+			name: "test".into(),
+			description: "test".into(),
+			parameters: std::collections::HashMap::new(),
+			max_output_chars: None,
+		};
+		let json = serde_json::to_string(&tool).unwrap();
+		assert!(!json.contains("max_output_chars"));
+	}
+
+	#[test]
+	fn tool_call_result_diff_omitted_when_none() {
+		let result = ToolCallResult {
+			id: "1".into(),
+			name: "test".into(),
+			output: "ok".into(),
+			is_error: false,
+			diff: None,
+		};
+		let json = serde_json::to_string(&result).unwrap();
+		assert!(!json.contains("diff"));
+	}
+
+	#[test]
+	fn tool_call_result_diff_present() {
+		let result = ToolCallResult {
+			id: "1".into(),
+			name: "test".into(),
+			output: "ok".into(),
+			is_error: false,
+			diff: Some("+line".into()),
+		};
+		let json = serde_json::to_string(&result).unwrap();
+		assert!(json.contains("diff"));
+		assert!(json.contains("+line"));
 	}
 }

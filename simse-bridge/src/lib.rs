@@ -11,3 +11,4 @@ pub mod json_io;
 pub mod protocol;
 pub mod session_store;
 pub mod storage;
+pub mod tool_registry;

@@ -11,6 +11,7 @@ bun run build:vfs-engine     # cd simse-vfs && cargo build --release
 bun run build:acp-engine     # cd simse-acp && cargo build --release
 bun run build:mcp-engine     # cd simse-mcp && cargo build --release
 bun run build:core           # cd simse-core && cargo build --release
+bun run build:tui            # cd simse-tui && cargo build --release
 bun run build:vsh-engine     # cd simse-vsh && cargo build --release
 bun run build:vnet-engine    # cd simse-vnet && cargo build --release
 
@@ -22,6 +23,9 @@ cd simse-mcp && cargo test     # Rust MCP engine tests
 cd simse-vsh && cargo test     # Rust VSH engine tests
 cd simse-vnet && cargo test    # Rust vnet engine tests
 cd simse-core && cargo test    # Rust core orchestration tests
+cd simse-ui-core && cargo test # Rust UI core tests
+cd simse-bridge && cargo test  # Rust bridge tests
+cd simse-tui && cargo test     # Rust TUI tests (unit + integration)
 ```
 
 ## Architecture

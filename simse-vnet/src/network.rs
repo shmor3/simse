@@ -307,6 +307,24 @@ impl VirtualNetwork {
         }
     }
 
+    // ── Session activity (for external callers) ──
+
+    /// Record bytes sent/received on an existing session.
+    pub fn record_session_activity(
+        &mut self,
+        session_id: &str,
+        bytes_sent: u64,
+        bytes_received: u64,
+    ) {
+        self.sessions
+            .record_activity(session_id, bytes_sent, bytes_received);
+    }
+
+    /// Increment the total request counter (for protocols handled externally).
+    pub fn increment_requests(&mut self) {
+        self.total_requests += 1;
+    }
+
     // ── Metrics ──
 
     pub fn metrics(&self) -> MetricsResult {

@@ -10,6 +10,7 @@
 //! - `harness.rs` — `SimseTestHarness`: TestBackend-based test driver
 
 mod autocomplete;
+mod commands_config;
 mod commands_library;
 mod commands_meta;
 mod commands_session;

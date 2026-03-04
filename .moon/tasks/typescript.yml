@@ -1,5 +1,5 @@
 inheritedBy:
-  toolchains: ['javascript', 'typescript']
+  toolchains: ['bun', 'javascript', 'typescript']
 
 tasks:
   build:

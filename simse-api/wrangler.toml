@@ -1,0 +1,15 @@
+name = "simse-api"
+compatibility_date = "2025-04-01"
+main = "src/index.ts"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "simse-api-db"
+database_id = "placeholder-create-via-wrangler"
+
+# Secrets (set via `wrangler secret put`):
+# SESSION_SECRET
+# PAYMENTS_API_URL
+# PAYMENTS_API_SECRET
+# MAILER_API_URL
+# MAILER_API_SECRET

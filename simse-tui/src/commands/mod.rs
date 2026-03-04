@@ -30,6 +30,13 @@ pub enum CommandOutput {
 	OpenOverlay(OverlayAction),
 	/// Request an async bridge operation (dispatched by the event loop).
 	BridgeRequest(BridgeAction),
+	/// Request a confirmation dialog before executing a bridge action.
+	ConfirmAction {
+		/// The confirmation message to display.
+		message: String,
+		/// The action to execute if the user confirms.
+		action: BridgeAction,
+	},
 }
 
 /// Overlay actions that a command can request.
@@ -326,5 +333,20 @@ mod tests {
 		let info = ToolDefInfo::default();
 		assert_eq!(info.name, "");
 		assert_eq!(info.description, "");
+	}
+
+	#[test]
+	fn command_output_confirm_action() {
+		let output = CommandOutput::ConfirmAction {
+			message: "Are you sure?".into(),
+			action: BridgeAction::FactoryReset,
+		};
+		match &output {
+			CommandOutput::ConfirmAction { message, action } => {
+				assert_eq!(message, "Are you sure?");
+				assert_eq!(action, &BridgeAction::FactoryReset);
+			}
+			other => panic!("expected ConfirmAction, got {:?}", other),
+		}
 	}
 }

@@ -92,6 +92,8 @@ pub struct App {
 	pub prompts: Vec<PromptInfo>,
 	pub config_values: Vec<(String, String)>,
 	pub pending_bridge_action: Option<BridgeAction>,
+	/// Pending action waiting for confirmation via Screen::Confirm.
+	pub pending_confirm_action: Option<BridgeAction>,
 	/// Overlay state for the settings explorer.
 	pub settings_state: SettingsExplorerState,
 	/// Overlay state for the settings explorer config data.
@@ -139,6 +141,7 @@ impl App {
 			prompts: Vec::new(),
 			config_values: Vec::new(),
 			pending_bridge_action: None,
+			pending_confirm_action: None,
 			settings_state: SettingsExplorerState::new(),
 			settings_config_data: serde_json::Value::Null,
 			librarian_state: LibrarianExplorerState::new(Vec::new()),
@@ -280,6 +283,13 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 				Screen::Setup { .. } => {
 					let action = app.setup_state.enter();
 					handle_setup_action(&mut app, action);
+					return app;
+				}
+				Screen::Confirm { .. } => {
+					if let Some(action) = app.pending_confirm_action.take() {
+						app.pending_bridge_action = Some(action);
+					}
+					app.screen = Screen::Chat;
 					return app;
 				}
 				_ => {}
@@ -494,6 +504,13 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 						if app.setup_state.back() {
 							app.screen = Screen::Chat;
 						}
+					}
+					Screen::Confirm { .. } => {
+						app.pending_confirm_action = None;
+						app.screen = Screen::Chat;
+						app.output.push(OutputItem::Info {
+							text: "Cancelled.".into(),
+						});
 					}
 					Screen::Chat => {
 						if app.loop_status != LoopStatus::Idle {
@@ -733,6 +750,10 @@ fn dispatch_command(mut app: App, text: &str) -> App {
 				// Store pending action for the event loop to pick up and execute.
 				app.pending_bridge_action = Some(action);
 			}
+			CommandOutput::ConfirmAction { message, action } => {
+				app.pending_confirm_action = Some(action);
+				app.screen = Screen::Confirm { message };
+			}
 			CommandOutput::OpenOverlay(action) => match action {
 				OverlayAction::Settings => {
 					app.settings_state = SettingsExplorerState::new();
@@ -866,6 +887,9 @@ pub fn view(app: &App, frame: &mut Frame) {
 		}
 		Screen::Setup { .. } => {
 			render_setup_selector(frame, area, &app.setup_state);
+		}
+		Screen::Confirm { message } => {
+			render_confirm_overlay(frame, area, message);
 		}
 		_ => {}
 	}
@@ -1012,6 +1036,44 @@ fn render_shortcuts_overlay(frame: &mut Frame, area: Rect) {
 			.borders(Borders::ALL)
 			.border_style(Style::default().fg(Color::Cyan))
 			.title(" Shortcuts "),
+	);
+	frame.render_widget(popup, popup_area);
+}
+
+/// Render a centered confirmation dialog overlay.
+fn render_confirm_overlay(frame: &mut Frame, area: Rect, message: &str) {
+	let popup_width = 50u16.min(area.width.saturating_sub(4));
+	let popup_height = 8u16.min(area.height.saturating_sub(4));
+	let popup_x = (area.width.saturating_sub(popup_width)) / 2;
+	let popup_y = (area.height.saturating_sub(popup_height)) / 2;
+
+	let popup_area = Rect::new(popup_x, popup_y, popup_width, popup_height);
+
+	let dim = Style::default().fg(Color::DarkGray);
+	let cyan = Style::default().fg(Color::Cyan);
+
+	let lines = vec![
+		Line::from(""),
+		Line::from(Span::styled(
+			format!("  {message}"),
+			Style::default().fg(Color::White),
+		)),
+		Line::from(""),
+		Line::from(""),
+		Line::from(vec![
+			Span::styled("  [Enter] ", cyan),
+			Span::styled("Confirm  ", dim),
+			Span::styled("[Esc] ", cyan),
+			Span::styled("Cancel", dim),
+		]),
+	];
+
+	frame.render_widget(Clear, popup_area);
+	let popup = Paragraph::new(lines).block(
+		Block::default()
+			.borders(Borders::ALL)
+			.border_style(Style::default().fg(Color::Yellow))
+			.title(" Confirm "),
 	);
 	frame.render_widget(popup, popup_area);
 }
@@ -1791,6 +1853,54 @@ mod tests {
 		app = update(app, AppMessage::Submit);
 		// Should transition back to Chat with a result message
 		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	// ── Confirm screen tests ──────────────────────
+
+	#[test]
+	fn confirm_submit_executes_pending_action() {
+		let mut app = App::new();
+		app.pending_confirm_action = Some(BridgeAction::FactoryReset);
+		app.screen = Screen::Confirm {
+			message: "Are you sure?".into(),
+		};
+		app = update(app, AppMessage::Submit);
+		assert_eq!(app.screen, Screen::Chat);
+		assert_eq!(app.pending_bridge_action, Some(BridgeAction::FactoryReset));
+		assert!(app.pending_confirm_action.is_none());
+	}
+
+	#[test]
+	fn confirm_escape_cancels() {
+		let mut app = App::new();
+		app.pending_confirm_action = Some(BridgeAction::FactoryReset);
+		app.screen = Screen::Confirm {
+			message: "Are you sure?".into(),
+		};
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+		assert!(app.pending_bridge_action.is_none());
+		assert!(app.pending_confirm_action.is_none());
+		assert!(app
+			.output
+			.iter()
+			.any(|o| matches!(o, OutputItem::Info { text } if text == "Cancelled.")));
+	}
+
+	#[test]
+	fn render_confirm_overlay_does_not_panic() {
+		let backend = ratatui::backend::TestBackend::new(80, 24);
+		let mut terminal = ratatui::Terminal::new(backend).unwrap();
+		let mut app = App::new();
+		app.screen = Screen::Confirm {
+			message: "Delete everything?".into(),
+		};
+
+		terminal
+			.draw(|frame| {
+				view(&app, frame);
+			})
+			.unwrap();
 	}
 
 	#[test]

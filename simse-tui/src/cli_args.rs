@@ -31,6 +31,8 @@ pub struct CliArgs {
 	pub server: Option<String>,
 	/// Override agent ID.
 	pub agent: Option<String>,
+	/// Override data directory (for isolated testing).
+	pub data_dir: Option<String>,
 	/// Enable verbose output.
 	pub verbose: bool,
 	/// If true, the user requested `--help` and the program should print
@@ -47,6 +49,7 @@ impl Default for CliArgs {
 			resume: None,
 			server: None,
 			agent: None,
+			data_dir: None,
 			verbose: false,
 			help: false,
 		}
@@ -71,6 +74,7 @@ Options:
       --resume <id>       Resume a specific session by ID
       --server <name>     Override ACP server name
       --agent <id>        Override agent ID
+      --data-dir <path>     Override data directory
   -v, --verbose           Enable verbose output
   -h, --help              Show this help message"
 		.into()
@@ -134,6 +138,12 @@ pub fn parse_cli_args(args: &[String]) -> CliArgs {
 			"--agent" => {
 				if let Some(value) = args.get(i + 1) {
 					result.agent = Some(value.clone());
+					i += 1;
+				}
+			}
+			"--data-dir" => {
+				if let Some(value) = args.get(i + 1) {
+					result.data_dir = Some(value.clone());
 					i += 1;
 				}
 			}
@@ -384,5 +394,17 @@ mod tests {
 		// When the same flag is given twice, the last value wins
 		let result = parse_cli_args(&args(&["-p", "first", "-p", "second"]));
 		assert_eq!(result.prompt.as_deref(), Some("second"));
+	}
+
+	#[test]
+	fn cli_args_data_dir() {
+		let result = parse_cli_args(&args(&["--data-dir", "/tmp/simse-test"]));
+		assert_eq!(result.data_dir.as_deref(), Some("/tmp/simse-test"));
+	}
+
+	#[test]
+	fn cli_args_data_dir_missing_value() {
+		let result = parse_cli_args(&args(&["--data-dir"]));
+		assert_eq!(result.data_dir, None);
 	}
 }

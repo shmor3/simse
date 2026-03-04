@@ -1,0 +1,11 @@
+language: 'typescript'
+tags: ['app']
+
+tasks:
+  dev:
+    command: 'bun run start'
+    options:
+      persistent: true
+      runInCI: false
+  test:
+    command: 'bun test'

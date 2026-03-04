@@ -141,6 +141,7 @@ pub struct PermissionData {
 pub struct PermissionManager {
 	mode: PermissionMode,
 	rules: Vec<PermissionRule>,
+	config_path: Option<String>,
 }
 
 /// Mode cycle order.
@@ -157,7 +158,27 @@ impl PermissionManager {
 		Self {
 			mode,
 			rules: Vec::new(),
+			config_path: None,
 		}
+	}
+
+	/// Create a new `PermissionManager` with a config path for external persistence.
+	pub fn with_config_path(mode: PermissionMode, config_path: String) -> Self {
+		Self {
+			mode,
+			rules: Vec::new(),
+			config_path: Some(config_path),
+		}
+	}
+
+	/// Get the config path.
+	pub fn config_path(&self) -> Option<&str> {
+		self.config_path.as_deref()
+	}
+
+	/// Set the config path.
+	pub fn set_config_path(&mut self, path: Option<String>) {
+		self.config_path = path;
 	}
 
 	/// Check whether a tool call should be allowed, denied, or needs user confirmation.
@@ -201,10 +222,8 @@ impl PermissionManager {
 			PermissionMode::Default => {
 				if is_read_only_tool(tool_name) {
 					PermissionDecision::Allow
-				} else if is_write_tool(tool_name) || is_bash_tool(tool_name) {
-					PermissionDecision::Ask
 				} else {
-					PermissionDecision::Allow
+					PermissionDecision::Ask
 				}
 			}
 		}
@@ -427,9 +446,9 @@ mod tests {
 	}
 
 	#[test]
-	fn default_mode_allows_unknown_tools() {
+	fn default_mode_asks_for_unknown_tools() {
 		let pm = PermissionManager::default();
-		assert_eq!(pm.check("some_custom_tool", None), PermissionDecision::Allow);
+		assert_eq!(pm.check("some_custom_tool", None), PermissionDecision::Ask);
 	}
 
 	// -----------------------------------------------------------------------
@@ -638,8 +657,8 @@ mod tests {
 		});
 		assert_eq!(pm.check("bash", None), PermissionDecision::Allow);
 		assert_eq!(pm.check("bass", None), PermissionDecision::Allow);
-		// "ba" should not match (? requires exactly one character)
-		assert_eq!(pm.check("ba", None), PermissionDecision::Allow); // unknown tool, default allows
+		// "ba" should not match glob (? requires exactly one character), falls to mode-based
+		assert_eq!(pm.check("ba", None), PermissionDecision::Ask); // unknown tool in Default mode
 	}
 
 	#[test]

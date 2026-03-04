@@ -4,11 +4,14 @@ mod app;
 pub mod at_mention;
 pub mod autocomplete;
 mod banner;
+pub mod cli_args;
 pub mod commands;
 pub mod dialogs;
 pub mod dispatch;
+pub mod event_loop;
 pub mod markdown;
 mod output;
+pub mod onboarding;
 pub mod overlays;
 pub mod spinner;
 

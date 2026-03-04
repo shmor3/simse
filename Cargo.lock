@@ -1034,6 +1034,7 @@ dependencies = [
  "simse-bridge",
  "simse-ui-core",
  "tempfile",
+ "thiserror",
  "tokio",
  "tui-textarea",
 ]

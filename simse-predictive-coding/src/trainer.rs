@@ -6,6 +6,7 @@ use tracing::{debug, info, warn};
 use crate::config::PcnConfig;
 use crate::encoder::{InputEncoder, LibraryEvent};
 use crate::network::PredictiveCodingNetwork;
+use crate::persistence::save_snapshot;
 use crate::snapshot::ModelSnapshot;
 
 /// Aggregate statistics from the background training loop.
@@ -213,6 +214,21 @@ impl TrainingWorker {
                     );
                 }
             }
+
+            // Auto-save periodically if configured.
+            if config.auto_save_epochs > 0
+                && stats.epochs % config.auto_save_epochs == 0
+            {
+                if let Some(ref storage_path) = config.storage_path {
+                    let path = format!("{}/pcn-auto-{}.json.gz", storage_path, stats.epochs);
+                    let snap_to_save = snapshot.read().unwrap();
+                    if let Err(e) = save_snapshot(&snap_to_save, &path, true) {
+                        warn!(error = %e, path, "Auto-save failed");
+                    } else {
+                        debug!(epoch = stats.epochs, path, "Auto-saved snapshot");
+                    }
+                }
+            }
         }
     }
 }
@@ -308,5 +324,95 @@ mod tests {
         assert_eq!(stats.dropped_events, 0);
         assert_eq!(stats.last_energy, 0.0);
         assert!(stats.energy_history.is_empty());
+    }
+
+    #[tokio::test]
+    async fn auto_save_creates_files_at_interval() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage_path = dir.path().to_str().unwrap().to_string();
+
+        let config = PcnConfig {
+            auto_save_epochs: 2,
+            storage_path: Some(storage_path.clone()),
+            ..test_config()
+        };
+        let embedding_dim = 4;
+        let snapshot = Arc::new(RwLock::new(ModelSnapshot::empty()));
+        let (tx, rx) = mpsc::channel::<LibraryEvent>(config.channel_capacity);
+
+        // Send 6 events with batch_size=2 → 3 epochs. Auto-save at epoch 2.
+        for i in 0..6 {
+            tx.send(make_event(vec![0.1 * i as f32; 4], "rust"))
+                .await
+                .unwrap();
+        }
+        drop(tx);
+
+        let stats = TrainingWorker::run_batch(rx, snapshot, config, embedding_dim).await;
+        assert_eq!(stats.epochs, 3);
+
+        // Should have auto-saved at epoch 2.
+        let auto_save_path = format!("{}/pcn-auto-2.json.gz", storage_path);
+        assert!(
+            std::path::Path::new(&auto_save_path).exists(),
+            "Auto-save file should exist at epoch 2: {}",
+            auto_save_path
+        );
+
+        // Should NOT have auto-saved at epoch 1 or 3.
+        assert!(!std::path::Path::new(&format!("{}/pcn-auto-1.json.gz", storage_path)).exists());
+        assert!(!std::path::Path::new(&format!("{}/pcn-auto-3.json.gz", storage_path)).exists());
+    }
+
+    #[tokio::test]
+    async fn auto_save_disabled_when_zero() {
+        let dir = tempfile::tempdir().unwrap();
+        let storage_path = dir.path().to_str().unwrap().to_string();
+
+        let config = PcnConfig {
+            auto_save_epochs: 0,
+            storage_path: Some(storage_path.clone()),
+            ..test_config()
+        };
+        let embedding_dim = 4;
+        let snapshot = Arc::new(RwLock::new(ModelSnapshot::empty()));
+        let (tx, rx) = mpsc::channel::<LibraryEvent>(config.channel_capacity);
+
+        for i in 0..4 {
+            tx.send(make_event(vec![0.1 * i as f32; 4], "rust"))
+                .await
+                .unwrap();
+        }
+        drop(tx);
+
+        let stats = TrainingWorker::run_batch(rx, snapshot, config, embedding_dim).await;
+        assert_eq!(stats.epochs, 2);
+
+        // No auto-save files should exist.
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .collect();
+        assert!(entries.is_empty(), "No auto-save files when auto_save_epochs=0");
+    }
+
+    #[tokio::test]
+    async fn auto_save_skipped_when_no_storage_path() {
+        let config = PcnConfig {
+            auto_save_epochs: 1,
+            storage_path: None,
+            ..test_config()
+        };
+        let embedding_dim = 4;
+        let snapshot = Arc::new(RwLock::new(ModelSnapshot::empty()));
+        let (tx, rx) = mpsc::channel::<LibraryEvent>(config.channel_capacity);
+
+        tx.send(make_event(vec![0.1; 4], "rust")).await.unwrap();
+        tx.send(make_event(vec![0.2; 4], "rust")).await.unwrap();
+        drop(tx);
+
+        // Should complete without errors (no storage_path → no auto-save attempt).
+        let stats = TrainingWorker::run_batch(rx, snapshot, config, embedding_dim).await;
+        assert_eq!(stats.epochs, 1);
     }
 }

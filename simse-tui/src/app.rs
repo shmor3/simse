@@ -829,6 +829,8 @@ fn render_chat_area(app: &App, frame: &mut Frame, area: Rect) {
 
 /// Render the input area.
 fn render_input(app: &App, frame: &mut Frame, area: Rect) {
+	let ghost = app.autocomplete.ghost_text();
+
 	let input_display = if app.input.value.is_empty() {
 		if app.ctrl_c_pending {
 			Line::from(Span::styled(
@@ -841,19 +843,27 @@ fn render_input(app: &App, frame: &mut Frame, area: Rect) {
 				Style::default().fg(Color::DarkGray),
 			))
 		}
+	} else if let Some(ref ghost_str) = ghost {
+		Line::from(vec![
+			Span::raw(app.input.value.clone()),
+			Span::styled(ghost_str.clone(), Style::default().fg(Color::DarkGray)),
+		])
 	} else {
 		Line::from(app.input.value.as_str())
 	};
+
 	let input_widget = Paragraph::new(input_display)
 		.block(Block::default().borders(Borders::ALL).title("Input"));
 	frame.render_widget(input_widget, area);
 
-	// Cursor position (clamped to input area width).
-	let cursor_x = area.x.saturating_add(1).saturating_add(
-		(app.input.cursor as u16).min(area.width.saturating_sub(2)),
-	);
-	let cursor_y = area.y + 1;
-	frame.set_cursor_position((cursor_x, cursor_y));
+	// Hide cursor when overlay is active
+	if app.screen == Screen::Chat {
+		let cursor_x = area.x.saturating_add(1).saturating_add(
+			(app.input.cursor as u16).min(area.width.saturating_sub(2)),
+		);
+		let cursor_y = area.y + 1;
+		frame.set_cursor_position((cursor_x, cursor_y));
+	}
 }
 
 /// Render a centered shortcuts overlay popup.

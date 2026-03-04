@@ -239,7 +239,10 @@ fn concurrent_reads_during_snapshot() {
         layers: vec![
             LayerConfig {
                 dim: 8,
-                activation: Activation::Relu,
+                // Use Tanh (bounded) instead of Relu to prevent numerical
+                // divergence when snapshot.predict() randomizes latent values
+                // with trained weights on high-dimensional sparse input.
+                activation: Activation::Tanh,
             },
             LayerConfig {
                 dim: 4,
@@ -247,7 +250,7 @@ fn concurrent_reads_during_snapshot() {
             },
         ],
         inference_steps: 10,
-        learning_rate: 0.01,
+        learning_rate: 0.005,
         inference_rate: 0.1,
         batch_size: 4,
         max_batch_delay_ms: 100,

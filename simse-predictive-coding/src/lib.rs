@@ -1,3 +1,7 @@
+// Allow indexed loops in math-heavy PCN code where multiple arrays
+// share the same index — iterators would be less clear.
+#![allow(clippy::needless_range_loop)]
+
 pub mod config;
 pub mod encoder;
 pub mod error;

@@ -1,0 +1,15 @@
+name = "simse-payments"
+compatibility_date = "2025-04-01"
+main = "src/index.ts"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "simse-payments-db"
+database_id = "cb43715c-8536-4334-9386-64dd8855a96e"
+
+# Secrets (set via `wrangler secret put`):
+# STRIPE_SECRET_KEY
+# STRIPE_WEBHOOK_SECRET
+# API_SECRET
+# MAILER_API_URL
+# MAILER_API_SECRET

@@ -121,10 +121,6 @@ export async function action({ request, context }: Route.ActionArgs) {
 			.bind(session.userId)
 			.run();
 		await db
-			.prepare('DELETE FROM credit_ledger WHERE user_id = ?')
-			.bind(session.userId)
-			.run();
-		await db
 			.prepare('DELETE FROM team_members WHERE user_id = ?')
 			.bind(session.userId)
 			.run();

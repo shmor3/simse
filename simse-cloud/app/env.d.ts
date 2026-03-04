@@ -1,8 +1,8 @@
 interface Env {
 	DB: D1Database;
 	SESSIONS: KVNamespace;
-	STRIPE_SECRET_KEY: string;
-	STRIPE_WEBHOOK_SECRET: string;
+	PAYMENTS_API_URL: string;
+	PAYMENTS_API_SECRET: string;
 	EMAIL_API_URL: string;
 	EMAIL_API_SECRET: string;
 	SESSION_SECRET: string;

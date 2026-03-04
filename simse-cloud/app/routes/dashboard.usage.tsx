@@ -1,6 +1,7 @@
 import PageHeader from '~/components/layout/PageHeader';
 import Card from '~/components/ui/Card';
 import ProgressBar from '~/components/ui/ProgressBar';
+import { createPaymentsClient } from '~/lib/payments.server';
 import { getSession } from '~/lib/session.server';
 import type { Route } from './+types/dashboard.usage';
 
@@ -8,23 +9,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 	const session = await getSession(request, context.cloudflare.env);
 	if (!session) return { usage: null, dailyTokens: [], breakdown: [] };
 
-	const db = context.cloudflare.env.DB;
+	const env = context.cloudflare.env;
+	const payments = createPaymentsClient({
+		apiUrl: env.PAYMENTS_API_URL,
+		apiSecret: env.PAYMENTS_API_SECRET,
+	});
 
-	// Get total credit balance
-	const balance = await db
-		.prepare(
-			'SELECT COALESCE(SUM(amount), 0) as total FROM credit_ledger WHERE user_id = ?',
-		)
-		.bind(session.userId)
-		.first<{ total: number }>();
-
-	// Get recent usage (last 7 days)
-	const recentUsage = await db
-		.prepare(
-			"SELECT date(created_at) as day, SUM(ABS(amount)) as tokens FROM credit_ledger WHERE user_id = ? AND amount < 0 AND created_at > datetime('now', '-7 days') GROUP BY date(created_at) ORDER BY day",
-		)
-		.bind(session.userId)
-		.all<{ day: string; tokens: number }>();
+	const data = await payments.getUsage(session.userId);
 
 	// Build 7-day chart data
 	const dailyTokens: Array<{ day: string; tokens: number }> = [];
@@ -33,7 +24,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 		d.setDate(d.getDate() - i);
 		const dayStr = d.toISOString().slice(0, 10);
 		const label = d.toLocaleDateString('en', { weekday: 'short' });
-		const found = recentUsage.results.find((r) => r.day === dayStr);
+		const found = data.recentUsage.find((r) => r.day === dayStr);
 		dailyTokens.push({ day: label, tokens: found?.tokens ?? 0 });
 	}
 
@@ -41,9 +32,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
 	return {
 		usage: {
-			used: Math.abs(balance?.total ?? 0),
+			used: Math.abs(data.balance),
 			limit: 100_000,
-			balance: balance?.total ?? 0,
+			balance: data.balance,
 		},
 		dailyTokens: dailyTokens.map((d) => ({
 			...d,

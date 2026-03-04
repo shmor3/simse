@@ -2,6 +2,7 @@ import { Link } from 'react-router';
 import PageHeader from '~/components/layout/PageHeader';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
+import { createPaymentsClient } from '~/lib/payments.server';
 import { getSession } from '~/lib/session.server';
 import type { Route } from './+types/dashboard.billing.credit';
 
@@ -9,30 +10,17 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 	const session = await getSession(request, context.cloudflare.env);
 	if (!session) return { balance: 0, history: [] };
 
-	const db = context.cloudflare.env.DB;
+	const env = context.cloudflare.env;
+	const payments = createPaymentsClient({
+		apiUrl: env.PAYMENTS_API_URL,
+		apiSecret: env.PAYMENTS_API_SECRET,
+	});
 
-	const balance = await db
-		.prepare(
-			'SELECT COALESCE(SUM(amount), 0) as total FROM credit_ledger WHERE user_id = ?',
-		)
-		.bind(session.userId)
-		.first<{ total: number }>();
-
-	const history = await db
-		.prepare(
-			'SELECT id, amount, description, created_at FROM credit_ledger WHERE user_id = ? ORDER BY created_at DESC LIMIT 50',
-		)
-		.bind(session.userId)
-		.all<{
-			id: string;
-			amount: number;
-			description: string;
-			created_at: string;
-		}>();
+	const data = await payments.getCredits(session.userId);
 
 	return {
-		balance: balance?.total ?? 0,
-		history: history.results,
+		balance: data.balance,
+		history: data.history,
 	};
 }
 

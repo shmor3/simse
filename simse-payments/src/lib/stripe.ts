@@ -17,7 +17,7 @@ export async function createCheckoutSession(
 		success_url: `${appUrl}/dashboard/billing?success=true`,
 		cancel_url: `${appUrl}/dashboard/billing?canceled=true`,
 	});
-	return session.url!;
+	return session.url ?? '';
 }
 
 export async function createBillingPortalSession(
@@ -30,29 +30,6 @@ export async function createBillingPortalSession(
 		return_url: `${appUrl}/dashboard/billing`,
 	});
 	return session.url;
-}
-
-export async function getOrCreateCustomer(
-	stripe: Stripe,
-	db: D1Database,
-	teamId: string,
-	email: string,
-	name: string,
-): Promise<string> {
-	const team = await db
-		.prepare('SELECT stripe_customer_id FROM teams WHERE id = ?')
-		.bind(teamId)
-		.first<{ stripe_customer_id: string | null }>();
-
-	if (team?.stripe_customer_id) return team.stripe_customer_id;
-
-	const customer = await stripe.customers.create({ email, name });
-	await db
-		.prepare('UPDATE teams SET stripe_customer_id = ? WHERE id = ?')
-		.bind(customer.id, teamId)
-		.run();
-
-	return customer.id;
 }
 
 export async function verifyWebhookSignature(

@@ -1,7 +1,6 @@
 import {
 	index,
 	layout,
-	prefix,
 	type RouteConfig,
 	route,
 } from '@react-router/dev/routes';
@@ -29,9 +28,5 @@ export default [
 		route('dashboard/team/invite', './routes/dashboard.team.invite.tsx'),
 		route('dashboard/notifications', './routes/dashboard.notifications.tsx'),
 		route('dashboard/account', './routes/dashboard.account.tsx'),
-	]),
-
-	...prefix('api', [
-		route('stripe-webhook', './routes/api.stripe-webhook.tsx'),
 	]),
 ] satisfies RouteConfig;

@@ -1,0 +1,24 @@
+{
+	"name": "simse-payments",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "wrangler dev",
+		"build": "wrangler deploy --dry-run --outdir dist",
+		"deploy": "wrangler deploy",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"db:migrate": "wrangler d1 migrations apply simse-payments-db --local",
+		"db:migrate:prod": "wrangler d1 migrations apply simse-payments-db --remote"
+	},
+	"dependencies": {
+		"hono": "^4.7.0",
+		"stripe": "^18.1.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.3.12",
+		"@cloudflare/workers-types": "^4.20260305.0",
+		"typescript": "^5.7.0",
+		"wrangler": "^4.0.0"
+	}
+}

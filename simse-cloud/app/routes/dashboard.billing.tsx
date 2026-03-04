@@ -3,46 +3,39 @@ import PageHeader from '~/components/layout/PageHeader';
 import Badge from '~/components/ui/Badge';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
+import { createPaymentsClient } from '~/lib/payments.server';
 import { getSession } from '~/lib/session.server';
-import {
-	createBillingPortalSession,
-	createStripe,
-	getOrCreateCustomer,
-} from '~/lib/stripe.server';
 import type { Route } from './+types/dashboard.billing';
 
 export async function loader({ request, context }: Route.LoaderArgs) {
 	const session = await getSession(request, context.cloudflare.env);
 	if (!session) throw redirect('/auth/login');
 
-	const db = context.cloudflare.env.DB;
+	const env = context.cloudflare.env;
+	const payments = createPaymentsClient({
+		apiUrl: env.PAYMENTS_API_URL,
+		apiSecret: env.PAYMENTS_API_SECRET,
+	});
 
-	// Get user's team and plan
+	// Get user's team
+	const db = env.DB;
 	const team = await db
 		.prepare(
-			"SELECT t.id, t.name, t.plan, t.stripe_customer_id FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role = 'owner' LIMIT 1",
+			"SELECT t.id, t.name FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role = 'owner' LIMIT 1",
 		)
 		.bind(session.userId)
-		.first<{
-			id: string;
-			name: string;
-			plan: string;
-			stripe_customer_id: string | null;
-		}>();
+		.first<{ id: string; name: string }>();
 
-	// Get credit balance
-	const balance = await db
-		.prepare(
-			'SELECT COALESCE(SUM(amount), 0) as total FROM credit_ledger WHERE user_id = ?',
-		)
-		.bind(session.userId)
-		.first<{ total: number }>();
+	const [subscription, credits] = await Promise.all([
+		team ? payments.getSubscription(team.id) : null,
+		payments.getCredits(session.userId),
+	]);
 
 	return {
-		plan: team?.plan ?? 'free',
+		plan: subscription?.plan ?? 'free',
 		teamName: team?.name ?? '',
-		hasPaymentMethod: !!team?.stripe_customer_id,
-		creditBalance: balance?.total ?? 0,
+		hasPaymentMethod: !!subscription?.stripeSubscriptionId,
+		creditBalance: credits.balance,
 	};
 }
 
@@ -54,7 +47,11 @@ export async function action({ request, context }: Route.ActionArgs) {
 	const intent = formData.get('intent');
 	const env = context.cloudflare.env;
 	const db = env.DB;
-	const stripe = createStripe(env.STRIPE_SECRET_KEY);
+
+	const payments = createPaymentsClient({
+		apiUrl: env.PAYMENTS_API_URL,
+		apiSecret: env.PAYMENTS_API_SECRET,
+	});
 
 	const user = await db
 		.prepare('SELECT email, name FROM users WHERE id = ?')
@@ -63,27 +60,18 @@ export async function action({ request, context }: Route.ActionArgs) {
 
 	const team = await db
 		.prepare(
-			"SELECT t.id, t.stripe_customer_id FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role = 'owner' LIMIT 1",
+			"SELECT t.id FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role = 'owner' LIMIT 1",
 		)
 		.bind(session.userId)
-		.first<{ id: string; stripe_customer_id: string | null }>();
+		.first<{ id: string }>();
 
 	if (!user || !team) throw redirect('/dashboard');
 
-	const customerId = await getOrCreateCustomer(
-		stripe,
-		db,
-		team.id,
-		user.email,
-		user.name,
-	);
+	// Ensure customer exists
+	await payments.getOrCreateCustomer(team.id, user.email, user.name);
 
 	if (intent === 'manage') {
-		const url = await createBillingPortalSession(
-			stripe,
-			customerId,
-			env.APP_URL,
-		);
+		const { url } = await payments.createPortalSession(team.id, env.APP_URL);
 		throw redirect(url);
 	}
 

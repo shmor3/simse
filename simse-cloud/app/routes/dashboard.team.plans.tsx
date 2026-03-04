@@ -3,6 +3,7 @@ import PageHeader from '~/components/layout/PageHeader';
 import Badge from '~/components/ui/Badge';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
+import { createPaymentsClient } from '~/lib/payments.server';
 import { getSession } from '~/lib/session.server';
 import type { Route } from './+types/dashboard.team.plans';
 
@@ -10,13 +11,25 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 	const session = await getSession(request, context.cloudflare.env);
 	if (!session) return { currentPlan: 'free' };
 
-	const team = await context.cloudflare.env.DB.prepare(
-		'SELECT t.plan FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? LIMIT 1',
-	)
-		.bind(session.userId)
-		.first<{ plan: string }>();
+	const env = context.cloudflare.env;
+	const db = env.DB;
 
-	return { currentPlan: team?.plan ?? 'free' };
+	const team = await db
+		.prepare(
+			'SELECT t.id FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? LIMIT 1',
+		)
+		.bind(session.userId)
+		.first<{ id: string }>();
+
+	if (!team) return { currentPlan: 'free' };
+
+	const payments = createPaymentsClient({
+		apiUrl: env.PAYMENTS_API_URL,
+		apiSecret: env.PAYMENTS_API_SECRET,
+	});
+
+	const sub = await payments.getSubscription(team.id);
+	return { currentPlan: sub.plan };
 }
 
 const plans = [

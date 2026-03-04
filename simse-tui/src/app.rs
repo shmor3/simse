@@ -15,7 +15,7 @@ use simse_ui_core::input::state as input;
 use std::collections::BTreeMap;
 
 use crate::banner;
-use crate::commands::{format_table, CommandOutput, OverlayAction};
+use crate::commands::{format_table, CommandContext, CommandOutput, OverlayAction};
 use crate::dispatch::{parse_command_line, DispatchContext};
 use crate::output;
 
@@ -488,6 +488,7 @@ fn dispatch_command(mut app: App, text: &str) -> App {
 		total_tokens: app.total_tokens,
 		context_percent: app.context_percent,
 		commands: app.commands.clone(),
+		cmd_ctx: CommandContext::default(),
 	};
 
 	let results = ctx.dispatch(&command, &args);

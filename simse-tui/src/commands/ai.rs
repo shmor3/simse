@@ -1,6 +1,6 @@
 //! AI commands: `/chain`, `/prompts`.
 
-use super::CommandOutput;
+use super::{BridgeAction, CommandContext, CommandOutput};
 
 /// `/chain <name> [args...]` -- run a prompt chain.
 pub fn handle_chain(args: &str) -> Vec<CommandOutput> {
@@ -25,27 +25,64 @@ pub fn handle_chain(args: &str) -> Vec<CommandOutput> {
 		))];
 	}
 
-	if chain_args.is_empty() {
-		vec![CommandOutput::Info(format!(
-			"Would call bridge to run chain \"{name}\" with no arguments"
-		))]
-	} else {
-		vec![CommandOutput::Info(format!(
-			"Would call bridge to run chain \"{name}\" with args: {chain_args}"
-		))]
-	}
+	vec![CommandOutput::BridgeRequest(BridgeAction::RunChain {
+		name: name.to_string(),
+		args: chain_args.to_string(),
+	})]
 }
 
 /// `/prompts` -- list available prompt templates.
-pub fn handle_prompts(_args: &str) -> Vec<CommandOutput> {
-	vec![CommandOutput::Info(
-		"Would call bridge to list available prompt templates".into(),
-	)]
+pub fn handle_prompts(_args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
+	if ctx.prompts.is_empty() {
+		return vec![CommandOutput::Info(
+			"No prompt templates configured.".into(),
+		)];
+	}
+
+	let rows: Vec<Vec<String>> = ctx
+		.prompts
+		.iter()
+		.map(|p| {
+			vec![
+				p.name.clone(),
+				p.step_count.to_string(),
+				p.description.clone().unwrap_or_default(),
+			]
+		})
+		.collect();
+
+	vec![CommandOutput::Table {
+		headers: vec!["Name".into(), "Steps".into(), "Description".into()],
+		rows,
+	}]
 }
 
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::commands::{CommandContext, PromptInfo};
+
+	fn empty_ctx() -> CommandContext {
+		CommandContext::default()
+	}
+
+	fn prompts_ctx() -> CommandContext {
+		CommandContext {
+			prompts: vec![
+				PromptInfo {
+					name: "summarize".into(),
+					description: Some("Summarize a document".into()),
+					step_count: 3,
+				},
+				PromptInfo {
+					name: "translate".into(),
+					description: None,
+					step_count: 2,
+				},
+			],
+			..Default::default()
+		}
+	}
 
 	// ── /chain ───────────────────────────────────────────
 
@@ -58,17 +95,25 @@ mod tests {
 	#[test]
 	fn chain_name_only() {
 		let out = handle_chain("summarize");
-		assert!(
-			matches!(&out[0], CommandOutput::Info(msg) if msg.contains("summarize") && msg.contains("no arguments"))
-		);
+		match &out[0] {
+			CommandOutput::BridgeRequest(BridgeAction::RunChain { name, args }) => {
+				assert_eq!(name, "summarize");
+				assert_eq!(args, "");
+			}
+			other => panic!("expected BridgeRequest(RunChain), got {:?}", other),
+		}
 	}
 
 	#[test]
 	fn chain_name_and_args() {
 		let out = handle_chain("translate en es");
-		assert!(
-			matches!(&out[0], CommandOutput::Info(msg) if msg.contains("translate") && msg.contains("en es"))
-		);
+		match &out[0] {
+			CommandOutput::BridgeRequest(BridgeAction::RunChain { name, args }) => {
+				assert_eq!(name, "translate");
+				assert_eq!(args, "en es");
+			}
+			other => panic!("expected BridgeRequest(RunChain), got {:?}", other),
+		}
 	}
 
 	#[test]
@@ -82,24 +127,52 @@ mod tests {
 	#[test]
 	fn chain_name_with_hyphens_and_underscores() {
 		let out = handle_chain("my-cool_chain");
-		assert!(
-			matches!(&out[0], CommandOutput::Info(msg) if msg.contains("my-cool_chain"))
-		);
+		match &out[0] {
+			CommandOutput::BridgeRequest(BridgeAction::RunChain { name, .. }) => {
+				assert_eq!(name, "my-cool_chain");
+			}
+			other => panic!("expected BridgeRequest(RunChain), got {:?}", other),
+		}
 	}
 
 	#[test]
 	fn chain_trims_whitespace() {
 		let out = handle_chain("  analyze  some text  ");
-		assert!(
-			matches!(&out[0], CommandOutput::Info(msg) if msg.contains("analyze") && msg.contains("some text"))
-		);
+		match &out[0] {
+			CommandOutput::BridgeRequest(BridgeAction::RunChain { name, args }) => {
+				assert_eq!(name, "analyze");
+				assert_eq!(args, "some text");
+			}
+			other => panic!("expected BridgeRequest(RunChain), got {:?}", other),
+		}
 	}
 
 	// ── /prompts ─────────────────────────────────────────
 
 	#[test]
-	fn prompts_returns_info() {
-		let out = handle_prompts("");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("prompt templates")));
+	fn prompts_empty_returns_info() {
+		let out = handle_prompts("", &empty_ctx());
+		assert!(
+			matches!(&out[0], CommandOutput::Info(msg) if msg == "No prompt templates configured.")
+		);
+	}
+
+	#[test]
+	fn prompts_returns_table() {
+		let ctx = prompts_ctx();
+		let out = handle_prompts("", &ctx);
+		match &out[0] {
+			CommandOutput::Table { headers, rows } => {
+				assert_eq!(headers, &["Name", "Steps", "Description"]);
+				assert_eq!(rows.len(), 2);
+				assert_eq!(rows[0][0], "summarize");
+				assert_eq!(rows[0][1], "3");
+				assert_eq!(rows[0][2], "Summarize a document");
+				assert_eq!(rows[1][0], "translate");
+				assert_eq!(rows[1][1], "2");
+				assert_eq!(rows[1][2], "");
+			}
+			other => panic!("expected Table, got {:?}", other),
+		}
 	}
 }

@@ -1,7 +1,7 @@
 //! Config commands: `/setup`, `/init`, `/config`, `/settings`,
 //! `/factory-reset`, `/factory-reset-project`.
 
-use super::{CommandOutput, OverlayAction};
+use super::{BridgeAction, CommandContext, CommandOutput, OverlayAction};
 
 /// `/setup [preset]` -- open the setup wizard (optionally jumping to a preset).
 pub fn handle_setup(args: &str) -> Vec<CommandOutput> {
@@ -35,28 +35,42 @@ pub fn handle_init(args: &str) -> Vec<CommandOutput> {
 		)];
 	}
 
-	if force {
-		vec![CommandOutput::Info(
-			"Would call bridge to initialize project configuration (force overwrite)".into(),
-		)]
-	} else {
-		vec![CommandOutput::Info(
-			"Would call bridge to initialize project configuration".into(),
-		)]
-	}
+	vec![CommandOutput::BridgeRequest(BridgeAction::InitConfig { force })]
 }
 
 /// `/config [key]` -- show configuration values.
-pub fn handle_config(args: &str) -> Vec<CommandOutput> {
+pub fn handle_config(args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 	let key = args.trim();
 	if key.is_empty() {
-		vec![CommandOutput::Info(
-			"Would call bridge to show all configuration values".into(),
-		)]
+		if ctx.config_values.is_empty() {
+			vec![CommandOutput::Info("No configuration loaded.".into())]
+		} else {
+			let headers = vec!["Key".into(), "Value".into()];
+			let rows: Vec<Vec<String>> = ctx
+				.config_values
+				.iter()
+				.map(|(k, v)| vec![k.clone(), v.clone()])
+				.collect();
+			vec![CommandOutput::Table { headers, rows }]
+		}
 	} else {
-		vec![CommandOutput::Info(format!(
-			"Would call bridge to show configuration value for \"{key}\""
-		))]
+		let matching: Vec<Vec<String>> = ctx
+			.config_values
+			.iter()
+			.filter(|(k, _)| k == key)
+			.map(|(k, v)| vec![k.clone(), v.clone()])
+			.collect();
+		if matching.is_empty() {
+			vec![CommandOutput::Error(format!(
+				"Configuration key not found: {key}"
+			))]
+		} else {
+			let headers = vec!["Key".into(), "Value".into()];
+			vec![CommandOutput::Table {
+				headers,
+				rows: matching,
+			}]
+		}
 	}
 }
 
@@ -67,16 +81,12 @@ pub fn handle_settings(_args: &str) -> Vec<CommandOutput> {
 
 /// `/factory-reset` -- reset all user settings to defaults.
 pub fn handle_factory_reset(_args: &str) -> Vec<CommandOutput> {
-	vec![CommandOutput::Info(
-		"Would call bridge to perform factory reset of all user settings".into(),
-	)]
+	vec![CommandOutput::BridgeRequest(BridgeAction::FactoryReset)]
 }
 
 /// `/factory-reset-project` -- reset project-level settings to defaults.
 pub fn handle_factory_reset_project(_args: &str) -> Vec<CommandOutput> {
-	vec![CommandOutput::Info(
-		"Would call bridge to perform factory reset of project settings".into(),
-	)]
+	vec![CommandOutput::BridgeRequest(BridgeAction::FactoryResetProject)]
 }
 
 #[cfg(test)]
@@ -135,21 +145,31 @@ mod tests {
 	#[test]
 	fn init_no_args() {
 		let out = handle_init("");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("initialize")));
+		assert_eq!(out.len(), 1);
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::InitConfig { force: false })
+		));
 	}
 
 	#[test]
 	fn init_force() {
 		let out = handle_init("--force");
-		assert!(
-			matches!(&out[0], CommandOutput::Info(msg) if msg.contains("force"))
-		);
+		assert_eq!(out.len(), 1);
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::InitConfig { force: true })
+		));
 	}
 
 	#[test]
 	fn init_short_force() {
 		let out = handle_init("-f");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("force")));
+		assert_eq!(out.len(), 1);
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::InitConfig { force: true })
+		));
 	}
 
 	#[test]
@@ -161,17 +181,71 @@ mod tests {
 	// ── /config ──────────────────────────────────────────
 
 	#[test]
-	fn config_no_args_shows_all() {
-		let out = handle_config("");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("all")));
+	fn config_no_args_empty() {
+		let ctx = CommandContext::default();
+		let out = handle_config("", &ctx);
+		assert_eq!(out.len(), 1);
+		assert!(matches!(
+			&out[0],
+			CommandOutput::Info(msg) if msg == "No configuration loaded."
+		));
 	}
 
 	#[test]
-	fn config_with_key() {
-		let out = handle_config("acp.timeout");
-		assert!(
-			matches!(&out[0], CommandOutput::Info(msg) if msg.contains("acp.timeout"))
-		);
+	fn config_no_args_shows_all() {
+		let ctx = CommandContext {
+			config_values: vec![
+				("acp.timeout".into(), "60".into()),
+				("log.level".into(), "info".into()),
+			],
+			..Default::default()
+		};
+		let out = handle_config("", &ctx);
+		assert_eq!(out.len(), 1);
+		match &out[0] {
+			CommandOutput::Table { headers, rows } => {
+				assert_eq!(headers, &["Key", "Value"]);
+				assert_eq!(rows.len(), 2);
+				assert_eq!(rows[0], vec!["acp.timeout", "60"]);
+				assert_eq!(rows[1], vec!["log.level", "info"]);
+			}
+			other => panic!("expected Table, got {:?}", other),
+		}
+	}
+
+	#[test]
+	fn config_with_key_found() {
+		let ctx = CommandContext {
+			config_values: vec![
+				("acp.timeout".into(), "60".into()),
+				("log.level".into(), "info".into()),
+			],
+			..Default::default()
+		};
+		let out = handle_config("acp.timeout", &ctx);
+		assert_eq!(out.len(), 1);
+		match &out[0] {
+			CommandOutput::Table { headers, rows } => {
+				assert_eq!(headers, &["Key", "Value"]);
+				assert_eq!(rows.len(), 1);
+				assert_eq!(rows[0], vec!["acp.timeout", "60"]);
+			}
+			other => panic!("expected Table, got {:?}", other),
+		}
+	}
+
+	#[test]
+	fn config_with_key_not_found() {
+		let ctx = CommandContext {
+			config_values: vec![("acp.timeout".into(), "60".into())],
+			..Default::default()
+		};
+		let out = handle_config("nonexistent.key", &ctx);
+		assert_eq!(out.len(), 1);
+		assert!(matches!(
+			&out[0],
+			CommandOutput::Error(msg) if msg.contains("nonexistent.key")
+		));
 	}
 
 	// ── /settings ────────────────────────────────────────
@@ -189,20 +263,24 @@ mod tests {
 	// ── /factory-reset ───────────────────────────────────
 
 	#[test]
-	fn factory_reset_returns_info() {
+	fn factory_reset_returns_bridge_request() {
 		let out = handle_factory_reset("");
-		assert!(
-			matches!(&out[0], CommandOutput::Info(msg) if msg.contains("factory reset"))
-		);
+		assert_eq!(out.len(), 1);
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::FactoryReset)
+		));
 	}
 
 	// ── /factory-reset-project ───────────────────────────
 
 	#[test]
-	fn factory_reset_project_returns_info() {
+	fn factory_reset_project_returns_bridge_request() {
 		let out = handle_factory_reset_project("");
-		assert!(
-			matches!(&out[0], CommandOutput::Info(msg) if msg.contains("project"))
-		);
+		assert_eq!(out.len(), 1);
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::FactoryResetProject)
+		));
 	}
 }

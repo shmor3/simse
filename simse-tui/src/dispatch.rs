@@ -8,7 +8,7 @@
 
 use simse_ui_core::commands::registry::{all_commands, CommandDefinition};
 
-use crate::commands::{self, CommandOutput};
+use crate::commands::{self, CommandContext, CommandOutput};
 
 /// Parse a `/command args` line into `(command_name, args)`.
 ///
@@ -49,6 +49,8 @@ pub struct DispatchContext {
 	pub context_percent: u8,
 	/// The registered command definitions (for `/help`).
 	pub commands: Vec<CommandDefinition>,
+	/// Runtime state snapshot for session/tool/config commands.
+	pub cmd_ctx: CommandContext,
 }
 
 impl Default for DispatchContext {
@@ -59,6 +61,7 @@ impl Default for DispatchContext {
 			total_tokens: 0,
 			context_percent: 0,
 			commands: all_commands(),
+			cmd_ctx: CommandContext::default(),
 		}
 	}
 }
@@ -96,18 +99,18 @@ fn dispatch_inner(command: &str, args: &str, ctx: &DispatchContext) -> Vec<Comma
 		"librarians" => commands::library::handle_librarians(args),
 
 		// ── Session ──────────────────────────────────────────
-		"sessions" => commands::session::handle_sessions(args),
+		"sessions" => commands::session::handle_sessions(args, &ctx.cmd_ctx),
 		"resume" => commands::session::handle_resume(args),
 		"rename" => commands::session::handle_rename(args),
-		"server" => commands::session::handle_server(args),
-		"model" => commands::session::handle_model(args),
-		"mcp" => commands::session::handle_mcp(args),
-		"acp" => commands::session::handle_acp(args),
+		"server" => commands::session::handle_server(args, &ctx.cmd_ctx),
+		"model" => commands::session::handle_model(args, &ctx.cmd_ctx),
+		"mcp" => commands::session::handle_mcp(args, &ctx.cmd_ctx),
+		"acp" => commands::session::handle_acp(args, &ctx.cmd_ctx),
 
 		// ── Config ───────────────────────────────────────────
 		"setup" => commands::config::handle_setup(args),
 		"init" => commands::config::handle_init(args),
-		"config" => commands::config::handle_config(args),
+		"config" => commands::config::handle_config(args, &ctx.cmd_ctx),
 		"settings" => commands::config::handle_settings(args),
 		"factory-reset" => commands::config::handle_factory_reset(args),
 		"factory-reset-project" => commands::config::handle_factory_reset_project(args),
@@ -121,12 +124,12 @@ fn dispatch_inner(command: &str, args: &str, ctx: &DispatchContext) -> Vec<Comma
 
 		// ── AI ───────────────────────────────────────────────
 		"chain" => commands::ai::handle_chain(args),
-		"prompts" => commands::ai::handle_prompts(args),
+		"prompts" => commands::ai::handle_prompts(args, &ctx.cmd_ctx),
 
 		// ── Tools ────────────────────────────────────────────
-		"tools" => commands::tools::handle_tools(args),
-		"agents" => commands::tools::handle_agents(args),
-		"skills" => commands::tools::handle_skills(args),
+		"tools" => commands::tools::handle_tools(args, &ctx.cmd_ctx),
+		"agents" => commands::tools::handle_agents(args, &ctx.cmd_ctx),
+		"skills" => commands::tools::handle_skills(args, &ctx.cmd_ctx),
 
 		// ── Meta ─────────────────────────────────────────────
 		"help" => commands::meta::handle_help(args, &ctx.commands),
@@ -148,7 +151,7 @@ fn dispatch_inner(command: &str, args: &str, ctx: &DispatchContext) -> Vec<Comma
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::commands::OverlayAction;
+	use crate::commands::{BridgeAction, CommandContext, OverlayAction};
 
 	// ── parse_command_line ───────────────────────────────────
 
@@ -223,43 +226,70 @@ mod tests {
 	#[test]
 	fn dispatch_add() {
 		let out = dispatch_command("add", "topic some text");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("topic=\"topic\"")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryAdd { topic, text })
+				if topic == "topic" && text == "some text"
+		));
 	}
 
 	#[test]
 	fn dispatch_search() {
 		let out = dispatch_command("search", "query");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("query")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibrarySearch { query })
+				if query == "query"
+		));
 	}
 
 	#[test]
 	fn dispatch_recommend() {
 		let out = dispatch_command("recommend", "patterns");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("patterns")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryRecommend { query })
+				if query == "patterns"
+		));
 	}
 
 	#[test]
 	fn dispatch_topics() {
 		let out = dispatch_command("topics", "");
-		assert!(matches!(&out[0], CommandOutput::Info(_)));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryTopics)
+		));
 	}
 
 	#[test]
 	fn dispatch_volumes() {
 		let out = dispatch_command("volumes", "rust");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("rust")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryVolumes { topic })
+				if topic.as_deref() == Some("rust")
+		));
 	}
 
 	#[test]
 	fn dispatch_get() {
 		let out = dispatch_command("get", "id-42");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("id-42")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryGet { id })
+				if id == "id-42"
+		));
 	}
 
 	#[test]
 	fn dispatch_delete() {
 		let out = dispatch_command("delete", "id-99");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("id-99")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibraryDelete { id })
+				if id == "id-99"
+		));
 	}
 
 	#[test]
@@ -275,44 +305,60 @@ mod tests {
 
 	#[test]
 	fn dispatch_sessions() {
+		// Default ctx has empty sessions list → Info("No saved sessions.")
 		let out = dispatch_command("sessions", "");
-		assert!(matches!(&out[0], CommandOutput::Info(_)));
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("No saved sessions")));
 	}
 
 	#[test]
 	fn dispatch_resume() {
 		let out = dispatch_command("resume", "sess-1");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("sess-1")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::ResumeSession { id }) if id == "sess-1"
+		));
 	}
 
 	#[test]
 	fn dispatch_rename() {
 		let out = dispatch_command("rename", "Cool Name");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("Cool Name")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::RenameSession { title }) if title == "Cool Name"
+		));
 	}
 
 	#[test]
 	fn dispatch_server() {
 		let out = dispatch_command("server", "ollama");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("ollama")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::SwitchServer { name }) if name == "ollama"
+		));
 	}
 
 	#[test]
 	fn dispatch_model() {
 		let out = dispatch_command("model", "gpt-4o");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("gpt-4o")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::SwitchModel { name }) if name == "gpt-4o"
+		));
 	}
 
 	#[test]
 	fn dispatch_mcp() {
 		let out = dispatch_command("mcp", "status");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("status")));
+		assert!(matches!(&out[0], CommandOutput::Success(msg) if msg.contains("status")));
 	}
 
 	#[test]
 	fn dispatch_acp() {
 		let out = dispatch_command("acp", "restart");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("restart")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::AcpRestart)
+		));
 	}
 
 	// ── dispatch_command: config ─────────────────────────────
@@ -329,13 +375,30 @@ mod tests {
 	#[test]
 	fn dispatch_init() {
 		let out = dispatch_command("init", "");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("initialize")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::InitConfig { force: false })
+		));
 	}
 
 	#[test]
 	fn dispatch_config() {
+		// Default CommandContext has empty config_values, so looking up a key returns an error.
 		let out = dispatch_command("config", "acp.timeout");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("acp.timeout")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::Error(msg) if msg.contains("acp.timeout")
+		));
+	}
+
+	#[test]
+	fn dispatch_config_empty() {
+		// Default CommandContext has empty config_values → Info("No configuration loaded.")
+		let out = dispatch_command("config", "");
+		assert!(matches!(
+			&out[0],
+			CommandOutput::Info(msg) if msg.contains("No configuration loaded")
+		));
 	}
 
 	#[test]
@@ -350,13 +413,19 @@ mod tests {
 	#[test]
 	fn dispatch_factory_reset() {
 		let out = dispatch_command("factory-reset", "");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("factory reset")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::FactoryReset)
+		));
 	}
 
 	#[test]
 	fn dispatch_factory_reset_project() {
 		let out = dispatch_command("factory-reset-project", "");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("project")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::FactoryResetProject)
+		));
 	}
 
 	// ── dispatch_command: files ──────────────────────────────
@@ -364,31 +433,50 @@ mod tests {
 	#[test]
 	fn dispatch_files() {
 		let out = dispatch_command("files", "src");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("src")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::ListFiles { path })
+				if path.as_deref() == Some("src")
+		));
 	}
 
 	#[test]
 	fn dispatch_save() {
 		let out = dispatch_command("save", "output.txt");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("output.txt")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::SaveFiles { path })
+				if path.as_deref() == Some("output.txt")
+		));
 	}
 
 	#[test]
 	fn dispatch_validate() {
 		let out = dispatch_command("validate", "");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("all")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::ValidateFiles { path: None })
+		));
 	}
 
 	#[test]
 	fn dispatch_discard() {
 		let out = dispatch_command("discard", "temp.rs");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("temp.rs")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::DiscardFile { path })
+				if path == "temp.rs"
+		));
 	}
 
 	#[test]
 	fn dispatch_diff() {
 		let out = dispatch_command("diff", "lib.rs");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("lib.rs")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::DiffFiles { path })
+				if path.as_deref() == Some("lib.rs")
+		));
 	}
 
 	// ── dispatch_command: ai ─────────────────────────────────
@@ -396,13 +484,18 @@ mod tests {
 	#[test]
 	fn dispatch_chain() {
 		let out = dispatch_command("chain", "summarize");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("summarize")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::RunChain { name, .. }) if name == "summarize"
+		));
 	}
 
 	#[test]
 	fn dispatch_prompts() {
 		let out = dispatch_command("prompts", "");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("prompt templates")));
+		assert!(
+			matches!(&out[0], CommandOutput::Info(msg) if msg.contains("No prompt templates configured."))
+		);
 	}
 
 	// ── dispatch_command: tools ──────────────────────────────
@@ -410,19 +503,19 @@ mod tests {
 	#[test]
 	fn dispatch_tools() {
 		let out = dispatch_command("tools", "read");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("read")));
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("No tools registered.")));
 	}
 
 	#[test]
 	fn dispatch_agents() {
 		let out = dispatch_command("agents", "");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("agents")));
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("No agents configured.")));
 	}
 
 	#[test]
 	fn dispatch_skills() {
 		let out = dispatch_command("skills", "");
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("skills")));
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("No skills configured.")));
 	}
 
 	// ── dispatch_command: meta ───────────────────────────────
@@ -516,6 +609,7 @@ mod tests {
 			total_tokens: 42_000,
 			context_percent: 65,
 			commands: all_commands(),
+			cmd_ctx: CommandContext::default(),
 		};
 
 		// /verbose with no args toggles from current (true -> off).
@@ -550,7 +644,11 @@ mod tests {
 		let input = "/search hello world";
 		let (cmd, args) = parse_command_line(input).unwrap();
 		let out = dispatch_command(&cmd, &args);
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("hello world")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::LibrarySearch { query })
+				if query == "hello world"
+		));
 	}
 
 	#[test]
@@ -566,7 +664,10 @@ mod tests {
 		let input = "/factory-reset";
 		let (cmd, args) = parse_command_line(input).unwrap();
 		let out = dispatch_command(&cmd, &args);
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("factory reset")));
+		assert!(matches!(
+			&out[0],
+			CommandOutput::BridgeRequest(BridgeAction::FactoryReset)
+		));
 	}
 
 	#[test]

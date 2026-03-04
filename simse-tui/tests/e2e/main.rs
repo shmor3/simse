@@ -15,6 +15,7 @@ mod commands_files;
 mod commands_library;
 mod commands_meta;
 mod commands_session;
+mod commands_tools;
 mod config;
 pub mod harness;
 mod input;

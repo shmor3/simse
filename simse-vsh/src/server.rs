@@ -2,6 +2,7 @@ use std::io::{self, BufRead};
 
 use crate::error::VshError;
 use crate::executor::default_shell;
+use crate::local_backend::LocalShellBackend;
 use crate::protocol::*;
 use crate::sandbox::SandboxConfig;
 use crate::shell::VirtualShell;
@@ -155,7 +156,7 @@ impl VshServer {
 		};
 
 		let shell = p.shell.unwrap_or_else(default_shell);
-		self.shell = Some(VirtualShell::new(sandbox, shell));
+		self.shell = Some(VirtualShell::new(sandbox, shell, Box::new(LocalShellBackend)));
 
 		Ok(serde_json::json!({ "ok": true }))
 	}

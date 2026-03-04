@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::backend::ShellBackend;
 use crate::error::VshError;
-use crate::executor::{self, ExecResult};
+use crate::executor::ExecResult;
 use crate::sandbox::SandboxConfig;
 
 fn now_ms() -> u64 {
@@ -40,16 +41,18 @@ pub struct VirtualShell {
 	sessions: HashMap<String, ShellSession>,
 	sandbox: SandboxConfig,
 	shell: String,
+	backend: Box<dyn ShellBackend>,
 	total_commands: u64,
 	total_errors: u64,
 }
 
 impl VirtualShell {
-	pub fn new(sandbox: SandboxConfig, shell: String) -> Self {
+	pub fn new(sandbox: SandboxConfig, shell: String, backend: Box<dyn ShellBackend>) -> Self {
 		Self {
 			sessions: HashMap::new(),
 			sandbox,
 			shell,
+			backend,
 			total_commands: 0,
 			total_errors: 0,
 		}
@@ -137,16 +140,10 @@ impl VirtualShell {
 		// Resolve aliases
 		let resolved_command = self.resolve_alias(session_id, command);
 
-		let result = executor::execute_command(
-			&resolved_command,
-			&cwd,
-			&env,
-			&shell,
-			timeout,
-			max_out,
-			stdin,
-		)
-		.await;
+		let result = self
+			.backend
+			.execute_command(&resolved_command, &cwd, &env, &shell, timeout, max_out, stdin)
+			.await;
 
 		self.record_history(session_id, command, &result);
 		result
@@ -173,7 +170,7 @@ impl VirtualShell {
 		let timeout = timeout_ms.unwrap_or(self.sandbox.default_timeout_ms);
 		let max_out = max_output_bytes.unwrap_or(self.sandbox.max_output_bytes);
 
-		let result = executor::execute_git(args, &cwd, &env, timeout, max_out).await;
+		let result = self.backend.execute_git(args, &cwd, &env, timeout, max_out).await;
 
 		self.record_history(session_id, &command_str, &result);
 		result
@@ -206,9 +203,10 @@ impl VirtualShell {
 
 		self.total_commands += 1;
 
-		let result =
-			executor::execute_command(command, &resolved_cwd, env, shell, timeout, max_out, stdin)
-				.await;
+		let result = self
+			.backend
+			.execute_command(command, &resolved_cwd, env, shell, timeout, max_out, stdin)
+			.await;
 
 		if result.is_err() {
 			self.total_errors += 1;

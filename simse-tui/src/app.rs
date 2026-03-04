@@ -15,9 +15,15 @@ use simse_ui_core::input::state as input;
 use std::collections::BTreeMap;
 
 use crate::banner;
-use crate::commands::{format_table, CommandContext, CommandOutput, OverlayAction};
+use crate::commands::{
+	format_table, AgentInfo, BridgeAction, CommandContext, CommandOutput, OverlayAction,
+	PromptInfo, SessionInfo, SkillInfo, ToolDefInfo,
+};
 use crate::dispatch::{parse_command_line, DispatchContext};
 use crate::output;
+use crate::overlays::librarian::{render_librarian_explorer, LibrarianExplorerState};
+use crate::overlays::settings::{render_settings_explorer, SettingsExplorerState};
+use crate::overlays::setup::{render_setup_selector, SetupSelectorState};
 
 // ── Screen ──────────────────────────────────────────────
 
@@ -27,6 +33,8 @@ pub enum Screen {
 	Chat,
 	Shortcuts,
 	Settings,
+	Librarians,
+	Setup { preset: Option<String> },
 	Confirm { message: String },
 	Permission(PermissionRequest),
 }
@@ -80,6 +88,25 @@ pub struct App {
 	pub version: String,
 	pub server_name: Option<String>,
 	pub model_name: Option<String>,
+	pub session_id: Option<String>,
+	pub acp_connected: bool,
+	pub data_dir: Option<String>,
+	pub work_dir: Option<String>,
+	pub sessions: Vec<SessionInfo>,
+	pub tool_defs: Vec<ToolDefInfo>,
+	pub agents: Vec<AgentInfo>,
+	pub skills: Vec<SkillInfo>,
+	pub prompts: Vec<PromptInfo>,
+	pub config_values: Vec<(String, String)>,
+	pub pending_bridge_action: Option<BridgeAction>,
+	/// Overlay state for the settings explorer.
+	pub settings_state: SettingsExplorerState,
+	/// Overlay state for the settings explorer config data.
+	pub settings_config_data: serde_json::Value,
+	/// Overlay state for the librarian explorer.
+	pub librarian_state: LibrarianExplorerState,
+	/// Overlay state for the setup selector.
+	pub setup_state: SetupSelectorState,
 }
 
 impl App {
@@ -108,6 +135,21 @@ impl App {
 			version: env!("CARGO_PKG_VERSION").into(),
 			server_name: None,
 			model_name: None,
+			session_id: None,
+			acp_connected: false,
+			data_dir: None,
+			work_dir: None,
+			sessions: Vec::new(),
+			tool_defs: Vec::new(),
+			agents: Vec::new(),
+			skills: Vec::new(),
+			prompts: Vec::new(),
+			config_values: Vec::new(),
+			pending_bridge_action: None,
+			settings_state: SettingsExplorerState::new(),
+			settings_config_data: serde_json::Value::Null,
+			librarian_state: LibrarianExplorerState::new(Vec::new()),
+			setup_state: SetupSelectorState::new(),
 		}
 	}
 }
@@ -183,6 +225,13 @@ pub enum AppMessage {
 		id: String,
 		option_id: String,
 	},
+
+	// Bridge
+	BridgeResult {
+		text: String,
+		is_error: bool,
+	},
+	RefreshContext(CommandContext),
 
 	// Resize
 	Resize {
@@ -463,6 +512,29 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.screen = Screen::Chat;
 		}
 
+		// ── Bridge ──────────────────────────────────
+		AppMessage::BridgeResult { text, is_error } => {
+			if is_error {
+				app.output.push(OutputItem::Error { message: text });
+			} else {
+				app.output.push(OutputItem::CommandResult { text });
+			}
+		}
+		AppMessage::RefreshContext(ctx) => {
+			app.sessions = ctx.sessions;
+			app.tool_defs = ctx.tool_defs;
+			app.agents = ctx.agents;
+			app.skills = ctx.skills;
+			app.prompts = ctx.prompts;
+			app.server_name = ctx.server_name;
+			app.model_name = ctx.model_name;
+			app.session_id = ctx.session_id;
+			app.acp_connected = ctx.acp_connected;
+			app.data_dir = ctx.data_dir;
+			app.work_dir = ctx.work_dir;
+			app.config_values = ctx.config_values;
+		}
+
 		// ── Resize ──────────────────────────────────
 		AppMessage::Resize { .. } => {
 			// Resize is handled by the terminal framework.
@@ -481,14 +553,29 @@ fn dispatch_command(mut app: App, text: &str) -> App {
 		return app;
 	};
 
-	// Build context from current app state for meta commands
+	// Build CommandContext from current app state
+	let cmd_ctx = CommandContext {
+		sessions: app.sessions.clone(),
+		tool_defs: app.tool_defs.clone(),
+		agents: app.agents.clone(),
+		skills: app.skills.clone(),
+		prompts: app.prompts.clone(),
+		server_name: app.server_name.clone(),
+		model_name: app.model_name.clone(),
+		session_id: app.session_id.clone(),
+		acp_connected: app.acp_connected,
+		data_dir: app.data_dir.clone(),
+		work_dir: app.work_dir.clone(),
+		config_values: app.config_values.clone(),
+	};
+
 	let ctx = DispatchContext {
 		verbose: app.verbose,
 		plan: app.plan_mode,
 		total_tokens: app.total_tokens,
 		context_percent: app.context_percent,
 		commands: app.commands.clone(),
-		cmd_ctx: CommandContext::default(),
+		cmd_ctx,
 	};
 
 	let results = ctx.dispatch(&command, &args);
@@ -544,30 +631,25 @@ fn dispatch_command(mut app: App, text: &str) -> App {
 				app.output.push(OutputItem::CommandResult { text });
 			}
 			CommandOutput::BridgeRequest(action) => {
-				// TODO(task-7): dispatch to TuiRuntime once wired
-				app.output.push(OutputItem::Info {
-					text: format!("Bridge request queued: {action:?}"),
-				});
+				// Store pending action for the event loop to pick up and execute.
+				app.pending_bridge_action = Some(action);
 			}
 			CommandOutput::OpenOverlay(action) => match action {
 				OverlayAction::Settings => {
+					app.settings_state = SettingsExplorerState::new();
 					app.screen = Screen::Settings;
 				}
 				OverlayAction::Shortcuts => {
 					app.screen = Screen::Shortcuts;
 				}
 				OverlayAction::Librarians => {
-					// Librarian explorer — switch screen
-					app.output.push(OutputItem::Info {
-						text: "Opening librarian explorer...".into(),
-					});
+					app.librarian_state =
+						LibrarianExplorerState::new(app.librarian_state.librarians.clone());
+					app.screen = Screen::Librarians;
 				}
 				OverlayAction::Setup(preset) => {
-					let msg = match preset {
-						Some(p) => format!("Opening setup wizard with preset: {p}"),
-						None => "Opening setup wizard...".into(),
-					};
-					app.output.push(OutputItem::Info { text: msg });
+					app.setup_state = SetupSelectorState::new();
+					app.screen = Screen::Setup { preset };
 				}
 			},
 		}
@@ -649,9 +731,19 @@ pub fn view(app: &App, frame: &mut Frame) {
 	let status = render_status_line(app, chunks[2].width);
 	frame.render_widget(Paragraph::new(status), chunks[2]);
 
-	// 4. Shortcuts overlay (on top of everything)
-	if app.screen == Screen::Shortcuts {
-		render_shortcuts_overlay(frame, area);
+	// 4. Overlay screens (rendered on top of everything)
+	match &app.screen {
+		Screen::Shortcuts => render_shortcuts_overlay(frame, area),
+		Screen::Settings => {
+			render_settings_explorer(frame, area, &app.settings_state, &app.settings_config_data);
+		}
+		Screen::Librarians => {
+			render_librarian_explorer(frame, area, &app.librarian_state);
+		}
+		Screen::Setup { .. } => {
+			render_setup_selector(frame, area, &app.setup_state);
+		}
+		_ => {}
 	}
 }
 
@@ -1155,5 +1247,216 @@ mod tests {
 		app.input = input::insert(&app.input, "hello");
 		app = update(app, AppMessage::Submit);
 		assert_eq!(app.history.len(), 1);
+	}
+
+	// ── Overlay screen transition tests ─────────────
+
+	#[test]
+	fn librarians_overlay_opens_via_command() {
+		let mut app = App::new();
+		app.input = input::insert(&app.input, "/librarians");
+		app = update(app, AppMessage::Submit);
+		assert_eq!(app.screen, Screen::Librarians);
+	}
+
+	#[test]
+	fn setup_overlay_opens_via_command() {
+		let mut app = App::new();
+		app.input = input::insert(&app.input, "/setup");
+		app = update(app, AppMessage::Submit);
+		assert!(matches!(app.screen, Screen::Setup { preset: None }));
+	}
+
+	#[test]
+	fn escape_dismisses_librarians_overlay() {
+		let mut app = App::new();
+		app.screen = Screen::Librarians;
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn escape_dismisses_setup_overlay() {
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn escape_dismisses_settings_overlay() {
+		let mut app = App::new();
+		app.screen = Screen::Settings;
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn setup_overlay_with_preset() {
+		let mut app = App::new();
+		// Directly set through the overlay action path
+		app.setup_state = SetupSelectorState::new();
+		app.screen = Screen::Setup {
+			preset: Some("ollama".into()),
+		};
+		assert!(matches!(
+			app.screen,
+			Screen::Setup {
+				preset: Some(ref p)
+			} if p == "ollama"
+		));
+		// Escape dismisses it
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn dismiss_overlay_message_returns_to_chat_from_librarians() {
+		let mut app = App::new();
+		app.screen = Screen::Librarians;
+		app = update(app, AppMessage::DismissOverlay);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn dismiss_overlay_message_returns_to_chat_from_setup() {
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+		app = update(app, AppMessage::DismissOverlay);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn new_app_has_default_overlay_states() {
+		let app = App::new();
+		assert!(app.librarian_state.librarians.is_empty());
+		assert_eq!(app.setup_state.selected, 0);
+		assert_eq!(
+			app.settings_state.level,
+			crate::overlays::settings::SettingsLevel::FileList
+		);
+		assert_eq!(app.settings_config_data, serde_json::Value::Null);
+	}
+
+	#[test]
+	fn librarians_overlay_resets_state_on_open() {
+		let mut app = App::new();
+		// Simulate having some librarian data
+		use crate::overlays::librarian::LibrarianEntry;
+		app.librarian_state = LibrarianExplorerState::new(vec![LibrarianEntry::default_new()]);
+		app.librarian_state.selected = 1; // non-zero selection
+		// Open the overlay via command dispatch
+		app.input = input::insert(&app.input, "/librarians");
+		app = update(app, AppMessage::Submit);
+		assert_eq!(app.screen, Screen::Librarians);
+		// State should be reset: selection back to 0, but librarians preserved
+		assert_eq!(app.librarian_state.selected, 0);
+		assert_eq!(app.librarian_state.librarians.len(), 1);
+	}
+
+	#[test]
+	fn setup_overlay_resets_state_on_open() {
+		let mut app = App::new();
+		app.setup_state.selected = 3;
+		app.setup_state.editing_custom = true;
+		// Open the overlay via command dispatch
+		app.input = input::insert(&app.input, "/setup");
+		app = update(app, AppMessage::Submit);
+		assert!(matches!(app.screen, Screen::Setup { preset: None }));
+		// State should be freshly initialized
+		assert_eq!(app.setup_state.selected, 0);
+		assert!(!app.setup_state.editing_custom);
+	}
+
+	// ── Render smoke tests for new overlay screens ──
+
+	#[test]
+	fn render_librarians_overlay_does_not_panic() {
+		let backend = ratatui::backend::TestBackend::new(80, 24);
+		let mut terminal = ratatui::Terminal::new(backend).unwrap();
+		let mut app = App::new();
+		app.screen = Screen::Librarians;
+
+		terminal
+			.draw(|frame| {
+				view(&app, frame);
+			})
+			.unwrap();
+	}
+
+	#[test]
+	fn render_setup_overlay_does_not_panic() {
+		let backend = ratatui::backend::TestBackend::new(80, 24);
+		let mut terminal = ratatui::Terminal::new(backend).unwrap();
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+
+		terminal
+			.draw(|frame| {
+				view(&app, frame);
+			})
+			.unwrap();
+	}
+
+	#[test]
+	fn render_settings_overlay_does_not_panic() {
+		let backend = ratatui::backend::TestBackend::new(80, 24);
+		let mut terminal = ratatui::Terminal::new(backend).unwrap();
+		let mut app = App::new();
+		app.screen = Screen::Settings;
+
+		terminal
+			.draw(|frame| {
+				view(&app, frame);
+			})
+			.unwrap();
+	}
+
+	#[test]
+	fn render_librarians_with_entries_does_not_panic() {
+		let backend = ratatui::backend::TestBackend::new(80, 24);
+		let mut terminal = ratatui::Terminal::new(backend).unwrap();
+		let mut app = App::new();
+		use crate::overlays::librarian::LibrarianEntry;
+		app.librarian_state = LibrarianExplorerState::new(vec![
+			LibrarianEntry {
+				name: "my-lib".into(),
+				description: "General purpose".into(),
+				permissions: vec!["add".into(), "delete".into()],
+				topics: vec!["**".into()],
+			},
+			LibrarianEntry {
+				name: "code-reviewer".into(),
+				description: "Reviews code changes".into(),
+				permissions: vec!["add".into()],
+				topics: vec!["rust".into(), "web/**".into()],
+			},
+		]);
+		app.screen = Screen::Librarians;
+
+		terminal
+			.draw(|frame| {
+				view(&app, frame);
+			})
+			.unwrap();
+	}
+
+	#[test]
+	fn render_settings_with_config_data_does_not_panic() {
+		let backend = ratatui::backend::TestBackend::new(80, 24);
+		let mut terminal = ratatui::Terminal::new(backend).unwrap();
+		let mut app = App::new();
+		app.settings_config_data = serde_json::json!({
+			"host": "localhost",
+			"port": 8080,
+			"debug": true
+		});
+		app.screen = Screen::Settings;
+
+		terminal
+			.draw(|frame| {
+				view(&app, frame);
+			})
+			.unwrap();
 	}
 }

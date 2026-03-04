@@ -10,13 +10,13 @@ use ratatui::{
 use simse_ui_core::app::{
 	OutputItem, PermissionRequest, ToolCallState, ToolCallStatus,
 };
-use simse_ui_core::commands::registry::{
-	all_commands, find_command, parse_bool_arg, CommandCategory, CommandDefinition,
-};
+use simse_ui_core::commands::registry::{all_commands, CommandCategory, CommandDefinition};
 use simse_ui_core::input::state as input;
 use std::collections::BTreeMap;
 
 use crate::banner;
+use crate::commands::{format_table, CommandOutput, OverlayAction};
+use crate::dispatch::{parse_command_line, DispatchContext};
 use crate::output;
 
 // ── Screen ──────────────────────────────────────────────
@@ -474,78 +474,95 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 // ── Command dispatch ────────────────────────────────────
 
 fn dispatch_command(mut app: App, text: &str) -> App {
-	let without_slash = text.strip_prefix('/').unwrap_or(text);
-	let mut parts = without_slash.splitn(2, ' ');
-	let cmd_name = parts.next().unwrap_or("");
-	let arg = parts.next().unwrap_or("").trim();
+	let Some((command, args)) = parse_command_line(text) else {
+		app.output.push(OutputItem::Error {
+			message: "Invalid command.".into(),
+		});
+		return app;
+	};
 
-	match cmd_name.to_lowercase().as_str() {
-		"help" | "?" => {
-			let help = format_help_text(&app.commands);
-			app.output.push(OutputItem::CommandResult { text: help });
-		}
+	// Build context from current app state for meta commands
+	let ctx = DispatchContext {
+		verbose: app.verbose,
+		plan: app.plan_mode,
+		total_tokens: app.total_tokens,
+		context_percent: app.context_percent,
+		commands: app.commands.clone(),
+	};
+
+	let results = ctx.dispatch(&command, &args);
+
+	// Apply side effects for commands that mutate app state
+	match command.as_str() {
 		"clear" => {
 			app.output.clear();
 			app.banner_visible = true;
+			return app;
 		}
 		"exit" | "quit" | "q" => {
 			app.should_quit = true;
+			return app;
 		}
 		"verbose" | "v" => {
-			match parse_bool_arg(arg, app.verbose) {
-				Some(val) => {
-					app.verbose = val;
-					let state = if val { "on" } else { "off" };
-					app.output.push(OutputItem::Info {
-						text: format!("Verbose mode {state}."),
-					});
-				}
-				None => {
-					app.output.push(OutputItem::Error {
-						message: format!("Invalid argument: {arg}. Use on/off/true/false."),
-					});
+			// Toggle verbose: the handler was passed current state,
+			// so the success message tells us the new state.
+			for r in &results {
+				if let CommandOutput::Success(msg) = r {
+					app.verbose = msg.contains(" on");
 				}
 			}
 		}
 		"plan" => {
-			match parse_bool_arg(arg, app.plan_mode) {
-				Some(val) => {
-					app.plan_mode = val;
-					let state = if val { "on" } else { "off" };
+			for r in &results {
+				if let CommandOutput::Success(msg) = r {
+					app.plan_mode = msg.contains(" on");
+				}
+			}
+		}
+		_ => {}
+	}
+
+	// Convert CommandOutput items into App output
+	for result in results {
+		match result {
+			CommandOutput::Success(text) => {
+				app.output.push(OutputItem::CommandResult { text });
+			}
+			CommandOutput::Error(message) => {
+				app.output.push(OutputItem::Error { message });
+			}
+			CommandOutput::Info(text) => {
+				// Filter out sentinel values (clear/exit already handled above)
+				if text == "__clear__" || text == "__exit__" {
+					continue;
+				}
+				app.output.push(OutputItem::Info { text });
+			}
+			CommandOutput::Table { headers, rows } => {
+				let text = format_table(&headers, &rows);
+				app.output.push(OutputItem::CommandResult { text });
+			}
+			CommandOutput::OpenOverlay(action) => match action {
+				OverlayAction::Settings => {
+					app.screen = Screen::Settings;
+				}
+				OverlayAction::Shortcuts => {
+					app.screen = Screen::Shortcuts;
+				}
+				OverlayAction::Librarians => {
+					// Librarian explorer — switch screen
 					app.output.push(OutputItem::Info {
-						text: format!("Plan mode {state}."),
+						text: "Opening librarian explorer...".into(),
 					});
 				}
-				None => {
-					app.output.push(OutputItem::Error {
-						message: format!("Invalid argument: {arg}. Use on/off/true/false."),
-					});
+				OverlayAction::Setup(preset) => {
+					let msg = match preset {
+						Some(p) => format!("Opening setup wizard with preset: {p}"),
+						None => "Opening setup wizard...".into(),
+					};
+					app.output.push(OutputItem::Info { text: msg });
 				}
-			}
-		}
-		"context" => {
-			let tokens = format_tokens(app.total_tokens);
-			let ctx = app.context_percent;
-			app.output.push(OutputItem::CommandResult {
-				text: format!("Tokens: {tokens} | Context: {ctx}%"),
-			});
-		}
-		"compact" => {
-			app.output.push(OutputItem::Info {
-				text: "Compaction requested.".into(),
-			});
-		}
-		_ => {
-			// Check if it's a registered command.
-			if find_command(&app.commands, cmd_name).is_some() {
-				app.output.push(OutputItem::Info {
-					text: format!("/{cmd_name} is not yet implemented in TUI."),
-				});
-			} else {
-				app.output.push(OutputItem::Error {
-					message: format!("Unknown command: /{cmd_name}"),
-				});
-			}
+			},
 		}
 	}
 	app

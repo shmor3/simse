@@ -1,0 +1,4 @@
+bun:
+  version: 'latest'
+
+rust: {}

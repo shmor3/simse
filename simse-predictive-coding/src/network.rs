@@ -119,6 +119,11 @@ impl PredictiveCodingNetwork {
         &mut self.input_predictor
     }
 
+    /// Step size for latent value updates during inference.
+    pub fn inference_rate(&self) -> f64 {
+        self.inference_rate
+    }
+
     /// Run T inference steps on a clamped input, randomizing latent values first.
     ///
     /// Returns the total energy (sum of squared prediction errors across all layers).
@@ -809,5 +814,15 @@ mod tests {
         let energy = net.infer(&input, 5);
         assert!(energy.is_finite());
         assert!(energy >= 0.0);
+    }
+
+    #[test]
+    fn inference_rate_accessor() {
+        let config = PcnConfig {
+            inference_rate: 0.05,
+            ..test_config()
+        };
+        let net = PredictiveCodingNetwork::new(6, &config);
+        assert!((net.inference_rate() - 0.05).abs() < 1e-15);
     }
 }

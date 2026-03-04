@@ -245,6 +245,12 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 	match msg {
 		// ── Input ────────────────────────────────────
 		AppMessage::CharInput(c) => {
+			match &app.screen {
+				Screen::Settings => { app.settings_state.type_char(c); return app; }
+				Screen::Librarians => { app.librarian_state.type_char(c); return app; }
+				Screen::Setup { .. } => { app.setup_state.type_char(c); return app; }
+				_ => {}
+			}
 			if app.screen == Screen::Shortcuts {
 				app.screen = Screen::Chat;
 				return app;
@@ -261,6 +267,20 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::Submit => {
+			match &app.screen {
+				Screen::Settings => {
+					let current_value = get_settings_current_value(&app);
+					app.settings_state.enter(&current_value);
+					return app;
+				}
+				Screen::Librarians => { app.librarian_state.enter(); return app; }
+				Screen::Setup { .. } => {
+					let action = app.setup_state.enter();
+					handle_setup_action(&mut app, action);
+					return app;
+				}
+				_ => {}
+			}
 			app.autocomplete.deactivate();
 			let text = app.input.value.trim().to_string();
 			if text.is_empty() {
@@ -300,6 +320,12 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			}
 		}
 		AppMessage::Backspace => {
+			match &app.screen {
+				Screen::Settings => { app.settings_state.backspace(); return app; }
+				Screen::Librarians => { app.librarian_state.backspace(); return app; }
+				Screen::Setup { .. } => { app.setup_state.backspace(); return app; }
+				_ => {}
+			}
 			app.input = input::backspace(&app.input);
 			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
@@ -345,6 +371,12 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.input = input::select_all(&app.input);
 		}
 		AppMessage::HistoryUp => {
+			match &app.screen {
+				Screen::Settings => { app.settings_state.move_up(); return app; }
+				Screen::Librarians => { app.librarian_state.move_up(); return app; }
+				Screen::Setup { .. } => { app.setup_state.move_up(); return app; }
+				_ => {}
+			}
 			if app.autocomplete.is_active() {
 				app.autocomplete.move_up();
 				return app;
@@ -373,6 +405,27 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			}
 		}
 		AppMessage::HistoryDown => {
+			match &app.screen {
+				Screen::Settings => {
+					let count = match app.settings_state.level {
+						crate::overlays::settings::SettingsLevel::FileList => {
+							crate::overlays::settings::CONFIG_FILES.len()
+						}
+						_ => {
+							if let Some(obj) = app.settings_config_data.as_object() {
+								obj.len()
+							} else {
+								0
+							}
+						}
+					};
+					app.settings_state.move_down(count);
+					return app;
+				}
+				Screen::Librarians => { app.librarian_state.move_down(); return app; }
+				Screen::Setup { .. } => { app.setup_state.move_down(); return app; }
+				_ => {}
+			}
 			if app.autocomplete.is_active() {
 				app.autocomplete.move_down();
 				return app;
@@ -422,13 +475,35 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		AppMessage::Escape => {
 			if app.autocomplete.is_active() {
 				app.autocomplete.deactivate();
-			} else if app.screen != Screen::Chat {
-				app.screen = Screen::Chat;
-			} else if app.loop_status != LoopStatus::Idle {
-				app.loop_status = LoopStatus::Idle;
-				app.output.push(OutputItem::Info {
-					text: "Interrupted.".into(),
-				});
+			} else {
+				match &app.screen {
+					Screen::Settings => {
+						if app.settings_state.back() {
+							app.screen = Screen::Chat;
+						}
+					}
+					Screen::Librarians => {
+						if app.librarian_state.back() {
+							app.screen = Screen::Chat;
+						}
+					}
+					Screen::Setup { .. } => {
+						if app.setup_state.back() {
+							app.screen = Screen::Chat;
+						}
+					}
+					Screen::Chat => {
+						if app.loop_status != LoopStatus::Idle {
+							app.loop_status = LoopStatus::Idle;
+							app.output.push(OutputItem::Info {
+								text: "Interrupted.".into(),
+							});
+						}
+					}
+					_ => {
+						app.screen = Screen::Chat;
+					}
+				}
 			}
 		}
 		AppMessage::CtrlL => {
@@ -443,6 +518,10 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			};
 		}
 		AppMessage::Tab => {
+			match &app.screen {
+				Screen::Setup { .. } => { app.setup_state.toggle_field(); return app; }
+				_ => {}
+			}
 			if app.autocomplete.is_active() {
 				if let Some(completed) = app.autocomplete.accept() {
 					let with_space = format!("{completed} ");
@@ -967,6 +1046,50 @@ fn render_status_line(app: &App, width: u16) -> Line<'static> {
 		full,
 		Style::default().fg(Color::DarkGray),
 	))
+}
+
+/// Get the current value string for the selected settings field.
+fn get_settings_current_value(app: &App) -> String {
+	if let Some(obj) = app.settings_config_data.as_object() {
+		let keys: Vec<&String> = obj.keys().collect();
+		if let Some(key) = keys.get(app.settings_state.selected_field) {
+			if let Some(val) = obj.get(*key) {
+				return match val {
+					serde_json::Value::String(s) => s.clone(),
+					other => other.to_string(),
+				};
+			}
+		}
+	}
+	String::new()
+}
+
+/// Handle a SetupAction returned by the setup selector.
+fn handle_setup_action(app: &mut App, action: crate::overlays::setup::SetupAction) {
+	use crate::overlays::setup::SetupAction;
+	match action {
+		SetupAction::SelectPreset(preset) => {
+			app.output.push(OutputItem::CommandResult {
+				text: format!("Selected preset: {}", preset.label()),
+			});
+			app.screen = Screen::Chat;
+		}
+		SetupAction::OpenOllamaWizard => {
+			app.output.push(OutputItem::Info {
+				text: "Opening Ollama wizard...".into(),
+			});
+		}
+		SetupAction::EnterCustomEdit => {
+			// Stay in Setup screen, now in custom edit mode
+		}
+		SetupAction::ConfirmCustom { command, args } => {
+			app.output.push(OutputItem::CommandResult {
+				text: format!("Custom ACP: {command} {args}"),
+			});
+			app.screen = Screen::Chat;
+		}
+		SetupAction::None => {}
+	}
 }
 
 // ── Tests ───────────────────────────────────────────────
@@ -1582,5 +1705,104 @@ mod tests {
 		assert!(app.autocomplete.is_active());
 		app = update(app, AppMessage::Submit);
 		assert!(!app.autocomplete.is_active());
+	}
+
+	// ── Overlay focus routing tests ─────────────────
+
+	#[test]
+	fn settings_overlay_captures_arrow_keys() {
+		let mut app = App::new();
+		app.screen = Screen::Settings;
+		let initial = app.settings_state.selected_file;
+		app = update(app, AppMessage::HistoryDown);
+		assert_ne!(app.settings_state.selected_file, initial);
+	}
+
+	#[test]
+	fn settings_overlay_escape_dismisses() {
+		let mut app = App::new();
+		app.screen = Screen::Settings;
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn settings_overlay_enter_goes_to_field_list() {
+		use crate::overlays::settings::SettingsLevel;
+		let mut app = App::new();
+		app.screen = Screen::Settings;
+		app = update(app, AppMessage::Submit);
+		assert_eq!(app.settings_state.level, SettingsLevel::FieldList);
+	}
+
+	#[test]
+	fn settings_overlay_char_does_not_reach_input() {
+		let mut app = App::new();
+		app.screen = Screen::Settings;
+		let original = app.input.value.clone();
+		app = update(app, AppMessage::CharInput('a'));
+		assert_eq!(app.input.value, original);
+	}
+
+	#[test]
+	fn librarian_overlay_captures_navigation() {
+		let mut app = App::new();
+		app.screen = Screen::Librarians;
+		// No entries by default, but move_down/move_up should not crash
+		app = update(app, AppMessage::HistoryDown);
+		app = update(app, AppMessage::HistoryUp);
+		// Should still be on Librarians screen
+		assert_eq!(app.screen, Screen::Librarians);
+	}
+
+	#[test]
+	fn librarian_overlay_escape_dismisses() {
+		let mut app = App::new();
+		app.screen = Screen::Librarians;
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn setup_overlay_captures_navigation() {
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+		app = update(app, AppMessage::HistoryDown);
+		assert_eq!(app.setup_state.selected, 1);
+	}
+
+	#[test]
+	fn setup_overlay_escape_dismisses() {
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+		app = update(app, AppMessage::Escape);
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn setup_overlay_enter_selects_preset() {
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+		// First entry is "Claude Code"
+		app = update(app, AppMessage::Submit);
+		// Should transition back to Chat with a result message
+		assert_eq!(app.screen, Screen::Chat);
+	}
+
+	#[test]
+	fn setup_overlay_tab_toggles_field() {
+		let mut app = App::new();
+		app.screen = Screen::Setup { preset: None };
+		// Navigate to Custom (index 3)
+		app = update(app, AppMessage::HistoryDown);
+		app = update(app, AppMessage::HistoryDown);
+		app = update(app, AppMessage::HistoryDown);
+		// Enter Custom -> enters custom edit mode
+		app = update(app, AppMessage::Submit);
+		assert!(app.setup_state.editing_custom);
+		// Tab should toggle field
+		let field_before = app.setup_state.editing_field;
+		app = update(app, AppMessage::Tab);
+		assert_ne!(app.setup_state.editing_field, field_before);
 	}
 }

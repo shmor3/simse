@@ -5,6 +5,7 @@ mod banner;
 pub mod dialogs;
 pub mod markdown;
 mod output;
+pub mod overlays;
 pub mod spinner;
 
 use std::io;

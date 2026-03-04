@@ -15,6 +15,9 @@ use simse_ui_core::input::state as input;
 use std::collections::BTreeMap;
 
 use crate::autocomplete::{render_inline_completions, CommandAutocompleteState};
+
+/// Maximum height (in rows) for the inline completions area.
+const MAX_VISIBLE_COMPLETIONS: u16 = 8;
 use crate::banner;
 use crate::commands::{
 	format_table, AgentInfo, BridgeAction, CommandContext, CommandOutput, OverlayAction,
@@ -810,7 +813,8 @@ pub fn view(app: &App, frame: &mut Frame) {
 	let area = frame.area();
 
 	let completions_height = if app.autocomplete.is_active() {
-		(app.autocomplete.visible_matches().len() as u16).min(8)
+		let total = app.autocomplete.matches.len() as u16;
+		total.min(MAX_VISIBLE_COMPLETIONS)
 	} else {
 		0
 	};

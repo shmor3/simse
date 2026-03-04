@@ -191,15 +191,40 @@ impl CommandAutocompleteState {
 		self.active
 	}
 
-	/// Return the visible matches (up to `MAX_VISIBLE_MATCHES`).
+	/// Return the visible window of matches (up to `MAX_VISIBLE_MATCHES`),
+	/// scrolled so the selected item is always visible.
 	pub fn visible_matches(&self) -> &[CommandMatch] {
-		let end = self.matches.len().min(MAX_VISIBLE_MATCHES);
-		&self.matches[..end]
+		if self.matches.len() <= MAX_VISIBLE_MATCHES {
+			return &self.matches;
+		}
+		let (start, _) = self.visible_window();
+		let end = (start + MAX_VISIBLE_MATCHES).min(self.matches.len());
+		&self.matches[start..end]
 	}
 
-	/// Return the current selection index.
+	/// Return the (start, end) indices of the visible window.
+	fn visible_window(&self) -> (usize, usize) {
+		let total = self.matches.len();
+		if total <= MAX_VISIBLE_MATCHES {
+			return (0, total);
+		}
+		// Keep selected item visible by scrolling the window.
+		let half = MAX_VISIBLE_MATCHES / 2;
+		let start = if self.selected <= half {
+			0
+		} else if self.selected + half >= total {
+			total - MAX_VISIBLE_MATCHES
+		} else {
+			self.selected - half
+		};
+		let end = (start + MAX_VISIBLE_MATCHES).min(total);
+		(start, end)
+	}
+
+	/// Return the current selection index (relative to the visible window).
 	pub fn selected_index(&self) -> usize {
-		self.selected
+		let (start, _) = self.visible_window();
+		self.selected - start
 	}
 }
 
@@ -224,11 +249,10 @@ fn filter_matches(input: &str, commands: &[CommandDefinition]) -> Vec<CommandMat
 	let prefix = extract_prefix(input).to_lowercase();
 
 	if prefix.is_empty() {
-		// Just `/` typed: show all non-hidden commands (capped at MAX).
+		// Just `/` typed: show all non-hidden commands.
 		return commands
 			.iter()
 			.filter(|cmd| !cmd.hidden)
-			.take(MAX_VISIBLE_MATCHES)
 			.map(|cmd| CommandMatch {
 				name: cmd.name.clone(),
 				description: cmd.description.clone(),
@@ -747,15 +771,33 @@ mod tests {
 	// ── visible_matches ─────────────────────────────────
 
 	#[test]
-	fn visible_matches_caps_at_max() {
+	fn visible_matches_windows_at_max() {
 		// Use the full registry which has 33+ commands.
 		let cmds = all_commands();
 		let mut state = CommandAutocompleteState::new();
 		state.activate("/", &cmds);
 
-		// All non-hidden should match, but visible caps at MAX_VISIBLE_MATCHES.
+		// All non-hidden commands are in matches, but visible window caps at MAX_VISIBLE_MATCHES.
+		assert!(state.matches.len() > MAX_VISIBLE_MATCHES);
 		let visible = state.visible_matches();
-		assert!(visible.len() <= MAX_VISIBLE_MATCHES);
+		assert_eq!(visible.len(), MAX_VISIBLE_MATCHES);
+	}
+
+	#[test]
+	fn visible_matches_scrolls_with_selection() {
+		let cmds = all_commands();
+		let mut state = CommandAutocompleteState::new();
+		state.activate("/", &cmds);
+
+		// Move selection past the initial window
+		let total = state.matches.len();
+		for _ in 0..total - 1 {
+			state.move_down();
+		}
+		// Selection is at the last item; visible window should include it
+		let visible = state.visible_matches();
+		assert_eq!(visible.last().unwrap().name, state.matches[total - 1].name);
+		assert_eq!(state.selected_index(), visible.len() - 1);
 	}
 
 	#[test]

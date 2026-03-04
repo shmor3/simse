@@ -8,3 +8,5 @@ bun.lock
 .simse-app-example/
 .worktrees/
 target/
+.moon/cache
+.moon/docker

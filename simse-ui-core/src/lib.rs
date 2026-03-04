@@ -6,6 +6,7 @@
 
 pub mod app;
 pub mod agentic_loop;
+pub mod cli;
 pub mod commands;
 pub mod config;
 pub mod diff;

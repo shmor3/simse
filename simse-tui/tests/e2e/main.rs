@@ -12,6 +12,7 @@
 mod autocomplete;
 mod commands_library;
 mod commands_meta;
+mod commands_session;
 mod config;
 pub mod harness;
 mod input;

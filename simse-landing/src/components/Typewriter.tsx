@@ -38,10 +38,7 @@ export default function Typewriter() {
 			let widest = 0;
 			for (const word of words) {
 				el.textContent = word;
-				widest = Math.max(
-					widest,
-					Math.ceil(el.getBoundingClientRect().width),
-				);
+				widest = Math.max(widest, Math.ceil(el.getBoundingClientRect().width));
 			}
 
 			document.body.removeChild(el);
@@ -89,7 +86,10 @@ export default function Typewriter() {
 		<span
 			ref={containerRef}
 			className={clsx('relative inline-block overflow-clip text-emerald-400')}
-			style={{ maxWidth: '100%', width: maxWidth > 0 ? `${maxWidth}px` : undefined }}
+			style={{
+				maxWidth: '100%',
+				width: maxWidth > 0 ? `${maxWidth}px` : undefined,
+			}}
 		>
 			<span
 				className={clsx('border-r-2 border-emerald-400 animate-blink-cursor')}

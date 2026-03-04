@@ -13,7 +13,13 @@ interface SendOptions {
 	unsubscribeUrl: string;
 }
 
-async function send({ to, apiKey, subject, html, unsubscribeUrl }: SendOptions) {
+async function send({
+	to,
+	apiKey,
+	subject,
+	html,
+	unsubscribeUrl,
+}: SendOptions) {
 	const res = await fetch('https://api.resend.com/emails', {
 		method: 'POST',
 		headers: {

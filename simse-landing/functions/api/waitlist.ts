@@ -1,6 +1,6 @@
 import { waitlistSchema } from '../../src/lib/schema';
-import { validateEmail } from '../lib/validate-email';
 import { sendWelcomeEmail } from '../lib/send-email';
+import { validateEmail } from '../lib/validate-email';
 
 interface Env {
 	simse_waitlist: D1Database;
@@ -54,11 +54,9 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 		const unsubscribeUrl = `${origin}/unsubscribe?email=${encodeURIComponent(email)}`;
 
 		context.waitUntil(
-			sendWelcomeEmail(
-				email,
-				context.env.RESEND_API_KEY,
-				unsubscribeUrl,
-			).catch(() => {}),
+			sendWelcomeEmail(email, context.env.RESEND_API_KEY, unsubscribeUrl).catch(
+				() => {},
+			),
 		);
 	}
 

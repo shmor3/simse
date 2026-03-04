@@ -1,9 +1,9 @@
 {
-  "name": "simse",
-  "short_name": "simse",
-  "description": "The assistant that evolves with you",
-  "start_url": "/",
-  "display": "standalone",
-  "background_color": "#0a0a0b",
-  "theme_color": "#34d399"
+	"name": "simse",
+	"short_name": "simse",
+	"description": "The assistant that evolves with you",
+	"start_url": "/",
+	"display": "standalone",
+	"background_color": "#0a0a0b",
+	"theme_color": "#34d399"
 }

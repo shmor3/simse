@@ -1,6 +1,6 @@
-import satori from 'satori';
-import { Resvg } from '@resvg/resvg-js';
 import { writeFile } from 'node:fs/promises';
+import { Resvg } from '@resvg/resvg-js';
+import satori from 'satori';
 
 // Fetch DM Sans Bold from Google Fonts (request TTF via user-agent)
 const cssResponse = await fetch(
@@ -49,7 +49,8 @@ const svg = await satori(
 										{
 											type: 'polygon',
 											props: {
-												points: '50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5',
+												points:
+													'50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5',
 												fill: 'none',
 												stroke: 'white',
 												'stroke-width': '5',
@@ -62,7 +63,8 @@ const svg = await satori(
 												children: {
 													type: 'polygon',
 													props: {
-														points: '50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5',
+														points:
+															'50,5 93.3,27.5 93.3,72.5 50,95 6.7,72.5 6.7,27.5',
 													},
 												},
 											},

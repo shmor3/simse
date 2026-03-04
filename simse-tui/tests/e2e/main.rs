@@ -11,6 +11,7 @@
 
 mod autocomplete;
 mod commands_config;
+mod commands_files;
 mod commands_library;
 mod commands_meta;
 mod commands_session;

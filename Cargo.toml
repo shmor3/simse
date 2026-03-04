@@ -15,6 +15,7 @@ exclude = [
     "simse-core",
     "simse-engine",
     "simse-predictive-coding",
+    "simse-sandbox",
 ]
 
 [workspace.package]

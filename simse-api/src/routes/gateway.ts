@@ -11,9 +11,11 @@ gateway.all('/payments/*', async (c) => {
 	const path = c.req.path.replace('/payments', '');
 	const url = `${c.env.PAYMENTS_API_URL}${path}`;
 
+	const auth = c.get('auth');
 	const headers = new Headers();
 	headers.set('Authorization', `Bearer ${c.env.PAYMENTS_API_SECRET}`);
 	headers.set('Content-Type', 'application/json');
+	headers.set('X-User-Id', auth.userId);
 
 	const init: RequestInit = {
 		method: c.req.method,
@@ -35,6 +37,7 @@ gateway.all('/payments/*', async (c) => {
 
 // Proxy to simse-mailer: /emails/send → simse-mailer/send
 gateway.post('/emails/send', async (c) => {
+	const auth = c.get('auth');
 	const body = await c.req.text();
 
 	const res = await fetch(`${c.env.MAILER_API_URL}/send`, {
@@ -42,6 +45,7 @@ gateway.post('/emails/send', async (c) => {
 		headers: {
 			Authorization: `Bearer ${c.env.MAILER_API_SECRET}`,
 			'Content-Type': 'application/json',
+			'X-User-Id': auth.userId,
 		},
 		body,
 	});

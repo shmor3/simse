@@ -29,6 +29,18 @@ notifications.get('/', async (c) => {
 	return c.json({ data: results.results });
 });
 
+// PUT /notifications/read-all
+notifications.put('/read-all', async (c) => {
+	const auth = c.get('auth');
+
+	await c.env.DB
+		.prepare('UPDATE notifications SET read = 1 WHERE user_id = ? AND read = 0')
+		.bind(auth.userId)
+		.run();
+
+	return c.json({ data: { ok: true } });
+});
+
 // PUT /notifications/:id/read
 notifications.put('/:id/read', async (c) => {
 	const auth = c.get('auth');
@@ -37,18 +49,6 @@ notifications.put('/:id/read', async (c) => {
 	await c.env.DB
 		.prepare('UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?')
 		.bind(id, auth.userId)
-		.run();
-
-	return c.json({ data: { ok: true } });
-});
-
-// PUT /notifications/read-all
-notifications.put('/read-all', async (c) => {
-	const auth = c.get('auth');
-
-	await c.env.DB
-		.prepare('UPDATE notifications SET read = 1 WHERE user_id = ? AND read = 0')
-		.bind(auth.userId)
 		.run();
 
 	return c.json({ data: { ok: true } });

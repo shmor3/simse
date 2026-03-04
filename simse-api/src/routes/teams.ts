@@ -129,6 +129,21 @@ teams.put('/me/members/:userId/role', async (c) => {
 		return c.json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } }, 403);
 	}
 
+	// Prevent self-demotion
+	if (targetUserId === auth.userId) {
+		return c.json({ error: { code: 'INVALID_OPERATION', message: 'Cannot change your own role' } }, 400);
+	}
+
+	// Prevent demoting the owner
+	const targetMember = await db
+		.prepare('SELECT role FROM team_members WHERE team_id = ? AND user_id = ?')
+		.bind(membership.team_id, targetUserId)
+		.first<{ role: string }>();
+
+	if (targetMember?.role === 'owner') {
+		return c.json({ error: { code: 'FORBIDDEN', message: 'Cannot change the owner role' } }, 403);
+	}
+
 	await db
 		.prepare('UPDATE team_members SET role = ? WHERE team_id = ? AND user_id = ?')
 		.bind(body.role, membership.team_id, targetUserId)

@@ -72,13 +72,16 @@ users.delete('/me', async (c) => {
 		return c.json({ error: { code: 'EMAIL_MISMATCH', message: 'Email does not match' } }, 400);
 	}
 
-	// Cascade delete
-	await db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(auth.userId).run();
-	await db.prepare('DELETE FROM tokens WHERE user_id = ?').bind(auth.userId).run();
-	await db.prepare('DELETE FROM notifications WHERE user_id = ?').bind(auth.userId).run();
-	await db.prepare('DELETE FROM api_keys WHERE user_id = ?').bind(auth.userId).run();
-	await db.prepare('DELETE FROM team_members WHERE user_id = ?').bind(auth.userId).run();
-	await db.prepare('DELETE FROM users WHERE id = ?').bind(auth.userId).run();
+	// Cascade delete (batched for atomicity)
+	await db.batch([
+		db.prepare('DELETE FROM sessions WHERE user_id = ?').bind(auth.userId),
+		db.prepare('DELETE FROM tokens WHERE user_id = ?').bind(auth.userId),
+		db.prepare('DELETE FROM notifications WHERE user_id = ?').bind(auth.userId),
+		db.prepare('DELETE FROM api_keys WHERE user_id = ?').bind(auth.userId),
+		db.prepare('DELETE FROM team_invites WHERE invited_by = ?').bind(auth.userId),
+		db.prepare('DELETE FROM team_members WHERE user_id = ?').bind(auth.userId),
+		db.prepare('DELETE FROM users WHERE id = ?').bind(auth.userId),
+	]);
 
 	return c.json({ data: { ok: true } });
 });

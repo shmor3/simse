@@ -8,7 +8,6 @@ database_name = "simse-api-db"
 database_id = "a2a07725-b216-4ab0-bb60-6fd83db97e3d"
 
 # Secrets (set via `wrangler secret put`):
-# SESSION_SECRET
 # PAYMENTS_API_URL
 # PAYMENTS_API_SECRET
 # MAILER_API_URL

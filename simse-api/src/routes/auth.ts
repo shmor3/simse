@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { generateId } from '../lib/db';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { createSession, deleteSession } from '../lib/session';
-import { createToken, markTokenUsed, validateToken } from '../lib/token';
+import { createToken, generateCode, markTokenUsed, validateToken } from '../lib/token';
 import { loginSchema, newPasswordSchema, registerSchema, resetPasswordSchema, twoFactorSchema } from '../schemas';
 import type { AuthContext, Env } from '../types';
 
@@ -36,30 +36,18 @@ auth.post('/register', async (c) => {
 	const userId = generateId();
 	const passwordHash = await hashPassword(password);
 
-	// Create user
-	await db
-		.prepare(
-			'INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)',
-		)
-		.bind(userId, normalizedEmail, name, passwordHash)
-		.run();
-
-	// Create default team
+	// Create user, team, membership, and verification token atomically
 	const teamId = generateId();
-	await db
-		.prepare('INSERT INTO teams (id, name) VALUES (?, ?)')
-		.bind(teamId, `${name}'s Team`)
-		.run();
+	const tokenId = generateId();
+	const verifyCode = generateCode();
+	const tokenExpires = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
-	await db
-		.prepare(
-			"INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'owner')",
-		)
-		.bind(teamId, userId)
-		.run();
-
-	// Create verification token
-	await createToken(db, userId, 'email_verify', 15);
+	await db.batch([
+		db.prepare('INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)').bind(userId, normalizedEmail, name, passwordHash),
+		db.prepare('INSERT INTO teams (id, name) VALUES (?, ?)').bind(teamId, `${name}'s Team`),
+		db.prepare("INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'owner')").bind(teamId, userId),
+		db.prepare('INSERT INTO tokens (id, user_id, type, code, expires_at) VALUES (?, ?, ?, ?, ?)').bind(tokenId, userId, 'email_verify', verifyCode, tokenExpires),
+	]);
 
 	// Create session
 	const token = await createSession(db, userId);

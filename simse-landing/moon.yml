@@ -1,2 +1,8 @@
 language: 'typescript'
 tags: ['app']
+
+tasks:
+  test:
+    command: 'bun run lint'
+    options:
+      mergeArgs: 'replace'

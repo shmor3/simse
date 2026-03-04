@@ -254,11 +254,14 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			} else {
 				app.input = input::insert(&app.input, &c.to_string());
 			}
+			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::Paste(text) => {
 			app.input = input::insert(&app.input, &text);
+			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::Submit => {
+			app.autocomplete.deactivate();
 			let text = app.input.value.trim().to_string();
 			if text.is_empty() {
 				return app;
@@ -298,12 +301,15 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		}
 		AppMessage::Backspace => {
 			app.input = input::backspace(&app.input);
+			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::Delete => {
 			app.input = input::delete(&app.input);
+			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::DeleteWordBack => {
 			app.input = input::delete_word_back(&app.input);
+			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::CursorLeft => {
 			app.input = input::move_left(&app.input, false);
@@ -339,6 +345,10 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.input = input::select_all(&app.input);
 		}
 		AppMessage::HistoryUp => {
+			if app.autocomplete.is_active() {
+				app.autocomplete.move_up();
+				return app;
+			}
 			if app.history.is_empty() {
 				return app;
 			}
@@ -363,6 +373,10 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			}
 		}
 		AppMessage::HistoryDown => {
+			if app.autocomplete.is_active() {
+				app.autocomplete.move_down();
+				return app;
+			}
 			match app.history_index {
 				Some(idx) => {
 					if idx + 1 < app.history.len() {
@@ -406,7 +420,9 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.ctrl_c_pending = false;
 		}
 		AppMessage::Escape => {
-			if app.screen != Screen::Chat {
+			if app.autocomplete.is_active() {
+				app.autocomplete.deactivate();
+			} else if app.screen != Screen::Chat {
 				app.screen = Screen::Chat;
 			} else if app.loop_status != LoopStatus::Idle {
 				app.loop_status = LoopStatus::Idle;
@@ -427,7 +443,18 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			};
 		}
 		AppMessage::Tab => {
-			// Autocomplete wiring handled in Task 2
+			if app.autocomplete.is_active() {
+				if let Some(completed) = app.autocomplete.accept() {
+					let with_space = format!("{completed} ");
+					app.input = input::InputState {
+						value: with_space.clone(),
+						cursor: with_space.len(),
+						..Default::default()
+					};
+				}
+			} else if app.input.value.starts_with('/') {
+				app.autocomplete.update_matches(&app.input.value, &app.commands);
+			}
 		}
 		AppMessage::Quit => {
 			app.should_quit = true;
@@ -1453,6 +1480,73 @@ mod tests {
 	#[test]
 	fn app_has_autocomplete_state() {
 		let app = App::new();
+		assert!(!app.autocomplete.is_active());
+	}
+
+	// ── Autocomplete integration tests ─────────────
+
+	#[test]
+	fn typing_slash_activates_autocomplete() {
+		let mut app = App::new();
+		app = update(app, AppMessage::CharInput('/'));
+		app = update(app, AppMessage::CharInput('h'));
+		assert!(app.autocomplete.is_active());
+		assert!(app.autocomplete.matches.iter().any(|m| m.name == "help"));
+	}
+
+	#[test]
+	fn tab_accepts_autocomplete_selection() {
+		let mut app = App::new();
+		app = update(app, AppMessage::CharInput('/'));
+		app = update(app, AppMessage::CharInput('h'));
+		app = update(app, AppMessage::CharInput('e'));
+		app = update(app, AppMessage::CharInput('l'));
+		assert!(app.autocomplete.is_active());
+		app = update(app, AppMessage::Tab);
+		assert!(!app.autocomplete.is_active());
+		assert!(app.input.value.starts_with("/help"));
+	}
+
+	#[test]
+	fn escape_deactivates_autocomplete() {
+		let mut app = App::new();
+		app = update(app, AppMessage::CharInput('/'));
+		app = update(app, AppMessage::CharInput('h'));
+		assert!(app.autocomplete.is_active());
+		app = update(app, AppMessage::Escape);
+		assert!(!app.autocomplete.is_active());
+	}
+
+	#[test]
+	fn up_down_navigate_autocomplete() {
+		let mut app = App::new();
+		app = update(app, AppMessage::CharInput('/'));
+		assert!(app.autocomplete.is_active());
+		let initial_selected = app.autocomplete.selected;
+		app = update(app, AppMessage::HistoryDown);
+		assert_eq!(app.autocomplete.selected, initial_selected + 1);
+		app = update(app, AppMessage::HistoryUp);
+		assert_eq!(app.autocomplete.selected, initial_selected);
+	}
+
+	#[test]
+	fn backspace_updates_autocomplete() {
+		let mut app = App::new();
+		app = update(app, AppMessage::CharInput('/'));
+		app = update(app, AppMessage::CharInput('h'));
+		app = update(app, AppMessage::CharInput('e'));
+		let count_he = app.autocomplete.matches.len();
+		app = update(app, AppMessage::Backspace);
+		assert!(app.autocomplete.matches.len() >= count_he);
+	}
+
+	#[test]
+	fn submit_deactivates_autocomplete() {
+		let mut app = App::new();
+		app = update(app, AppMessage::CharInput('/'));
+		app = update(app, AppMessage::CharInput('h'));
+		assert!(app.autocomplete.is_active());
+		app = update(app, AppMessage::Submit);
 		assert!(!app.autocomplete.is_active());
 	}
 }

@@ -14,6 +14,7 @@ bun run build:core           # cd simse-core && cargo build --release
 bun run build:tui            # cd simse-tui && cargo build --release
 bun run build:vsh-engine     # cd simse-vsh && cargo build --release
 bun run build:vnet-engine    # cd simse-vnet && cargo build --release
+bun run build:sandbox-engine # cd simse-sandbox && cargo build --release
 
 # Rust tests
 cd simse-vector && cargo test  # Rust vector engine tests
@@ -25,6 +26,7 @@ cd simse-vnet && cargo test    # Rust vnet engine tests
 cd simse-core && cargo test    # Rust core orchestration tests
 cd simse-ui-core && cargo test # Rust UI core tests
 cd simse-bridge && cargo test  # Rust bridge tests
+cd simse-sandbox && cargo test # Rust sandbox engine tests
 cd simse-tui && cargo test     # Rust TUI tests (unit + integration)
 ```
 
@@ -44,6 +46,7 @@ simse-acp/                  # Pure Rust crate — ACP engine (JSON-RPC over stdi
 simse-mcp/                  # Pure Rust crate — MCP engine (JSON-RPC over stdio)
 simse-vsh/                  # Pure Rust crate — virtual shell engine (JSON-RPC over stdio)
 simse-vnet/                 # Pure Rust crate — virtual network engine (JSON-RPC over stdio)
+simse-sandbox/              # Pure Rust crate — unified sandbox engine (JSON-RPC over stdio)
 simse-ui-core/              # Pure Rust crate — platform-agnostic UI logic (no I/O)
 simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Architecture)
 simse-bridge/               # Pure Rust crate — async I/O bridge (ACP client, config, sessions, storage)
@@ -160,6 +163,27 @@ simse-vnet/                 # Pure Rust crate — virtual network engine
     session.rs              # SessionManager: persistent connection tracking (WS, TCP)
     network.rs              # VirtualNetwork: core logic, mock HTTP, sandbox, metrics
     server.rs               # VnetServer: 19-method JSON-RPC dispatch
+
+simse-sandbox/              # Pure Rust crate — unified sandbox engine
+  src/
+    lib.rs                  # Module declarations, re-exports
+    main.rs                 # Binary entry point (simse-sandbox-engine)
+    error.rs                # SandboxError enum (SANDBOX_ prefix)
+    protocol.rs             # JSON-RPC param/result types
+    transport.rs            # NdjsonTransport (same pattern as other crates)
+    server.rs               # SandboxServer: JSON-RPC dispatcher (63 methods across 7 domains)
+    sandbox.rs              # Sandbox: unified orchestrator, backend switching
+    config.rs               # BackendConfig, SshConfig, SshAuth
+    ssh/
+      mod.rs                # SSH module root
+      pool.rs               # SshPool: multiplexed russh connection manager
+      channel.rs            # ExecOutput, channel read with timeout
+      fs_backend.rs         # FsBackend impl over SFTP
+      shell_backend.rs      # ShellBackend impl over exec channel
+      net_backend.rs        # NetBackend impl over exec channel (curl/getent)
+  tests/
+    integration.rs          # 10 integration tests (local backend)
+    ssh_integration.rs      # SSH integration tests (feature-gated)
 ```
 
 ### TUI Crates (CLI Application)
@@ -222,6 +246,7 @@ simse-bridge/               # Async I/O bridge (tokio)
 - **Session forking**: `SessionManager.fork(id)` clones conversation state, creates fresh event bus and new ID.
 - **Structured compaction**: Auto-compaction requests 6 sections (Goal, Progress, Current State, Key Decisions, Relevant Files, Next Steps).
 - **Arc<AtomicBool> for health flags**: Connection health shared between spawned reader tasks and main struct.
+- **Backend trait abstraction**: Each engine crate (VFS, VSH, VNet) defines a backend trait (`FsBackend`, `ShellBackend`, `NetBackend`). LocalBackend wraps existing logic, SshBackend in simse-sandbox uses russh multiplexed SSH connections.
 
 ### ACP Protocol
 

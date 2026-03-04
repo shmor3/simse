@@ -8,12 +8,15 @@ pub mod cli_args;
 pub mod commands;
 pub mod dialogs;
 pub mod dispatch;
+pub mod error_box;
 pub mod event_loop;
 pub mod markdown;
 mod output;
 pub mod onboarding;
 pub mod overlays;
 pub mod spinner;
+pub mod status_bar;
+pub mod tool_call_box;
 
 use std::io;
 

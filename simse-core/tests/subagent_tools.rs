@@ -12,7 +12,7 @@ use simse_core::tools::delegation::{
 };
 use simse_core::tools::subagent::{
 	DelegateRunner, SubagentCallbacks, SubagentInfo, SubagentLoopRunner, SubagentMode,
-	SubagentResult, SubagentToolsOptions, register_subagent_tools, reset_subagent_counter,
+	SubagentResult, SubagentToolsOptions, register_subagent_tools,
 };
 use simse_core::tools::{ToolCallRequest, ToolRegistry, ToolRegistryOptions};
 
@@ -164,7 +164,7 @@ fn make_call(name: &str, args: serde_json::Value) -> ToolCallRequest {
 
 #[tokio::test]
 async fn subagent_spawn_registered_at_depth_0() {
-	reset_subagent_counter();
+
 	let mut registry = ToolRegistry::new(ToolRegistryOptions::default());
 	let options = make_subagent_options(
 		Arc::new(MockLoopRunner::default()),
@@ -188,7 +188,7 @@ async fn subagent_spawn_registered_at_depth_0() {
 
 #[tokio::test]
 async fn subagent_delegate_registered_at_depth_0() {
-	reset_subagent_counter();
+
 	let mut registry = ToolRegistry::new(ToolRegistryOptions::default());
 	let options = make_subagent_options(
 		Arc::new(MockLoopRunner::default()),
@@ -208,7 +208,7 @@ async fn subagent_delegate_registered_at_depth_0() {
 
 #[tokio::test]
 async fn subagent_tools_not_registered_at_max_depth() {
-	reset_subagent_counter();
+
 	let mut registry = ToolRegistry::new(ToolRegistryOptions::default());
 	let options = make_subagent_options(
 		Arc::new(MockLoopRunner::default()),
@@ -224,7 +224,7 @@ async fn subagent_tools_not_registered_at_max_depth() {
 
 #[tokio::test]
 async fn subagent_tools_not_registered_above_max_depth() {
-	reset_subagent_counter();
+
 	let mut registry = ToolRegistry::new(ToolRegistryOptions::default());
 	let options = make_subagent_options(
 		Arc::new(MockLoopRunner::default()),
@@ -239,7 +239,7 @@ async fn subagent_tools_not_registered_above_max_depth() {
 
 #[tokio::test]
 async fn subagent_spawn_execution_returns_result_text() {
-	reset_subagent_counter();
+
 	let mut registry = ToolRegistry::new(ToolRegistryOptions::default());
 	let options = make_subagent_options(
 		Arc::new(MockLoopRunner {
@@ -266,7 +266,7 @@ async fn subagent_spawn_execution_returns_result_text() {
 
 #[tokio::test]
 async fn subagent_delegate_execution_returns_result_text() {
-	reset_subagent_counter();
+
 	let mut registry = ToolRegistry::new(ToolRegistryOptions::default());
 	let options = make_subagent_options(
 		Arc::new(MockLoopRunner::default()),
@@ -293,7 +293,7 @@ async fn subagent_delegate_execution_returns_result_text() {
 
 #[tokio::test]
 async fn subagent_spawn_callbacks_fired() {
-	reset_subagent_counter();
+
 	let started = Arc::new(Mutex::new(Vec::<SubagentInfo>::new()));
 	let completed = Arc::new(Mutex::new(Vec::<(String, SubagentResult)>::new()));
 
@@ -348,7 +348,7 @@ async fn subagent_spawn_callbacks_fired() {
 
 #[tokio::test]
 async fn subagent_delegate_callbacks_fired() {
-	reset_subagent_counter();
+
 	let started = Arc::new(Mutex::new(Vec::<SubagentInfo>::new()));
 	let completed = Arc::new(Mutex::new(Vec::<(String, SubagentResult)>::new()));
 
@@ -403,7 +403,7 @@ async fn subagent_delegate_callbacks_fired() {
 
 #[tokio::test]
 async fn subagent_spawn_error_propagation() {
-	reset_subagent_counter();
+
 	let errors = Arc::new(Mutex::new(Vec::<(String, String)>::new()));
 	let errors_clone = Arc::clone(&errors);
 
@@ -452,7 +452,7 @@ async fn subagent_spawn_error_propagation() {
 
 #[tokio::test]
 async fn subagent_delegate_error_propagation() {
-	reset_subagent_counter();
+
 	let mut registry = ToolRegistry::new(ToolRegistryOptions::default());
 	let options = make_subagent_options(
 		Arc::new(MockLoopRunner::default()),
@@ -479,7 +479,7 @@ async fn subagent_delegate_error_propagation() {
 
 #[tokio::test]
 async fn subagent_unique_id_generation() {
-	reset_subagent_counter();
+
 	let ids = Arc::new(Mutex::new(Vec::<String>::new()));
 	let ids_clone = Arc::clone(&ids);
 
@@ -539,7 +539,7 @@ async fn subagent_unique_id_generation() {
 
 #[tokio::test]
 async fn subagent_depth_check_at_depth_1() {
-	reset_subagent_counter();
+
 	let mut registry = ToolRegistry::new(ToolRegistryOptions::default());
 	let options = SubagentToolsOptions {
 		loop_runner: Arc::new(MockLoopRunner::default()),
@@ -559,7 +559,7 @@ async fn subagent_depth_check_at_depth_1() {
 
 #[tokio::test]
 async fn subagent_depth_check_custom_max_depth() {
-	reset_subagent_counter();
+
 	let mut registry = ToolRegistry::new(ToolRegistryOptions::default());
 	let options = SubagentToolsOptions {
 		loop_runner: Arc::new(MockLoopRunner::default()),
@@ -584,7 +584,7 @@ async fn subagent_depth_check_custom_max_depth() {
 
 #[tokio::test]
 async fn subagent_spawn_uses_custom_max_turns() {
-	reset_subagent_counter();
+
 	let received_turns = Arc::new(AtomicU64::new(0));
 	let received_clone = Arc::clone(&received_turns);
 

@@ -9,11 +9,11 @@
 //! `LibraryStore` and `VfsStore` traits.
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::Value;
+use uuid::Uuid;
 
 use crate::error::SimseError;
 use crate::tools::registry::ToolRegistry;
@@ -23,18 +23,10 @@ use crate::tools::types::{ToolCategory, ToolDefinition, ToolHandler, ToolParamet
 // ID generation
 // ---------------------------------------------------------------------------
 
-/// Global atomic counter for generating unique subagent IDs.
-static SUBAGENT_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// Generate the next unique subagent ID (e.g. "sub_1", "sub_2").
+/// Generate a unique subagent ID using UUID v4 (e.g. "sub_a1b2c3d4").
 fn next_subagent_id() -> String {
-	let n = SUBAGENT_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
-	format!("sub_{}", n)
-}
-
-/// Reset the counter. Exposed for tests only.
-pub fn reset_subagent_counter() {
-	SUBAGENT_COUNTER.store(0, Ordering::Relaxed);
+	let short = &Uuid::new_v4().to_string()[..8];
+	format!("sub_{}", short)
 }
 
 // ---------------------------------------------------------------------------

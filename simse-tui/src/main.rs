@@ -1,6 +1,7 @@
 //! SimSE TUI — Terminal interface for SimSE.
 
 mod app;
+pub mod autocomplete;
 mod banner;
 pub mod dialogs;
 pub mod markdown;

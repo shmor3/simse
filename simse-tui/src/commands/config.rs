@@ -35,7 +35,10 @@ pub fn handle_init(args: &str) -> Vec<CommandOutput> {
 		)];
 	}
 
-	vec![CommandOutput::BridgeRequest(BridgeAction::InitConfig { force })]
+	vec![
+		CommandOutput::Info("Initializing project configuration...".into()),
+		CommandOutput::BridgeRequest(BridgeAction::InitConfig { force }),
+	]
 }
 
 /// `/config [key]` -- show configuration values.
@@ -145,9 +148,10 @@ mod tests {
 	#[test]
 	fn init_no_args() {
 		let out = handle_init("");
-		assert_eq!(out.len(), 1);
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "Initializing project configuration..."));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::InitConfig { force: false })
 		));
 	}
@@ -155,9 +159,10 @@ mod tests {
 	#[test]
 	fn init_force() {
 		let out = handle_init("--force");
-		assert_eq!(out.len(), 1);
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::InitConfig { force: true })
 		));
 	}
@@ -165,9 +170,10 @@ mod tests {
 	#[test]
 	fn init_short_force() {
 		let out = handle_init("-f");
-		assert_eq!(out.len(), 1);
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::InitConfig { force: true })
 		));
 	}
@@ -283,4 +289,5 @@ mod tests {
 			CommandOutput::BridgeRequest(BridgeAction::FactoryResetProject)
 		));
 	}
+
 }

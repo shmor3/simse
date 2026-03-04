@@ -198,14 +198,19 @@ fn dispatch_library_commands_produce_output() {
     for (cmd, args) in &library_cmds {
         let out = dispatch_command(cmd, args);
         assert!(
-            !out.is_empty(),
-            "Library command /{cmd} should produce output"
+            out.len() >= 2,
+            "Library command /{cmd} should produce at least 2 outputs (Info + BridgeRequest)"
         );
-        // Library commands should return BridgeRequest or OpenOverlay.
+        // Library commands now return Info feedback then BridgeRequest.
         assert!(
-            matches!(&out[0], CommandOutput::BridgeRequest(_) | CommandOutput::OpenOverlay(_)),
-            "Library command /{cmd} should return BridgeRequest or OpenOverlay, got {:?}",
+            matches!(&out[0], CommandOutput::Info(_)),
+            "Library command /{cmd} should return Info feedback first, got {:?}",
             out[0]
+        );
+        assert!(
+            matches!(&out[1], CommandOutput::BridgeRequest(_)),
+            "Library command /{cmd} should return BridgeRequest second, got {:?}",
+            out[1]
         );
     }
 }
@@ -256,10 +261,11 @@ fn dispatch_config_commands_produce_correct_types() {
         CommandOutput::OpenOverlay(OverlayAction::Settings)
     ));
 
-    // /init -> BridgeRequest(InitConfig)
+    // /init -> Info + BridgeRequest(InitConfig)
     let out = dispatch_command("init", "");
+    assert!(matches!(&out[0], CommandOutput::Info(_)));
     assert!(matches!(
-        &out[0],
+        &out[1],
         CommandOutput::BridgeRequest(BridgeAction::InitConfig { force: false })
     ));
 
@@ -297,8 +303,9 @@ fn dispatch_files_commands_produce_output() {
 #[test]
 fn dispatch_ai_commands_produce_output() {
     let out = dispatch_command("chain", "summarize");
+    assert!(matches!(&out[0], CommandOutput::Info(_)));
     assert!(matches!(
-        &out[0],
+        &out[1],
         CommandOutput::BridgeRequest(BridgeAction::RunChain { .. })
     ));
 
@@ -339,10 +346,11 @@ fn dispatch_meta_commands_produce_correct_types() {
         CommandOutput::OpenOverlay(OverlayAction::Shortcuts)
     ));
 
-    // /compact -> BridgeRequest(Compact)
+    // /compact -> Info + BridgeRequest(Compact)
     let out = dispatch_command("compact", "");
+    assert!(matches!(&out[0], CommandOutput::Info(_)));
     assert!(matches!(
-        &out[0],
+        &out[1],
         CommandOutput::BridgeRequest(BridgeAction::Compact)
     ));
 }

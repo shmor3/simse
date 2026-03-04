@@ -6,9 +6,12 @@ use super::{BridgeAction, CommandOutput};
 pub fn handle_files(args: &str) -> Vec<CommandOutput> {
 	let path = args.trim();
 	if path.is_empty() {
-		vec![CommandOutput::BridgeRequest(BridgeAction::ListFiles {
-			path: None,
-		})]
+		vec![
+			CommandOutput::Info("Listing files...".into()),
+			CommandOutput::BridgeRequest(BridgeAction::ListFiles {
+				path: None,
+			}),
+		]
 	} else {
 		// Basic path validation.
 		if path.contains('\0') {
@@ -16,9 +19,12 @@ pub fn handle_files(args: &str) -> Vec<CommandOutput> {
 				"Invalid path: contains null bytes".into(),
 			)];
 		}
-		vec![CommandOutput::BridgeRequest(BridgeAction::ListFiles {
-			path: Some(path.into()),
-		})]
+		vec![
+			CommandOutput::Info("Listing files...".into()),
+			CommandOutput::BridgeRequest(BridgeAction::ListFiles {
+				path: Some(path.into()),
+			}),
+		]
 	}
 }
 
@@ -26,18 +32,24 @@ pub fn handle_files(args: &str) -> Vec<CommandOutput> {
 pub fn handle_save(args: &str) -> Vec<CommandOutput> {
 	let path = args.trim();
 	if path.is_empty() {
-		vec![CommandOutput::BridgeRequest(BridgeAction::SaveFiles {
-			path: None,
-		})]
+		vec![
+			CommandOutput::Info("Saving files...".into()),
+			CommandOutput::BridgeRequest(BridgeAction::SaveFiles {
+				path: None,
+			}),
+		]
 	} else {
 		if path.contains('\0') {
 			return vec![CommandOutput::Error(
 				"Invalid path: contains null bytes".into(),
 			)];
 		}
-		vec![CommandOutput::BridgeRequest(BridgeAction::SaveFiles {
-			path: Some(path.into()),
-		})]
+		vec![
+			CommandOutput::Info(format!("Saving to: {path}")),
+			CommandOutput::BridgeRequest(BridgeAction::SaveFiles {
+				path: Some(path.into()),
+			}),
+		]
 	}
 }
 
@@ -45,18 +57,24 @@ pub fn handle_save(args: &str) -> Vec<CommandOutput> {
 pub fn handle_validate(args: &str) -> Vec<CommandOutput> {
 	let path = args.trim();
 	if path.is_empty() {
-		vec![CommandOutput::BridgeRequest(BridgeAction::ValidateFiles {
-			path: None,
-		})]
+		vec![
+			CommandOutput::Info("Validating files...".into()),
+			CommandOutput::BridgeRequest(BridgeAction::ValidateFiles {
+				path: None,
+			}),
+		]
 	} else {
 		if path.contains('\0') {
 			return vec![CommandOutput::Error(
 				"Invalid path: contains null bytes".into(),
 			)];
 		}
-		vec![CommandOutput::BridgeRequest(BridgeAction::ValidateFiles {
-			path: Some(path.into()),
-		})]
+		vec![
+			CommandOutput::Info("Validating files...".into()),
+			CommandOutput::BridgeRequest(BridgeAction::ValidateFiles {
+				path: Some(path.into()),
+			}),
+		]
 	}
 }
 
@@ -75,27 +93,36 @@ pub fn handle_discard(args: &str) -> Vec<CommandOutput> {
 		)];
 	}
 
-	vec![CommandOutput::BridgeRequest(BridgeAction::DiscardFile {
-		path: path.into(),
-	})]
+	vec![
+		CommandOutput::Info(format!("Discarding changes to: {path}")),
+		CommandOutput::BridgeRequest(BridgeAction::DiscardFile {
+			path: path.into(),
+		}),
+	]
 }
 
 /// `/diff [path]` -- show diff of virtual file changes.
 pub fn handle_diff(args: &str) -> Vec<CommandOutput> {
 	let path = args.trim();
 	if path.is_empty() {
-		vec![CommandOutput::BridgeRequest(BridgeAction::DiffFiles {
-			path: None,
-		})]
+		vec![
+			CommandOutput::Info("Generating diff...".into()),
+			CommandOutput::BridgeRequest(BridgeAction::DiffFiles {
+				path: None,
+			}),
+		]
 	} else {
 		if path.contains('\0') {
 			return vec![CommandOutput::Error(
 				"Invalid path: contains null bytes".into(),
 			)];
 		}
-		vec![CommandOutput::BridgeRequest(BridgeAction::DiffFiles {
-			path: Some(path.into()),
-		})]
+		vec![
+			CommandOutput::Info("Generating diff...".into()),
+			CommandOutput::BridgeRequest(BridgeAction::DiffFiles {
+				path: Some(path.into()),
+			}),
+		]
 	}
 }
 
@@ -108,8 +135,10 @@ mod tests {
 	#[test]
 	fn files_no_args_lists_all() {
 		let out = handle_files("");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "Listing files..."));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::ListFiles { path: None })
 		));
 	}
@@ -117,8 +146,10 @@ mod tests {
 	#[test]
 	fn files_with_path() {
 		let out = handle_files("src/main.rs");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::ListFiles { path: Some(p) }) if p == "src/main.rs"
 		));
 	}
@@ -132,8 +163,10 @@ mod tests {
 	#[test]
 	fn files_trims_whitespace() {
 		let out = handle_files("  /some/path  ");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::ListFiles { path: Some(p) }) if p == "/some/path"
 		));
 	}
@@ -143,8 +176,10 @@ mod tests {
 	#[test]
 	fn save_no_args_saves_all() {
 		let out = handle_save("");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "Saving files..."));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::SaveFiles { path: None })
 		));
 	}
@@ -152,8 +187,10 @@ mod tests {
 	#[test]
 	fn save_with_path() {
 		let out = handle_save("output.txt");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("output.txt")));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::SaveFiles { path: Some(p) }) if p == "output.txt"
 		));
 	}
@@ -169,8 +206,10 @@ mod tests {
 	#[test]
 	fn validate_no_args_validates_all() {
 		let out = handle_validate("");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "Validating files..."));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::ValidateFiles { path: None })
 		));
 	}
@@ -178,8 +217,10 @@ mod tests {
 	#[test]
 	fn validate_with_path() {
 		let out = handle_validate("config.toml");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::ValidateFiles { path: Some(p) }) if p == "config.toml"
 		));
 	}
@@ -201,8 +242,10 @@ mod tests {
 	#[test]
 	fn discard_with_path() {
 		let out = handle_discard("temp.rs");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("temp.rs")));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::DiscardFile { path }) if path == "temp.rs"
 		));
 	}
@@ -218,8 +261,10 @@ mod tests {
 	#[test]
 	fn diff_no_args_shows_all() {
 		let out = handle_diff("");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "Generating diff..."));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::DiffFiles { path: None })
 		));
 	}
@@ -227,8 +272,10 @@ mod tests {
 	#[test]
 	fn diff_with_path() {
 		let out = handle_diff("lib.rs");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::DiffFiles { path: Some(p) }) if p == "lib.rs"
 		));
 	}

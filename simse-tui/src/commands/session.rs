@@ -41,9 +41,12 @@ pub fn handle_resume(args: &str) -> Vec<CommandOutput> {
 		return vec![CommandOutput::Error("Usage: /resume <id>".into())];
 	}
 
-	vec![CommandOutput::BridgeRequest(BridgeAction::ResumeSession {
-		id: id.to_string(),
-	})]
+	vec![
+		CommandOutput::Info("Resuming session...".into()),
+		CommandOutput::BridgeRequest(BridgeAction::ResumeSession {
+			id: id.to_string(),
+		}),
+	]
 }
 
 /// `/rename <title>` -- rename the current session.
@@ -53,9 +56,12 @@ pub fn handle_rename(args: &str) -> Vec<CommandOutput> {
 		return vec![CommandOutput::Error("Usage: /rename <title>".into())];
 	}
 
-	vec![CommandOutput::BridgeRequest(BridgeAction::RenameSession {
-		title: title.to_string(),
-	})]
+	vec![
+		CommandOutput::Info(format!("Renaming session to: {title}")),
+		CommandOutput::BridgeRequest(BridgeAction::RenameSession {
+			title: title.to_string(),
+		}),
+	]
 }
 
 /// `/server [name]` -- show or change the ACP server.
@@ -72,9 +78,12 @@ pub fn handle_server(args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 		};
 	}
 
-	vec![CommandOutput::BridgeRequest(BridgeAction::SwitchServer {
-		name: name.to_string(),
-	})]
+	vec![
+		CommandOutput::Info(format!("Switching to server: {name}")),
+		CommandOutput::BridgeRequest(BridgeAction::SwitchServer {
+			name: name.to_string(),
+		}),
+	]
 }
 
 /// `/model [name]` -- show or change the model.
@@ -89,9 +98,12 @@ pub fn handle_model(args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 		};
 	}
 
-	vec![CommandOutput::BridgeRequest(BridgeAction::SwitchModel {
-		name: name.to_string(),
-	})]
+	vec![
+		CommandOutput::Info(format!("Switching to model: {name}")),
+		CommandOutput::BridgeRequest(BridgeAction::SwitchModel {
+			name: name.to_string(),
+		}),
+	]
 }
 
 /// `/mcp [status|restart]` -- manage MCP connections.
@@ -112,7 +124,10 @@ pub fn handle_mcp(args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 				"MCP status: server={server}, status={status}"
 			))]
 		}
-		"restart" => vec![CommandOutput::BridgeRequest(BridgeAction::McpRestart)],
+		"restart" => vec![
+			CommandOutput::Info("Restarting MCP connections...".into()),
+			CommandOutput::BridgeRequest(BridgeAction::McpRestart),
+		],
 		other => vec![CommandOutput::Error(format!(
 			"Unknown MCP subcommand: \"{other}\". Use: status, restart"
 		))],
@@ -133,7 +148,10 @@ pub fn handle_acp(args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 				"ACP status: {status}"
 			))]
 		}
-		"restart" => vec![CommandOutput::BridgeRequest(BridgeAction::AcpRestart)],
+		"restart" => vec![
+			CommandOutput::Info("Restarting ACP connection...".into()),
+			CommandOutput::BridgeRequest(BridgeAction::AcpRestart),
+		],
 		other => vec![CommandOutput::Error(format!(
 			"Unknown ACP subcommand: \"{other}\". Use: status, restart"
 		))],
@@ -227,8 +245,10 @@ mod tests {
 	#[test]
 	fn resume_valid() {
 		let out = handle_resume("sess-42");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "Resuming session..."));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::ResumeSession { id }) if id == "sess-42"
 		));
 	}
@@ -236,8 +256,10 @@ mod tests {
 	#[test]
 	fn resume_trims_whitespace() {
 		let out = handle_resume("  sess-1  ");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::ResumeSession { id }) if id == "sess-1"
 		));
 	}
@@ -253,8 +275,10 @@ mod tests {
 	#[test]
 	fn rename_valid() {
 		let out = handle_rename("My Cool Session");
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("My Cool Session")));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::RenameSession { title }) if title == "My Cool Session"
 		));
 	}
@@ -280,8 +304,10 @@ mod tests {
 	#[test]
 	fn server_with_name_switches() {
 		let out = handle_server("ollama", &empty_ctx());
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("ollama")));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::SwitchServer { name }) if name == "ollama"
 		));
 	}
@@ -307,8 +333,10 @@ mod tests {
 	#[test]
 	fn model_with_name_switches() {
 		let out = handle_model("gpt-4o", &empty_ctx());
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg.contains("gpt-4o")));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::SwitchModel { name }) if name == "gpt-4o"
 		));
 	}
@@ -338,8 +366,10 @@ mod tests {
 	#[test]
 	fn mcp_restart() {
 		let out = handle_mcp("restart", &empty_ctx());
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "Restarting MCP connections..."));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::McpRestart)
 		));
 	}
@@ -353,8 +383,10 @@ mod tests {
 	#[test]
 	fn mcp_case_insensitive() {
 		let out = handle_mcp("RESTART", &empty_ctx());
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::McpRestart)
 		));
 	}
@@ -380,8 +412,10 @@ mod tests {
 	#[test]
 	fn acp_restart() {
 		let out = handle_acp("restart", &empty_ctx());
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "Restarting ACP connection..."));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::AcpRestart)
 		));
 	}

@@ -226,8 +226,9 @@ mod tests {
 	#[test]
 	fn dispatch_add() {
 		let out = dispatch_command("add", "topic some text");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::LibraryAdd { topic, text })
 				if topic == "topic" && text == "some text"
 		));
@@ -236,8 +237,9 @@ mod tests {
 	#[test]
 	fn dispatch_search() {
 		let out = dispatch_command("search", "query");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::LibrarySearch { query })
 				if query == "query"
 		));
@@ -246,8 +248,9 @@ mod tests {
 	#[test]
 	fn dispatch_recommend() {
 		let out = dispatch_command("recommend", "patterns");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::LibraryRecommend { query })
 				if query == "patterns"
 		));
@@ -256,8 +259,9 @@ mod tests {
 	#[test]
 	fn dispatch_topics() {
 		let out = dispatch_command("topics", "");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::LibraryTopics)
 		));
 	}
@@ -265,8 +269,9 @@ mod tests {
 	#[test]
 	fn dispatch_volumes() {
 		let out = dispatch_command("volumes", "rust");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::LibraryVolumes { topic })
 				if topic.as_deref() == Some("rust")
 		));
@@ -275,8 +280,9 @@ mod tests {
 	#[test]
 	fn dispatch_get() {
 		let out = dispatch_command("get", "id-42");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::LibraryGet { id })
 				if id == "id-42"
 		));
@@ -285,8 +291,9 @@ mod tests {
 	#[test]
 	fn dispatch_delete() {
 		let out = dispatch_command("delete", "id-99");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::LibraryDelete { id })
 				if id == "id-99"
 		));
@@ -313,8 +320,9 @@ mod tests {
 	#[test]
 	fn dispatch_resume() {
 		let out = dispatch_command("resume", "sess-1");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::ResumeSession { id }) if id == "sess-1"
 		));
 	}
@@ -322,8 +330,9 @@ mod tests {
 	#[test]
 	fn dispatch_rename() {
 		let out = dispatch_command("rename", "Cool Name");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::RenameSession { title }) if title == "Cool Name"
 		));
 	}
@@ -331,8 +340,9 @@ mod tests {
 	#[test]
 	fn dispatch_server() {
 		let out = dispatch_command("server", "ollama");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::SwitchServer { name }) if name == "ollama"
 		));
 	}
@@ -340,8 +350,9 @@ mod tests {
 	#[test]
 	fn dispatch_model() {
 		let out = dispatch_command("model", "gpt-4o");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::SwitchModel { name }) if name == "gpt-4o"
 		));
 	}
@@ -355,8 +366,9 @@ mod tests {
 	#[test]
 	fn dispatch_acp() {
 		let out = dispatch_command("acp", "restart");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::AcpRestart)
 		));
 	}
@@ -375,8 +387,9 @@ mod tests {
 	#[test]
 	fn dispatch_init() {
 		let out = dispatch_command("init", "");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::InitConfig { force: false })
 		));
 	}
@@ -428,13 +441,15 @@ mod tests {
 		));
 	}
 
+
 	// ── dispatch_command: files ──────────────────────────────
 
 	#[test]
 	fn dispatch_files() {
 		let out = dispatch_command("files", "src");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::ListFiles { path })
 				if path.as_deref() == Some("src")
 		));
@@ -443,8 +458,9 @@ mod tests {
 	#[test]
 	fn dispatch_save() {
 		let out = dispatch_command("save", "output.txt");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::SaveFiles { path })
 				if path.as_deref() == Some("output.txt")
 		));
@@ -453,8 +469,9 @@ mod tests {
 	#[test]
 	fn dispatch_validate() {
 		let out = dispatch_command("validate", "");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::ValidateFiles { path: None })
 		));
 	}
@@ -462,8 +479,9 @@ mod tests {
 	#[test]
 	fn dispatch_discard() {
 		let out = dispatch_command("discard", "temp.rs");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::DiscardFile { path })
 				if path == "temp.rs"
 		));
@@ -472,8 +490,9 @@ mod tests {
 	#[test]
 	fn dispatch_diff() {
 		let out = dispatch_command("diff", "lib.rs");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::DiffFiles { path })
 				if path.as_deref() == Some("lib.rs")
 		));
@@ -484,8 +503,9 @@ mod tests {
 	#[test]
 	fn dispatch_chain() {
 		let out = dispatch_command("chain", "summarize");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::RunChain { name, .. }) if name == "summarize"
 		));
 	}
@@ -573,8 +593,9 @@ mod tests {
 	#[test]
 	fn dispatch_compact() {
 		let out = dispatch_command("compact", "");
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::Compact)
 		));
 	}
@@ -647,8 +668,9 @@ mod tests {
 		let input = "/search hello world";
 		let (cmd, args) = parse_command_line(input).unwrap();
 		let out = dispatch_command(&cmd, &args);
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::LibrarySearch { query })
 				if query == "hello world"
 		));
@@ -672,6 +694,7 @@ mod tests {
 			CommandOutput::BridgeRequest(BridgeAction::FactoryReset)
 		));
 	}
+
 
 	#[test]
 	fn round_trip_case_insensitive() {

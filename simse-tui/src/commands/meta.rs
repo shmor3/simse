@@ -92,7 +92,10 @@ pub fn handle_context(total_tokens: u64, context_percent: u8) -> Vec<CommandOutp
 
 /// `/compact` -- request conversation compaction.
 pub fn handle_compact() -> Vec<CommandOutput> {
-	vec![CommandOutput::BridgeRequest(BridgeAction::Compact)]
+	vec![
+		CommandOutput::Info("Compacting conversation history...".into()),
+		CommandOutput::BridgeRequest(BridgeAction::Compact),
+	]
 }
 
 /// `/shortcuts` -- open the shortcuts overlay.
@@ -302,8 +305,10 @@ mod tests {
 	#[test]
 	fn compact_returns_bridge_request() {
 		let out = handle_compact();
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "Compacting conversation history..."));
 		assert!(matches!(
-			&out[0],
+			&out[1],
 			CommandOutput::BridgeRequest(BridgeAction::Compact)
 		));
 	}

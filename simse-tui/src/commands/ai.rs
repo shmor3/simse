@@ -25,10 +25,13 @@ pub fn handle_chain(args: &str) -> Vec<CommandOutput> {
 		))];
 	}
 
-	vec![CommandOutput::BridgeRequest(BridgeAction::RunChain {
-		name: name.to_string(),
-		args: chain_args.to_string(),
-	})]
+	vec![
+		CommandOutput::Info(format!("Running chain: {name}")),
+		CommandOutput::BridgeRequest(BridgeAction::RunChain {
+			name: name.to_string(),
+			args: chain_args.to_string(),
+		}),
+	]
 }
 
 /// `/prompts` -- list available prompt templates.
@@ -95,7 +98,9 @@ mod tests {
 	#[test]
 	fn chain_name_only() {
 		let out = handle_chain("summarize");
-		match &out[0] {
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "Running chain: summarize"));
+		match &out[1] {
 			CommandOutput::BridgeRequest(BridgeAction::RunChain { name, args }) => {
 				assert_eq!(name, "summarize");
 				assert_eq!(args, "");
@@ -107,7 +112,9 @@ mod tests {
 	#[test]
 	fn chain_name_and_args() {
 		let out = handle_chain("translate en es");
-		match &out[0] {
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "Running chain: translate"));
+		match &out[1] {
 			CommandOutput::BridgeRequest(BridgeAction::RunChain { name, args }) => {
 				assert_eq!(name, "translate");
 				assert_eq!(args, "en es");
@@ -127,7 +134,9 @@ mod tests {
 	#[test]
 	fn chain_name_with_hyphens_and_underscores() {
 		let out = handle_chain("my-cool_chain");
-		match &out[0] {
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
+		match &out[1] {
 			CommandOutput::BridgeRequest(BridgeAction::RunChain { name, .. }) => {
 				assert_eq!(name, "my-cool_chain");
 			}
@@ -138,7 +147,9 @@ mod tests {
 	#[test]
 	fn chain_trims_whitespace() {
 		let out = handle_chain("  analyze  some text  ");
-		match &out[0] {
+		assert_eq!(out.len(), 2);
+		assert!(matches!(&out[0], CommandOutput::Info(_)));
+		match &out[1] {
 			CommandOutput::BridgeRequest(BridgeAction::RunChain { name, args }) => {
 				assert_eq!(name, "analyze");
 				assert_eq!(args, "some text");

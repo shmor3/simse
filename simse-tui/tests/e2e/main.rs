@@ -20,6 +20,7 @@ mod config;
 pub mod harness;
 mod input;
 mod overlays;
+mod setup_wizard;
 mod startup;
 
 use harness::SimseTestHarness;

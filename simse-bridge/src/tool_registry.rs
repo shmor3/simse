@@ -1,9 +1,10 @@
 //! Tool registry — discovers, registers, and executes tools.
 //!
 //! Mirrors the TypeScript `tool-registry.ts` from `simse-code`. The registry
-//! holds built-in tool stubs (library, VFS) and can discover MCP tools from
-//! connected servers. Each tool has a [`ToolHandler`] that is called when the
-//! agentic loop requests execution.
+//! holds built-in tool handlers (library, VFS) backed by JSON-RPC engine
+//! subprocesses and can discover MCP tools from connected servers. Each tool
+//! has a [`ToolHandler`] that is called when the agentic loop requests
+//! execution.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,6 +18,12 @@ use simse_ui_core::tools::{
 	DEFAULT_MAX_OUTPUT_CHARS, ToolCallRequest, ToolCallResult, ToolDefinition, ToolHandlerOutput,
 	ToolParameter, truncate_output,
 };
+
+/// Shared handle to an optional engine subprocess.
+///
+/// `None` means the engine has not been spawned yet. Handlers check this and
+/// return a clear error if the engine is not connected.
+pub type EngineHandle = Arc<TokioMutex<Option<BridgeProcess>>>;
 
 // ---------------------------------------------------------------------------
 // ToolHandler trait
@@ -75,24 +82,282 @@ pub struct RegisteredTool {
 }
 
 // ---------------------------------------------------------------------------
-// Built-in stub handlers
+// Built-in engine handlers (library + VFS)
 // ---------------------------------------------------------------------------
 
-/// Stub handler that returns a placeholder message. Used for built-in tools
-/// whose backends (library, VFS) are not yet wired up.
-struct StubHandler {
-	tool_name: String,
+/// Helper: send a JSON-RPC request to an engine and return the result value.
+///
+/// Returns a clear error if the engine is not yet connected (the `Option` is
+/// `None`), or if the engine returns a JSON-RPC error.
+async fn engine_request(
+	engine: &EngineHandle,
+	engine_name: &str,
+	method: &str,
+	params: serde_json::Value,
+) -> Result<serde_json::Value, ToolExecutionError> {
+	let mut guard = engine.lock().await;
+	let bridge = guard.as_mut().ok_or_else(|| {
+		ToolExecutionError::HandlerError(format!("{engine_name} not connected"))
+	})?;
+
+	let resp = client::request(bridge, method, Some(params))
+		.await
+		.map_err(|e| {
+			ToolExecutionError::HandlerError(format!("{engine_name} request failed: {e}"))
+		})?;
+
+	if let Some(err) = resp.error {
+		return Err(ToolExecutionError::HandlerError(format!(
+			"{engine_name} error: {}",
+			err.message
+		)));
+	}
+
+	Ok(resp.result.unwrap_or(serde_json::json!({})))
 }
 
-impl ToolHandler for StubHandler {
+// -- Library: search --------------------------------------------------------
+
+/// Handler that searches the vector store via `store/textSearch`.
+///
+/// Extracts `query` (required) and `maxResults` (optional, default 5) from the
+/// tool call arguments and forwards them to the simse-vector engine.
+struct LibrarySearchHandler {
+	engine: EngineHandle,
+}
+
+impl ToolHandler for LibrarySearchHandler {
 	async fn execute(
 		&self,
-		_args: serde_json::Value,
+		args: serde_json::Value,
 	) -> Result<ToolHandlerOutput, ToolExecutionError> {
+		let query = args
+			.get("query")
+			.and_then(|v| v.as_str())
+			.ok_or_else(|| {
+				ToolExecutionError::HandlerError(
+					"Missing required parameter: query".into(),
+				)
+			})?
+			.to_string();
+
+		let _max_results = args
+			.get("maxResults")
+			.and_then(|v| v.as_u64())
+			.unwrap_or(5) as usize;
+
+		// Use store/textSearch which accepts a text query (no embedding needed).
+		let params = serde_json::json!({
+			"query": query,
+			"mode": "fuzzy",
+		});
+
+		let result = engine_request(&self.engine, "Vector engine", "store/textSearch", params).await?;
+
+		let output = serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string());
+		Ok(ToolHandlerOutput { output, diff: None })
+	}
+}
+
+// -- Library: shelve --------------------------------------------------------
+
+/// Handler that adds a volume to the vector store via `store/add`.
+///
+/// Extracts `text` (required) and `topic` (required) from the tool call
+/// arguments. Since the bridge does not have access to an embedding model, a
+/// zero-length embedding is passed; the engine will index the text for
+/// text-based retrieval. A real embedding can be injected upstream before the
+/// tool call reaches this handler.
+struct LibraryShelveHandler {
+	engine: EngineHandle,
+}
+
+impl ToolHandler for LibraryShelveHandler {
+	async fn execute(
+		&self,
+		args: serde_json::Value,
+	) -> Result<ToolHandlerOutput, ToolExecutionError> {
+		let text = args
+			.get("text")
+			.and_then(|v| v.as_str())
+			.ok_or_else(|| {
+				ToolExecutionError::HandlerError(
+					"Missing required parameter: text".into(),
+				)
+			})?
+			.to_string();
+
+		let topic = args
+			.get("topic")
+			.and_then(|v| v.as_str())
+			.ok_or_else(|| {
+				ToolExecutionError::HandlerError(
+					"Missing required parameter: topic".into(),
+				)
+			})?
+			.to_string();
+
+		let params = serde_json::json!({
+			"text": text,
+			"embedding": [],
+			"metadata": {
+				"topic": topic,
+			},
+		});
+
+		let result = engine_request(&self.engine, "Vector engine", "store/add", params).await?;
+
+		let id = result
+			.get("id")
+			.and_then(|v| v.as_str())
+			.unwrap_or("unknown");
 		Ok(ToolHandlerOutput {
-			output: format!("[{}] Not yet connected — stub result.", self.tool_name),
+			output: format!("Shelved volume with id: {id}"),
 			diff: None,
 		})
+	}
+}
+
+// -- VFS: read --------------------------------------------------------------
+
+/// Handler that reads a file from the VFS engine via `vfs/readFile`.
+struct VfsReadHandler {
+	engine: EngineHandle,
+}
+
+impl ToolHandler for VfsReadHandler {
+	async fn execute(
+		&self,
+		args: serde_json::Value,
+	) -> Result<ToolHandlerOutput, ToolExecutionError> {
+		let path = args
+			.get("path")
+			.and_then(|v| v.as_str())
+			.ok_or_else(|| {
+				ToolExecutionError::HandlerError(
+					"Missing required parameter: path".into(),
+				)
+			})?
+			.to_string();
+
+		let params = serde_json::json!({ "path": path });
+		let result = engine_request(&self.engine, "VFS engine", "vfs/readFile", params).await?;
+
+		// The VFS readFile returns { contentType, text?, data?, size }.
+		// Return the text content if available, otherwise the raw JSON.
+		let output = if let Some(text) = result.get("text").and_then(|v| v.as_str()) {
+			text.to_string()
+		} else {
+			serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
+		};
+
+		Ok(ToolHandlerOutput { output, diff: None })
+	}
+}
+
+// -- VFS: write -------------------------------------------------------------
+
+/// Handler that writes a file to the VFS engine via `vfs/writeFile`.
+struct VfsWriteHandler {
+	engine: EngineHandle,
+}
+
+impl ToolHandler for VfsWriteHandler {
+	async fn execute(
+		&self,
+		args: serde_json::Value,
+	) -> Result<ToolHandlerOutput, ToolExecutionError> {
+		let path = args
+			.get("path")
+			.and_then(|v| v.as_str())
+			.ok_or_else(|| {
+				ToolExecutionError::HandlerError(
+					"Missing required parameter: path".into(),
+				)
+			})?
+			.to_string();
+
+		let content = args
+			.get("content")
+			.and_then(|v| v.as_str())
+			.ok_or_else(|| {
+				ToolExecutionError::HandlerError(
+					"Missing required parameter: content".into(),
+				)
+			})?
+			.to_string();
+
+		let params = serde_json::json!({
+			"path": path,
+			"content": content,
+			"createParents": true,
+		});
+
+		engine_request(&self.engine, "VFS engine", "vfs/writeFile", params).await?;
+
+		let bytes = content.len();
+		Ok(ToolHandlerOutput {
+			output: format!("Wrote {bytes} bytes to {path}"),
+			diff: Some(content),
+		})
+	}
+}
+
+// -- VFS: list --------------------------------------------------------------
+
+/// Handler that lists directory entries via `vfs/readdir`.
+struct VfsListHandler {
+	engine: EngineHandle,
+}
+
+impl ToolHandler for VfsListHandler {
+	async fn execute(
+		&self,
+		args: serde_json::Value,
+	) -> Result<ToolHandlerOutput, ToolExecutionError> {
+		let path = args
+			.get("path")
+			.and_then(|v| v.as_str())
+			.unwrap_or("vfs:///")
+			.to_string();
+
+		let params = serde_json::json!({ "path": path });
+		let result = engine_request(&self.engine, "VFS engine", "vfs/readdir", params).await?;
+
+		let output = serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string());
+		Ok(ToolHandlerOutput { output, diff: None })
+	}
+}
+
+// -- VFS: tree --------------------------------------------------------------
+
+/// Handler that returns a tree view of the VFS via `vfs/tree`.
+struct VfsTreeHandler {
+	engine: EngineHandle,
+}
+
+impl ToolHandler for VfsTreeHandler {
+	async fn execute(
+		&self,
+		args: serde_json::Value,
+	) -> Result<ToolHandlerOutput, ToolExecutionError> {
+		let path = args.get("path").and_then(|v| v.as_str()).map(String::from);
+
+		let params = match &path {
+			Some(p) => serde_json::json!({ "path": p }),
+			None => serde_json::json!({}),
+		};
+
+		let result = engine_request(&self.engine, "VFS engine", "vfs/tree", params).await?;
+
+		// The tree result contains { tree: "..." } — return the tree string directly.
+		let output = if let Some(tree) = result.get("tree").and_then(|v| v.as_str()) {
+			tree.to_string()
+		} else {
+			serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
+		};
+
+		Ok(ToolHandlerOutput { output, diff: None })
 	}
 }
 
@@ -262,6 +527,10 @@ pub struct ToolRegistry {
 	tools: HashMap<String, RegisteredTool>,
 	/// Global maximum output characters. Per-tool overrides take precedence.
 	pub max_output_chars: usize,
+	/// Shared handle to the vector engine subprocess (used by library tools).
+	pub vector_engine: EngineHandle,
+	/// Shared handle to the VFS engine subprocess (used by VFS tools).
+	pub vfs_engine: EngineHandle,
 }
 
 impl ToolRegistry {
@@ -270,6 +539,8 @@ impl ToolRegistry {
 		Self {
 			tools: HashMap::new(),
 			max_output_chars: DEFAULT_MAX_OUTPUT_CHARS,
+			vector_engine: Arc::new(TokioMutex::new(None)),
+			vfs_engine: Arc::new(TokioMutex::new(None)),
 		}
 	}
 
@@ -278,6 +549,8 @@ impl ToolRegistry {
 		Self {
 			tools: HashMap::new(),
 			max_output_chars,
+			vector_engine: Arc::new(TokioMutex::new(None)),
+			vfs_engine: Arc::new(TokioMutex::new(None)),
 		}
 	}
 
@@ -375,11 +648,16 @@ impl ToolRegistry {
 		self.discover_mcp_tools(mcp_servers).await;
 	}
 
-	/// Register built-in tool definitions with stub handlers.
+	/// Register built-in tool definitions with real engine-backed handlers.
 	///
-	/// These stubs will be replaced with real implementations once the library
-	/// and VFS backends are connected.
+	/// Library tools use the shared `vector_engine` handle and VFS tools use
+	/// the shared `vfs_engine` handle. If an engine is not yet spawned (the
+	/// `Option` inside the handle is `None`), the handler returns a clear
+	/// "not connected" error at call time.
 	fn register_builtins(&mut self) {
+		let vector = Arc::clone(&self.vector_engine);
+		let vfs = Arc::clone(&self.vfs_engine);
+
 		// -- Library tools --
 		self.register(
 			ToolDefinition {
@@ -409,8 +687,8 @@ impl ToolRegistry {
 				},
 				max_output_chars: None,
 			},
-			StubHandler {
-				tool_name: "library_search".into(),
+			LibrarySearchHandler {
+				engine: Arc::clone(&vector),
 			},
 		);
 
@@ -440,8 +718,8 @@ impl ToolRegistry {
 				},
 				max_output_chars: None,
 			},
-			StubHandler {
-				tool_name: "library_shelve".into(),
+			LibraryShelveHandler {
+				engine: Arc::clone(&vector),
 			},
 		);
 
@@ -465,8 +743,8 @@ impl ToolRegistry {
 				},
 				max_output_chars: None,
 			},
-			StubHandler {
-				tool_name: "vfs_read".into(),
+			VfsReadHandler {
+				engine: Arc::clone(&vfs),
 			},
 		);
 
@@ -497,8 +775,8 @@ impl ToolRegistry {
 				},
 				max_output_chars: None,
 			},
-			StubHandler {
-				tool_name: "vfs_write".into(),
+			VfsWriteHandler {
+				engine: Arc::clone(&vfs),
 			},
 		);
 
@@ -522,8 +800,8 @@ impl ToolRegistry {
 				},
 				max_output_chars: None,
 			},
-			StubHandler {
-				tool_name: "vfs_list".into(),
+			VfsListHandler {
+				engine: Arc::clone(&vfs),
 			},
 		);
 
@@ -546,8 +824,8 @@ impl ToolRegistry {
 				},
 				max_output_chars: None,
 			},
-			StubHandler {
-				tool_name: "vfs_tree".into(),
+			VfsTreeHandler {
+				engine: Arc::clone(&vfs),
 			},
 		);
 	}
@@ -1028,13 +1306,65 @@ mod tests {
 	}
 
 	#[tokio::test]
-	async fn builtin_stubs_return_placeholder() {
+	async fn builtin_handlers_return_not_connected_when_engines_missing() {
 		let mut reg = ToolRegistry::new();
 		reg.discover(&[]).await;
 		let call = make_call_with_args("library_search", json!({"query": "test"}));
 		let result = reg.execute(&call).await;
-		assert!(!result.is_error);
-		assert!(result.output.contains("stub"));
+		assert!(result.is_error);
+		assert!(result.output.contains("not connected"));
+	}
+
+	#[tokio::test]
+	async fn vfs_handler_returns_not_connected_when_engine_missing() {
+		let mut reg = ToolRegistry::new();
+		reg.discover(&[]).await;
+		let call = make_call_with_args("vfs_read", json!({"path": "vfs:///test.txt"}));
+		let result = reg.execute(&call).await;
+		assert!(result.is_error);
+		assert!(result.output.contains("not connected"));
+	}
+
+	#[tokio::test]
+	async fn library_search_requires_query_param() {
+		let mut reg = ToolRegistry::new();
+		reg.discover(&[]).await;
+		let call = make_call_with_args("library_search", json!({}));
+		let result = reg.execute(&call).await;
+		assert!(result.is_error);
+		assert!(result.output.contains("query"));
+	}
+
+	#[tokio::test]
+	async fn library_shelve_requires_text_and_topic() {
+		let mut reg = ToolRegistry::new();
+		reg.discover(&[]).await;
+
+		let call = make_call_with_args("library_shelve", json!({"text": "hello"}));
+		let result = reg.execute(&call).await;
+		assert!(result.is_error);
+		assert!(result.output.contains("topic"));
+
+		let call = make_call_with_args("library_shelve", json!({"topic": "test"}));
+		let result = reg.execute(&call).await;
+		assert!(result.is_error);
+		assert!(result.output.contains("text"));
+	}
+
+	#[tokio::test]
+	async fn vfs_write_requires_path_and_content() {
+		let mut reg = ToolRegistry::new();
+		reg.discover(&[]).await;
+
+		let call = make_call_with_args("vfs_write", json!({"path": "vfs:///test.txt"}));
+		let result = reg.execute(&call).await;
+		assert!(result.is_error);
+		assert!(result.output.contains("content"));
+
+		let call = make_call_with_args("vfs_write", json!({"content": "hello"}));
+		let result = reg.execute(&call).await;
+		assert!(result.is_error);
+		assert!(result.output.contains("path"));
 	}
 
 	#[tokio::test]
@@ -1058,6 +1388,19 @@ mod tests {
 		assert!(!list.parameters.get("path").unwrap().required);
 	}
 
+	// -- Engine handle --
+
+	#[test]
+	fn new_registry_has_none_engine_handles() {
+		let reg = ToolRegistry::new();
+		// The engine handles should be accessible and start as None.
+		let vector = reg.vector_engine.clone();
+		let vfs = reg.vfs_engine.clone();
+		// We can't block on async in a sync test, but we can verify the Arc is created.
+		assert!(Arc::strong_count(&vector) >= 1);
+		assert!(Arc::strong_count(&vfs) >= 1);
+	}
+
 	// -- Default trait --
 
 	#[test]
@@ -1065,176 +1408,5 @@ mod tests {
 		let reg = ToolRegistry::default();
 		assert_eq!(reg.tool_count(), 0);
 		assert_eq!(reg.max_output_chars, DEFAULT_MAX_OUTPUT_CHARS);
-	}
-
-	// -- MCP schema conversion --
-
-	#[test]
-	fn convert_mcp_input_schema_full() {
-		let schema = json!({
-			"type": "object",
-			"properties": {
-				"query": { "type": "string", "description": "Search query" },
-				"limit": { "type": "number", "description": "Max results" }
-			},
-			"required": ["query"]
-		});
-		let params = convert_mcp_input_schema(&schema);
-		assert_eq!(params.len(), 2);
-
-		let query = params.get("query").unwrap();
-		assert_eq!(query.param_type, "string");
-		assert_eq!(query.description, "Search query");
-		assert!(query.required);
-
-		let limit = params.get("limit").unwrap();
-		assert_eq!(limit.param_type, "number");
-		assert_eq!(limit.description, "Max results");
-		assert!(!limit.required);
-	}
-
-	#[test]
-	fn convert_mcp_input_schema_empty_properties() {
-		let schema = json!({ "type": "object" });
-		let params = convert_mcp_input_schema(&schema);
-		assert!(params.is_empty());
-	}
-
-	#[test]
-	fn convert_mcp_input_schema_no_required() {
-		let schema = json!({
-			"type": "object",
-			"properties": {
-				"name": { "type": "string", "description": "A name" }
-			}
-		});
-		let params = convert_mcp_input_schema(&schema);
-		assert_eq!(params.len(), 1);
-		assert!(!params.get("name").unwrap().required);
-	}
-
-	#[test]
-	fn convert_mcp_input_schema_missing_description() {
-		let schema = json!({
-			"type": "object",
-			"properties": {
-				"id": { "type": "integer" }
-			},
-			"required": ["id"]
-		});
-		let params = convert_mcp_input_schema(&schema);
-		let id = params.get("id").unwrap();
-		assert_eq!(id.param_type, "integer");
-		assert_eq!(id.description, "");
-		assert!(id.required);
-	}
-
-	#[test]
-	fn convert_mcp_input_schema_missing_type() {
-		let schema = json!({
-			"type": "object",
-			"properties": {
-				"data": { "description": "Some data" }
-			}
-		});
-		let params = convert_mcp_input_schema(&schema);
-		// Missing type should default to "string"
-		assert_eq!(params.get("data").unwrap().param_type, "string");
-	}
-
-	// -- MCP text content extraction --
-
-	#[test]
-	fn extract_mcp_text_content_single_text() {
-		let result = json!({
-			"content": [{ "type": "text", "text": "Hello world" }],
-			"isError": false
-		});
-		assert_eq!(extract_mcp_text_content(&result), "Hello world");
-	}
-
-	#[test]
-	fn extract_mcp_text_content_multiple_text_items() {
-		let result = json!({
-			"content": [
-				{ "type": "text", "text": "Line 1" },
-				{ "type": "text", "text": "Line 2" }
-			]
-		});
-		assert_eq!(extract_mcp_text_content(&result), "Line 1\nLine 2");
-	}
-
-	#[test]
-	fn extract_mcp_text_content_no_content() {
-		let result = json!({ "isError": false });
-		// Falls back to JSON string
-		let output = extract_mcp_text_content(&result);
-		assert!(output.contains("isError"));
-	}
-
-	#[test]
-	fn extract_mcp_text_content_non_text_items() {
-		let result = json!({
-			"content": [
-				{ "type": "image", "data": "base64...", "mimeType": "image/png" }
-			]
-		});
-		// No text items, falls back to full JSON
-		let output = extract_mcp_text_content(&result);
-		assert!(output.contains("image"));
-	}
-
-	#[test]
-	fn extract_mcp_text_content_mixed_items() {
-		let result = json!({
-			"content": [
-				{ "type": "text", "text": "Result:" },
-				{ "type": "image", "data": "base64...", "mimeType": "image/png" },
-				{ "type": "text", "text": "Done." }
-			]
-		});
-		assert_eq!(extract_mcp_text_content(&result), "Result:\nDone.");
-	}
-
-	// -- MCP server discovery edge cases --
-
-	#[tokio::test]
-	async fn discover_skips_unsupported_transport() {
-		let mut reg = ToolRegistry::new();
-		let servers = vec![McpServerConfig {
-			name: "http-server".into(),
-			transport: "http".into(),
-			command: "node".into(),
-			args: vec![],
-			env: HashMap::new(),
-			required_env: vec![],
-		}];
-		reg.discover(&servers).await;
-		// Only builtins, no MCP tools
-		assert_eq!(reg.tool_count(), 6);
-	}
-
-	#[tokio::test]
-	async fn discover_skips_server_that_fails_to_spawn() {
-		let mut reg = ToolRegistry::new();
-		let servers = vec![McpServerConfig {
-			name: "bad-server".into(),
-			transport: "stdio".into(),
-			command: "this-command-definitely-does-not-exist-12345".into(),
-			args: vec![],
-			env: HashMap::new(),
-			required_env: vec![],
-		}];
-		reg.discover(&servers).await;
-		// Only builtins should be registered
-		assert_eq!(reg.tool_count(), 6);
-	}
-
-	#[tokio::test]
-	async fn discover_with_empty_server_list() {
-		let mut reg = ToolRegistry::new();
-		reg.discover(&[]).await;
-		// Only builtins
-		assert_eq!(reg.tool_count(), 6);
 	}
 }

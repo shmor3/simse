@@ -1,0 +1,22 @@
+{
+  "planPath": "docs/plans/2026-03-04-full-stack-test-migration-plan.md",
+  "tasks": [
+    {"id": 139, "subject": "Task 0: Add terminal-testlib dependency and create PTY helper module", "status": "pending"},
+    {"id": 140, "subject": "Task 1: Migrate startup.rs (5 tests)", "status": "pending", "blockedBy": [139]},
+    {"id": 141, "subject": "Task 2: Migrate input.rs (8 tests)", "status": "pending", "blockedBy": [139]},
+    {"id": 142, "subject": "Task 3: Migrate commands_config.rs (7 tests) — CRITICAL", "status": "pending", "blockedBy": [139]},
+    {"id": 143, "subject": "Task 4: Migrate acp_flow.rs (14 tests)", "status": "pending", "blockedBy": [139]},
+    {"id": 144, "subject": "Task 5: Migrate onboarding + command_feedback (14 tests)", "status": "pending", "blockedBy": [139]},
+    {"id": 145, "subject": "Task 6: Migrate autocomplete + overlays + setup_wizard (25 tests)", "status": "pending", "blockedBy": [139]},
+    {"id": 146, "subject": "Task 7: Migrate remaining command tests (33 tests)", "status": "pending", "blockedBy": [139]},
+    {"id": 147, "subject": "Task 8: Migrate error_states + config_settings (10 tests)", "status": "pending", "blockedBy": [139]},
+    {"id": 148, "subject": "Task 9: Add bridge_actions.rs — NEW gap tests (7 tests)", "status": "pending", "blockedBy": [139]},
+    {"id": 149, "subject": "Task 10: Migrate integration.rs (61 tests)", "status": "pending", "blockedBy": [139, 140, 141, 142, 143, 144, 145, 146, 147, 148]},
+    {"id": 150, "subject": "Task 11: Delete old e2e harnesses and directory", "status": "pending", "blockedBy": [149]},
+    {"id": 151, "subject": "Task 12: simse-bridge real integration tests (16 tests)", "status": "pending"},
+    {"id": 152, "subject": "Task 13: simse-acp real server integration tests (8 tests)", "status": "pending"},
+    {"id": 153, "subject": "Task 14: simse-ui-core integration tests (9 tests)", "status": "pending"},
+    {"id": 154, "subject": "Task 15: Run full test suite, fix regressions, push", "status": "pending", "blockedBy": [139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 153]}
+  ],
+  "lastUpdated": "2026-03-04T23:30:00Z"
+}

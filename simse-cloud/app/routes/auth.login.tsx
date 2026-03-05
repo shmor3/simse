@@ -1,72 +1,41 @@
 import { Form, Link, redirect, useNavigation } from 'react-router';
 import Button from '~/components/ui/Button';
 import Input from '~/components/ui/Input';
-import { createSession, verifyPassword } from '~/lib/auth.server';
-import { loginSchema } from '~/lib/schemas';
-import { getSession, setSessionCookie } from '~/lib/session.server';
+import { api } from '~/lib/api.server';
+import { setSessionCookie } from '~/lib/session.server';
 import type { Route } from './+types/auth.login';
 
-export async function loader({ request, context }: Route.LoaderArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (session) throw redirect('/dashboard');
+export async function loader({ request }: Route.LoaderArgs) {
+	const cookie = request.headers.get('Cookie') ?? '';
+	if (cookie.includes('simse_session=')) throw redirect('/dashboard');
 	return null;
 }
 
-export async function action({ request, context }: Route.ActionArgs) {
+export async function action({ request }: Route.ActionArgs) {
 	const formData = await request.formData();
 	const raw = Object.fromEntries(formData);
-	const parsed = loginSchema.safeParse(raw);
 
-	if (!parsed.success) {
-		const errors: Record<string, string> = {};
-		for (const issue of parsed.error.issues) {
-			const key = String(issue.path[0]);
-			errors[key] = issue.message;
-		}
-		return { errors, values: raw };
+	const res = await api('/auth/login', {
+		method: 'POST',
+		body: JSON.stringify({ email: raw.email, password: raw.password }),
+	});
+
+	const json = await res.json() as any;
+
+	if (!res.ok) {
+		return { errors: { email: json.error?.message ?? 'Invalid email or password' }, values: raw };
 	}
 
-	const { email, password } = parsed.data;
-	const db = context.cloudflare.env.DB;
-
-	const user = await db
-		.prepare(
-			'SELECT id, password_hash, two_factor_enabled FROM users WHERE email = ?',
-		)
-		.bind(email.toLowerCase())
-		.first<{ id: string; password_hash: string; two_factor_enabled: number }>();
-
-	if (!user || !(await verifyPassword(password, user.password_hash))) {
-		return {
-			errors: { email: 'Invalid email or password' },
-			values: raw,
-		};
-	}
-
-	// If 2FA is enabled, redirect to 2FA page
-	if (user.two_factor_enabled) {
-		// Store pending user ID in a short-lived token
-		const tokenId = crypto.randomUUID();
-		await db
-			.prepare(
-				"INSERT INTO tokens (id, user_id, type, code, expires_at) VALUES (?, ?, '2fa', '', datetime('now', '+10 minutes'))",
-			)
-			.bind(tokenId, user.id)
-			.run();
-
+	if (json.data?.requires2fa) {
 		return redirect('/auth/2fa', {
 			headers: {
-				'Set-Cookie': `simse_2fa_pending=${tokenId}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=600`,
+				'Set-Cookie': `simse_2fa_pending=${json.data.pendingToken}; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=600`,
 			},
 		});
 	}
 
-	const sessionId = await createSession(db, user.id);
-
 	return redirect('/dashboard', {
-		headers: {
-			'Set-Cookie': setSessionCookie(sessionId),
-		},
+		headers: { 'Set-Cookie': setSessionCookie(json.data.token) },
 	});
 }
 

@@ -3,69 +3,30 @@ import PageHeader from '~/components/layout/PageHeader';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
 import Input from '~/components/ui/Input';
-import { generateId } from '~/lib/db.server';
-import { inviteSchema } from '~/lib/schemas';
-import { getSession } from '~/lib/session.server';
+import { authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.team.invite';
 
-export async function action({ request, context }: Route.ActionArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (!session) throw redirect('/auth/login');
-
+export async function action({ request }: Route.ActionArgs) {
 	const formData = await request.formData();
 	const raw = Object.fromEntries(formData);
-	const parsed = inviteSchema.safeParse(raw);
 
-	if (!parsed.success) {
-		const errors: Record<string, string> = {};
-		for (const issue of parsed.error.issues) {
-			errors[String(issue.path[0])] = issue.message;
-		}
-		return { errors, values: raw };
+	const email = raw.email as string;
+	const role = raw.role as string;
+
+	if (!email) {
+		return { errors: { email: 'Email is required' }, values: raw };
 	}
 
-	const db = context.cloudflare.env.DB;
-	const { email, role } = parsed.data;
+	const res = await authenticatedApi(request, '/teams/me/invite', {
+		method: 'POST',
+		body: JSON.stringify({ email, role }),
+	});
 
-	// Get the user's team
-	const team = await db
-		.prepare(
-			"SELECT t.id FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND (tm.role = 'owner' OR tm.role = 'admin') LIMIT 1",
-		)
-		.bind(session.userId)
-		.first<{ id: string }>();
-
-	if (!team) {
-		return {
-			errors: { email: 'You do not have permission to invite members' },
-		};
+	if (!res.ok) {
+		const json = await res.json() as any;
+		const message = json.error?.message ?? 'Failed to send invite';
+		return { errors: { email: message }, values: raw };
 	}
-
-	// Check if already a member
-	const existing = await db
-		.prepare(
-			'SELECT 1 FROM team_members tm JOIN users u ON tm.user_id = u.id WHERE tm.team_id = ? AND u.email = ?',
-		)
-		.bind(team.id, email.toLowerCase())
-		.first();
-
-	if (existing) {
-		return {
-			errors: { email: 'This person is already a team member' },
-			values: raw,
-		};
-	}
-
-	// Create invite
-	const inviteId = generateId();
-	await db
-		.prepare(
-			"INSERT INTO team_invites (id, team_id, email, role, invited_by, expires_at) VALUES (?, ?, ?, ?, ?, datetime('now', '+7 days'))",
-		)
-		.bind(inviteId, team.id, email.toLowerCase(), role, session.userId)
-		.run();
-
-	// TODO: Send team invite email via email API
 
 	return redirect('/dashboard/team');
 }

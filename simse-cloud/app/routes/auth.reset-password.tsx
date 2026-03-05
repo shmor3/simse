@@ -1,44 +1,23 @@
 import { Form, Link, useNavigation } from 'react-router';
 import Button from '~/components/ui/Button';
 import Input from '~/components/ui/Input';
-import { generateCode } from '~/lib/auth.server';
-import { generateId } from '~/lib/db.server';
-import { resetPasswordSchema } from '~/lib/schemas';
+import { api } from '~/lib/api.server';
 import type { Route } from './+types/auth.reset-password';
 
-export async function action({ request, context }: Route.ActionArgs) {
+export async function action({ request }: Route.ActionArgs) {
 	const formData = await request.formData();
-	const raw = Object.fromEntries(formData);
-	const parsed = resetPasswordSchema.safeParse(raw);
+	const email = formData.get('email') as string;
 
-	if (!parsed.success) {
-		const errors: Record<string, string> = {};
-		for (const issue of parsed.error.issues) {
-			errors[String(issue.path[0])] = issue.message;
-		}
-		return { errors, values: raw };
+	if (!email) {
+		return { errors: { email: 'Email is required' } };
 	}
 
-	const db = context.cloudflare.env.DB;
-	const user = await db
-		.prepare('SELECT id FROM users WHERE email = ?')
-		.bind(parsed.data.email.toLowerCase())
-		.first<{ id: string }>();
+	await api('/auth/reset-password', {
+		method: 'POST',
+		body: JSON.stringify({ email }),
+	});
 
 	// Always show success to prevent email enumeration
-	if (user) {
-		const tokenId = generateId();
-		const code = generateCode();
-		await db
-			.prepare(
-				"INSERT INTO tokens (id, user_id, type, code, expires_at) VALUES (?, ?, 'password_reset', ?, datetime('now', '+1 hour'))",
-			)
-			.bind(tokenId, user.id, code)
-			.run();
-
-		// TODO: Send reset password email via email API with resetUrl
-	}
-
 	return { success: true };
 }
 

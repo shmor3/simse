@@ -7,18 +7,5 @@ APP_URL = "https://app.simse.dev"
 
 routes = [{ pattern = "app.simse.dev", custom_domain = true }]
 
-[[d1_databases]]
-binding = "DB"
-database_name = "simse-db"
-database_id = "cc8d85fe-5071-4a56-bcf6-6df4342e59fa"
-
-[[kv_namespaces]]
-binding = "SESSIONS"
-id = "1326cd8d046e45f48ea88ac46a102a36"
-
-# Secrets (set via `wrangler secret put`):
-# PAYMENTS_API_URL
-# PAYMENTS_API_SECRET
-# EMAIL_API_URL
-# EMAIL_API_SECRET
-# SESSION_SECRET
+# No database — calls simse-api
+# No secrets — simse-api handles service auth

@@ -1,23 +1,20 @@
 import { Hono } from 'hono';
 import { generateId } from '../lib/db';
+import { sendEmail } from '../lib/comms';
 import { inviteSchema } from '../schemas';
-import type { AuthContext, Env } from '../types';
+import type { Env } from '../types';
 
-const teams = new Hono<{
-	Bindings: Env;
-	Variables: { auth: AuthContext };
-}>();
+const teams = new Hono<{ Bindings: Env }>();
 
 // GET /teams/me
 teams.get('/me', async (c) => {
-	const auth = c.get('auth');
-	const db = c.env.DB;
+	const userId = c.req.header('X-User-Id');
+	if (!userId) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401);
 
+	const db = c.env.DB;
 	const team = await db
-		.prepare(
-			'SELECT t.id, t.name, t.plan FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? LIMIT 1',
-		)
-		.bind(auth.userId)
+		.prepare('SELECT t.id, t.name, t.plan FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? LIMIT 1')
+		.bind(userId)
 		.first<{ id: string; name: string; plan: string }>();
 
 	if (!team) {
@@ -25,29 +22,14 @@ teams.get('/me', async (c) => {
 	}
 
 	const members = await db
-		.prepare(
-			'SELECT u.id, u.name, u.email, tm.role, tm.joined_at FROM team_members tm JOIN users u ON tm.user_id = u.id WHERE tm.team_id = ?',
-		)
+		.prepare('SELECT u.id, u.name, u.email, tm.role, tm.joined_at FROM team_members tm JOIN users u ON tm.user_id = u.id WHERE tm.team_id = ?')
 		.bind(team.id)
-		.all<{
-			id: string;
-			name: string;
-			email: string;
-			role: string;
-			joined_at: string;
-		}>();
+		.all<{ id: string; name: string; email: string; role: string; joined_at: string }>();
 
 	const invites = await db
-		.prepare(
-			"SELECT id, email, role, created_at FROM team_invites WHERE team_id = ? AND expires_at > datetime('now')",
-		)
+		.prepare("SELECT id, email, role, created_at FROM team_invites WHERE team_id = ? AND expires_at > datetime('now')")
 		.bind(team.id)
-		.all<{
-			id: string;
-			email: string;
-			role: string;
-			created_at: string;
-		}>();
+		.all<{ id: string; email: string; role: string; created_at: string }>();
 
 	return c.json({
 		data: {
@@ -62,7 +44,9 @@ teams.get('/me', async (c) => {
 
 // POST /teams/me/invite
 teams.post('/me/invite', async (c) => {
-	const auth = c.get('auth');
+	const userId = c.req.header('X-User-Id');
+	if (!userId) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401);
+
 	const body = await c.req.json();
 	const parsed = inviteSchema.safeParse(body);
 	if (!parsed.success) {
@@ -72,20 +56,16 @@ teams.post('/me/invite', async (c) => {
 	const db = c.env.DB;
 
 	const membership = await db
-		.prepare(
-			"SELECT t.id as team_id FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role IN ('owner', 'admin') LIMIT 1",
-		)
-		.bind(auth.userId)
-		.first<{ team_id: string }>();
+		.prepare("SELECT t.id as team_id, t.name as team_name FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role IN ('owner', 'admin') LIMIT 1")
+		.bind(userId)
+		.first<{ team_id: string; team_name: string }>();
 
 	if (!membership) {
 		return c.json({ error: { code: 'FORBIDDEN', message: 'Only owners and admins can invite' } }, 403);
 	}
 
 	const existingMember = await db
-		.prepare(
-			'SELECT 1 FROM team_members tm JOIN users u ON tm.user_id = u.id WHERE tm.team_id = ? AND LOWER(u.email) = ?',
-		)
+		.prepare('SELECT 1 FROM team_members tm JOIN users u ON tm.user_id = u.id WHERE tm.team_id = ? AND LOWER(u.email) = ?')
 		.bind(membership.team_id, parsed.data.email.toLowerCase())
 		.first();
 
@@ -97,18 +77,27 @@ teams.post('/me/invite', async (c) => {
 	const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
 
 	await db
-		.prepare(
-			'INSERT INTO team_invites (id, team_id, email, role, invited_by, expires_at) VALUES (?, ?, ?, ?, ?, ?)',
-		)
-		.bind(inviteId, membership.team_id, parsed.data.email.toLowerCase(), parsed.data.role, auth.userId, expiresAt)
+		.prepare('INSERT INTO team_invites (id, team_id, email, role, invited_by, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
+		.bind(inviteId, membership.team_id, parsed.data.email.toLowerCase(), parsed.data.role, userId, expiresAt)
 		.run();
+
+	// Get inviter name for email
+	const inviter = await db.prepare('SELECT name FROM users WHERE id = ?').bind(userId).first<{ name: string }>();
+
+	await sendEmail(c.env.COMMS_QUEUE, 'team-invite', parsed.data.email, {
+		inviterName: inviter?.name ?? 'A team member',
+		teamName: membership.team_name,
+		inviteUrl: `https://app.simse.dev/invite/${inviteId}`,
+	});
 
 	return c.json({ data: { id: inviteId } }, 201);
 });
 
 // PUT /teams/me/members/:userId/role
 teams.put('/me/members/:userId/role', async (c) => {
-	const auth = c.get('auth');
+	const userId = c.req.header('X-User-Id');
+	if (!userId) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401);
+
 	const targetUserId = c.req.param('userId');
 	const body = await c.req.json<{ role: string }>();
 
@@ -119,22 +108,18 @@ teams.put('/me/members/:userId/role', async (c) => {
 	const db = c.env.DB;
 
 	const membership = await db
-		.prepare(
-			"SELECT t.id as team_id FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role IN ('owner', 'admin') LIMIT 1",
-		)
-		.bind(auth.userId)
+		.prepare("SELECT t.id as team_id FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role IN ('owner', 'admin') LIMIT 1")
+		.bind(userId)
 		.first<{ team_id: string }>();
 
 	if (!membership) {
 		return c.json({ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } }, 403);
 	}
 
-	// Prevent self-demotion
-	if (targetUserId === auth.userId) {
+	if (targetUserId === userId) {
 		return c.json({ error: { code: 'INVALID_OPERATION', message: 'Cannot change your own role' } }, 400);
 	}
 
-	// Prevent demoting the owner
 	const targetMember = await db
 		.prepare('SELECT role FROM team_members WHERE team_id = ? AND user_id = ?')
 		.bind(membership.team_id, targetUserId)
@@ -154,15 +139,15 @@ teams.put('/me/members/:userId/role', async (c) => {
 
 // DELETE /teams/me/invites/:inviteId
 teams.delete('/me/invites/:inviteId', async (c) => {
-	const auth = c.get('auth');
+	const userId = c.req.header('X-User-Id');
+	if (!userId) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401);
+
 	const inviteId = c.req.param('inviteId');
 	const db = c.env.DB;
 
 	const membership = await db
-		.prepare(
-			"SELECT t.id as team_id FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role IN ('owner', 'admin') LIMIT 1",
-		)
-		.bind(auth.userId)
+		.prepare("SELECT t.id as team_id FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role IN ('owner', 'admin') LIMIT 1")
+		.bind(userId)
 		.first<{ team_id: string }>();
 
 	if (!membership) {

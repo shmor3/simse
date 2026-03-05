@@ -1,9 +1,16 @@
 import { Hono } from 'hono';
 import { generateId } from '../lib/db';
+import { sendEmail } from '../lib/comms';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { createSession, deleteSession } from '../lib/session';
 import { createToken, generateCode, markTokenUsed, validateToken } from '../lib/token';
-import { loginSchema, newPasswordSchema, registerSchema, resetPasswordSchema, twoFactorSchema } from '../schemas';
+import {
+	loginSchema,
+	newPasswordSchema,
+	registerSchema,
+	resetPasswordSchema,
+	twoFactorSchema,
+} from '../schemas';
 import type { AuthContext, Env } from '../types';
 
 const auth = new Hono<{
@@ -23,7 +30,6 @@ auth.post('/register', async (c) => {
 	const normalizedEmail = email.toLowerCase();
 	const db = c.env.DB;
 
-	// Check email uniqueness
 	const existing = await db
 		.prepare('SELECT id FROM users WHERE LOWER(email) = ?')
 		.bind(normalizedEmail)
@@ -35,8 +41,6 @@ auth.post('/register', async (c) => {
 
 	const userId = generateId();
 	const passwordHash = await hashPassword(password);
-
-	// Create user, team, membership, and verification token atomically
 	const teamId = generateId();
 	const tokenId = generateId();
 	const verifyCode = generateCode();
@@ -49,8 +53,10 @@ auth.post('/register', async (c) => {
 		db.prepare('INSERT INTO tokens (id, user_id, type, code, expires_at) VALUES (?, ?, ?, ?, ?)').bind(tokenId, userId, 'email_verify', verifyCode, tokenExpires),
 	]);
 
-	// Create session
 	const token = await createSession(db, userId);
+
+	// Send verification email via queue
+	await sendEmail(c.env.COMMS_QUEUE, 'verify-email', normalizedEmail, { code: verifyCode });
 
 	return c.json({
 		data: {
@@ -72,34 +78,23 @@ auth.post('/login', async (c) => {
 	const db = c.env.DB;
 
 	const user = await db
-		.prepare(
-			'SELECT id, password_hash, two_factor_enabled FROM users WHERE LOWER(email) = ?',
-		)
+		.prepare('SELECT id, email, password_hash, two_factor_enabled FROM users WHERE LOWER(email) = ?')
 		.bind(email.toLowerCase())
-		.first<{
-			id: string;
-			password_hash: string;
-			two_factor_enabled: number;
-		}>();
+		.first<{ id: string; email: string; password_hash: string; two_factor_enabled: number }>();
 
 	if (!user || !(await verifyPassword(password, user.password_hash))) {
 		return c.json({ error: { code: 'INVALID_CREDENTIALS', message: 'Invalid email or password' } }, 401);
 	}
 
-	// 2FA flow
 	if (user.two_factor_enabled) {
-		const { id } = await createToken(db, user.id, '2fa', 10);
+		const { id, code } = await createToken(db, user.id, '2fa', 10);
+		// Send 2FA code via queue
+		await sendEmail(c.env.COMMS_QUEUE, 'two-factor', user.email, { code });
 		return c.json({ data: { requires2fa: true, pendingToken: id } });
 	}
 
 	const token = await createSession(db, user.id);
-
-	return c.json({
-		data: {
-			token,
-			user: { id: user.id },
-		},
-	});
+	return c.json({ data: { token, user: { id: user.id } } });
 });
 
 // POST /auth/2fa
@@ -113,11 +108,8 @@ auth.post('/2fa', async (c) => {
 	const { code, pendingToken } = parsed.data;
 	const db = c.env.DB;
 
-	// Validate pending token
 	const pending = await db
-		.prepare(
-			"SELECT user_id FROM tokens WHERE id = ? AND type = '2fa' AND used = 0 AND expires_at > datetime('now')",
-		)
+		.prepare("SELECT user_id FROM tokens WHERE id = ? AND type = '2fa' AND used = 0 AND expires_at > datetime('now')")
 		.bind(pendingToken)
 		.first<{ user_id: string }>();
 
@@ -125,29 +117,24 @@ auth.post('/2fa', async (c) => {
 		return c.json({ error: { code: 'INVALID_TOKEN', message: '2FA session expired' } }, 401);
 	}
 
-	// Validate code
 	const codeToken = await validateToken(db, code, '2fa');
 	if (!codeToken || codeToken.userId !== pending.user_id) {
 		return c.json({ error: { code: 'INVALID_CODE', message: 'Invalid 2FA code' } }, 401);
 	}
 
-	// Mark tokens used
 	await markTokenUsed(db, pendingToken);
 	await markTokenUsed(db, codeToken.id);
 
 	const token = await createSession(db, pending.user_id);
-
 	return c.json({ data: { token, user: { id: pending.user_id } } });
 });
 
-// POST /auth/logout (requires auth)
+// POST /auth/logout (requires auth — called via gateway with X-User-Id)
 auth.post('/logout', async (c) => {
-	const auth = c.get('auth');
-	if (!auth?.sessionId) {
-		return c.json({ data: { ok: true } });
+	const sessionId = c.req.header('X-Session-Id');
+	if (sessionId) {
+		await deleteSession(c.env.DB, sessionId);
 	}
-
-	await deleteSession(c.env.DB, auth.sessionId);
 	return c.json({ data: { ok: true } });
 });
 
@@ -161,16 +148,15 @@ auth.post('/reset-password', async (c) => {
 
 	const db = c.env.DB;
 	const user = await db
-		.prepare('SELECT id FROM users WHERE LOWER(email) = ?')
+		.prepare('SELECT id, email FROM users WHERE LOWER(email) = ?')
 		.bind(parsed.data.email.toLowerCase())
-		.first<{ id: string }>();
+		.first<{ id: string; email: string }>();
 
 	if (user) {
-		await createToken(db, user.id, 'password_reset', 60);
-		// TODO: send email with reset code
+		const { code } = await createToken(db, user.id, 'password_reset', 60);
+		await sendEmail(c.env.COMMS_QUEUE, 'reset-password', user.email, { code });
 	}
 
-	// Always return success to prevent email enumeration
 	return c.json({ data: { ok: true } });
 });
 
@@ -189,11 +175,7 @@ auth.post('/new-password', async (c) => {
 	}
 
 	const passwordHash = await hashPassword(parsed.data.password);
-	await db
-		.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
-		.bind(passwordHash, token.userId)
-		.run();
-
+	await db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').bind(passwordHash, token.userId).run();
 	await markTokenUsed(db, token.id);
 
 	return c.json({ data: { ok: true } });
@@ -212,29 +194,82 @@ auth.post('/verify-email', async (c) => {
 		return c.json({ error: { code: 'INVALID_TOKEN', message: 'Invalid or expired code' } }, 400);
 	}
 
-	await db
-		.prepare('UPDATE users SET email_verified = 1 WHERE id = ?')
-		.bind(token.userId)
-		.run();
-
+	await db.prepare('UPDATE users SET email_verified = 1 WHERE id = ?').bind(token.userId).run();
 	await markTokenUsed(db, token.id);
 
 	return c.json({ data: { ok: true } });
 });
 
-// GET /auth/me (requires auth)
+// POST /auth/validate — called by simse-api gateway
+auth.post('/validate', async (c) => {
+	const body = await c.req.json<{ token: string }>();
+	if (!body.token) {
+		return c.json({ error: { code: 'VALIDATION_ERROR', message: 'Token required' } }, 400);
+	}
+
+	const db = c.env.DB;
+	const token = body.token;
+	let userId: string | null = null;
+	let sessionId: string | undefined;
+
+	if (token.startsWith('session_')) {
+		const row = await db
+			.prepare("SELECT user_id FROM sessions WHERE id = ? AND expires_at > datetime('now')")
+			.bind(token)
+			.first<{ user_id: string }>();
+		if (row) {
+			userId = row.user_id;
+			sessionId = token;
+		}
+	} else if (token.startsWith('sk_')) {
+		const encoder = new TextEncoder();
+		const data = encoder.encode(token);
+		const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+		const hashArray = new Uint8Array(hashBuffer);
+		const keyHash = btoa(String.fromCharCode(...hashArray));
+
+		const row = await db
+			.prepare('SELECT user_id FROM api_keys WHERE key_hash = ?')
+			.bind(keyHash)
+			.first<{ user_id: string }>();
+
+		if (row) {
+			userId = row.user_id;
+			await db.prepare("UPDATE api_keys SET last_used_at = datetime('now') WHERE key_hash = ?").bind(keyHash).run();
+		}
+	}
+
+	if (!userId) {
+		return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } }, 401);
+	}
+
+	// Get team info for RBAC
+	const team = await db
+		.prepare('SELECT t.id, tm.role FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? LIMIT 1')
+		.bind(userId)
+		.first<{ id: string; role: string }>();
+
+	return c.json({
+		data: {
+			userId,
+			sessionId,
+			teamId: team?.id ?? null,
+			role: team?.role ?? null,
+		},
+	});
+});
+
+// GET /auth/me — requires auth headers from gateway
 auth.get('/me', async (c) => {
-	const auth = c.get('auth');
-	if (!auth) {
+	const userId = c.req.header('X-User-Id');
+	if (!userId) {
 		return c.json({ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } }, 401);
 	}
 
 	const db = c.env.DB;
 	const user = await db
-		.prepare(
-			'SELECT id, email, name, email_verified, two_factor_enabled, created_at FROM users WHERE id = ?',
-		)
-		.bind(auth.userId)
+		.prepare('SELECT id, email, name, email_verified, two_factor_enabled, created_at FROM users WHERE id = ?')
+		.bind(userId)
 		.first<{
 			id: string;
 			email: string;
@@ -249,10 +284,8 @@ auth.get('/me', async (c) => {
 	}
 
 	const team = await db
-		.prepare(
-			"SELECT t.id, t.name, t.plan, tm.role FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? LIMIT 1",
-		)
-		.bind(auth.userId)
+		.prepare('SELECT t.id, t.name, t.plan, tm.role FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? LIMIT 1')
+		.bind(userId)
 		.first<{ id: string; name: string; plan: string; role: string }>();
 
 	return c.json({
@@ -263,9 +296,7 @@ auth.get('/me', async (c) => {
 			emailVerified: !!user.email_verified,
 			twoFactorEnabled: !!user.two_factor_enabled,
 			createdAt: user.created_at,
-			team: team
-				? { id: team.id, name: team.name, plan: team.plan, role: team.role }
-				: null,
+			team: team ? { id: team.id, name: team.name, plan: team.plan, role: team.role } : null,
 		},
 	});
 });

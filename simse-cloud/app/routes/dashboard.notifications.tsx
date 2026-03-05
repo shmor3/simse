@@ -3,55 +3,36 @@ import PageHeader from '~/components/layout/PageHeader';
 
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
-import { getSession } from '~/lib/session.server';
+import { authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.notifications';
 
-export async function loader({ request, context }: Route.LoaderArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (!session) return { notifications: [] };
+export async function loader({ request }: Route.LoaderArgs) {
+	try {
+		const res = await authenticatedApi(request, '/notifications');
+		if (!res.ok) return { notifications: [] };
 
-	const db = context.cloudflare.env.DB;
-	const notifications = await db
-		.prepare(
-			'SELECT id, type, title, body, read, link, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 100',
-		)
-		.bind(session.userId)
-		.all<{
-			id: string;
-			type: string;
-			title: string;
-			body: string;
-			read: number;
-			link: string | null;
-			created_at: string;
-		}>();
-
-	return { notifications: notifications.results };
+		const json = await res.json() as any;
+		return { notifications: json.data ?? [] };
+	} catch {
+		return { notifications: [] };
+	}
 }
 
-export async function action({ request, context }: Route.ActionArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (!session) return null;
-
+export async function action({ request }: Route.ActionArgs) {
 	const formData = await request.formData();
 	const intent = formData.get('intent');
-	const db = context.cloudflare.env.DB;
 
 	if (intent === 'mark-read') {
 		const notifId = formData.get('id') as string;
-		await db
-			.prepare('UPDATE notifications SET read = 1 WHERE id = ? AND user_id = ?')
-			.bind(notifId, session.userId)
-			.run();
+		await authenticatedApi(request, `/notifications/${notifId}/read`, {
+			method: 'PUT',
+		});
 	}
 
 	if (intent === 'mark-all-read') {
-		await db
-			.prepare(
-				'UPDATE notifications SET read = 1 WHERE user_id = ? AND read = 0',
-			)
-			.bind(session.userId)
-			.run();
+		await authenticatedApi(request, '/notifications/read-all', {
+			method: 'PUT',
+		});
 	}
 
 	return null;
@@ -136,7 +117,7 @@ const typeIcon = (type: string) => {
 
 export default function Notifications({ loaderData }: Route.ComponentProps) {
 	const { notifications } = loaderData;
-	const unreadCount = notifications.filter((n) => !n.read).length;
+	const unreadCount = notifications.filter((n: any) => !n.read).length;
 
 	return (
 		<>
@@ -186,7 +167,7 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
 			) : (
 				<Card className="mt-8 overflow-hidden">
 					<div className="divide-y divide-zinc-800/50">
-						{notifications.map((n) => (
+						{notifications.map((n: any) => (
 							<div
 								key={n.id}
 								className={`flex items-start gap-4 px-6 py-4 ${!n.read ? 'bg-zinc-800/20' : ''}`}

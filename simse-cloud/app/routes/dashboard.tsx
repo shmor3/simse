@@ -1,30 +1,30 @@
 import { redirect } from 'react-router';
 import DashboardLayout from '~/components/layout/DashboardLayout';
-import { getSession } from '~/lib/session.server';
+import { authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard';
 
-export async function loader({ request, context }: Route.LoaderArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (!session) throw redirect('/auth/login');
+export async function loader({ request }: Route.LoaderArgs) {
+	const res = await authenticatedApi(request, '/auth/me');
+	if (!res.ok) throw redirect('/auth/login');
 
-	const db = context.cloudflare.env.DB;
+	const json = await res.json() as any;
+	const user = json.data;
 
-	// Count unread notifications
-	const result = await db
-		.prepare(
-			'SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND read = 0',
-		)
-		.bind(session.userId)
-		.first<{ count: number }>();
-
-	// Get user info for header
-	const user = await db
-		.prepare('SELECT name, email FROM users WHERE id = ?')
-		.bind(session.userId)
-		.first<{ name: string; email: string }>();
+	// Get unread notification count
+	let unreadCount = 0;
+	try {
+		const notifRes = await authenticatedApi(request, '/notifications');
+		if (notifRes.ok) {
+			const notifJson = await notifRes.json() as any;
+			const notifications = notifJson.data ?? [];
+			unreadCount = notifications.filter((n: any) => !n.read).length;
+		}
+	} catch {
+		// ignore
+	}
 
 	return {
-		unreadCount: result?.count ?? 0,
+		unreadCount,
 		userName: user?.name ?? '',
 		userEmail: user?.email ?? '',
 	};

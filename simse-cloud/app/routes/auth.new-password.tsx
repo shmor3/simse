@@ -1,8 +1,7 @@
 import { Form, Link, redirect, useNavigation } from 'react-router';
 import Button from '~/components/ui/Button';
 import Input from '~/components/ui/Input';
-import { hashPassword } from '~/lib/auth.server';
-import { newPasswordSchema } from '~/lib/schemas';
+import { api } from '~/lib/api.server';
 import type { Route } from './+types/auth.new-password';
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -12,41 +11,28 @@ export async function loader({ request }: Route.LoaderArgs) {
 	return { token };
 }
 
-export async function action({ request, context }: Route.ActionArgs) {
+export async function action({ request }: Route.ActionArgs) {
 	const formData = await request.formData();
-	const raw = Object.fromEntries(formData);
-	const parsed = newPasswordSchema.safeParse(raw);
+	const token = formData.get('token') as string;
+	const password = formData.get('password') as string;
 
-	if (!parsed.success) {
-		const errors: Record<string, string> = {};
-		for (const issue of parsed.error.issues) {
-			errors[String(issue.path[0])] = issue.message;
-		}
-		return { errors };
+	if (!token || !password) {
+		return { errors: { password: 'Password is required' } };
 	}
 
-	const db = context.cloudflare.env.DB;
-	const token = await db
-		.prepare(
-			"SELECT id, user_id FROM tokens WHERE code = ? AND type = 'password_reset' AND used = 0 AND expires_at > datetime('now')",
-		)
-		.bind(parsed.data.token)
-		.first<{ id: string; user_id: string }>();
-
-	if (!token) {
-		return { errors: { token: 'Invalid or expired reset link' } };
+	if (password.length < 8) {
+		return { errors: { password: 'Password must be at least 8 characters' } };
 	}
 
-	const passwordHash = await hashPassword(parsed.data.password);
+	const res = await api('/auth/new-password', {
+		method: 'POST',
+		body: JSON.stringify({ token, password }),
+	});
 
-	await db.batch([
-		db
-			.prepare(
-				"UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
-			)
-			.bind(passwordHash, token.user_id),
-		db.prepare('UPDATE tokens SET used = 1 WHERE id = ?').bind(token.id),
-	]);
+	if (!res.ok) {
+		const json = await res.json() as any;
+		return { errors: { token: json.error?.message ?? 'Invalid or expired reset link' } };
+	}
 
 	return { success: true };
 }

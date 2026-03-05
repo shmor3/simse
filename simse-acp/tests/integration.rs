@@ -560,3 +560,176 @@ fn test_engine_exits_on_stdin_close() {
 
 	assert!(exited, "Engine should exit gracefully when stdin is closed");
 }
+
+/// `acp/initialize` with a server config pointing to a non-existent binary
+/// should return an ACP error (-32000) because the connection cannot be
+/// established.
+#[test]
+fn test_initialize_nonexistent_binary() {
+	let mut engine = TestEngine::new();
+	let resp = engine.request(
+		"acp/initialize",
+		json!({
+			"servers": [{
+				"name": "ghost",
+				"command": "this-binary-does-not-exist-anywhere-12345",
+				"args": [],
+			}],
+		}),
+	);
+
+	assert_is_error(&resp, -32000);
+	let error = &resp["error"];
+	// The error data should contain an acpCode field.
+	if let Some(data) = error.get("data") {
+		let acp_code = data["acpCode"].as_str().unwrap_or("");
+		assert!(
+			!acp_code.is_empty(),
+			"Error data should contain an acpCode, got: {data}"
+		);
+	}
+}
+
+/// After dispose, the engine returns to an un-initialized state, so
+/// subsequent lifecycle operations (dispose again, then methods that
+/// require init) all behave correctly in sequence.
+#[test]
+fn test_full_lifecycle_dispose_reinit_dispose() {
+	let mut engine = TestEngine::new();
+
+	// Dispose (no-op since not initialized).
+	let resp = engine.request("acp/dispose", json!({}));
+	assert_is_success(&resp);
+
+	// Attempt initialize with empty servers — should fail.
+	let resp = engine.request("acp/initialize", json!({ "servers": [] }));
+	assert_is_error(&resp, -32000);
+
+	// After failed init, client-requiring methods still return not-initialized.
+	let resp = engine.request("acp/generate", json!({ "prompt": "test" }));
+	assert_is_error(&resp, -32000);
+	assert!(resp["error"]["message"]
+		.as_str()
+		.unwrap()
+		.contains("Not initialized"));
+
+	// Dispose again should still succeed cleanly.
+	let resp = engine.request("acp/dispose", json!({}));
+	assert_is_success(&resp);
+
+	// Verify engine is still alive and responsive.
+	assert!(engine.is_alive());
+	let resp = engine.request("acp/dispose", json!({}));
+	assert_is_success(&resp);
+}
+
+/// The engine correctly handles a burst of rapid sequential requests,
+/// returning properly matched IDs for each one without dropping or
+/// misrouting any response.
+#[test]
+fn test_rapid_sequential_requests() {
+	let mut engine = TestEngine::new();
+
+	// Send 20 rapid-fire requests and verify each response matches its ID.
+	for i in 0..20 {
+		let resp = engine.request("acp/dispose", json!({}));
+		assert_is_success(&resp);
+		let resp_id = resp["id"].as_u64().unwrap();
+		assert_eq!(
+			resp_id,
+			(i + 1) as u64,
+			"Response ID mismatch at iteration {i}"
+		);
+	}
+
+	// Interleave different method types.
+	for _ in 0..10 {
+		let r1 = engine.request("acp/dispose", json!({}));
+		assert_is_success(&r1);
+
+		let r2 = engine.request("unknown/method", json!({}));
+		assert_is_error(&r2, -32601);
+
+		let r3 = engine.request("acp/generate", json!({ "prompt": "x" }));
+		assert_is_error(&r3, -32000);
+
+		let r4 = engine.request("acp/initialize", json!({}));
+		assert_is_error(&r4, -32602);
+	}
+
+	assert!(engine.is_alive());
+}
+
+/// Error responses for not-initialized methods should contain structured
+/// error data with the correct JSON-RPC fields.
+#[test]
+fn test_error_response_structure() {
+	let mut engine = TestEngine::new();
+
+	// Test several methods that return not-initialized errors.
+	let methods = vec![
+		("acp/generate", json!({ "prompt": "test" })),
+		("acp/chat", json!({ "messages": [{ "role": "user", "content": [{ "type": "text", "text": "hi" }] }] })),
+		("acp/serverHealth", json!({})),
+		("acp/listAgents", json!({})),
+		("acp/embed", json!({ "input": ["hello"] })),
+	];
+
+	for (method, params) in methods {
+		let resp = engine.request(method, params);
+
+		// Must have error, no result.
+		assert!(
+			resp.get("error").is_some(),
+			"{method}: expected error response"
+		);
+		assert!(
+			resp.get("result").is_none(),
+			"{method}: should not have result"
+		);
+
+		// Must have jsonrpc field.
+		assert_eq!(
+			resp["jsonrpc"].as_str().unwrap(),
+			"2.0",
+			"{method}: missing jsonrpc field"
+		);
+
+		// Error must have code and message.
+		let error = &resp["error"];
+		assert!(
+			error.get("code").is_some(),
+			"{method}: error missing code field"
+		);
+		assert!(
+			error.get("message").is_some(),
+			"{method}: error missing message field"
+		);
+		assert_eq!(
+			error["code"].as_i64().unwrap(),
+			-32000,
+			"{method}: expected ACP_ERROR code"
+		);
+	}
+}
+
+/// Sending a JSON-RPC request with a very large params payload should
+/// not crash the engine. The engine should respond (either with an error
+/// or by processing it normally).
+#[test]
+fn test_large_params_payload() {
+	let mut engine = TestEngine::new();
+
+	// Build a large string (~100KB).
+	let large_string: String = "x".repeat(100_000);
+
+	let resp = engine.request(
+		"acp/generate",
+		json!({ "prompt": large_string }),
+	);
+
+	// Should get a not-initialized error (server parses the payload fine,
+	// but the client check happens first).
+	assert_is_error(&resp, -32000);
+	assert!(engine.is_alive());
+}

@@ -1,0 +1,15 @@
+name = "simse-cdn"
+compatibility_date = "2025-04-01"
+main = "src/index.ts"
+
+workers_dev = true
+
+routes = [{ pattern = "cdn.simse.dev", custom_domain = true }]
+
+[[r2_buckets]]
+binding = "CDN_BUCKET"
+bucket_name = "simse-cdn"
+
+[[kv_namespaces]]
+binding = "VERSION_STORE"
+id = "PLACEHOLDER_REPLACE_WITH_KV_ID"

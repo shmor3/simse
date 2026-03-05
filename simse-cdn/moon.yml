@@ -1,0 +1,12 @@
+language: "typescript"
+tags: ["app"]
+
+tasks:
+  test:
+    command: "bun run test"
+    options:
+      mergeArgs: "replace"
+  start:
+    command: "bun run dev"
+    options:
+      mergeArgs: "replace"

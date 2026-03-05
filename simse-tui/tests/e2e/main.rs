@@ -20,6 +20,7 @@ mod commands_meta;
 mod commands_session;
 mod commands_tools;
 mod config;
+mod config_settings;
 mod error_states;
 pub mod harness;
 mod input;

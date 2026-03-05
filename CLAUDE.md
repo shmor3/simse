@@ -28,6 +28,9 @@ cd simse-ui-core && cargo test # Rust UI core tests
 cd simse-bridge && cargo test  # Rust bridge tests
 cd simse-sandbox && cargo test # Rust sandbox engine tests
 cd simse-tui && cargo test     # Rust TUI tests (unit + integration)
+
+# TypeScript tests
+cd simse-cdn && npm run test   # CDN worker tests (Vitest + @cloudflare/vitest-pool-workers)
 ```
 
 ## Architecture
@@ -51,6 +54,7 @@ simse-ui-core/              # Pure Rust crate — platform-agnostic UI logic (no
 simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Architecture)
 simse-bridge/               # Pure Rust crate — async I/O bridge (ACP client, config, sessions, storage)
 simse-engine/               # Pure Rust crate — core engine
+simse-cdn/                  # TypeScript — CDN worker (R2 + KV, Cloudflare Worker)
 simse-cloud/                # TypeScript — SaaS web app (React Router + Cloudflare)
 simse-landing/              # TypeScript — Landing page (Remix)
 simse-mailer/               # TypeScript — Email templates
@@ -233,6 +237,30 @@ simse-bridge/               # Async I/O bridge (tokio)
     agentic_loop.rs         # Agentic loop (conversation→ACP→parse→execute→repeat)
     json_io.rs              # JSON/JSONL utilities
 ```
+
+### CDN Worker
+
+```tree
+simse-cdn/                  # TypeScript — Cloudflare Worker at cdn.simse.dev
+  src/
+    index.ts                # Worker fetch handler (media, versioned downloads, latest redirect)
+    types.ts                # Env interface (R2Bucket, KVNamespace)
+    index.test.ts           # Integration tests (8 tests, @cloudflare/vitest-pool-workers)
+    test-setup.ts           # R2/KV mock seeding for tests
+  wrangler.toml             # R2 bucket (CDN_BUCKET) + KV namespace (VERSION_STORE) bindings
+  vitest.config.ts          # Vitest workers pool config
+```
+
+**Routes:**
+| Path | Behavior |
+|------|----------|
+| `GET /media/{file}` | Stream from R2, immutable cache |
+| `GET /download/{version}/{os}/{arch}` | Stream binary from R2, immutable cache, Content-Disposition |
+| `GET /download/latest/{os}/{arch}` | KV lookup → 301 redirect to versioned URL |
+| `GET /health` | 200 OK |
+
+**R2 key layout:** `media/{file}` and `releases/{os}/{arch}/{version}/{filename}`
+**KV keys:** `latest:{os}-{arch}` → version string
 
 ### Key Patterns
 

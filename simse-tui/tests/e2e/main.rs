@@ -6,8 +6,9 @@
 //!
 //! ## Module layout
 //!
-//! - `config.rs`  — Test config utilities (reserved for future ACP integration)
-//! - `harness.rs` — `SimseTestHarness`: TestBackend-based test driver
+//! - `config.rs`           — Test config utilities (reserved for future ACP integration)
+//! - `harness.rs`          — `SimseTestHarness`: TestBackend-based test driver
+//! - `runtime_harness.rs`  — `RuntimeTestHarness`: file I/O test harness with temp directories
 
 mod acp_integration;
 mod autocomplete;
@@ -24,6 +25,7 @@ pub mod harness;
 mod input;
 mod onboarding;
 mod overlays;
+mod runtime_harness;
 mod setup_wizard;
 mod startup;
 

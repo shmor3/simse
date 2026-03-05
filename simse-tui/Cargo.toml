@@ -23,3 +23,4 @@ pulldown-cmark = { version = "0.13", default-features = false }
 tempfile = "3"
 ratatui-testlib = { version = "0.1", features = ["async-tokio"] }
 portable-pty = "0.8"
+vt100-ctt = { version = "0.17", default-features = false }

@@ -1,10 +1,10 @@
 //! Shared PTY test helpers for simse-tui integration tests.
 //!
 //! All tests spawn the real `simse-tui` binary in a pseudo-terminal via
-//! `portable-pty` + `ratatui-testlib::ScreenState`. On Windows, PTY reads
-//! are blocking, so we use a dedicated reader thread that feeds output
-//! into a shared `ScreenState`. This avoids the blocking `update_state`
-//! loop in the default `TuiTestHarness`.
+//! `portable-pty` + `vt100::Parser`. On Windows, PTY reads are blocking,
+//! so we use a dedicated reader thread that feeds output into a shared
+//! `vt100::Parser`. This provides a complete VT terminal emulator that
+//! correctly handles erase sequences, cursor movement, scrolling, etc.
 
 #![allow(dead_code)]
 
@@ -14,17 +14,17 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use portable_pty::{native_pty_system, CommandBuilder, PtyPair, PtySize};
-use ratatui_testlib::{KeyCode, Modifiers, ScreenState};
+pub use ratatui_testlib::{KeyCode, Modifiers};
 
 /// Custom test harness that uses a background reader thread.
 ///
-/// Wraps a `portable-pty` master handle and a shared `ScreenState`.
+/// Wraps a `portable-pty` master handle and a shared `vt100::Parser`.
 /// A background thread continuously reads from the PTY master and feeds
-/// data into the screen state, so `wait_for_text` never blocks.
+/// data into the parser, so `wait_for_text` never blocks.
 pub struct PtyHarness {
     writer: Box<dyn Write + Send>,
     child: Box<dyn portable_pty::Child + Send + Sync>,
-    screen: Arc<Mutex<ScreenState>>,
+    parser: Arc<Mutex<vt100_ctt::Parser>>,
     _reader_handle: std::thread::JoinHandle<()>,
     // Keep the PtyPair alive so the ConPTY handle is not closed.
     // On Windows, dropping the PtyPair closes the ConPTY, terminating
@@ -61,18 +61,18 @@ impl PtyHarness {
             .take_writer()
             .expect("Failed to take PTY writer");
 
-        let screen = Arc::new(Mutex::new(ScreenState::new(width, height)));
-        let screen_bg = Arc::clone(&screen);
+        let parser = Arc::new(Mutex::new(vt100_ctt::Parser::new(height, width, 0)));
+        let parser_bg = Arc::clone(&parser);
 
-        // Background thread: read PTY output and feed into ScreenState.
+        // Background thread: read PTY output and feed into vt100 parser.
         let reader_handle = std::thread::spawn(move || {
             let mut buf = [0u8; 8192];
             loop {
                 match reader.read(&mut buf) {
                     Ok(0) => break, // EOF
                     Ok(n) => {
-                        if let Ok(mut s) = screen_bg.lock() {
-                            s.feed(&buf[..n]);
+                        if let Ok(mut p) = parser_bg.lock() {
+                            p.process(&buf[..n]);
                         }
                     }
                     Err(e) => {
@@ -96,7 +96,7 @@ impl PtyHarness {
         Self {
             writer,
             child,
-            screen,
+            parser,
             _reader_handle: reader_handle,
             _pty_pair: pair,
             timeout,
@@ -109,8 +109,9 @@ impl PtyHarness {
         let poll = Duration::from_millis(50);
 
         loop {
-            if let Ok(s) = self.screen.lock() {
-                if s.contains(text) {
+            if let Ok(p) = self.parser.lock() {
+                let contents = p.screen().contents();
+                if contents.contains(text) {
                     return Ok(());
                 }
             }
@@ -127,9 +128,9 @@ impl PtyHarness {
 
     /// Return current screen contents as a string.
     pub fn screen_contents(&self) -> String {
-        self.screen
+        self.parser
             .lock()
-            .map(|s| s.contents())
+            .map(|p| p.screen().contents())
             .unwrap_or_default()
     }
 
@@ -137,7 +138,10 @@ impl PtyHarness {
     pub fn send_keys(&mut self, text: &str) -> Result<(), String> {
         self.writer
             .write_all(text.as_bytes())
-            .map_err(|e| format!("Failed to send keys: {e}"))
+            .map_err(|e| format!("Failed to send keys: {e}"))?;
+        self.writer
+            .flush()
+            .map_err(|e| format!("Failed to flush: {e}"))
     }
 
     /// Send a single key code.
@@ -145,7 +149,19 @@ impl PtyHarness {
         let bytes = encode_key(key, Modifiers::empty());
         self.writer
             .write_all(&bytes)
-            .map_err(|e| format!("Failed to send key: {e}"))
+            .map_err(|e| format!("Failed to send key: {e}"))?;
+        self.writer
+            .flush()
+            .map_err(|e| format!("Failed to flush: {e}"))
+    }
+
+    /// Check if the child process is still running.
+    pub fn is_running(&mut self) -> bool {
+        match self.child.try_wait() {
+            Ok(Some(_)) => false, // exited
+            Ok(None) => true,     // still running
+            Err(_) => false,      // treat error as exited
+        }
     }
 
     /// Send a key with modifiers.
@@ -157,7 +173,10 @@ impl PtyHarness {
         let bytes = encode_key(key, mods);
         self.writer
             .write_all(&bytes)
-            .map_err(|e| format!("Failed to send key: {e}"))
+            .map_err(|e| format!("Failed to send key: {e}"))?;
+        self.writer
+            .flush()
+            .map_err(|e| format!("Failed to flush: {e}"))
     }
 }
 
@@ -174,7 +193,14 @@ fn encode_key(key: KeyCode, mods: Modifiers) -> Vec<u8> {
         KeyCode::Enter => b"\r".to_vec(),
         KeyCode::Esc => b"\x1b".to_vec(),
         KeyCode::Tab => b"\t".to_vec(),
-        KeyCode::Backspace => b"\x7f".to_vec(),
+        KeyCode::Backspace => {
+            if mods.contains(Modifiers::ALT) {
+                // Alt+Backspace = ESC + DEL
+                b"\x1b\x7f".to_vec()
+            } else {
+                b"\x7f".to_vec()
+            }
+        }
         KeyCode::Up => b"\x1b[A".to_vec(),
         KeyCode::Down => b"\x1b[B".to_vec(),
         KeyCode::Right => b"\x1b[C".to_vec(),

@@ -1,0 +1,11 @@
+{
+  "planPath": "docs/plans/2026-03-04-nonblocking-ui-session-reuse-plan.md",
+  "tasks": [
+    {"id": 1, "subject": "Task 1: Fix StreamEnd to reset loop_status to Idle", "status": "pending"},
+    {"id": 2, "subject": "Task 2: Pass session_id into AgenticLoopOptions for reuse", "status": "pending", "blockedBy": [1]},
+    {"id": 3, "subject": "Task 3: Make TuiRuntime shareable with Arc<Mutex>", "status": "pending", "blockedBy": [2]},
+    {"id": 4, "subject": "Task 4: Spawn handle_submit as background task", "status": "pending", "blockedBy": [3]},
+    {"id": 5, "subject": "Task 5: Guard against concurrent submits", "status": "pending", "blockedBy": [4]}
+  ],
+  "lastUpdated": "2026-03-04T00:00:00Z"
+}

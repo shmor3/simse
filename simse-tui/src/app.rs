@@ -591,6 +591,7 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 				text,
 			});
 			app.stream_text.clear();
+			app.loop_status = LoopStatus::Idle;
 		}
 		AppMessage::ToolCallStart(tc) => {
 			app.active_tool_calls.push(tc);
@@ -1264,6 +1265,7 @@ mod tests {
 		);
 		assert!(app.stream_text.is_empty());
 		assert!(!app.output.is_empty());
+		assert_eq!(app.loop_status, LoopStatus::Idle);
 	}
 
 	#[test]

@@ -20,6 +20,7 @@ pub mod status_bar;
 pub mod tool_call_box;
 
 use std::io;
+use std::path::PathBuf;
 
 use crossterm::{
 	event::{
@@ -34,6 +35,7 @@ use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::sync::mpsc;
 
 use app::{update, view, App, AppMessage};
+use cli_args::parse_cli_args;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -57,6 +59,21 @@ async fn main() -> io::Result<()> {
 }
 
 async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
+	// Parse CLI arguments and load configuration.
+	let args: Vec<String> = std::env::args().collect();
+	let cli = parse_cli_args(&args);
+
+	let config_options = simse_bridge::config::ConfigOptions {
+		data_dir: cli.data_dir.map(PathBuf::from),
+		work_dir: None,
+		default_agent: cli.agent.clone(),
+		log_level: None,
+		server_name: cli.server.clone(),
+	};
+	let config = simse_bridge::config::load_config(&config_options);
+	let mut runtime = event_loop::TuiRuntime::new(config);
+	runtime.verbose = cli.verbose;
+
 	let mut app = App::new();
 	let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<AppMessage>();
 	let mut reader = EventStream::new();
@@ -81,6 +98,12 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 			Some(msg) = msg_rx.recv() => {
 				app = update(app, msg);
 			}
+		}
+
+		// Dispatch pending bridge action (e.g. after confirming factory-reset).
+		if let Some(action) = app.pending_bridge_action.take() {
+			let result_msg = runtime.dispatch_bridge_action(action).await;
+			app = update(app, result_msg);
 		}
 
 		if app.should_quit {

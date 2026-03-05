@@ -55,11 +55,19 @@ impl AcpClient {
 
 		let mut bridge = spawn_bridge(&config).await?;
 
-		// Perform initialize handshake with init-specific timeout
+		// Perform initialize handshake with init-specific timeout.
+		// ACP protocol requires protocolVersion and clientInfo in the params.
+		let init_params = serde_json::json!({
+			"protocolVersion": 1,
+			"clientInfo": {
+				"name": "simse",
+				"version": env!("CARGO_PKG_VERSION")
+			}
+		});
 		let init_timeout = Duration::from_millis(server.init_timeout_ms);
 		let resp = tokio::time::timeout(
 			init_timeout,
-			crate::client::request(&mut bridge, "initialize", None),
+			crate::client::request(&mut bridge, "initialize", Some(init_params)),
 		)
 		.await
 		.map_err(|_| AcpError::Bridge(BridgeError::Timeout))?
@@ -99,8 +107,15 @@ impl AcpClient {
 
 	/// Create a new ACP session. Returns the session ID.
 	pub async fn new_session(&self) -> Result<String, AcpError> {
+		let cwd = std::env::current_dir()
+			.map(|p| p.to_string_lossy().to_string())
+			.unwrap_or_else(|_| ".".to_string());
+		let params = serde_json::json!({
+			"cwd": cwd,
+			"mcpServers": []
+		});
 		let mut bridge = self.bridge.lock().await;
-		let resp = crate::client::request(&mut bridge, "session/new", None).await?;
+		let resp = crate::client::request(&mut bridge, "session/new", Some(params)).await?;
 
 		if let Some(err) = resp.error {
 			return Err(AcpError::Protocol(format!(
@@ -145,16 +160,10 @@ impl AcpClient {
 				.ok_or_else(|| AcpError::Protocol("session/prompt returned no result".into()))?,
 		)?;
 
-		let content = extract_text_content(&result.content);
-		let usage = result
-			.metadata
-			.as_ref()
-			.and_then(|m| m.usage.clone());
-
 		Ok(GenerateResult {
-			content,
+			content: String::new(), // Content arrives via notifications, not the response
 			stop_reason: result.stop_reason,
-			usage,
+			usage: result.usage,
 		})
 	}
 
@@ -214,10 +223,8 @@ impl AcpClient {
 						serde_json::from_value::<SessionPromptResult>,
 					) {
 						// Send usage if available
-						if let Some(usage) =
-							result.metadata.as_ref().and_then(|m| m.usage.clone())
-						{
-							let _ = event_tx.send(StreamEvent::Usage(usage));
+						if let Some(usage) = &result.usage {
+							let _ = event_tx.send(StreamEvent::Usage(usage.clone()));
 						}
 						let _ = event_tx.send(StreamEvent::Complete(result));
 					}
@@ -274,27 +281,14 @@ impl AcpClient {
 				.ok_or_else(|| AcpError::Protocol("embed returned no result".into()))?,
 		)?;
 
-		// Extract embeddings from data content blocks
-		let mut embeddings = Vec::new();
-		for block in &result.content {
-			if let ContentBlock::Data { data } = block {
-				if let Some(embedding) = data.get("embedding") {
-					if let Ok(vec) = serde_json::from_value::<Vec<f32>>(embedding.clone()) {
-						embeddings.push(vec);
-					}
-				}
-			}
-		}
-
 		let prompt_tokens = result
-			.metadata
+			.usage
 			.as_ref()
-			.and_then(|m| m.usage.as_ref())
 			.map(|u| u.prompt_tokens)
 			.unwrap_or(0);
 
 		Ok(EmbedResult {
-			embeddings,
+			embeddings: Vec::new(), // Embed via ACP is not yet supported
 			prompt_tokens,
 		})
 	}
@@ -637,8 +631,6 @@ mod tests {
 
 	#[test]
 	fn build_prompt_params_basic() {
-		// We can't call build_prompt_params directly without an AcpClient,
-		// but we can test the public extract_text_content + types integration
 		let params = SessionPromptParams {
 			session_id: "test-session".into(),
 			content: vec![ContentBlock::Text {
@@ -648,8 +640,9 @@ mod tests {
 		};
 		let json = serde_json::to_value(&params).unwrap();
 		assert_eq!(json["sessionId"], "test-session");
-		assert_eq!(json["content"][0]["type"], "text");
-		assert_eq!(json["content"][0]["text"], "Hello");
+		// content field is serialized as "prompt" per ACP protocol
+		assert_eq!(json["prompt"][0]["type"], "text");
+		assert_eq!(json["prompt"][0]["text"], "Hello");
 		// metadata should be absent (skip_serializing_if)
 		assert!(json.get("metadata").is_none());
 	}
@@ -749,8 +742,8 @@ mod tests {
 		let json = serde_json::to_value(&params).unwrap();
 		// metadata should be absent
 		assert!(json.get("metadata").is_none());
-		// data block should contain action and texts
-		let block = &json["content"][0];
+		// data block should contain action and texts (serialized as "prompt")
+		let block = &json["prompt"][0];
 		assert_eq!(block["data"]["action"], "embed");
 		assert_eq!(block["data"]["texts"][0], "hello");
 		assert_eq!(block["data"]["texts"][1], "world");
@@ -773,7 +766,7 @@ mod tests {
 			metadata: None,
 		};
 		let json = serde_json::to_value(&params).unwrap();
-		let block = &json["content"][0];
+		let block = &json["prompt"][0];
 		assert_eq!(block["data"]["action"], "embed");
 		assert_eq!(block["data"]["model"], "text-embedding-3-small");
 		assert_eq!(block["data"]["texts"][0], "hello");

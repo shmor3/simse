@@ -94,6 +94,8 @@ pub struct App {
 	pub prompts: Vec<PromptInfo>,
 	pub config_values: Vec<(String, String)>,
 	pub pending_bridge_action: Option<BridgeAction>,
+	/// Pending chat message to send through the agentic loop.
+	pub pending_chat_message: Option<String>,
 	/// Pending action waiting for confirmation via Screen::Confirm.
 	pub pending_confirm_action: Option<BridgeAction>,
 	/// Overlay state for the settings explorer.
@@ -145,6 +147,7 @@ impl App {
 			prompts: Vec::new(),
 			config_values: Vec::new(),
 			pending_bridge_action: None,
+			pending_chat_message: None,
 			pending_confirm_action: None,
 			settings_state: SettingsExplorerState::new(),
 			settings_config_data: serde_json::Value::Null,
@@ -331,7 +334,8 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			if text.starts_with('/') {
 				app = dispatch_command(app, &text);
 			} else {
-				// Regular user message.
+				// Regular user message - display it and queue for agentic loop.
+				app.pending_chat_message = Some(text.clone());
 				app.output.push(OutputItem::Message {
 					role: "user".into(),
 					text,

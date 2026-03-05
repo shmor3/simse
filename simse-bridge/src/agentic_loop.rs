@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use simse_ui_core::tools::{ToolCallRequest, ToolCallResult, format_tools_for_system_prompt};
 
-use crate::acp_client::{AcpClient, extract_text_content};
+use crate::acp_client::AcpClient;
 use crate::acp_types::{GenerateOptions, StreamEvent};
 use crate::tool_registry::ToolRegistry;
 
@@ -358,17 +358,10 @@ pub async fn run_agentic_loop(
 					full_response.push_str(&text);
 				}
 				StreamEvent::Complete(result) => {
-					// Extract any remaining text from the complete event
-					let completion_text = extract_text_content(&result.content);
-					if !completion_text.is_empty() && full_response.is_empty() {
-						full_response = completion_text;
-					}
-					// Extract usage from completion metadata
-					if let Some(meta) = &result.metadata {
-						if let Some(usage) = &meta.usage {
-							turn_usage =
-								Some((usage.prompt_tokens, usage.completion_tokens));
-						}
+					// Extract usage from the prompt response
+					if let Some(usage) = &result.usage {
+						turn_usage =
+							Some((usage.prompt_tokens, usage.completion_tokens));
 					}
 				}
 				StreamEvent::Usage(usage) => {

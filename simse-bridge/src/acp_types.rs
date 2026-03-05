@@ -16,6 +16,7 @@ pub enum ContentBlock {
 #[serde(rename_all = "camelCase")]
 pub struct SessionPromptParams {
 	pub session_id: String,
+	#[serde(rename = "prompt")]
 	pub content: Vec<ContentBlock>,
 	#[serde(default, skip_serializing_if = "Option::is_none")]
 	pub metadata: Option<PromptMetadata>,
@@ -42,13 +43,15 @@ pub struct PromptMetadata {
 }
 
 /// Result from session/prompt.
+///
+/// The ACP protocol returns `stopReason` and optional `usage` in the response.
+/// Content arrives via `session/update` notifications (streaming deltas).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionPromptResult {
-	pub content: Vec<ContentBlock>,
 	pub stop_reason: String,
-	#[serde(default, skip_serializing_if = "Option::is_none")]
-	pub metadata: Option<ResultMetadata>,
+	#[serde(default)]
+	pub usage: Option<TokenUsage>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -104,8 +107,48 @@ pub struct SessionUpdate {
 #[serde(rename_all = "camelCase")]
 pub struct UpdatePayload {
 	pub session_update: String,
-	#[serde(default)]
+	#[serde(default, deserialize_with = "deserialize_content_one_or_many")]
 	pub content: Vec<ContentBlock>,
+}
+
+/// Deserialize content as either a single ContentBlock or an array.
+/// The ACP protocol sends a single object for chunks but some implementations
+/// may send an array.
+fn deserialize_content_one_or_many<'de, D>(
+	deserializer: D,
+) -> Result<Vec<ContentBlock>, D::Error>
+where
+	D: serde::Deserializer<'de>,
+{
+	use serde::de;
+
+	struct ContentVisitor;
+
+	impl<'de> de::Visitor<'de> for ContentVisitor {
+		type Value = Vec<ContentBlock>;
+
+		fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+			formatter.write_str("a content block or array of content blocks")
+		}
+
+		fn visit_seq<A>(self, seq: A) -> Result<Vec<ContentBlock>, A::Error>
+		where
+			A: de::SeqAccess<'de>,
+		{
+			Vec::<ContentBlock>::deserialize(de::value::SeqAccessDeserializer::new(seq))
+		}
+
+		fn visit_map<M>(self, map: M) -> Result<Vec<ContentBlock>, M::Error>
+		where
+			M: de::MapAccess<'de>,
+		{
+			let block =
+				ContentBlock::deserialize(de::value::MapAccessDeserializer::new(map))?;
+			Ok(vec![block])
+		}
+	}
+
+	deserializer.deserialize_any(ContentVisitor)
 }
 
 /// Options for generate requests.
@@ -401,12 +444,23 @@ mod tests {
 	#[test]
 	fn session_prompt_result_deserializes() {
 		let json = r#"{
-			"content": [{"type": "text", "text": "response"}],
 			"stopReason": "end_turn"
 		}"#;
 		let result: SessionPromptResult = serde_json::from_str(json).unwrap();
 		assert_eq!(result.stop_reason, "end_turn");
-		assert_eq!(result.content.len(), 1);
-		assert!(result.metadata.is_none());
+		assert!(result.usage.is_none());
+	}
+
+	#[test]
+	fn session_prompt_result_with_usage() {
+		let json = r#"{
+			"stopReason": "end_turn",
+			"usage": {"promptTokens": 50, "completionTokens": 25}
+		}"#;
+		let result: SessionPromptResult = serde_json::from_str(json).unwrap();
+		assert_eq!(result.stop_reason, "end_turn");
+		let usage = result.usage.unwrap();
+		assert_eq!(usage.prompt_tokens, 50);
+		assert_eq!(usage.completion_tokens, 25);
 	}
 }

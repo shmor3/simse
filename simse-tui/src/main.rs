@@ -36,6 +36,22 @@ use tokio::sync::mpsc;
 
 use app::{update, view, App, AppMessage};
 use cli_args::parse_cli_args;
+use simse_bridge::agentic_loop::LoopCallbacks;
+
+/// Callbacks that forward agentic loop events to the TUI as AppMessages.
+struct TuiLoopCallbacks {
+	tx: mpsc::UnboundedSender<AppMessage>,
+}
+
+impl LoopCallbacks for TuiLoopCallbacks {
+	fn on_stream_start(&self) {
+		let _ = self.tx.send(AppMessage::StreamStart);
+	}
+
+	fn on_stream_delta(&self, delta: &str) {
+		let _ = self.tx.send(AppMessage::StreamDelta(delta.to_string()));
+	}
+}
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -104,6 +120,40 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 		if let Some(action) = app.pending_bridge_action.take() {
 			let result_msg = runtime.dispatch_bridge_action(action).await;
 			app = update(app, result_msg);
+		}
+
+		// Dispatch pending chat message through the agentic loop.
+		if let Some(text) = app.pending_chat_message.take() {
+			// Lazily connect to ACP on first chat message.
+			if !runtime.is_connected() && !runtime.needs_onboarding() {
+				match runtime.connect().await {
+					Ok(()) => {
+						let ctx = runtime.build_command_context();
+						app = update(app, AppMessage::RefreshContext(ctx));
+					}
+					Err(e) => {
+						app = update(
+							app,
+							AppMessage::LoopError(format!("ACP connection failed: {e}")),
+						);
+						continue;
+					}
+				}
+			}
+
+			let tx = msg_tx.clone();
+			let callbacks = TuiLoopCallbacks { tx: tx.clone() };
+			app = update(app, AppMessage::StreamStart);
+			terminal.draw(|frame| view(&app, frame))?;
+
+			match runtime.handle_submit(&text, &callbacks).await {
+				Ok(final_text) => {
+					app = update(app, AppMessage::StreamEnd { text: final_text });
+				}
+				Err(e) => {
+					app = update(app, AppMessage::LoopError(e.to_string()));
+				}
+			}
 		}
 
 		if app.should_quit {

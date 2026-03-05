@@ -237,12 +237,17 @@ pub fn spawn_simse(data_dir: &Path) -> PtyHarness {
 
 /// Spawn simse-tui with an explicit working directory.
 pub fn spawn_simse_with_cwd(data_dir: &Path, work_dir: &Path) -> PtyHarness {
+    spawn_simse_with_timeout(data_dir, work_dir, Duration::from_secs(15))
+}
+
+/// Spawn simse-tui with an explicit working directory and custom timeout.
+pub fn spawn_simse_with_timeout(data_dir: &Path, work_dir: &Path, timeout: Duration) -> PtyHarness {
     let binary = env!("CARGO_BIN_EXE_simse-tui");
     let mut cmd = CommandBuilder::new(binary);
     cmd.arg("--data-dir");
     cmd.arg(data_dir.to_str().expect("data_dir must be valid UTF-8"));
     cmd.cwd(work_dir);
-    PtyHarness::spawn(cmd, 120, 40, Duration::from_secs(15))
+    PtyHarness::spawn(cmd, 120, 40, timeout)
 }
 
 /// Write default config files (config.json + acp.json) to a data directory.
@@ -256,6 +261,56 @@ pub fn write_default_config(data_dir: &Path) {
     std::fs::write(
         data_dir.join("acp.json"),
         r#"{"servers": [{"name": "claude-code", "command": "claude"}]}"#,
+    )
+    .unwrap();
+}
+
+/// Write ACP config using `claude-agent-acp` (Zed's ACP server for Claude).
+///
+/// Resolves the `claude-agent-acp` entry point relative to the `node` binary,
+/// using `node` as the command. Requires `@zed-industries/claude-agent-acp`
+/// installed globally (`npm i -g @zed-industries/claude-agent-acp`).
+///
+/// Panics if the entry point cannot be found.
+pub fn write_acp_config(data_dir: &Path) {
+    std::fs::create_dir_all(data_dir).unwrap();
+
+    // Resolve the entry point relative to node's binary location.
+    let output = std::process::Command::new("node")
+        .args([
+            "-e",
+            "const p = require('path'); \
+             console.log(p.join(p.dirname(process.execPath), \
+             'node_modules', '@zed-industries', 'claude-agent-acp', 'dist', 'index.js'));",
+        ])
+        .output()
+        .expect("Failed to run node to resolve claude-agent-acp path");
+
+    let entry_point = String::from_utf8(output.stdout)
+        .expect("Non-UTF8 output from node")
+        .trim()
+        .to_string();
+
+    assert!(
+        std::path::Path::new(&entry_point).exists(),
+        "claude-agent-acp entry point not found at: {entry_point}\n\
+         Install with: npm i -g @zed-industries/claude-agent-acp"
+    );
+
+    // Use forward slashes for JSON compatibility on Windows.
+    let entry_point_json = entry_point.replace('\\', "/");
+
+    std::fs::write(
+        data_dir.join("config.json"),
+        r#"{"logLevel": "warn"}"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        data_dir.join("acp.json"),
+        format!(
+            r#"{{"servers": [{{"name": "claude-agent-acp", "command": "node", "args": ["{entry_point_json}"]}}]}}"#
+        ),
     )
     .unwrap();
 }

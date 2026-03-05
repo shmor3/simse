@@ -199,3 +199,63 @@ fn submit_clears_input() {
 		"New text should appear in input after submit cleared the old text. Screen:\n{contents}"
 	);
 }
+
+// ═══════════════════════════════════════════════════════════════
+// 11. E2E: Chat message through ACP gets AI response
+// ═══════════════════════════════════════════════════════════════
+//
+// This is the CRITICAL integration test. It proves the entire chat flow
+// works end-to-end:
+//   1. Start simse-tui configured with claude-agent-acp (Zed's ACP server)
+//   2. User types a chat message
+//   3. Lazy ACP connect fires → spawns claude-agent-acp subprocess
+//   4. Message goes through pending_chat_message -> handle_submit -> agentic_loop
+//   5. Claude processes the message via ACP and returns a response
+//   6. Response appears on screen as an assistant message
+//
+// Requires:
+//   - `@zed-industries/claude-agent-acp` installed (`npm i -g @zed-industries/claude-agent-acp`)
+//   - `ANTHROPIC_API_KEY` environment variable set
+
+#[test]
+fn chat_round_trip_with_claude_code_acp() {
+	let tmp = TempDir::new().unwrap();
+	let data_dir = tmp.path().join("data");
+	let work_dir = tmp.path().join("work");
+	std::fs::create_dir_all(&work_dir).unwrap();
+
+	// Write config pointing to claude-agent-acp (the Zed ACP server for Claude).
+	// We use `node` as the command with the entry point as an arg, because
+	// tokio::process::Command handles executable resolution reliably this way.
+	write_acp_config(&data_dir);
+
+	// Long timeout: ACP server startup (~5s) + AI response time (~30s).
+	let mut h = spawn_simse_with_timeout(
+		&data_dir,
+		&work_dir,
+		Duration::from_secs(90),
+	);
+	wait_for_startup(&h);
+
+	// Send a math question whose answer (42) does NOT appear in the prompt.
+	// This ensures we can distinguish the AI's response from the user's message.
+	type_command(&mut h, "What is the sum of 17 and 25? Reply with ONLY the number.");
+
+	// The user message should appear on screen.
+	h.wait_for_text("sum of 17 and 25")
+		.expect("User message should appear on screen after submission");
+
+	// Wait for the AI response. The number 42 can only come from the AI,
+	// proving the full round-trip: TUI -> pending_chat_message -> handle_submit
+	// -> agentic_loop -> ACP -> claude-agent-acp -> streaming response -> screen.
+	h.wait_for_text("42")
+		.expect(
+			"AI response '42' should appear on screen, proving the E2E ACP chat round-trip works",
+		);
+
+	// The app should remain running after the response.
+	assert!(
+		h.is_running(),
+		"App should not crash after receiving AI response"
+	);
+}

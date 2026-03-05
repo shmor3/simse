@@ -58,9 +58,13 @@ pub struct BridgeProcess {
 }
 
 /// Spawn a bridge subprocess with piped stdin/stdout and null stderr.
+///
+/// Clears the `CLAUDECODE` env var to prevent the Claude Agent SDK from
+/// refusing to run inside a nested Claude Code session.
 pub async fn spawn_bridge(config: &BridgeConfig) -> Result<BridgeProcess, BridgeError> {
 	let mut child = Command::new(&config.command)
 		.args(&config.args)
+		.env_remove("CLAUDECODE")
 		.stdin(Stdio::piped())
 		.stdout(Stdio::piped())
 		.stderr(Stdio::null())

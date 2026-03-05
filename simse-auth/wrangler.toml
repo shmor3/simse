@@ -1,0 +1,18 @@
+name = "simse-auth"
+compatibility_date = "2025-04-01"
+main = "src/index.ts"
+
+workers_dev = true
+
+routes = [
+  { pattern = "auth.simse.dev", custom_domain = true }
+]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "simse-auth-db"
+database_id = "PLACEHOLDER_FILL_AFTER_CREATION"
+
+[[queues.producers]]
+queue = "simse-auth-comms"
+binding = "COMMS_QUEUE"

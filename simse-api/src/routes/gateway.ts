@@ -1,10 +1,20 @@
 import { Hono } from 'hono';
-import type { Env, ApiSecrets, ValidateResponse } from '../types';
+import type { ApiSecrets, Env, ValidateResponse } from '../types';
 
-const gateway = new Hono<{ Bindings: Env; Variables: { secrets: ApiSecrets } }>();
+const gateway = new Hono<{
+	Bindings: Env;
+	Variables: { secrets: ApiSecrets };
+}>();
 
 // Public auth routes — proxy directly without validation
-const PUBLIC_AUTH_PATHS = ['/register', '/login', '/2fa', '/reset-password', '/new-password', '/verify-email'];
+const PUBLIC_AUTH_PATHS = [
+	'/register',
+	'/login',
+	'/2fa',
+	'/reset-password',
+	'/new-password',
+	'/verify-email',
+];
 
 gateway.all('/auth/*', async (c) => {
 	const subpath = c.req.path.replace('/auth', '');
@@ -17,7 +27,10 @@ gateway.all('/auth/*', async (c) => {
 	if (!isPublic) {
 		const auth = await validateToken(c);
 		if (!auth) {
-			return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } }, 401);
+			return c.json(
+				{ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } },
+				401,
+			);
 		}
 		headers.set('X-User-Id', auth.userId);
 		if (auth.sessionId) headers.set('X-Session-Id', auth.sessionId);
@@ -33,7 +46,10 @@ for (const prefix of ['/users', '/teams', '/api-keys']) {
 	gateway.all(`${prefix}/*`, async (c) => {
 		const auth = await validateToken(c);
 		if (!auth) {
-			return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } }, 401);
+			return c.json(
+				{ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } },
+				401,
+			);
 		}
 
 		const headers = serviceHeaders(auth);
@@ -45,7 +61,10 @@ for (const prefix of ['/users', '/teams', '/api-keys']) {
 gateway.all('/payments/*', async (c) => {
 	const auth = await validateToken(c);
 	if (!auth) {
-		return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } }, 401);
+		return c.json(
+			{ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } },
+			401,
+		);
 	}
 
 	const path = c.req.path.replace('/payments', '');
@@ -69,7 +88,10 @@ gateway.all('/notifications/*', async (c) => {
 async function proxyNotifications(c: any) {
 	const auth = await validateToken(c);
 	if (!auth) {
-		return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } }, 401);
+		return c.json(
+			{ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } },
+			401,
+		);
 	}
 
 	// POST /notifications → enqueue (fire-and-forget)
@@ -122,7 +144,11 @@ function serviceHeaders(auth: ValidateResponse['data']): Headers {
 	return headers;
 }
 
-async function proxyTo(c: any, url: string, headers: Headers): Promise<Response> {
+async function proxyTo(
+	c: any,
+	url: string,
+	headers: Headers,
+): Promise<Response> {
 	const init: RequestInit = {
 		method: c.req.method,
 		headers,

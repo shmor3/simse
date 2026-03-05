@@ -392,7 +392,7 @@ pub enum SimseError {
 	McpEngine(#[from] simse_mcp_engine::error::McpError),
 
 	#[error(transparent)]
-	Vector(#[from] simse_vector_engine::error::VectorError),
+	Vector(#[from] simse_adaptive_engine::error::VectorError),
 
 	#[error(transparent)]
 	VfsEngine(#[from] simse_vfs_engine::error::VfsError),

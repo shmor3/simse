@@ -1,5 +1,5 @@
-use simse_vector_engine::server::VectorServer;
-use simse_vector_engine::transport::NdjsonTransport;
+use simse_adaptive_engine::server::VectorServer;
+use simse_adaptive_engine::transport::NdjsonTransport;
 
 fn main() {
 	tracing_subscriber::fmt()
@@ -13,7 +13,7 @@ fn main() {
 	let transport = NdjsonTransport::new();
 	let mut server = VectorServer::new(transport);
 
-	tracing::info!("simse-vector-engine ready");
+	tracing::info!("simse-adaptive-engine ready");
 
 	if let Err(e) = server.run() {
 		tracing::error!("Server error: {}", e);

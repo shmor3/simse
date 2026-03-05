@@ -461,7 +461,7 @@ fn from_mcp_error() {
 
 #[test]
 fn from_vector_error() {
-	let vec_err = simse_vector_engine::error::VectorError::EmptyText;
+	let vec_err = simse_adaptive_engine::error::VectorError::EmptyText;
 	let err: SimseError = vec_err.into();
 	assert_eq!(err.code(), "VECTOR_ERROR");
 	assert!(

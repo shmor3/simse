@@ -1,16 +1,16 @@
 [package]
-name = "simse-vector-engine"
+name = "simse-adaptive-engine"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Vector store engine over JSON-RPC 2.0 / NDJSON stdio"
+description = "Adaptive learning engine over JSON-RPC 2.0 / NDJSON stdio"
 
 [lib]
-name = "simse_vector_engine"
+name = "simse_adaptive_engine"
 path = "src/lib.rs"
 
 [[bin]]
-name = "simse-vector-engine"
+name = "simse-adaptive-engine"
 path = "src/main.rs"
 
 [dependencies]

@@ -1216,7 +1216,7 @@ async fn circulation_desk_multiple_job_types() {
 
 use simse_core::library::{EmbeddingProvider, Library, LibraryConfig};
 use simse_core::library::services::{LibraryContext, LibraryServices, LibraryServicesOptions};
-use simse_vector_engine::store::StoreConfig;
+use simse_adaptive_engine::store::StoreConfig;
 
 /// Simple mock embedder for services tests.
 struct SimpleEmbedder;

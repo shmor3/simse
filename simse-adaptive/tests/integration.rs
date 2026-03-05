@@ -1,8 +1,8 @@
 // ---------------------------------------------------------------------------
-// Integration tests for simse-vector-engine JSON-RPC 2.0 / NDJSON protocol
+// Integration tests for simse-adaptive-engine JSON-RPC 2.0 / NDJSON protocol
 // ---------------------------------------------------------------------------
 //
-// Each test spawns a fresh simse-vector-engine binary and communicates via
+// Each test spawns a fresh simse-adaptive-engine binary and communicates via
 // stdin/stdout using newline-delimited JSON-RPC 2.0 messages.
 // ---------------------------------------------------------------------------
 
@@ -24,13 +24,13 @@ struct VectorProcess {
 
 impl VectorProcess {
 	fn spawn() -> Self {
-		let bin = env!("CARGO_BIN_EXE_simse-vector-engine");
+		let bin = env!("CARGO_BIN_EXE_simse-adaptive-engine");
 		let mut child = Command::new(bin)
 			.stdin(Stdio::piped())
 			.stdout(Stdio::piped())
 			.stderr(Stdio::null())
 			.spawn()
-			.expect("failed to spawn simse-vector-engine");
+			.expect("failed to spawn simse-adaptive-engine");
 
 		let stdout = child.stdout.take().expect("no stdout");
 		let reader = BufReader::new(stdout);

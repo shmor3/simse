@@ -186,11 +186,11 @@ impl TopicIndex {
 		let has_entries = self
 			.topic_to_entries
 			.get(topic)
-			.map_or(true, |e| !e.is_empty());
+			.is_none_or(|e| !e.is_empty());
 		let has_children = self
 			.topic_to_children
 			.get(topic)
-			.map_or(false, |c| !c.is_empty());
+			.is_some_and(|c| !c.is_empty());
 
 		if !has_entries && !has_children {
 			self.topic_to_entries.remove(topic);

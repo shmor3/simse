@@ -482,13 +482,13 @@ impl LearningEngine {
 				let map_a = self
 					.correlations
 					.entry(a.clone())
-					.or_insert_with(HashMap::new);
+					.or_default();
 				*map_a.entry(b.clone()).or_insert(0) += 1;
 
 				let map_b = self
 					.correlations
 					.entry(b.clone())
-					.or_insert_with(HashMap::new);
+					.or_default();
 				*map_b.entry(a.clone()).or_insert(0) += 1;
 			}
 		}

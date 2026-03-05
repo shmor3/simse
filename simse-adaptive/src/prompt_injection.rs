@@ -15,6 +15,7 @@ use crate::types::Lookup;
 // Options
 // ---------------------------------------------------------------------------
 
+#[derive(Default)]
 pub struct PromptInjectionOptions {
 	/// Maximum number of results to include.
 	pub max_results: Option<usize>,
@@ -28,17 +29,6 @@ pub struct PromptInjectionOptions {
 	pub max_chars: Option<usize>,
 }
 
-impl Default for PromptInjectionOptions {
-	fn default() -> Self {
-		Self {
-			max_results: None,
-			min_score: None,
-			format: None,
-			tag: None,
-			max_chars: None,
-		}
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Helpers

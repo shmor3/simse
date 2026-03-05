@@ -43,20 +43,17 @@ use crate::types::{
 
 /// Controls how duplicate volumes are handled during add.
 #[derive(Debug, Clone, PartialEq)]
+#[derive(Default)]
 pub enum DuplicateBehavior {
 	/// Silently skip the duplicate; return the existing volume's ID.
-	Skip,
+	#[default]
+ Skip,
 	/// Log a warning and skip (returns existing ID, dirty bit unchanged).
 	Warn,
 	/// Return a `AdaptiveError::Duplicate` error.
 	Error,
 }
 
-impl Default for DuplicateBehavior {
-	fn default() -> Self {
-		Self::Skip
-	}
-}
 
 /// Configuration for a `VolumeStore`.
 pub struct StoreConfig {

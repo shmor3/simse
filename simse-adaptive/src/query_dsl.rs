@@ -139,13 +139,13 @@ pub fn parse_query(dsl: &str) -> ParsedQuery {
 					});
 				}
 			}
-		} else if token.starts_with('"') {
+		} else if let Some(stripped) = token.strip_prefix('"') {
 			// Quoted string — strip surrounding quotes if present
-			if token.ends_with('"') && token.len() > 1 {
-				quoted_text = Some(token[1..token.len() - 1].to_string());
+			if stripped.ends_with('"') && !stripped.is_empty() {
+				quoted_text = Some(stripped[..stripped.len() - 1].to_string());
 			} else {
-				// Unterminated quote — strip opening quote only
-				quoted_text = Some(token[1..].to_string());
+				// Unterminated quote — stripped prefix already removed
+				quoted_text = Some(stripped.to_string());
 			}
 		} else if let Some(value) = token.strip_prefix("fuzzy~") {
 			if !value.is_empty() {

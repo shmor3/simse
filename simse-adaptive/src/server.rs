@@ -762,8 +762,8 @@ fn handle_check_duplicate(
 	let p: CheckDuplicateParams = parse_params(params)?;
 	// check_duplicate doesn't take a threshold param, it uses the store's config
 	let result = store.check_duplicate(&p.embedding);
-	Ok(serde_json::to_value(result)
-		.map_err(|e| AdaptiveError::Serialization(e.to_string()))?)
+	serde_json::to_value(result)
+		.map_err(|e| AdaptiveError::Serialization(e.to_string()))
 }
 
 fn handle_find_duplicates(

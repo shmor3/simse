@@ -142,9 +142,25 @@ fn dispatch_inner(command: &str, args: &str, ctx: &DispatchContext) -> Vec<Comma
 		"shortcuts" => commands::meta::handle_shortcuts(),
 
 		// ── Unknown ──────────────────────────────────────────
-		other => vec![CommandOutput::Error(format!(
-			"Unknown command: /{other}"
-		))],
+		other => {
+			let all = simse_ui_core::commands::registry::all_commands();
+			let mut suggestions: Vec<&str> = all
+				.iter()
+				.filter(|cmd| crate::levenshtein::levenshtein(other, &cmd.name) <= 2)
+				.map(|cmd| cmd.name.as_str())
+				.collect();
+			suggestions.sort();
+			suggestions.dedup();
+
+			if suggestions.is_empty() {
+				vec![CommandOutput::Error(format!("Unknown command: /{other}"))]
+			} else {
+				vec![CommandOutput::Error(format!(
+					"Unknown command: /{other}. Did you mean /{}?",
+					suggestions.join(", /")
+				))]
+			}
+		}
 	}
 }
 
@@ -620,13 +636,33 @@ mod tests {
 	#[test]
 	fn dispatch_unknown_command() {
 		let out = dispatch_command("foobar", "");
-		assert!(matches!(&out[0], CommandOutput::Error(msg) if msg.contains("/foobar")));
+		assert!(
+			matches!(&out[0], CommandOutput::Error(msg) if msg.contains("/foobar") && !msg.contains("Did you mean"))
+		);
 	}
 
 	#[test]
 	fn dispatch_unknown_preserves_name() {
 		let out = dispatch_command("xyzzy", "blah");
-		assert!(matches!(&out[0], CommandOutput::Error(msg) if msg.contains("/xyzzy")));
+		assert!(
+			matches!(&out[0], CommandOutput::Error(msg) if msg.contains("/xyzzy") && !msg.contains("Did you mean"))
+		);
+	}
+
+	#[test]
+	fn dispatch_typo_suggests_similar() {
+		let out = dispatch_command("sarch", "");
+		assert!(
+			matches!(&out[0], CommandOutput::Error(msg) if msg.contains("Did you mean") && msg.contains("/search"))
+		);
+	}
+
+	#[test]
+	fn dispatch_very_different_no_suggestion() {
+		let out = dispatch_command("xyzzy", "blah");
+		assert!(
+			matches!(&out[0], CommandOutput::Error(msg) if msg.contains("/xyzzy") && !msg.contains("Did you mean"))
+		);
 	}
 
 	// ── DispatchContext ──────────────────────────────────────

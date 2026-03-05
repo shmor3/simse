@@ -9,6 +9,7 @@ pub mod commands;
 pub mod dialogs;
 pub mod dispatch;
 pub mod error_box;
+pub mod levenshtein;
 pub mod event_loop;
 pub mod markdown;
 mod output;

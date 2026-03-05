@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Rust crate builds
-bun run build:vector-engine  # cd simse-vector && cargo build --release
+bun run build:adaptive-engine # cd simse-adaptive && cargo build --release
 bun run build:vfs-engine     # cd simse-vfs && cargo build --release
 bun run build:acp-engine     # cd simse-acp && cargo build --release
 bun run build:mcp-engine     # cd simse-mcp && cargo build --release
@@ -17,7 +17,7 @@ bun run build:vnet-engine    # cd simse-vnet && cargo build --release
 bun run build:sandbox-engine # cd simse-sandbox && cargo build --release
 
 # Rust tests
-cd simse-vector && cargo test  # Rust vector engine tests
+cd simse-adaptive && cargo test # Rust adaptive engine tests
 cd simse-vfs && cargo test     # Rust VFS engine tests
 cd simse-acp && cargo test     # Rust ACP engine tests
 cd simse-mcp && cargo test     # Rust MCP engine tests
@@ -49,7 +49,7 @@ The entire core is implemented in **Rust**. Each crate is a standalone binary co
 
 ```tree
 simse-core/                 # Pure Rust crate — orchestration library + JSON-RPC binary server
-simse-vector/               # Pure Rust crate — vector store engine (JSON-RPC over stdio)
+simse-adaptive/             # Pure Rust crate — adaptive engine (vector store + PCN, JSON-RPC over stdio)
 simse-vfs/                  # Pure Rust crate — virtual filesystem engine (vfs:// in-memory + file:// disk, JSON-RPC over stdio)
 simse-acp/                  # Pure Rust crate — ACP engine (JSON-RPC over stdio)
 simse-mcp/                  # Pure Rust crate — MCP engine (JSON-RPC over stdio)
@@ -68,7 +68,6 @@ simse-payments/             # TypeScript — Payments service (Cloudflare Worker
 simse-landing/              # TypeScript — Landing page (React Router + Cloudflare)
 simse-mailer/               # TypeScript — Email templates + notifications
 simse-brand/                # Brand assets (logos, screenshots, guidelines, copy)
-simse-predictive-coding/    # Pure Rust crate — predictive coding engine (JSON-RPC over stdio)
 ```
 
 ### simse-core Module Layout
@@ -119,11 +118,11 @@ simse-core/
 ### Other Rust Crates
 
 ```tree
-simse-vector/               # Pure Rust crate — vector store
+simse-adaptive/             # Pure Rust crate — vector store + predictive coding network (PCN)
   src/
     store.rs                # Main vector store implementation
     cosine.rs               # Cosine similarity (clamped [-1,1])
-    persistence.rs          # Float32 base64 encoding, gzip, save/load
+    persistence.rs          # Float32 base64 encoding, gzip, save/load + PCN snapshot save/load
     cataloging.rs           # TopicIndex, MetadataIndex, MagnitudeCache
     deduplication.rs        # Duplicate detection & clustering
     recommendation.rs       # Scoring with recency/frequency
@@ -133,6 +132,14 @@ simse-vector/               # Pure Rust crate — vector store
     learning.rs             # Adaptive learning engine
     query_dsl.rs            # Query DSL parsing
     prompt_injection.rs     # Memory context formatting
+    pcn_config.rs           # PCN model configuration
+    encoder.rs              # Input encoding (embeddings → PCN input)
+    vocabulary.rs           # Token vocabulary management
+    network.rs              # Predictive coding network layers
+    layer.rs                # Layer implementation
+    predictor.rs            # Prediction engine (read-only, concurrent)
+    trainer.rs              # Model training (async background worker)
+    snapshot.rs             # Model snapshots (serializable weights)
 
 simse-vfs/                  # Pure Rust crate — virtual filesystem
   src/
@@ -320,28 +327,6 @@ simse-payments/             # Payments service — Stripe subscriptions, credits
       auth.ts               # Service-to-service auth (X-User-Id)
 ```
 
-### Predictive Coding Engine
-
-```tree
-simse-predictive-coding/    # Pure Rust crate — predictive coding engine
-  src/
-    lib.rs                  # Module declarations
-    main.rs                 # Binary entry point (JSON-RPC server)
-    config.rs               # Model configuration
-    encoder.rs              # Input encoding
-    vocabulary.rs           # Token vocabulary management
-    network.rs              # Neural network layers
-    layer.rs                # Layer implementation
-    predictor.rs            # Prediction engine
-    trainer.rs              # Model training
-    snapshot.rs             # Model snapshots
-    persistence.rs          # Save/load persistence
-    error.rs                # Error types
-    protocol.rs             # JSON-RPC protocol types
-    transport.rs            # NDJSON transport
-    server.rs               # JSON-RPC dispatcher
-```
-
 ### Key Patterns
 
 - **Rust-first architecture**: All core logic is in Rust. TS packages are application/service layers (simse-cloud, simse-api, simse-auth, simse-payments, simse-cdn, simse-landing, simse-mailer).
@@ -379,10 +364,10 @@ The MCP engine (`simse-mcp/`) implements the [Model Context Protocol](https://mo
 
 ### Library System
 
-The library subsystem uses a **library analogy**. The storage engine is in Rust (`simse-vector/`), with orchestration in `simse-core/src/library/`.
+The library subsystem uses a **library analogy**. The storage engine is in Rust (`simse-adaptive/`), with orchestration in `simse-core/src/library/`.
 
-**Rust engine** (`simse-vector/src/`) — all vector operations via JSON-RPC:
-- Store, persistence, cataloging, deduplication, recommendation, text search, BM25, topic classification, adaptive learning
+**Rust engine** (`simse-adaptive/src/`) — all vector + PCN operations via JSON-RPC:
+- Store, persistence, cataloging, deduplication, recommendation, text search, BM25, topic classification, adaptive learning, predictive coding network (pcn/*, feed/*, predict/*, model/*)
 
 **simse-core library layer** (`simse-core/src/library/`) — orchestration:
 - Library, Stacks, Shelf, Librarian, LibrarianRegistry, CirculationDesk

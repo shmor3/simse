@@ -1,7 +1,7 @@
 //! Non-interactive CLI mode: argument parsing and result formatting.
 //!
 //! Supports `-p <prompt>` / `--prompt <prompt>` for single-shot generation
-//! without REPL. The actual execution happens in simse-bridge / simse-tui;
+//! without REPL. The actual execution happens in simse-tui;
 //! this module is purely data + logic (no I/O, no async).
 
 use serde::{Deserialize, Serialize};

@@ -3,7 +3,6 @@ resolver = "2"
 members = [
     "simse-ui-core",
     "simse-tui",
-    "simse-bridge",
     "simse-core",
 ]
 exclude = [

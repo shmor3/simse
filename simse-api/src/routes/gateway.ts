@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
-import type { Env, ValidateResponse } from '../types';
+import type { Env, ApiSecrets, ValidateResponse } from '../types';
 
-const gateway = new Hono<{ Bindings: Env }>();
+const gateway = new Hono<{ Bindings: Env; Variables: { secrets: ApiSecrets } }>();
 
 // Public auth routes — proxy directly without validation
 const PUBLIC_AUTH_PATHS = ['/register', '/login', '/2fa', '/reset-password', '/new-password', '/verify-email'];
@@ -25,7 +25,7 @@ gateway.all('/auth/*', async (c) => {
 		if (auth.role) headers.set('X-Role', auth.role);
 	}
 
-	return proxyTo(c, `${c.env.AUTH_API_URL}${c.req.path}`, headers);
+	return proxyTo(c, `${c.var.secrets.authApiUrl}${c.req.path}`, headers);
 });
 
 // Protected service routes
@@ -37,7 +37,7 @@ for (const prefix of ['/users', '/teams', '/api-keys']) {
 		}
 
 		const headers = serviceHeaders(auth);
-		return proxyTo(c, `${c.env.AUTH_API_URL}${c.req.path}`, headers);
+		return proxyTo(c, `${c.var.secrets.authApiUrl}${c.req.path}`, headers);
 	});
 }
 
@@ -50,12 +50,12 @@ gateway.all('/payments/*', async (c) => {
 
 	const path = c.req.path.replace('/payments', '');
 	const headers = new Headers();
-	headers.set('Authorization', `Bearer ${c.env.PAYMENTS_API_SECRET}`);
+	headers.set('Authorization', `Bearer ${c.var.secrets.paymentsApiSecret}`);
 	headers.set('Content-Type', 'application/json');
 	headers.set('X-User-Id', auth.userId);
 	if (auth.teamId) headers.set('X-Team-Id', auth.teamId);
 
-	return proxyTo(c, `${c.env.PAYMENTS_API_URL}${path}`, headers);
+	return proxyTo(c, `${c.var.secrets.paymentsApiUrl}${path}`, headers);
 });
 
 // Notifications proxy (to mailer)
@@ -85,10 +85,11 @@ async function proxyNotifications(c: any) {
 
 	// GET/PUT → proxy to mailer HTTP (needs response)
 	const headers = new Headers();
+	headers.set('Authorization', `Bearer ${c.var.secrets.mailerApiSecret}`);
 	headers.set('Content-Type', 'application/json');
 	headers.set('X-User-Id', auth.userId);
 
-	return proxyTo(c, `${c.env.MAILER_API_URL}${c.req.path}`, headers);
+	return proxyTo(c, `${c.var.secrets.mailerApiUrl}${c.req.path}`, headers);
 }
 
 // --- Helpers ---
@@ -99,7 +100,7 @@ async function validateToken(c: any): Promise<ValidateResponse['data'] | null> {
 
 	const token = authHeader.slice(7);
 
-	const res = await fetch(`${c.env.AUTH_API_URL}/auth/validate`, {
+	const res = await fetch(`${c.var.secrets.authApiUrl}/auth/validate`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ token }),
@@ -107,7 +108,7 @@ async function validateToken(c: any): Promise<ValidateResponse['data'] | null> {
 
 	if (!res.ok) return null;
 
-	const json = await res.json() as ValidateResponse;
+	const json = (await res.json()) as ValidateResponse;
 	return json.data;
 }
 

@@ -1,15 +1,16 @@
-//! Integration tests for simse-tui.
+//! Unit and state-machine tests for simse-tui.
 //!
-//! These are "integration-lite" tests that exercise multiple modules working
-//! together. They use `ratatui::backend::TestBackend` for rendering tests and
-//! the Elm-architecture `update` function for state machine tests.
+//! These tests exercise the Elm-architecture `update` function, command dispatch,
+//! CLI argument parsing, and widget state machines using `TestBackend` for rendering.
+//! They complement the PTY integration tests in `tests/pty/` which exercise the real
+//! binary end-to-end.
 
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
 use simse_tui::app::{update, view, App, AppMessage, LoopStatus, Screen};
 use simse_tui::autocomplete::CommandAutocompleteState;
-use simse_tui::cli_args::{parse_cli_args, CliArgs};
+use simse_tui::cli_args::parse_cli_args;
 use simse_tui::dialogs::confirm::ConfirmDialogState;
 use simse_tui::dispatch::{dispatch_command, parse_command_line, DispatchContext};
 use simse_tui::commands::{BridgeAction, CommandContext, CommandOutput, OverlayAction};
@@ -21,90 +22,7 @@ use simse_ui_core::commands::registry::all_commands;
 use simse_ui_core::input::state as input;
 
 // ═══════════════════════════════════════════════════════════════
-// 1. App startup -> banner visible
-// ═══════════════════════════════════════════════════════════════
-
-#[test]
-fn app_startup_renders_banner() {
-    let backend = TestBackend::new(100, 30);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let app = App::new();
-
-    assert!(app.banner_visible);
-    assert!(app.output.is_empty());
-    assert_eq!(app.screen, Screen::Chat);
-    assert_eq!(app.loop_status, LoopStatus::Idle);
-
-    // Render should not panic and should produce output.
-    terminal
-        .draw(|frame| {
-            view(&app, frame);
-        })
-        .unwrap();
-
-    // Verify the buffer contains the version string somewhere.
-    let buffer = terminal.backend().buffer().clone();
-    let content: String = buffer
-        .content()
-        .iter()
-        .map(|cell| cell.symbol().to_string())
-        .collect();
-    assert!(
-        content.contains("simse"),
-        "Banner should contain 'simse' in the rendered output"
-    );
-}
-
-#[test]
-fn app_startup_shows_tips_in_banner() {
-    let backend = TestBackend::new(100, 30);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let app = App::new();
-
-    terminal
-        .draw(|frame| {
-            view(&app, frame);
-        })
-        .unwrap();
-
-    let buffer = terminal.backend().buffer().clone();
-    let content: String = buffer
-        .content()
-        .iter()
-        .map(|cell| cell.symbol().to_string())
-        .collect();
-    assert!(
-        content.contains("Tips"),
-        "Banner should contain 'Tips' section"
-    );
-}
-
-#[test]
-fn app_startup_status_bar_shows_permission_mode() {
-    let backend = TestBackend::new(100, 30);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let app = App::new();
-
-    terminal
-        .draw(|frame| {
-            view(&app, frame);
-        })
-        .unwrap();
-
-    let buffer = terminal.backend().buffer().clone();
-    let content: String = buffer
-        .content()
-        .iter()
-        .map(|cell| cell.symbol().to_string())
-        .collect();
-    assert!(
-        content.contains("ask"),
-        "Status bar should show default permission mode 'ask'"
-    );
-}
-
-// ═══════════════════════════════════════════════════════════════
-// 2. Submit text -> appears in output
+// 1. Submit text -> appears in output
 // ═══════════════════════════════════════════════════════════════
 
 #[test]
@@ -136,33 +54,6 @@ fn submit_user_text_appears_in_output() {
 }
 
 #[test]
-fn submit_renders_user_message_with_chevron() {
-    let backend = TestBackend::new(80, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-
-    let mut app = App::new();
-    app.input = input::insert(&app.input, "test message");
-    app = update(app, AppMessage::Submit);
-
-    terminal
-        .draw(|frame| {
-            view(&app, frame);
-        })
-        .unwrap();
-
-    let buffer = terminal.backend().buffer().clone();
-    let content: String = buffer
-        .content()
-        .iter()
-        .map(|cell| cell.symbol().to_string())
-        .collect();
-    assert!(
-        content.contains("test message"),
-        "Rendered output should contain the user's message"
-    );
-}
-
-#[test]
 fn submit_multiple_messages_all_appear() {
     let mut app = App::new();
 
@@ -180,7 +71,7 @@ fn submit_multiple_messages_all_appear() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 3. Command dispatch -> all categories produce correct output
+// 2. Command dispatch -> all categories produce correct output
 // ═══════════════════════════════════════════════════════════════
 
 #[test]
@@ -405,7 +296,7 @@ fn dispatch_with_context_uses_state() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 4. History navigation -> up/down cycles through history
+// 3. History navigation -> up/down cycles through history
 // ═══════════════════════════════════════════════════════════════
 
 #[test]
@@ -492,7 +383,7 @@ fn history_deduplicates_consecutive_and_caps() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 5. Permission mode cycling
+// 4. Permission mode cycling
 // ═══════════════════════════════════════════════════════════════
 
 #[test]
@@ -514,34 +405,8 @@ fn permission_mode_cycles_through_all_modes() {
     assert_eq!(app.permission_mode, "auto");
 }
 
-#[test]
-fn permission_mode_rendered_in_status_bar() {
-    let backend = TestBackend::new(100, 30);
-    let mut terminal = Terminal::new(backend).unwrap();
-
-    let mut app = App::new();
-    app = update(app, AppMessage::ShiftTab); // -> "auto"
-
-    terminal
-        .draw(|frame| {
-            view(&app, frame);
-        })
-        .unwrap();
-
-    let buffer = terminal.backend().buffer().clone();
-    let content: String = buffer
-        .content()
-        .iter()
-        .map(|cell| cell.symbol().to_string())
-        .collect();
-    assert!(
-        content.contains("auto"),
-        "Status bar should show 'auto' permission mode"
-    );
-}
-
 // ═══════════════════════════════════════════════════════════════
-// 6. Non-interactive mode parsing
+// 5. Non-interactive mode parsing (CLI args)
 // ═══════════════════════════════════════════════════════════════
 
 #[test]
@@ -623,7 +488,7 @@ fn resume_session_parsed() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 7. Autocomplete activation and navigation
+// 6. Autocomplete activation and navigation
 // ═══════════════════════════════════════════════════════════════
 
 #[test]
@@ -720,7 +585,7 @@ fn autocomplete_full_workflow_type_navigate_accept() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 8. Settings explorer navigation
+// 7. Settings explorer navigation
 // ═══════════════════════════════════════════════════════════════
 
 #[test]
@@ -867,7 +732,7 @@ fn settings_render_all_levels_without_panic() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 9. Confirm dialog workflow
+// 8. Confirm dialog workflow
 // ═══════════════════════════════════════════════════════════════
 
 #[test]

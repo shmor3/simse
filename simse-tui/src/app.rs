@@ -304,6 +304,10 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 				_ => {}
 			}
 			app.autocomplete.deactivate();
+			// Don't accept new messages while the agentic loop is running.
+			if app.loop_status != LoopStatus::Idle {
+				return app;
+			}
 			let text = app.input.value.trim().to_string();
 			if text.is_empty() {
 				return app;
@@ -2006,5 +2010,17 @@ mod tests {
 		assert!(!app.onboarding.needs_setup);
 		assert!(app.onboarding.welcome_shown);
 		assert!(app.server_name.is_some());
+	}
+
+	#[test]
+	fn submit_ignored_while_streaming() {
+		let mut app = App::new();
+		app.loop_status = LoopStatus::Streaming;
+		app.input = input::insert(&app.input, "new message");
+		app = update(app, AppMessage::Submit);
+		// Message should NOT be queued while loop is active
+		assert!(app.pending_chat_message.is_none());
+		// Input should NOT be cleared
+		assert_eq!(app.input.value, "new message");
 	}
 }

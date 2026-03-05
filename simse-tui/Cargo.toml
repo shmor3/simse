@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 simse-ui-core = { path = "../simse-ui-core" }
 simse-bridge = { path = "../simse-bridge" }
+simse-core = { path = "../simse-core" }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 tui-textarea = { workspace = true }
@@ -17,6 +18,9 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }
 pulldown-cmark = { version = "0.13", default-features = false }
 
 [dev-dependencies]

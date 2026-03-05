@@ -1,7 +1,7 @@
 import PageHeader from '~/components/layout/PageHeader';
 import Card from '~/components/ui/Card';
 import ProgressBar from '~/components/ui/ProgressBar';
-import { authenticatedApi } from '~/lib/api.server';
+import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.usage';
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -9,7 +9,10 @@ export async function loader({ request }: Route.LoaderArgs) {
 		const res = await authenticatedApi(request, '/payments/usage');
 		if (!res.ok) return { usage: null, dailyTokens: [], breakdown: [] };
 
-		const json = await res.json() as any;
+		const json = (await res.json()) as ApiResponse<{
+			balance: number;
+			recentUsage: Array<{ day: string; tokens: number }>;
+		}>;
 		const data = json.data;
 
 		// Build 7-day chart data
@@ -19,7 +22,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 			d.setDate(d.getDate() - i);
 			const dayStr = d.toISOString().slice(0, 10);
 			const label = d.toLocaleDateString('en', { weekday: 'short' });
-			const found = (data?.recentUsage ?? []).find((r: any) => r.day === dayStr);
+			const found = (data?.recentUsage ?? []).find((r) => r.day === dayStr);
 			dailyTokens.push({ day: label, tokens: found?.tokens ?? 0 });
 		}
 

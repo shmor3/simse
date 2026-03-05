@@ -1,7 +1,7 @@
 import { Form, redirect, useNavigation } from 'react-router';
 import Button from '~/components/ui/Button';
 import CodeInput from '~/components/ui/CodeInput';
-import { api } from '~/lib/api.server';
+import { type ApiResponse, api } from '~/lib/api.server';
 import { setSessionCookie } from '~/lib/session.server';
 import type { Route } from './+types/auth.2fa';
 
@@ -30,7 +30,7 @@ export async function action({ request }: Route.ActionArgs) {
 		body: JSON.stringify({ code, pendingToken }),
 	});
 
-	const json = await res.json() as any;
+	const json = (await res.json()) as ApiResponse<{ token: string }>;
 
 	if (!res.ok) {
 		return { error: json.error?.message ?? 'Invalid or expired code' };

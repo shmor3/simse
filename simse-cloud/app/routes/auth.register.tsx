@@ -1,7 +1,7 @@
 import { Form, Link, redirect, useNavigation } from 'react-router';
 import Button from '~/components/ui/Button';
 import Input from '~/components/ui/Input';
-import { api } from '~/lib/api.server';
+import { type ApiResponse, api } from '~/lib/api.server';
 import { setSessionCookie } from '~/lib/session.server';
 import type { Route } from './+types/auth.register';
 
@@ -17,16 +17,23 @@ export async function action({ request }: Route.ActionArgs) {
 
 	const res = await api('/auth/register', {
 		method: 'POST',
-		body: JSON.stringify({ name: raw.name, email: raw.email, password: raw.password }),
+		body: JSON.stringify({
+			name: raw.name,
+			email: raw.email,
+			password: raw.password,
+		}),
 	});
 
-	const json = await res.json() as any;
+	const json = (await res.json()) as ApiResponse<{ token: string }>;
 
 	if (!res.ok) {
 		const message = json.error?.message ?? 'Registration failed';
 		const code = json.error?.code;
 		if (code === 'EMAIL_EXISTS') {
-			return { errors: { email: 'An account with this email already exists' }, values: raw };
+			return {
+				errors: { email: 'An account with this email already exists' },
+				values: raw,
+			};
 		}
 		return { errors: { email: message }, values: raw };
 	}

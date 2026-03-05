@@ -1,7 +1,7 @@
 import { Form, Link, redirect, useNavigation } from 'react-router';
 import Button from '~/components/ui/Button';
 import Input from '~/components/ui/Input';
-import { api } from '~/lib/api.server';
+import { type ApiResponse, api } from '~/lib/api.server';
 import type { Route } from './+types/auth.new-password';
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -30,8 +30,10 @@ export async function action({ request }: Route.ActionArgs) {
 	});
 
 	if (!res.ok) {
-		const json = await res.json() as any;
-		return { errors: { token: json.error?.message ?? 'Invalid or expired reset link' } };
+		const json = (await res.json()) as ApiResponse;
+		return {
+			errors: { token: json.error?.message ?? 'Invalid or expired reset link' },
+		};
 	}
 
 	return { success: true };

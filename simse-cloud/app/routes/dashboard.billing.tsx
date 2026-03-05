@@ -3,14 +3,19 @@ import PageHeader from '~/components/layout/PageHeader';
 import Badge from '~/components/ui/Badge';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
-import { authenticatedApi } from '~/lib/api.server';
+import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.billing';
 
 export async function loader({ request }: Route.LoaderArgs) {
 	const res = await authenticatedApi(request, '/payments/billing');
 	if (!res.ok) throw redirect('/auth/login');
 
-	const json = await res.json() as any;
+	const json = (await res.json()) as ApiResponse<{
+		plan: string;
+		teamName: string;
+		hasPaymentMethod: boolean;
+		creditBalance: number;
+	}>;
 	const data = json.data;
 
 	return {
@@ -31,7 +36,7 @@ export async function action({ request }: Route.ActionArgs) {
 		});
 
 		if (res.ok) {
-			const json = await res.json() as any;
+			const json = (await res.json()) as ApiResponse<{ url?: string }>;
 			if (json.data?.url) throw redirect(json.data.url);
 		}
 	}

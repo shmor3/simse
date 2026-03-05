@@ -3,7 +3,7 @@ import PageHeader from '~/components/layout/PageHeader';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
 import Input from '~/components/ui/Input';
-import { authenticatedApi } from '~/lib/api.server';
+import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.team.invite';
 
 export async function action({ request }: Route.ActionArgs) {
@@ -23,7 +23,7 @@ export async function action({ request }: Route.ActionArgs) {
 	});
 
 	if (!res.ok) {
-		const json = await res.json() as any;
+		const json = (await res.json()) as ApiResponse;
 		const message = json.error?.message ?? 'Failed to send invite';
 		return { errors: { email: message }, values: raw };
 	}

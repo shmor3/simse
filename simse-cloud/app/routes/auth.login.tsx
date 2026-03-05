@@ -1,7 +1,7 @@
 import { Form, Link, redirect, useNavigation } from 'react-router';
 import Button from '~/components/ui/Button';
 import Input from '~/components/ui/Input';
-import { api } from '~/lib/api.server';
+import { type ApiResponse, api } from '~/lib/api.server';
 import { setSessionCookie } from '~/lib/session.server';
 import type { Route } from './+types/auth.login';
 
@@ -20,10 +20,17 @@ export async function action({ request }: Route.ActionArgs) {
 		body: JSON.stringify({ email: raw.email, password: raw.password }),
 	});
 
-	const json = await res.json() as any;
+	const json = (await res.json()) as ApiResponse<{
+		token: string;
+		requires2fa?: boolean;
+		pendingToken?: string;
+	}>;
 
 	if (!res.ok) {
-		return { errors: { email: json.error?.message ?? 'Invalid email or password' }, values: raw };
+		return {
+			errors: { email: json.error?.message ?? 'Invalid email or password' },
+			values: raw,
+		};
 	}
 
 	if (json.data?.requires2fa) {

@@ -3,7 +3,7 @@ import PageHeader from '~/components/layout/PageHeader';
 
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
-import { authenticatedApi } from '~/lib/api.server';
+import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.notifications';
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -11,7 +11,16 @@ export async function loader({ request }: Route.LoaderArgs) {
 		const res = await authenticatedApi(request, '/notifications');
 		if (!res.ok) return { notifications: [] };
 
-		const json = await res.json() as any;
+		type Notif = {
+			id: string;
+			type: string;
+			title: string;
+			body: string;
+			read: boolean;
+			created_at: string;
+			link?: string;
+		};
+		const json = (await res.json()) as ApiResponse<Notif[]>;
 		return { notifications: json.data ?? [] };
 	} catch {
 		return { notifications: [] };
@@ -117,7 +126,7 @@ const typeIcon = (type: string) => {
 
 export default function Notifications({ loaderData }: Route.ComponentProps) {
 	const { notifications } = loaderData;
-	const unreadCount = notifications.filter((n: any) => !n.read).length;
+	const unreadCount = notifications.filter((n) => !n.read).length;
 
 	return (
 		<>
@@ -167,7 +176,7 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
 			) : (
 				<Card className="mt-8 overflow-hidden">
 					<div className="divide-y divide-zinc-800/50">
-						{notifications.map((n: any) => (
+						{notifications.map((n) => (
 							<div
 								key={n.id}
 								className={`flex items-start gap-4 px-6 py-4 ${!n.read ? 'bg-zinc-800/20' : ''}`}

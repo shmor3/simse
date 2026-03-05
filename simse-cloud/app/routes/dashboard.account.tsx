@@ -6,7 +6,7 @@ import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
 import Input from '~/components/ui/Input';
 import Modal from '~/components/ui/Modal';
-import { authenticatedApi } from '~/lib/api.server';
+import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
 import { clearSessionCookie } from '~/lib/session.server';
 import type { Route } from './+types/dashboard.account';
 
@@ -14,7 +14,11 @@ export async function loader({ request }: Route.LoaderArgs) {
 	const res = await authenticatedApi(request, '/auth/me');
 	if (!res.ok) throw redirect('/auth/login');
 
-	const json = await res.json() as any;
+	const json = (await res.json()) as ApiResponse<{
+		name: string;
+		email: string;
+		createdAt: string;
+	}>;
 	const user = json.data;
 
 	return {
@@ -33,7 +37,10 @@ export async function action({ request }: Route.ActionArgs) {
 	if (intent === 'update-name') {
 		const name = (formData.get('name') as string)?.trim();
 		if (!name || name.length < 2) {
-			return { error: 'Name must be at least 2 characters.', intent: 'update-name' };
+			return {
+				error: 'Name must be at least 2 characters.',
+				intent: 'update-name',
+			};
 		}
 		await authenticatedApi(request, '/users/me/name', {
 			method: 'PUT',
@@ -51,7 +58,10 @@ export async function action({ request }: Route.ActionArgs) {
 			return { error: 'All fields are required.', intent: 'change-password' };
 		}
 		if (newPassword.length < 8) {
-			return { error: 'New password must be at least 8 characters.', intent: 'change-password' };
+			return {
+				error: 'New password must be at least 8 characters.',
+				intent: 'change-password',
+			};
 		}
 		if (newPassword !== confirmPassword) {
 			return { error: 'Passwords do not match.', intent: 'change-password' };
@@ -63,14 +73,19 @@ export async function action({ request }: Route.ActionArgs) {
 		});
 
 		if (!res.ok) {
-			return { error: 'Current password is incorrect.', intent: 'change-password' };
+			return {
+				error: 'Current password is incorrect.',
+				intent: 'change-password',
+			};
 		}
 
 		return { success: true, intent: 'change-password' };
 	}
 
 	if (intent === 'delete-account') {
-		const confirmEmail = (formData.get('confirmEmail') as string)?.trim().toLowerCase();
+		const confirmEmail = (formData.get('confirmEmail') as string)
+			?.trim()
+			.toLowerCase();
 
 		const res = await authenticatedApi(request, '/users/me', {
 			method: 'DELETE',

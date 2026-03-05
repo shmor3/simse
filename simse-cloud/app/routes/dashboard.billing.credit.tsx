@@ -2,7 +2,7 @@ import { Link } from 'react-router';
 import PageHeader from '~/components/layout/PageHeader';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
-import { authenticatedApi } from '~/lib/api.server';
+import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.billing.credit';
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -10,7 +10,16 @@ export async function loader({ request }: Route.LoaderArgs) {
 		const res = await authenticatedApi(request, '/payments/credits');
 		if (!res.ok) return { balance: 0, history: [] };
 
-		const json = await res.json() as any;
+		type Tx = {
+			id: string;
+			amount: number;
+			description: string;
+			created_at: string;
+		};
+		const json = (await res.json()) as ApiResponse<{
+			balance: number;
+			history: Tx[];
+		}>;
 		return {
 			balance: json.data?.balance ?? 0,
 			history: json.data?.history ?? [],
@@ -72,7 +81,7 @@ export default function Credit({ loaderData }: Route.ComponentProps) {
 								</tr>
 							</thead>
 							<tbody>
-								{history.map((tx: any) => (
+								{history.map((tx) => (
 									<tr
 										key={tx.id}
 										className="border-b border-zinc-800/50 last:border-0"

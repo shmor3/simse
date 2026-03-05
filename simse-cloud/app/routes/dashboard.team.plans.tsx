@@ -3,7 +3,7 @@ import PageHeader from '~/components/layout/PageHeader';
 import Badge from '~/components/ui/Badge';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
-import { authenticatedApi } from '~/lib/api.server';
+import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.team.plans';
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -11,7 +11,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 		const res = await authenticatedApi(request, '/payments/billing');
 		if (!res.ok) return { currentPlan: 'free' };
 
-		const json = await res.json() as any;
+		const json = (await res.json()) as ApiResponse<{ plan: string }>;
 		return { currentPlan: json.data?.plan ?? 'free' };
 	} catch {
 		return { currentPlan: 'free' };

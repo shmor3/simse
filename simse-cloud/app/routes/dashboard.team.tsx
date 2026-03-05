@@ -4,7 +4,7 @@ import Avatar from '~/components/ui/Avatar';
 import Badge from '~/components/ui/Badge';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
-import { authenticatedApi } from '~/lib/api.server';
+import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.team';
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -12,22 +12,39 @@ export async function loader({ request }: Route.LoaderArgs) {
 		const res = await authenticatedApi(request, '/teams/me');
 		if (!res.ok) return { team: null, members: [], invites: [] };
 
-		const json = await res.json() as any;
+		type Member = {
+			id: string;
+			name: string;
+			email: string;
+			role: string;
+			joined_at: string;
+		};
+		type Invite = {
+			id: string;
+			email: string;
+			role: string;
+			created_at: string;
+		};
+		const json = (await res.json()) as ApiResponse<{
+			id: string;
+			name: string;
+			plan: string;
+			members: Member[];
+			invites: Invite[];
+		}>;
 		const team = json.data;
-
-		const myRole = team.members.find((m: any) => m.role === 'owner')?.role ?? 'member';
 
 		// Determine current user's role by looking at the session token
 		// We get this from the /auth/me endpoint
 		const meRes = await authenticatedApi(request, '/auth/me');
-		const meJson = await meRes.json() as any;
+		const meJson = (await meRes.json()) as ApiResponse<{ id: string }>;
 		const userId = meJson.data?.id;
-		const currentMember = team.members.find((m: any) => m.id === userId);
+		const currentMember = team?.members.find((m) => m.id === userId);
 
 		return {
-			team: { id: team.id, name: team.name, plan: team.plan },
-			members: team.members,
-			invites: team.invites,
+			team: team ? { id: team.id, name: team.name, plan: team.plan } : null,
+			members: team?.members ?? [],
+			invites: team?.invites ?? [],
 			myRole: currentMember?.role ?? 'member',
 		};
 	} catch {

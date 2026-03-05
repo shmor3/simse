@@ -247,6 +247,11 @@ pub fn spawn_simse_with_timeout(data_dir: &Path, work_dir: &Path, timeout: Durat
     cmd.arg("--data-dir");
     cmd.arg(data_dir.to_str().expect("data_dir must be valid UTF-8"));
     cmd.cwd(work_dir);
+    // On Windows, ConPTY may not inherit the full PATH. Propagate it
+    // explicitly so child processes (like npx) can be found by the ACP bridge.
+    if let Ok(path) = std::env::var("PATH") {
+        cmd.env("PATH", path);
+    }
     PtyHarness::spawn(cmd, 120, 40, timeout)
 }
 

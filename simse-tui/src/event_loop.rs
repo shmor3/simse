@@ -475,6 +475,13 @@ impl TuiRuntime {
 				Ok("Factory reset complete. Global configuration removed.".into())
 			}
 			BridgeAction::SetupAcp { name, command, args } => {
+				// Resolve npx-based commands to direct `node` invocations.
+				// This avoids issues with npx process wrappers (especially
+				// on Windows with shim managers like proto) that can break
+				// stdio piping for the JSON-RPC protocol.
+				let (command, args) = resolve_npx_to_node(&command, &args)
+					.unwrap_or((command, args));
+
 				let server = simse_bridge::config::AcpServerConfig {
 					name: name.clone(),
 					command: command.clone(),
@@ -777,6 +784,171 @@ impl TuiRuntime {
 }
 
 // ---------------------------------------------------------------------------
+// npx → node resolution
+// ---------------------------------------------------------------------------
+
+/// Try to resolve an npx-based ACP command to a direct `node` invocation.
+///
+/// When the setup wizard selects a preset using `npx -y <package>`, the npx
+/// process wrapper can cause issues with stdio piping (especially on Windows
+/// with shim managers like proto). This function resolves the package's entry
+/// point on disk so we can use `node <entry_point>` instead.
+///
+/// Returns `Some((command, args))` if resolution succeeds, `None` otherwise
+/// (in which case the caller should keep the original npx command as fallback).
+fn resolve_npx_to_node(command: &str, args: &[String]) -> Option<(String, Vec<String>)> {
+	// Only applies to npx commands.
+	let cmd_lower = command.to_lowercase();
+	if !cmd_lower.ends_with("npx") && !cmd_lower.ends_with("npx.exe") {
+		return None;
+	}
+
+	// Find the package name (skip flags like -y).
+	let package = args.iter().find(|a| !a.starts_with('-'))?;
+
+	// Collect candidate node binary directories to search for the package.
+	let candidates = find_node_module_dirs();
+
+	for node_dir in &candidates {
+		let pkg_dir = node_dir.join("node_modules").join(package.as_str());
+		let pkg_json_path = pkg_dir.join("package.json");
+
+		if let Ok(pkg_json) = std::fs::read_to_string(&pkg_json_path) {
+			if let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&pkg_json) {
+				// Prefer the `bin` entry point (what `npx` runs) over `main`
+				// (which is the library entry point). For scoped packages,
+				// `bin` is an object with named entries; use the first value.
+				let main = pkg
+					.get("bin")
+					.and_then(|bin| {
+						bin.as_str().map(String::from).or_else(|| {
+							bin.as_object()
+								.and_then(|obj| obj.values().next())
+								.and_then(|v| v.as_str())
+								.map(String::from)
+						})
+					})
+					.or_else(|| {
+						pkg.get("main")
+							.and_then(|v| v.as_str())
+							.map(String::from)
+					})
+					.unwrap_or_else(|| "index.js".to_string());
+
+				let entry_point = pkg_dir.join(&main);
+				if entry_point.exists() {
+					// Find the node binary in this directory.
+					let node_bin = if cfg!(windows) {
+						node_dir.join("node.exe")
+					} else {
+						node_dir.join("bin").join("node")
+					};
+
+					// Fall back to bare "node" if binary not found at expected path.
+					let node_cmd = if node_bin.exists() {
+						node_bin.to_string_lossy().into_owned()
+					} else {
+						"node".to_string()
+					};
+
+					return Some((
+						node_cmd,
+						vec![entry_point.to_string_lossy().into_owned()],
+					));
+				}
+			}
+		}
+	}
+
+	None
+}
+
+/// Collect directories that may contain `node_modules/` with globally
+/// installed npm packages. No subprocess calls — pure filesystem lookups.
+fn find_node_module_dirs() -> Vec<std::path::PathBuf> {
+	use std::path::PathBuf;
+
+	let mut dirs = Vec::new();
+
+	// 1. Check well-known system Node.js install locations.
+	if cfg!(windows) {
+		dirs.push(PathBuf::from(r"C:\Program Files\nodejs"));
+	} else {
+		dirs.push(PathBuf::from("/usr/local/lib"));
+		dirs.push(PathBuf::from("/usr/lib"));
+	}
+
+	// 2. Check proto tool versions (handles proto shim manager on Windows).
+	if let Some(home) = home_dir() {
+		let proto_node_dir = home.join(".proto").join("tools").join("node");
+		if proto_node_dir.exists() {
+			if let Ok(entries) = std::fs::read_dir(&proto_node_dir) {
+				for entry in entries.flatten() {
+					if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+						let name = entry.file_name();
+						let name_str = name.to_string_lossy();
+						if name_str.starts_with(|c: char| c.is_ascii_digit()) {
+							dirs.push(entry.path());
+						}
+					}
+				}
+			}
+		}
+
+		// 3. Check nvm versions (common on Linux/macOS).
+		let nvm_dir = home.join(".nvm").join("versions").join("node");
+		if nvm_dir.exists() {
+			if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+				for entry in entries.flatten() {
+					if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+						dirs.push(entry.path());
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Also check `where node` / `which node` for PATH-based installs.
+	if let Ok(output) = std::process::Command::new(
+		if cfg!(windows) { "where" } else { "which" }
+	)
+	.arg("node")
+	.output()
+	{
+		if output.status.success() {
+			if let Ok(paths) = String::from_utf8(output.stdout) {
+				for line in paths.lines() {
+					let p = std::path::Path::new(line.trim());
+					if let Some(parent) = p.parent() {
+						if !dirs.contains(&parent.to_path_buf()) {
+							dirs.push(parent.to_path_buf());
+						}
+					}
+				}
+			}
+		}
+	}
+
+	dirs
+}
+
+/// Get the user's home directory.
+fn home_dir() -> Option<std::path::PathBuf> {
+	#[cfg(windows)]
+	{
+		std::env::var("USERPROFILE")
+			.ok()
+			.map(std::path::PathBuf::from)
+	}
+	#[cfg(not(windows))]
+	{
+		std::env::var("HOME")
+			.ok()
+			.map(std::path::PathBuf::from)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -1040,5 +1212,67 @@ mod tests {
 			format!("{}", RuntimeError::Acp("timeout".into())),
 			"ACP error: timeout"
 		);
+	}
+
+	// ── resolve_npx_to_node ────────────────────────
+
+	#[test]
+	fn resolve_npx_skips_non_npx_command() {
+		let result = resolve_npx_to_node("node", &["script.js".into()]);
+		assert!(result.is_none());
+	}
+
+	#[test]
+	fn resolve_npx_skips_no_package_name() {
+		let result = resolve_npx_to_node("npx", &["-y".into()]);
+		assert!(result.is_none());
+	}
+
+	#[test]
+	fn resolve_npx_skips_unknown_package() {
+		let result = resolve_npx_to_node(
+			"npx",
+			&["-y".into(), "definitely-nonexistent-package-xyz-999".into()],
+		);
+		assert!(result.is_none());
+	}
+
+	#[test]
+	fn resolve_npx_handles_exe_suffix() {
+		// Should still return None for unknown package, but not panic.
+		let result = resolve_npx_to_node(
+			"C:/path/to/npx.exe",
+			&["-y".into(), "nonexistent-pkg".into()],
+		);
+		assert!(result.is_none());
+	}
+
+	#[test]
+	fn resolve_npx_resolves_claude_agent_acp() {
+		// This test only passes when @zed-industries/claude-agent-acp is
+		// globally installed. Skip gracefully otherwise.
+		let result = resolve_npx_to_node(
+			"npx",
+			&["-y".into(), "@zed-industries/claude-agent-acp".into()],
+		);
+		if let Some((cmd, args)) = result {
+			assert!(
+				cmd.to_lowercase().contains("node"),
+				"Resolved command should contain 'node', got: {cmd}"
+			);
+			assert_eq!(args.len(), 1);
+			assert!(
+				std::path::Path::new(&args[0]).exists(),
+				"Resolved path does not exist: {}",
+				args[0]
+			);
+		}
+		// If None, the package isn't installed — that's fine, skip silently.
+	}
+
+	#[test]
+	fn find_node_module_dirs_returns_candidates() {
+		let dirs = find_node_module_dirs();
+		assert!(!dirs.is_empty(), "Should find at least one node module directory");
 	}
 }

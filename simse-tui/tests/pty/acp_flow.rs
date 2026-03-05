@@ -322,3 +322,164 @@ fn two_message_conversation_with_claude_code_acp() {
 		"App should not crash after second AI response"
 	);
 }
+
+// ═══════════════════════════════════════════════════════════════
+// 13. Setup wizard writes resolved ACP config
+// ═══════════════════════════════════════════════════════════════
+//
+// Verifies that selecting Claude Code in the setup wizard writes
+// acp.json with a resolved `node` command (not `npx`), thanks to
+// the `resolve_npx_to_node` resolution in the SetupAcp handler.
+//
+// Requires:
+//   - `@zed-industries/claude-agent-acp` installed (`npm i -g @zed-industries/claude-agent-acp`)
+
+#[test]
+fn setup_wizard_resolves_npx_to_node() {
+	let tmp = TempDir::new().unwrap();
+	let data_dir = tmp.path().join("data");
+	let work_dir = tmp.path().join("work");
+	std::fs::create_dir_all(&data_dir).unwrap();
+	std::fs::create_dir_all(&work_dir).unwrap();
+
+	let mut h = spawn_simse_with_timeout(
+		&data_dir,
+		&work_dir,
+		Duration::from_secs(30),
+	);
+	wait_for_startup(&h);
+
+	// Open setup wizard.
+	type_command(&mut h, "/setup");
+
+	h.wait_for_text("Claude Code")
+		.expect("Setup wizard should show 'Claude Code'");
+
+	// Select Claude Code (first item).
+	h.send_key(KeyCode::Enter).unwrap();
+
+	h.wait_for_text("Selected preset: Claude Code")
+		.expect("Should show 'Selected preset: Claude Code'");
+
+	// Wait for the SetupAcp bridge action to process (writes acp.json).
+	h.wait_for_text("configured")
+		.expect("Should show ACP server configured message");
+
+	// Verify acp.json was written with `node` command (not `npx`).
+	let acp_json = std::fs::read_to_string(data_dir.join("acp.json"))
+		.expect("acp.json should exist after setup");
+
+	let config: serde_json::Value =
+		serde_json::from_str(&acp_json).expect("acp.json should be valid JSON");
+
+	let command = config["servers"][0]["command"]
+		.as_str()
+		.expect("servers[0].command should be a string");
+
+	assert!(
+		command.to_lowercase().contains("node"),
+		"SetupAcp should resolve npx to node binary. Got: {command}"
+	);
+	assert!(
+		command != "npx",
+		"SetupAcp should NOT use npx. acp.json: {acp_json}"
+	);
+
+	let args = config["servers"][0]["args"]
+		.as_array()
+		.expect("servers[0].args should be an array");
+
+	assert_eq!(args.len(), 1, "Should have exactly 1 arg (the entry point path)");
+
+	let entry_point = args[0].as_str().unwrap();
+	assert!(
+		std::path::Path::new(entry_point).exists(),
+		"Resolved entry point should exist on disk: {entry_point}"
+	);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 14. E2E: Setup wizard → two messages (exact manual flow)
+// ═══════════════════════════════════════════════════════════════
+//
+// This test reproduces the EXACT manual user flow (setup wizard path):
+//   1. Start simse-tui with an empty data directory (no config)
+//   2. Open the setup wizard via /setup
+//   3. Select "Claude Code" (the default first item)
+//   4. The setup wizard returns `npx -y @zed-industries/claude-agent-acp`
+//   5. The SetupAcp handler resolves the npx package to a direct `node`
+//      invocation (resolve_npx_to_node), avoiding npx process wrapper issues
+//   6. Send first chat message → wait for AI response
+//   7. Send second chat message → wait for AI response
+//
+// This is different from test #12 because:
+//   - Config is written by the setup wizard path (with npx→node resolution)
+//   - The app goes through the onboarding → setup → connect path
+//
+// Requires:
+//   - `@zed-industries/claude-agent-acp` installed (`npm i -g @zed-industries/claude-agent-acp`)
+//   - `ANTHROPIC_API_KEY` environment variable set
+
+#[test]
+fn setup_wizard_then_two_messages_with_claude_code_acp() {
+	let tmp = TempDir::new().unwrap();
+	let data_dir = tmp.path().join("data");
+	let work_dir = tmp.path().join("work");
+	std::fs::create_dir_all(&data_dir).unwrap();
+	std::fs::create_dir_all(&work_dir).unwrap();
+
+	// Start with EMPTY data dir — no config files at all.
+	// This triggers onboarding mode (needs_setup = true).
+	let mut h = spawn_simse_with_timeout(
+		&data_dir,
+		&work_dir,
+		Duration::from_secs(120),
+	);
+	wait_for_startup(&h);
+
+	// ── Step 1: Open setup wizard ─────────────────────────────
+	type_command(&mut h, "/setup");
+
+	h.wait_for_text("Claude Code")
+		.expect("Setup wizard should show 'Claude Code' preset");
+
+	// ── Step 2: Select Claude Code (first item, already selected) ─
+	h.send_key(KeyCode::Enter).unwrap();
+
+	h.wait_for_text("Selected preset: Claude Code")
+		.expect("Selecting Claude Code should show confirmation message");
+
+	// Give the bridge action time to process (writes acp.json, updates config).
+	settle();
+	settle();
+
+	// ── Step 3: First chat message ────────────────────────────
+	// This triggers: lazy ACP connect → npx spawns claude-agent-acp → session created.
+	type_command(&mut h, "What is the sum of 17 and 25? Reply with ONLY the number.");
+
+	h.wait_for_text("sum of 17 and 25")
+		.expect("First user message should appear on screen");
+
+	h.wait_for_text("42")
+		.expect("First AI response '42' should appear on screen");
+
+	// Give the UI time to process StreamEnd and reset loop_status to Idle.
+	settle();
+
+	// ── Step 4: Second chat message ───────────────────────────
+	// This is where the bug was reported: the second message fails in the manual flow.
+	type_command(&mut h, "What is the sum of 3 and 4? Reply with ONLY the number.");
+
+	h.wait_for_text("sum of 3 and 4")
+		.expect("Second user message should appear on screen");
+
+	h.wait_for_text("7")
+		.expect(
+			"Second AI response '7' should appear, proving setup wizard → two-message flow works",
+		);
+
+	assert!(
+		h.is_running(),
+		"App should not crash after second AI response via setup wizard flow"
+	);
+}

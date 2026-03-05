@@ -2,6 +2,15 @@ name = "simse-mailer"
 compatibility_date = "2025-04-01"
 main = "src/index.ts"
 
+[[queues.consumers]]
+queue = "simse-auth-comms"
+
+[[queues.consumers]]
+queue = "simse-api-comms"
+
+[[queues.consumers]]
+queue = "simse-landing-comms"
+
 # Secrets (set via `wrangler secret put`):
 # RESEND_API_KEY
 # API_SECRET

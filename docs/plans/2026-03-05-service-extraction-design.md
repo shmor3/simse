@@ -112,7 +112,7 @@ Called by simse-api gateway on every authenticated request. Accepts Bearer token
 }
 ```
 
-### Templates (all 18, moved from simse-cloud)
+### Templates (21 total — 18 from simse-cloud + 3 from simse-landing)
 
 | Category | Templates |
 |----------|-----------|
@@ -122,6 +122,7 @@ Called by simse-api gateway on every authenticated request. Accepts Bearer token
 | Team | team-invite, role-change, invite-friend |
 | Digest | weekly-digest |
 | Product | feature-announcement |
+| Waitlist | waitlist-welcome, waitlist-early-preview, waitlist-invite |
 
 ### Auth between services
 

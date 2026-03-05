@@ -6,7 +6,7 @@
 
 **Architecture:** Replace `@vitejs/plugin-react` with `@react-router/dev` + `@react-router/cloudflare`. Move all source from `src/` to `app/`. Convert `functions/` (waitlist API + unsubscribe) to RR7 route actions/loaders. Use simse-cloud as the reference implementation for RR7 + Cloudflare patterns.
 
-**Tech Stack:** React Router v7, Cloudflare Pages/Workers, D1, Vite, Tailwind CSS v4, React Email, Resend, Zod v4
+**Tech Stack:** React Router v7, Cloudflare Pages/Workers, D1, Vite, Tailwind CSS v4, Zod v4. Emails are sent via simse-api → simse-mailer (no direct Resend calls).
 
 ---
 
@@ -40,8 +40,6 @@ Replace the scripts and dependencies. Keep all existing deps, add RR7 + Cloudfla
 	"dependencies": {
 		"@fontsource-variable/dm-sans": "^5.2.8",
 		"@fontsource/space-mono": "^5.2.9",
-		"@react-email/components": "^1.0.8",
-		"@react-email/render": "^2.0.4",
 		"@react-router/cloudflare": "^7.13.1",
 		"clsx": "^2.1.1",
 		"isbot": "^5.1.27",
@@ -70,7 +68,7 @@ Replace the scripts and dependencies. Keep all existing deps, add RR7 + Cloudfla
 
 **Changes from current:**
 - Added: `@react-router/cloudflare`, `@react-router/dev`, `isbot`, `vite-tsconfig-paths`
-- Removed: `@vitejs/plugin-react`
+- Removed: `@vitejs/plugin-react`, `@react-email/components`, `@react-email/render` (emails now handled by simse-mailer)
 - Scripts: `vite` → `react-router dev`, `tsc -b && vite build` → `react-router build`, added `typecheck`, `start`, `preview`, changed `deploy` output dir to `build/client`
 
 **Step 2: Install dependencies**
@@ -161,16 +159,18 @@ pages_build_output_dir = "./build/client"
 
 routes = [{ pattern = "simse.dev", custom_domain = true }]
 
+[vars]
+API_URL = "https://api.simse.dev"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "simse_waitlist"
 database_id = "e5659e77-878c-440c-bbf6-dd74a324938b"
 
-# Secrets (set via `wrangler secret put`):
-# RESEND_API_KEY
+# No RESEND_API_KEY — emails sent via simse-api → simse-mailer
 ```
 
-**Changes:** `./dist` → `./build/client`, binding renamed from `simse_waitlist` to `DB` for consistency.
+**Changes:** `./dist` → `./build/client`, binding renamed from `simse_waitlist` to `DB`, removed `RESEND_API_KEY` (emails go through API), added `API_URL`.
 
 **Step 5: Update .gitignore** — add `.react-router/` to .gitignore
 
@@ -327,48 +327,29 @@ feat(simse-landing): add RR7 root layout and server entry
 - Move: `simse-landing/src/components/*.tsx` → `simse-landing/app/components/*.tsx`
 - Move: `simse-landing/src/lib/schema.ts` → `simse-landing/app/lib/schema.ts`
 - Move: `simse-landing/functions/lib/validate-email.ts` → `simse-landing/app/lib/validate-email.server.ts`
-- Move: `simse-landing/functions/lib/send-email.ts` → `simse-landing/app/lib/send-email.server.ts`
-- Move: `simse-landing/functions/emails/*.tsx` → `simse-landing/app/emails/*.tsx`
+
+**Note:** Email templates (`functions/emails/`) and `functions/lib/send-email.ts` are NOT moved — they will be migrated to simse-mailer in the service extraction plan. The landing page will call simse-api to send emails instead.
 
 **Step 1: Move client components**
 
 ```bash
 cd simse-landing
-mkdir -p app/components app/lib app/emails
+mkdir -p app/components app/lib
 cp src/components/*.tsx app/components/
 cp src/lib/schema.ts app/lib/schema.ts
 ```
 
 All 7 component files (DotGrid, Features, Footer, Hero, SimseLogo, Typewriter, WaitlistForm) move unchanged.
 
-**Step 2: Move server-side lib files**
+**Step 2: Move validate-email server lib**
 
 ```bash
 cp functions/lib/validate-email.ts app/lib/validate-email.server.ts
-cp functions/lib/send-email.ts app/lib/send-email.server.ts
 ```
 
-The `.server.ts` suffix ensures these are never bundled for the client.
+The `.server.ts` suffix ensures it is never bundled for the client.
 
-**Step 3: Fix import path in send-email.server.ts**
-
-The current file imports from `../emails/`. After moving, update to `~/emails/`:
-
-```typescript
-// Change these imports in app/lib/send-email.server.ts:
-import EarlyPreviewEmail from '~/emails/early-preview';
-import InviteEmail from '~/emails/invite';
-import WelcomeEmail from '~/emails/welcome';
-```
-
-**Step 4: Move email templates**
-
-```bash
-cp functions/emails/*.tsx app/emails/
-cp functions/emails/tailwind-config.ts app/emails/
-```
-
-**Step 5: Commit**
+**Step 3: Commit**
 
 ```
 refactor(simse-landing): move components and lib to app/ directory
@@ -383,12 +364,11 @@ refactor(simse-landing): move components and lib to app/ directory
 
 **Step 1: Create app/routes/home.tsx**
 
-This replaces `src/pages/Home.tsx` + `functions/api/waitlist.ts`. The component stays the same, but the waitlist logic becomes an RR7 action:
+This replaces `src/pages/Home.tsx` + `functions/api/waitlist.ts`. The component stays the same, but the waitlist logic becomes an RR7 action. Emails are sent via simse-api → simse-mailer instead of calling Resend directly:
 
 ```tsx
 import type { Route } from './+types/home';
 import { waitlistSchema } from '~/lib/schema';
-import { sendWelcomeEmail } from '~/lib/send-email.server';
 import { validateEmail } from '~/lib/validate-email.server';
 import Footer from '~/components/Footer';
 import Hero from '~/components/Hero';
@@ -423,6 +403,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 	}
 
 	const db = context.cloudflare.env.DB;
+	const apiUrl = context.cloudflare.env.API_URL;
 
 	let shouldEmail = false;
 	try {
@@ -444,10 +425,17 @@ export async function action({ request, context }: Route.ActionArgs) {
 		const origin = new URL(request.url).origin;
 		const unsubscribeUrl = `${origin}/unsubscribe?email=${encodeURIComponent(email)}`;
 
+		// Send welcome email via simse-api → simse-mailer
 		context.cloudflare.ctx.waitUntil(
-			sendWelcomeEmail(email, context.cloudflare.env.RESEND_API_KEY, unsubscribeUrl).catch(
-				() => {},
-			),
+			fetch(`${apiUrl}/emails/send`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({
+					template: 'waitlist-welcome',
+					to: email,
+					props: { unsubscribeUrl },
+				}),
+			}).catch(() => {}),
 		);
 	}
 
@@ -468,6 +456,7 @@ export default function Home() {
 - `context.env.simse_waitlist` → `context.cloudflare.env.DB`
 - `context.waitUntil()` → `context.cloudflare.ctx.waitUntil()`
 - `context.request` → `request` (direct param)
+- `sendWelcomeEmail(email, apiKey, url)` → `fetch(apiUrl/emails/send, { template, to, props })` (emails via API)
 
 **Step 2: Update WaitlistForm to POST to current route**
 
@@ -629,8 +618,9 @@ rm -rf functions/
 This removes:
 - `functions/api/waitlist.ts` — replaced by home route action
 - `functions/unsubscribe.ts` — replaced by unsubscribe route loader
-- `functions/lib/` — moved to `app/lib/`
-- `functions/emails/` — moved to `app/emails/`
+- `functions/lib/validate-email.ts` — moved to `app/lib/`
+- `functions/lib/send-email.ts` — no longer needed (emails via API)
+- `functions/emails/` — templates will be added to simse-mailer in the service extraction plan
 
 **Step 3: Delete index.html**
 

@@ -1445,6 +1445,13 @@ refactor(simse-cloud): remove dead server-side code, drop D1/KV bindings
 
 Copy entire `simse-cloud/app/emails/` directory to `simse-mailer/src/emails/`.
 
+Also copy the 3 waitlist templates from `simse-landing/functions/emails/` to `simse-mailer/src/emails/`:
+- `welcome.tsx` → `simse-mailer/src/emails/waitlist-welcome.tsx`
+- `early-preview.tsx` → `simse-mailer/src/emails/waitlist-early-preview.tsx`
+- `invite.tsx` → `simse-mailer/src/emails/waitlist-invite.tsx`
+- `simse-logo.tsx` → `simse-mailer/src/emails/simse-logo.tsx` (shared component)
+- `tailwind-config.ts` → `simse-mailer/src/emails/tailwind-config.ts` (shared config)
+
 **Step 3: Update POST /send endpoint**
 
 Change from accepting raw HTML to accepting `{ template, to, props }`:

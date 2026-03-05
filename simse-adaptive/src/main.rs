@@ -1,7 +1,8 @@
-use simse_adaptive_engine::server::VectorServer;
+use simse_adaptive_engine::server::AdaptiveServer;
 use simse_adaptive_engine::transport::NdjsonTransport;
 
-fn main() {
+#[tokio::main]
+async fn main() {
 	tracing_subscriber::fmt()
 		.with_writer(std::io::stderr)
 		.with_env_filter(
@@ -11,11 +12,11 @@ fn main() {
 		.init();
 
 	let transport = NdjsonTransport::new();
-	let mut server = VectorServer::new(transport);
+	let mut server = AdaptiveServer::new(transport);
 
 	tracing::info!("simse-adaptive-engine ready");
 
-	if let Err(e) = server.run() {
+	if let Err(e) = server.run().await {
 		tracing::error!("Server error: {}", e);
 		std::process::exit(1);
 	}

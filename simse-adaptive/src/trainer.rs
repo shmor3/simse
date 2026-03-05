@@ -3,7 +3,7 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
-use crate::config::PcnConfig;
+use crate::pcn_config::PcnConfig;
 use crate::encoder::{InputEncoder, LibraryEvent};
 use crate::network::PredictiveCodingNetwork;
 use crate::persistence::save_snapshot;
@@ -236,7 +236,7 @@ impl TrainingWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Activation, LayerConfig, PcnConfig};
+    use crate::pcn_config::{Activation, LayerConfig, PcnConfig};
 
     fn test_config() -> PcnConfig {
         PcnConfig {

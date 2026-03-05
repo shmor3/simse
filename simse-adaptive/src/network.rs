@@ -1,4 +1,4 @@
-use crate::config::PcnConfig;
+use crate::pcn_config::PcnConfig;
 use crate::layer::PcnLayer;
 
 /// A hierarchical predictive coding network (PCN) composed of multiple [`PcnLayer`] instances.
@@ -483,7 +483,7 @@ impl PredictiveCodingNetwork {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Activation, LayerConfig, PcnConfig};
+    use crate::pcn_config::{Activation, LayerConfig, PcnConfig};
 
     fn test_config() -> PcnConfig {
         PcnConfig {

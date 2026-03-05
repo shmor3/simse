@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::cataloging::{MagnitudeCache, MetadataIndex, TopicIndex};
 use crate::cosine::compute_magnitude;
 use crate::deduplication;
-use crate::error::VectorError;
+use crate::error::AdaptiveError;
 use crate::graph::{GraphConfig, GraphIndex};
 use crate::inverted_index::InvertedIndex;
 use crate::learning::{LearningEngine, LearningOptions};
@@ -48,7 +48,7 @@ pub enum DuplicateBehavior {
 	Skip,
 	/// Log a warning and skip (returns existing ID, dirty bit unchanged).
 	Warn,
-	/// Return a `VectorError::Duplicate` error.
+	/// Return a `AdaptiveError::Duplicate` error.
 	Error,
 }
 
@@ -137,7 +137,7 @@ fn current_timestamp_ms() -> u64 {
 macro_rules! ensure_initialized {
 	($self:expr) => {
 		if !$self.initialized {
-			return Err(VectorError::NotInitialized);
+			return Err(AdaptiveError::NotInitialized);
 		}
 	};
 }
@@ -184,7 +184,7 @@ impl VolumeStore {
 
 	/// Initialize the store. If a storage path is provided (or was set in
 	/// config), load persisted data from disk and rebuild all indexes.
-	pub fn initialize(&mut self, storage_path: Option<&str>) -> Result<(), VectorError> {
+	pub fn initialize(&mut self, storage_path: Option<&str>) -> Result<(), AdaptiveError> {
 		// Use the provided path, or fall back to config
 		let effective_path = storage_path
 			.map(|s| s.to_string())
@@ -194,10 +194,10 @@ impl VolumeStore {
 			self.config.storage_path = Some(path.clone());
 
 			let data = persistence::load_from_directory(path).map_err(|e| match e {
-				persistence::PersistenceError::Io(io) => VectorError::Io(io),
-				persistence::PersistenceError::Corruption(msg) => VectorError::Corruption(msg),
+				persistence::PersistenceError::Io(io) => AdaptiveError::Io(io),
+				persistence::PersistenceError::Corruption(msg) => AdaptiveError::Corruption(msg),
 				persistence::PersistenceError::Serialization(msg) => {
-					VectorError::Serialization(msg)
+					AdaptiveError::Serialization(msg)
 				}
 			})?;
 
@@ -246,7 +246,7 @@ impl VolumeStore {
 	}
 
 	/// Save if dirty, then clean up resources.
-	pub fn dispose(&mut self) -> Result<(), VectorError> {
+	pub fn dispose(&mut self) -> Result<(), AdaptiveError> {
 		if self.dirty {
 			self.save()?;
 		}
@@ -255,7 +255,7 @@ impl VolumeStore {
 	}
 
 	/// Serialize and write all data to disk.
-	pub fn save(&mut self) -> Result<(), VectorError> {
+	pub fn save(&mut self) -> Result<(), AdaptiveError> {
 		let path = match &self.config.storage_path {
 			Some(p) => p.clone(),
 			None => return Ok(()), // no path, nothing to save
@@ -272,10 +272,10 @@ impl VolumeStore {
 			Some(&graph_state),
 		)
 		.map_err(|e| match e {
-			persistence::PersistenceError::Io(io) => VectorError::Io(io),
-			persistence::PersistenceError::Corruption(msg) => VectorError::Corruption(msg),
+			persistence::PersistenceError::Io(io) => AdaptiveError::Io(io),
+			persistence::PersistenceError::Corruption(msg) => AdaptiveError::Corruption(msg),
 			persistence::PersistenceError::Serialization(msg) => {
-				VectorError::Serialization(msg)
+				AdaptiveError::Serialization(msg)
 			}
 		})?;
 
@@ -383,14 +383,14 @@ impl VolumeStore {
 		text: String,
 		embedding: Vec<f32>,
 		metadata: HashMap<String, String>,
-	) -> Result<String, VectorError> {
+	) -> Result<String, AdaptiveError> {
 		ensure_initialized!(self);
 
 		if text.is_empty() {
-			return Err(VectorError::EmptyText);
+			return Err(AdaptiveError::EmptyText);
 		}
 		if embedding.is_empty() {
-			return Err(VectorError::EmptyEmbedding);
+			return Err(AdaptiveError::EmptyEmbedding);
 		}
 
 		// Check for duplicates
@@ -408,7 +408,7 @@ impl VolumeStore {
 						}
 					}
 					DuplicateBehavior::Error => {
-						return Err(VectorError::Duplicate(
+						return Err(AdaptiveError::Duplicate(
 							dup_result.similarity.unwrap_or(1.0),
 						));
 					}
@@ -469,7 +469,7 @@ impl VolumeStore {
 	pub fn add_batch(
 		&mut self,
 		entries: Vec<AddEntry>,
-	) -> Result<Vec<String>, VectorError> {
+	) -> Result<Vec<String>, AdaptiveError> {
 		ensure_initialized!(self);
 
 		let mut ids = Vec::with_capacity(entries.len());
@@ -549,7 +549,7 @@ impl VolumeStore {
 		query_embedding: &[f32],
 		max_results: usize,
 		threshold: f64,
-	) -> Result<Vec<Lookup>, VectorError> {
+	) -> Result<Vec<Lookup>, AdaptiveError> {
 		ensure_initialized!(self);
 
 		let query_mag = compute_magnitude(query_embedding);
@@ -595,9 +595,9 @@ impl VolumeStore {
 	pub fn text_search(
 		&self,
 		options: &TextSearchOptions,
-	) -> Result<Vec<TextLookup>, VectorError> {
+	) -> Result<Vec<TextLookup>, AdaptiveError> {
 		if !self.initialized {
-			return Err(VectorError::NotInitialized);
+			return Err(AdaptiveError::NotInitialized);
 		}
 
 		let mode = options.mode.as_deref().unwrap_or("fuzzy");
@@ -721,7 +721,7 @@ impl VolumeStore {
 	pub fn advanced_search(
 		&mut self,
 		options: &SearchOptions,
-	) -> Result<Vec<AdvancedLookup>, VectorError> {
+	) -> Result<Vec<AdvancedLookup>, AdaptiveError> {
 		ensure_initialized!(self);
 
 		let max_results = options.max_results.unwrap_or(10);
@@ -940,9 +940,9 @@ impl VolumeStore {
 	pub fn recommend(
 		&self,
 		options: &RecommendOptions,
-	) -> Result<Vec<Recommendation>, VectorError> {
+	) -> Result<Vec<Recommendation>, AdaptiveError> {
 		if !self.initialized {
-			return Err(VectorError::NotInitialized);
+			return Err(AdaptiveError::NotInitialized);
 		}
 
 		let max_results = options.max_results.unwrap_or(10);
@@ -1451,7 +1451,7 @@ mod tests {
 			make_embedding(&[1.0, 0.0, 0.0]),
 			HashMap::new(),
 		);
-		assert!(matches!(result, Err(VectorError::EmptyText)));
+		assert!(matches!(result, Err(AdaptiveError::EmptyText)));
 	}
 
 	// 4. add with empty embedding
@@ -1459,7 +1459,7 @@ mod tests {
 	fn test_add_empty_embedding_error() {
 		let mut store = init_store(default_config());
 		let result = store.add("hello".to_string(), Vec::new(), HashMap::new());
-		assert!(matches!(result, Err(VectorError::EmptyEmbedding)));
+		assert!(matches!(result, Err(AdaptiveError::EmptyEmbedding)));
 	}
 
 	// 5. add_batch adds multiple
@@ -1904,7 +1904,7 @@ mod tests {
 			HashMap::new(),
 		);
 
-		assert!(matches!(result, Err(VectorError::Duplicate(_))));
+		assert!(matches!(result, Err(AdaptiveError::Duplicate(_))));
 		assert_eq!(store.size(), 1);
 	}
 
@@ -2092,12 +2092,12 @@ mod tests {
 
 		assert!(matches!(
 			store.add("test".to_string(), make_embedding(&[1.0]), HashMap::new()),
-			Err(VectorError::NotInitialized)
+			Err(AdaptiveError::NotInitialized)
 		));
 
 		assert!(matches!(
 			store.search(&make_embedding(&[1.0]), 10, 0.5),
-			Err(VectorError::NotInitialized)
+			Err(AdaptiveError::NotInitialized)
 		));
 
 		assert!(matches!(
@@ -2106,7 +2106,7 @@ mod tests {
 				mode: None,
 				threshold: None,
 			}),
-			Err(VectorError::NotInitialized)
+			Err(AdaptiveError::NotInitialized)
 		));
 
 		assert!(matches!(
@@ -2123,7 +2123,7 @@ mod tests {
 				topic_filter: None,
 				graph_boost: None,
 			}),
-			Err(VectorError::NotInitialized)
+			Err(AdaptiveError::NotInitialized)
 		));
 	}
 

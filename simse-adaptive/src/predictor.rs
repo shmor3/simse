@@ -127,7 +127,7 @@ impl Predictor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Activation, LayerConfig, PcnConfig};
+    use crate::pcn_config::{Activation, LayerConfig, PcnConfig};
     use crate::network::PredictiveCodingNetwork;
     use crate::vocabulary::VocabularyManager;
 

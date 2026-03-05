@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::error::PcnError;
+use crate::error::AdaptiveError;
 
 /// Dimensionality of entry type one-hot encoding: fact, decision, observation.
 const ENTRY_TYPE_DIM: usize = 3;
@@ -93,14 +93,14 @@ impl VocabularyManager {
     /// Register a topic and return its index. Idempotent: returns the existing
     /// index if the topic is already registered.
     ///
-    /// Returns `PcnError::VocabularyOverflow` if the topic limit has been reached
+    /// Returns `AdaptiveError::VocabularyOverflow` if the topic limit has been reached
     /// and the topic is not already registered.
-    pub fn register_topic(&mut self, topic: &str) -> Result<usize, PcnError> {
+    pub fn register_topic(&mut self, topic: &str) -> Result<usize, AdaptiveError> {
         if let Some(&idx) = self.topic_to_idx.get(topic) {
             return Ok(idx);
         }
         if self.topics.len() >= self.max_topics {
-            return Err(PcnError::VocabularyOverflow(format!(
+            return Err(AdaptiveError::VocabularyOverflow(format!(
                 "topic limit {} reached",
                 self.max_topics
             )));
@@ -114,14 +114,14 @@ impl VocabularyManager {
     /// Register a tag and return its index. Idempotent: returns the existing
     /// index if the tag is already registered.
     ///
-    /// Returns `PcnError::VocabularyOverflow` if the tag limit has been reached
+    /// Returns `AdaptiveError::VocabularyOverflow` if the tag limit has been reached
     /// and the tag is not already registered.
-    pub fn register_tag(&mut self, tag: &str) -> Result<usize, PcnError> {
+    pub fn register_tag(&mut self, tag: &str) -> Result<usize, AdaptiveError> {
         if let Some(&idx) = self.tag_to_idx.get(tag) {
             return Ok(idx);
         }
         if self.tags.len() >= self.max_tags {
-            return Err(PcnError::VocabularyOverflow(format!(
+            return Err(AdaptiveError::VocabularyOverflow(format!(
                 "tag limit {} reached",
                 self.max_tags
             )));

@@ -1,10 +1,10 @@
-use simse_pcn_engine::config::{Activation, LayerConfig, PcnConfig};
-use simse_pcn_engine::encoder::{InputEncoder, LibraryEvent};
-use simse_pcn_engine::network::PredictiveCodingNetwork;
-use simse_pcn_engine::predictor::Predictor;
-use simse_pcn_engine::snapshot::ModelSnapshot;
-use simse_pcn_engine::trainer::TrainingWorker;
-use simse_pcn_engine::vocabulary::VocabularyManager;
+use simse_adaptive_engine::pcn_config::{Activation, LayerConfig, PcnConfig};
+use simse_adaptive_engine::encoder::{InputEncoder, LibraryEvent};
+use simse_adaptive_engine::network::PredictiveCodingNetwork;
+use simse_adaptive_engine::predictor::Predictor;
+use simse_adaptive_engine::snapshot::ModelSnapshot;
+use simse_adaptive_engine::trainer::TrainingWorker;
+use simse_adaptive_engine::vocabulary::VocabularyManager;
 use std::sync::{Arc, RwLock};
 
 // ---------------------------------------------------------------------------

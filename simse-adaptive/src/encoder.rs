@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::PcnError;
+use crate::error::AdaptiveError;
 use crate::vocabulary::VocabularyManager;
 
 /// A library event carrying an embedding vector and structured metadata,
@@ -82,7 +82,7 @@ impl InputEncoder {
     /// 4. Build the combined vector:
     ///    `[embedding_f64, topic_one_hot, tag_bitmap, entry_type_one_hot, temporal, action_one_hot]`
     /// 5. Pad the embedding with zeros if shorter than `embedding_dim`.
-    pub fn encode(&mut self, event: &LibraryEvent) -> Result<(Vec<f64>, bool), PcnError> {
+    pub fn encode(&mut self, event: &LibraryEvent) -> Result<(Vec<f64>, bool), AdaptiveError> {
         // 1. Snapshot vocabulary sizes before registration.
         let topics_before = self.vocab.topic_count();
         let tags_before = self.vocab.tag_count();

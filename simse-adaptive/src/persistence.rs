@@ -991,3 +991,41 @@ mod tests {
 		assert!(nested.join("index.gz").exists());
 	}
 }
+
+// ---------------------------------------------------------------------------
+// PCN model snapshot persistence
+// ---------------------------------------------------------------------------
+
+use crate::snapshot::ModelSnapshot;
+
+/// Save a [`ModelSnapshot`] to a file as JSON, optionally gzip-compressed.
+pub fn save_snapshot(snapshot: &ModelSnapshot, path: &str, compress: bool) -> Result<(), crate::error::AdaptiveError> {
+	use std::io::Write;
+	let json = serde_json::to_vec(snapshot)?;
+	if compress {
+		let mut encoder =
+			flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+		encoder.write_all(&json).map_err(crate::error::AdaptiveError::Io)?;
+		let compressed = encoder.finish().map_err(crate::error::AdaptiveError::Io)?;
+		std::fs::write(path, compressed).map_err(crate::error::AdaptiveError::Io)?;
+	} else {
+		std::fs::write(path, json).map_err(crate::error::AdaptiveError::Io)?;
+	}
+	Ok(())
+}
+
+/// Load a [`ModelSnapshot`] from a file, optionally gzip-compressed.
+pub fn load_snapshot(path: &str, compressed: bool) -> Result<ModelSnapshot, crate::error::AdaptiveError> {
+	use std::io::Read;
+	let data = std::fs::read(path).map_err(crate::error::AdaptiveError::Io)?;
+	if compressed {
+		let mut decoder = flate2::read::GzDecoder::new(&data[..]);
+		let mut json = Vec::new();
+		decoder.read_to_end(&mut json).map_err(crate::error::AdaptiveError::Io)?;
+		let snapshot: ModelSnapshot = serde_json::from_slice(&json)?;
+		Ok(snapshot)
+	} else {
+		let snapshot: ModelSnapshot = serde_json::from_slice(&data)?;
+		Ok(snapshot)
+	}
+}

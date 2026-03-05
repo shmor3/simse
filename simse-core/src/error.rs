@@ -392,7 +392,7 @@ pub enum SimseError {
 	McpEngine(#[from] simse_mcp_engine::error::McpError),
 
 	#[error(transparent)]
-	Vector(#[from] simse_adaptive_engine::error::VectorError),
+	Adaptive(#[from] simse_adaptive_engine::error::AdaptiveError),
 
 	#[error(transparent)]
 	VfsEngine(#[from] simse_vfs_engine::error::VfsError),
@@ -426,7 +426,7 @@ impl SimseError {
 			Self::Vfs { code, .. } => code.as_str(),
 			Self::Acp(_) => "ACP_ERROR",
 			Self::McpEngine(_) => "MCP_ENGINE_ERROR",
-			Self::Vector(_) => "VECTOR_ERROR",
+			Self::Adaptive(_) => "ADAPTIVE_ERROR",
 			Self::VfsEngine(_) => "VFS_ENGINE_ERROR",
 			Self::Io(_) => "IO_ERROR",
 			Self::Other(_) => "OTHER_ERROR",

@@ -90,6 +90,25 @@ impl SetupPreset {
 			Self::Custom => "Custom",
 		}
 	}
+
+	/// Return the default ACP server name, command, and args for this preset.
+	///
+	/// Returns `None` for presets that need additional input (Custom, Ollama).
+	pub fn acp_defaults(&self) -> Option<(&'static str, &'static str, &'static [&'static str])> {
+		match self {
+			Self::ClaudeCode => Some((
+				"claude-agent-acp",
+				"npx",
+				&["-y", "@zed-industries/claude-agent-acp"],
+			)),
+			Self::Copilot => Some((
+				"copilot-acp",
+				"npx",
+				&["-y", "@anthropic-ai/copilot-acp"],
+			)),
+			_ => None,
+		}
+	}
 }
 
 // ── SetupAction ─────────────────────────────────────────

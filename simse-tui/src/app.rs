@@ -1127,9 +1127,21 @@ fn handle_setup_action(app: &mut App, action: crate::overlays::setup::SetupActio
 	use crate::overlays::setup::SetupAction;
 	match action {
 		SetupAction::SelectPreset(preset) => {
-			app.output.push(OutputItem::CommandResult {
-				text: format!("Selected preset: {}", preset.label()),
-			});
+			let label = preset.label().to_string();
+			if let Some((name, command, args)) = preset.acp_defaults() {
+				app.pending_bridge_action = Some(BridgeAction::SetupAcp {
+					name: name.to_string(),
+					command: command.to_string(),
+					args: args.iter().map(|s| s.to_string()).collect(),
+				});
+				app.output.push(OutputItem::CommandResult {
+					text: format!("Selected preset: {label}"),
+				});
+			} else {
+				app.output.push(OutputItem::Info {
+					text: format!("{label} requires manual configuration."),
+				});
+			}
 			app.screen = Screen::Chat;
 		}
 		SetupAction::OpenOllamaWizard => {
@@ -1141,8 +1153,18 @@ fn handle_setup_action(app: &mut App, action: crate::overlays::setup::SetupActio
 			// Stay in Setup screen, now in custom edit mode
 		}
 		SetupAction::ConfirmCustom { command, args } => {
+			let parsed_args: Vec<String> = if args.is_empty() {
+				Vec::new()
+			} else {
+				args.split_whitespace().map(String::from).collect()
+			};
+			app.pending_bridge_action = Some(BridgeAction::SetupAcp {
+				name: "custom".to_string(),
+				command,
+				args: parsed_args,
+			});
 			app.output.push(OutputItem::CommandResult {
-				text: format!("Custom ACP: {command} {args}"),
+				text: format!("Custom ACP configured."),
 			});
 			app.screen = Screen::Chat;
 		}

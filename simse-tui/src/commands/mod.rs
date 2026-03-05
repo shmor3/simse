@@ -104,6 +104,12 @@ pub enum BridgeAction {
 	FactoryReset,
 	/// Factory-reset the project-level configuration.
 	FactoryResetProject,
+	/// Apply a setup preset — writes `acp.json` and updates in-memory config.
+	SetupAcp {
+		name: String,
+		command: String,
+		args: Vec<String>,
+	},
 
 	// ── AI ───────────────────────────────────────────────────────────
 	/// Run a named chain with the given arguments.
@@ -139,6 +145,7 @@ impl BridgeAction {
 			BridgeAction::InitConfig { .. } => "init-config",
 			BridgeAction::FactoryReset => "factory-reset",
 			BridgeAction::FactoryResetProject => "factory-reset-project",
+			BridgeAction::SetupAcp { .. } => "setup-acp",
 			BridgeAction::RunChain { .. } => "run-chain",
 			BridgeAction::Compact => "compact",
 		}
@@ -416,6 +423,7 @@ mod tests {
 			BridgeAction::InitConfig { force: false },
 			BridgeAction::FactoryReset,
 			BridgeAction::FactoryResetProject,
+			BridgeAction::SetupAcp { name: "n".into(), command: "c".into(), args: vec![] },
 			BridgeAction::RunChain { name: "c".into(), args: "a".into() },
 			BridgeAction::Compact,
 		];

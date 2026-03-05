@@ -468,6 +468,41 @@ impl TuiRuntime {
 				}
 				Ok("Factory reset complete. Global configuration removed.".into())
 			}
+			BridgeAction::SetupAcp { name, command, args } => {
+				let server = simse_bridge::config::AcpServerConfig {
+					name: name.clone(),
+					command: command.clone(),
+					args: args.clone(),
+					cwd: None,
+					env: std::collections::HashMap::new(),
+					default_agent: None,
+					timeout_ms: None,
+				};
+
+				// Write acp.json to the data directory
+				let data_dir = &self.config.data_dir;
+				std::fs::create_dir_all(data_dir)
+					.map_err(|e| RuntimeError::Acp(e.to_string()))?;
+
+				let acp_config = simse_bridge::config::AcpFileConfig {
+					servers: vec![server.clone()],
+					default_server: Some(name.clone()),
+					default_agent: None,
+				};
+
+				simse_bridge::json_io::write_json_file(
+					&data_dir.join("acp.json"),
+					&acp_config,
+				)
+				.map_err(|e| RuntimeError::Acp(e.to_string()))?;
+
+				// Update in-memory config
+				self.config.acp.servers = vec![server];
+				self.config.acp.default_server = Some(name.clone());
+				self.config.default_server = Some(name.clone());
+
+				Ok(format!("ACP server '{name}' configured. Ready to connect."))
+			}
 			BridgeAction::FactoryResetProject => {
 				let dir = self.config.work_dir.join(".simse");
 				if dir.exists() {

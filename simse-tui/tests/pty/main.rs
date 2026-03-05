@@ -1,7 +1,10 @@
 mod r#mod;
 mod acp_flow;
+mod autocomplete;
 mod command_feedback;
 mod commands_config;
 mod input;
 mod onboarding;
+mod overlays;
+mod setup_wizard;
 mod startup;

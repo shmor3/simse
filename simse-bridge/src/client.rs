@@ -191,8 +191,47 @@ pub async fn request_streaming(
 			RpcMessage::Notification(notif) => {
 				let _ = notification_tx.send(notif);
 			}
+			RpcMessage::ServerRequest(req) => {
+				handle_server_request(bridge, &req, &notification_tx).await?;
+			}
 		}
 	}
+}
+
+/// Handle a server-to-client JSON-RPC request received during streaming.
+///
+/// Currently handles:
+/// - `session/request_permission`: Auto-approves with "allow_once" so the
+///   ACP agent can proceed with tool execution. The request is also forwarded
+///   as a notification for UI display.
+async fn handle_server_request(
+	bridge: &mut BridgeProcess,
+	req: &crate::protocol::JsonRpcServerRequest,
+	notification_tx: &mpsc::UnboundedSender<JsonRpcNotification>,
+) -> Result<(), BridgeError> {
+	if req.method == "session/request_permission" {
+		// Auto-approve: respond with "allow_once" so the agent can continue.
+		let response = serde_json::json!({
+			"jsonrpc": "2.0",
+			"id": req.id,
+			"result": {
+				"outcome": "selected",
+				"optionId": "allow_once"
+			}
+		});
+		let line = serde_json::to_string(&response)
+			.map_err(|e| BridgeError::Serialization(e))?;
+		send_line(bridge, &line).await?;
+	}
+
+	// Forward as a notification so the UI layer can track server requests.
+	let _ = notification_tx.send(JsonRpcNotification {
+		jsonrpc: req.jsonrpc.clone(),
+		method: req.method.clone(),
+		params: req.params.clone(),
+	});
+
+	Ok(())
 }
 
 #[cfg(test)]

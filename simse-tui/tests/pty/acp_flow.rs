@@ -399,6 +399,70 @@ fn setup_wizard_resolves_npx_to_node() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 15. E2E: Tool-use message gets response (permission auto-approved)
+// ═══════════════════════════════════════════════════════════════
+//
+// Tests that messages triggering Claude's tool use (e.g., file creation)
+// work correctly. The ACP server sends `session/request_permission` for
+// tool execution; simse auto-approves it so the agent can proceed.
+//
+// Requires:
+//   - `@zed-industries/claude-agent-acp` installed
+//   - `ANTHROPIC_API_KEY` environment variable set
+
+#[test]
+fn tool_use_message_with_permission_auto_approve() {
+	let tmp = TempDir::new().unwrap();
+	let data_dir = tmp.path().join("data");
+	let work_dir = tmp.path().join("work");
+	std::fs::create_dir_all(&data_dir).unwrap();
+	std::fs::create_dir_all(&work_dir).unwrap();
+
+	write_acp_config(&data_dir);
+
+	let mut h = spawn_simse_with_timeout(
+		&data_dir,
+		&work_dir,
+		Duration::from_secs(120),
+	);
+	wait_for_startup(&h);
+
+	// ── First message: simple greeting ──────────────────────
+	type_command(&mut h, "Hello?");
+
+	h.wait_for_text("Hello")
+		.expect("User message should appear");
+
+	// Wait for AI response
+	thread::sleep(Duration::from_secs(15));
+	settle();
+
+	// ── Second message: triggers tool use ───────────────────
+	// "write a python hello world app" causes Claude to use the
+	// Write tool, which sends session/request_permission.
+	type_command(&mut h, "write a python hello world app");
+
+	h.wait_for_text("write a python hello world app")
+		.expect("Second user message should appear on screen");
+
+	// Wait for Claude to finish tool execution + response.
+	// This is longer than a simple text response because:
+	// 1. Claude thinks about the task
+	// 2. Claude uses Write tool (permission auto-approved)
+	// 3. Claude sends the final response
+	h.wait_for_text("hello")
+		.expect(
+			"AI response should mention 'hello' (the file content or confirmation), \
+			 proving tool-use messages work with auto-approved permissions",
+		);
+
+	assert!(
+		h.is_running(),
+		"App should not crash after tool-use message"
+	);
+}
+
+// ═══════════════════════════════════════════════════════════════
 // 14. E2E: Setup wizard → two messages (exact manual flow)
 // ═══════════════════════════════════════════════════════════════
 //

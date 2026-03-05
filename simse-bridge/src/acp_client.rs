@@ -219,6 +219,11 @@ impl AcpClient {
 			// Process the final response
 			match resp {
 				Ok(resp) => {
+					if let Some(ref err) = resp.error {
+						let _ = event_tx.send(StreamEvent::Error(
+							format!("ACP error {}: {}", err.code, err.message),
+						));
+					}
 					if let Some(Ok(result)) = resp.result.map(
 						serde_json::from_value::<SessionPromptResult>,
 					) {

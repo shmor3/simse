@@ -49,6 +49,10 @@ impl LoopCallbacks for TuiLoopCallbacks {
 	fn on_stream_delta(&self, delta: &str) {
 		let _ = self.tx.send(AppMessage::StreamDelta(delta.to_string()));
 	}
+
+	fn on_error(&self, error: &str) {
+		let _ = self.tx.send(AppMessage::LoopError(error.to_string()));
+	}
 }
 
 #[tokio::main]

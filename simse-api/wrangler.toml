@@ -14,9 +14,6 @@ routes = [
 queue = "simse-api-comms"
 binding = "COMMS_QUEUE"
 
-# Secrets (set via `wrangler secret put`):
-# AUTH_API_URL
-# AUTH_API_SECRET
-# PAYMENTS_API_URL
-# PAYMENTS_API_SECRET
-# MAILER_API_URL (for reading notifications)
+[[secrets_store.bindings]]
+binding = "SECRETS"
+store_id = "PLACEHOLDER_REPLACE_WITH_STORE_ID"

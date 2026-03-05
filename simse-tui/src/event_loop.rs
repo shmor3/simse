@@ -191,6 +191,7 @@ impl TuiRuntime {
 			agent_id: self.config.default_agent.clone(),
 			system_prompt: self.config.workspace_prompt.clone(),
 			agent_manages_tools: false,
+			session_id: self.session_id.clone(),
 		};
 
 		let result = agentic_loop::run_agentic_loop(
@@ -532,6 +533,7 @@ impl TuiRuntime {
 					agent_id: self.config.default_agent.clone(),
 					system_prompt: self.config.workspace_prompt.clone(),
 					agent_manages_tools: false,
+					session_id: self.session_id.clone(),
 				};
 
 				let callbacks = simse_bridge::agentic_loop::NoopCallbacks;

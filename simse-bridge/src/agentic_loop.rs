@@ -33,6 +33,8 @@ pub struct AgenticLoopOptions {
 	/// If true, the agent manages its own tool calls and the loop does not
 	/// inject tool definitions into the system prompt or parse tool calls.
 	pub agent_manages_tools: bool,
+	/// Existing ACP session ID to reuse. If None, a new session is created per turn.
+	pub session_id: Option<String>,
 }
 
 impl Default for AgenticLoopOptions {
@@ -43,6 +45,7 @@ impl Default for AgenticLoopOptions {
 			agent_id: None,
 			system_prompt: None,
 			agent_manages_tools: false,
+			session_id: None,
 		}
 	}
 }
@@ -309,21 +312,25 @@ pub async fn run_agentic_loop(
 			..Default::default()
 		};
 
-		// Create a new ACP session for streaming
-		let session_id = match acp_client.new_session().await {
-			Ok(id) => id,
-			Err(e) => {
-				let error_msg = format!("Failed to create ACP session: {e}");
-				callbacks.on_error(&error_msg);
-				turns.push(LoopTurn {
-					turn: turn_num,
-					turn_type: TurnType::Error,
-					text: Some(error_msg.clone()),
-					tool_calls: Vec::new(),
-					tool_results: Vec::new(),
-				});
-				final_text = error_msg;
-				break;
+		// Reuse existing ACP session or create a new one
+		let session_id = if let Some(ref sid) = options.session_id {
+			sid.clone()
+		} else {
+			match acp_client.new_session().await {
+				Ok(id) => id,
+				Err(e) => {
+					let error_msg = format!("Failed to create ACP session: {e}");
+					callbacks.on_error(&error_msg);
+					turns.push(LoopTurn {
+						turn: turn_num,
+						turn_type: TurnType::Error,
+						text: Some(error_msg.clone()),
+						tool_calls: Vec::new(),
+						tool_results: Vec::new(),
+					});
+					final_text = error_msg;
+					break;
+				}
 			}
 		};
 
@@ -499,6 +506,7 @@ mod tests {
 		assert!(opts.agent_id.is_none());
 		assert!(opts.system_prompt.is_none());
 		assert!(!opts.agent_manages_tools);
+		assert!(opts.session_id.is_none());
 	}
 
 	#[test]
@@ -509,12 +517,14 @@ mod tests {
 			agent_id: Some("agent-1".into()),
 			system_prompt: Some("Be helpful".into()),
 			agent_manages_tools: true,
+			session_id: Some("sess-42".into()),
 		};
 		assert_eq!(opts.max_turns, 5);
 		assert_eq!(opts.server_name.as_deref(), Some("ollama"));
 		assert_eq!(opts.agent_id.as_deref(), Some("agent-1"));
 		assert_eq!(opts.system_prompt.as_deref(), Some("Be helpful"));
 		assert!(opts.agent_manages_tools);
+		assert_eq!(opts.session_id.as_deref(), Some("sess-42"));
 	}
 
 	// -- TurnType enum --

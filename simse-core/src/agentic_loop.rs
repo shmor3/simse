@@ -276,6 +276,7 @@ impl Default for CancellationToken {
 // Callback type aliases (clippy type_complexity fix)
 // ---------------------------------------------------------------------------
 
+type StreamStartFn = dyn Fn() + Send + Sync;
 type StreamDeltaFn = dyn Fn(&str) + Send + Sync;
 type ToolCallStartFn = dyn Fn(&ToolCallRequest) + Send + Sync;
 type ToolCallEndFn = dyn Fn(&ToolCallResult) + Send + Sync;
@@ -289,6 +290,7 @@ type DoomLoopFn = dyn Fn(&str, usize) + Send + Sync;
 /// Callbacks for observing the agentic loop lifecycle.
 #[derive(Default)]
 pub struct LoopCallbacks {
+	pub on_stream_start: Option<Box<StreamStartFn>>,
 	pub on_stream_delta: Option<Box<StreamDeltaFn>>,
 	pub on_tool_call_start: Option<Box<ToolCallStartFn>>,
 	pub on_tool_call_end: Option<Box<ToolCallEndFn>>,
@@ -563,6 +565,11 @@ pub async fn run_agentic_loop(
 			event_types::LOOP_TURN_START,
 			json!({ "turn": turn_idx }),
 		);
+
+		// Fire stream start callback before each generation call
+		if let Some(ref cb) = callbacks.on_stream_start {
+			cb();
+		}
 
 		let response = match stream_with_retry(
 			acp_client,
@@ -952,6 +959,7 @@ mod tests {
 	#[test]
 	fn test_loop_callbacks_default() {
 		let cb = LoopCallbacks::default();
+		assert!(cb.on_stream_start.is_none());
 		assert!(cb.on_stream_delta.is_none());
 		assert!(cb.on_tool_call_start.is_none());
 		assert!(cb.on_tool_call_end.is_none());

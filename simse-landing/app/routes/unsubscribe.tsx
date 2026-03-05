@@ -10,10 +10,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 	}
 
 	try {
-		await context.cloudflare.env.DB
-			.prepare(
-				"UPDATE waitlist SET subscribed = 0, updated_at = datetime('now') WHERE email = ? AND subscribed = 1",
-			)
+		await context.cloudflare.env.DB.prepare(
+			"UPDATE waitlist SET subscribed = 0, updated_at = datetime('now') WHERE email = ? AND subscribed = 1",
+		)
 			.bind(email)
 			.run();
 	} catch (err) {
@@ -30,7 +29,12 @@ export default function Unsubscribe({ loaderData }: Route.ComponentProps) {
 	return (
 		<div className="flex min-h-screen items-center justify-center bg-[#0a0a0b] px-8">
 			<div className="max-w-[420px] text-center">
-				<div className={clsx('text-[2rem]', success ? 'text-emerald-400' : 'text-red-400')}>
+				<div
+					className={clsx(
+						'text-[2rem]',
+						success ? 'text-emerald-400' : 'text-red-400',
+					)}
+				>
 					{success ? '\u2713' : '\u2717'}
 				</div>
 				<h1

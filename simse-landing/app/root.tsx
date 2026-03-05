@@ -27,7 +27,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
 				{/* Open Graph */}
 				<meta property="og:type" content="website" />
 				<meta property="og:url" content="https://simse.dev/" />
-				<meta property="og:title" content="simse — The assistant that evolves with you" />
+				<meta
+					property="og:title"
+					content="simse — The assistant that evolves with you"
+				/>
 				<meta
 					property="og:description"
 					content="Connect any ACP or MCP backend. Context carries over. Preferences stick. An assistant that gets better the more you use it."
@@ -38,7 +41,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 				{/* Twitter Card */}
 				<meta name="twitter:card" content="summary_large_image" />
-				<meta name="twitter:title" content="simse — The assistant that evolves with you" />
+				<meta
+					name="twitter:title"
+					content="simse — The assistant that evolves with you"
+				/>
 				<meta
 					name="twitter:description"
 					content="Connect any ACP or MCP backend. Context carries over. Preferences stick. An assistant that gets better the more you use it."
@@ -60,7 +66,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
 
 export default function App() {
 	return (
-		<div className={clsx('flex h-screen flex-col overflow-hidden bg-[#0a0a0b]')}>
+		<div
+			className={clsx('flex h-screen flex-col overflow-hidden bg-[#0a0a0b]')}
+		>
 			<DotGrid />
 			<Outlet />
 		</div>

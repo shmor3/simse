@@ -1,13 +1,11 @@
-import type { Route } from './+types/home';
-import { waitlistSchema } from '~/lib/schema';
-import { validateEmail } from '~/lib/validate-email.server';
 import Footer from '~/components/Footer';
 import Hero from '~/components/Hero';
+import { waitlistSchema } from '~/lib/schema';
+import { validateEmail } from '~/lib/validate-email.server';
+import type { Route } from './+types/home';
 
 export function meta(): Route.MetaDescriptors {
-	return [
-		{ title: 'simse — The assistant that evolves with you' },
-	];
+	return [{ title: 'simse — The assistant that evolves with you' }];
 }
 
 export async function action({ request, context }: Route.ActionArgs) {

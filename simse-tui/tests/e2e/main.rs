@@ -21,6 +21,7 @@ mod config;
 mod error_states;
 pub mod harness;
 mod input;
+mod onboarding;
 mod overlays;
 mod setup_wizard;
 mod startup;

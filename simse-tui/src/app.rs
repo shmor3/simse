@@ -15,6 +15,7 @@ use simse_ui_core::input::state as input;
 use std::collections::BTreeMap;
 
 use crate::autocomplete::{render_inline_completions, CommandAutocompleteState};
+use crate::onboarding::OnboardingState;
 
 /// Maximum height (in rows) for the inline completions area.
 const MAX_VISIBLE_COMPLETIONS: u16 = 8;
@@ -102,6 +103,8 @@ pub struct App {
 	pub librarian_state: LibrarianExplorerState,
 	/// Overlay state for the setup selector.
 	pub setup_state: SetupSelectorState,
+	/// Onboarding state — tracks whether first-run setup is needed.
+	pub onboarding: OnboardingState,
 }
 
 impl App {
@@ -146,6 +149,7 @@ impl App {
 			settings_config_data: serde_json::Value::Null,
 			librarian_state: LibrarianExplorerState::new(Vec::new()),
 			setup_state: SetupSelectorState::new(),
+			onboarding: OnboardingState::default(),
 		}
 	}
 }
@@ -224,6 +228,7 @@ pub enum AppMessage {
 
 	// Bridge
 	BridgeResult {
+		action: String,
 		text: String,
 		is_error: bool,
 	},
@@ -629,11 +634,19 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		}
 
 		// ── Bridge ──────────────────────────────────
-		AppMessage::BridgeResult { text, is_error } => {
+		AppMessage::BridgeResult { action, text, is_error } => {
 			if is_error {
 				app.output.push(OutputItem::Error { message: text });
 			} else {
 				app.output.push(OutputItem::CommandResult { text });
+			}
+			// After factory-reset, restart onboarding
+			if action == "factory-reset" && !is_error {
+				app.onboarding = OnboardingState { needs_setup: true, welcome_shown: false };
+				app.server_name = None;
+				app.model_name = None;
+				app.acp_connected = false;
+				app.config_values.clear();
 			}
 		}
 		AppMessage::RefreshContext(ctx) => {
@@ -1918,5 +1931,77 @@ mod tests {
 		let field_before = app.setup_state.editing_field;
 		app = update(app, AppMessage::Tab);
 		assert_ne!(app.setup_state.editing_field, field_before);
+	}
+
+	// ── Factory-reset onboarding restart tests ────
+
+	#[test]
+	fn factory_reset_success_restarts_onboarding() {
+		let mut app = App::new();
+		app.onboarding = OnboardingState { needs_setup: false, welcome_shown: true };
+		app.server_name = Some("test-server".into());
+		app.model_name = Some("llama3".into());
+		app.acp_connected = true;
+		app.config_values = vec![("key".into(), "val".into())];
+
+		app = update(app, AppMessage::BridgeResult {
+			action: "factory-reset".into(),
+			text: "Factory reset complete.".into(),
+			is_error: false,
+		});
+
+		// Onboarding should be restarted
+		assert!(app.onboarding.needs_setup);
+		assert!(!app.onboarding.welcome_shown);
+		// Connection state should be cleared
+		assert!(app.server_name.is_none());
+		assert!(app.model_name.is_none());
+		assert!(!app.acp_connected);
+		assert!(app.config_values.is_empty());
+		// Success message should be in output
+		assert!(app.output.iter().any(|o| matches!(o, OutputItem::CommandResult { text } if text.contains("Factory reset"))));
+	}
+
+	#[test]
+	fn factory_reset_error_does_not_restart_onboarding() {
+		let mut app = App::new();
+		app.onboarding = OnboardingState { needs_setup: false, welcome_shown: true };
+		app.server_name = Some("test-server".into());
+		app.model_name = Some("llama3".into());
+		app.acp_connected = true;
+
+		app = update(app, AppMessage::BridgeResult {
+			action: "factory-reset".into(),
+			text: "Permission denied".into(),
+			is_error: true,
+		});
+
+		// Onboarding should NOT be restarted on error
+		assert!(!app.onboarding.needs_setup);
+		assert!(app.onboarding.welcome_shown);
+		// Connection state should be preserved
+		assert!(app.server_name.is_some());
+		assert!(app.model_name.is_some());
+		assert!(app.acp_connected);
+		// Error should be in output
+		assert!(app.output.iter().any(|o| matches!(o, OutputItem::Error { .. })));
+	}
+
+	#[test]
+	fn non_factory_reset_action_does_not_restart_onboarding() {
+		let mut app = App::new();
+		app.onboarding = OnboardingState { needs_setup: false, welcome_shown: true };
+		app.server_name = Some("test-server".into());
+
+		app = update(app, AppMessage::BridgeResult {
+			action: "init-config".into(),
+			text: "Initialized project config.".into(),
+			is_error: false,
+		});
+
+		// Onboarding should NOT be restarted for non-factory-reset actions
+		assert!(!app.onboarding.needs_setup);
+		assert!(app.onboarding.welcome_shown);
+		assert!(app.server_name.is_some());
 	}
 }

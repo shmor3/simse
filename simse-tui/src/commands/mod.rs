@@ -114,6 +114,37 @@ pub enum BridgeAction {
 	Compact,
 }
 
+impl BridgeAction {
+	/// Return a kebab-case identifier for this action, used to tag `BridgeResult` messages.
+	pub fn action_name(&self) -> &'static str {
+		match self {
+			BridgeAction::LibraryAdd { .. } => "library-add",
+			BridgeAction::LibrarySearch { .. } => "library-search",
+			BridgeAction::LibraryRecommend { .. } => "library-recommend",
+			BridgeAction::LibraryTopics => "library-topics",
+			BridgeAction::LibraryVolumes { .. } => "library-volumes",
+			BridgeAction::LibraryGet { .. } => "library-get",
+			BridgeAction::LibraryDelete { .. } => "library-delete",
+			BridgeAction::ResumeSession { .. } => "resume-session",
+			BridgeAction::SwitchServer { .. } => "switch-server",
+			BridgeAction::SwitchModel { .. } => "switch-model",
+			BridgeAction::McpRestart => "mcp-restart",
+			BridgeAction::AcpRestart => "acp-restart",
+			BridgeAction::RenameSession { .. } => "rename-session",
+			BridgeAction::ListFiles { .. } => "list-files",
+			BridgeAction::SaveFiles { .. } => "save-files",
+			BridgeAction::ValidateFiles { .. } => "validate-files",
+			BridgeAction::DiscardFile { .. } => "discard-file",
+			BridgeAction::DiffFiles { .. } => "diff-files",
+			BridgeAction::InitConfig { .. } => "init-config",
+			BridgeAction::FactoryReset => "factory-reset",
+			BridgeAction::FactoryResetProject => "factory-reset-project",
+			BridgeAction::RunChain { .. } => "run-chain",
+			BridgeAction::Compact => "compact",
+		}
+	}
+}
+
 // ── Supporting info types ────────────────────────────────────────────────
 
 /// Lightweight session descriptor exposed to command handlers.
@@ -347,6 +378,51 @@ mod tests {
 				assert_eq!(action, &BridgeAction::FactoryReset);
 			}
 			other => panic!("expected ConfirmAction, got {:?}", other),
+		}
+	}
+
+	#[test]
+	fn bridge_action_name_factory_reset() {
+		assert_eq!(BridgeAction::FactoryReset.action_name(), "factory-reset");
+	}
+
+	#[test]
+	fn bridge_action_name_factory_reset_project() {
+		assert_eq!(BridgeAction::FactoryResetProject.action_name(), "factory-reset-project");
+	}
+
+	#[test]
+	fn bridge_action_name_all_variants() {
+		// Ensure every variant returns a non-empty string.
+		let actions: Vec<BridgeAction> = vec![
+			BridgeAction::LibraryAdd { topic: "t".into(), text: "x".into() },
+			BridgeAction::LibrarySearch { query: "q".into() },
+			BridgeAction::LibraryRecommend { query: "q".into() },
+			BridgeAction::LibraryTopics,
+			BridgeAction::LibraryVolumes { topic: None },
+			BridgeAction::LibraryGet { id: "1".into() },
+			BridgeAction::LibraryDelete { id: "1".into() },
+			BridgeAction::ResumeSession { id: "s".into() },
+			BridgeAction::SwitchServer { name: "n".into() },
+			BridgeAction::SwitchModel { name: "m".into() },
+			BridgeAction::McpRestart,
+			BridgeAction::AcpRestart,
+			BridgeAction::RenameSession { title: "t".into() },
+			BridgeAction::ListFiles { path: None },
+			BridgeAction::SaveFiles { path: None },
+			BridgeAction::ValidateFiles { path: None },
+			BridgeAction::DiscardFile { path: "p".into() },
+			BridgeAction::DiffFiles { path: None },
+			BridgeAction::InitConfig { force: false },
+			BridgeAction::FactoryReset,
+			BridgeAction::FactoryResetProject,
+			BridgeAction::RunChain { name: "c".into(), args: "a".into() },
+			BridgeAction::Compact,
+		];
+		for action in actions {
+			let name = action.action_name();
+			assert!(!name.is_empty(), "action_name() should not be empty for {:?}", action);
+			assert!(name.contains('-') || name.len() > 3, "action_name() should be kebab-case: {}", name);
 		}
 	}
 }

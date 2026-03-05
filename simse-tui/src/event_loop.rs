@@ -23,6 +23,7 @@ use simse_ui_core::state::permission_manager::PermissionManager;
 use simse_ui_core::state::permissions::PermissionMode;
 use simse_ui_core::tools::ToolCallRequest;
 
+use crate::app::AppMessage;
 use crate::commands::{
 	AgentInfo, BridgeAction, CommandContext, PromptInfo, SessionInfo, SkillInfo, ToolDefInfo,
 };
@@ -611,6 +612,29 @@ impl TuiRuntime {
 					"Conversation compacted ({msg_count} messages → 1 summary)."
 				))
 			}
+		}
+	}
+
+	/// Execute a bridge action and return an [`AppMessage::BridgeResult`].
+	///
+	/// This is the primary entry point for `main.rs` to dispatch a
+	/// `BridgeAction` picked up from `App::pending_bridge_action`.
+	/// The returned message includes the action name so the app can
+	/// perform action-specific side effects (e.g. restarting onboarding
+	/// after a factory-reset).
+	pub async fn dispatch_bridge_action(&mut self, action: BridgeAction) -> AppMessage {
+		let action_name = action.action_name().to_string();
+		match self.execute_bridge_action(action).await {
+			Ok(text) => AppMessage::BridgeResult {
+				action: action_name,
+				text,
+				is_error: false,
+			},
+			Err(e) => AppMessage::BridgeResult {
+				action: action_name,
+				text: e.to_string(),
+				is_error: true,
+			},
 		}
 	}
 

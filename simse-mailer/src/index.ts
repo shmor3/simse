@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import notificationsRoute from './routes/notifications';
 import { renderTemplate } from './render';
 import { sendEmail } from './send';
 
@@ -37,6 +38,8 @@ app.post('/send', async (c) => {
 	await sendEmail(c.env.RESEND_API_KEY, { to: body.to, subject, html });
 	return c.json({ success: true });
 });
+
+app.route('/notifications', notificationsRoute);
 
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {

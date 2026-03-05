@@ -2,6 +2,11 @@ name = "simse-mailer"
 compatibility_date = "2025-04-01"
 main = "src/index.ts"
 
+[[d1_databases]]
+binding = "DB"
+database_name = "simse-mailer-db"
+database_id = "PLACEHOLDER_FILL_AFTER_CREATION"
+
 [[queues.consumers]]
 queue = "simse-auth-comms"
 

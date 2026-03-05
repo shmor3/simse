@@ -2,10 +2,14 @@ import { Hono } from 'hono';
 
 interface Env {
 	DB: D1Database;
-	API_SECRET: string;
+	SECRETS: SecretsStoreNamespace;
 }
 
-const notifications = new Hono<{ Bindings: Env }>();
+interface MailerSecrets {
+	mailerApiSecret: string;
+}
+
+const notifications = new Hono<{ Bindings: Env; Variables: { secrets: MailerSecrets } }>();
 
 // GET /notifications/:userId — list (last 100)
 notifications.get('/:userId', async (c) => {
@@ -14,7 +18,7 @@ notifications.get('/:userId', async (c) => {
 	const paramUserId = c.req.param('userId');
 
 	// Must be accessed by the user themselves (via gateway X-User-Id) or internal API
-	if (userId !== paramUserId && authHeader !== `Bearer ${c.env.API_SECRET}`) {
+	if (userId !== paramUserId && authHeader !== `Bearer ${c.var.secrets.mailerApiSecret}`) {
 		return c.json({ error: { code: 'FORBIDDEN', message: 'Access denied' } }, 403);
 	}
 
@@ -29,7 +33,7 @@ notifications.get('/:userId', async (c) => {
 // POST /notifications — create (internal API only)
 notifications.post('/', async (c) => {
 	const authHeader = c.req.header('Authorization');
-	if (authHeader !== `Bearer ${c.env.API_SECRET}`) {
+	if (authHeader !== `Bearer ${c.var.secrets.mailerApiSecret}`) {
 		return c.json({ error: { code: 'UNAUTHORIZED', message: 'Unauthorized' } }, 401);
 	}
 

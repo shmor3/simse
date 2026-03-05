@@ -7,19 +7,36 @@ type CommsMessage =
 	| { type: 'email'; template: string; to: string; props?: Record<string, string> }
 	| { type: 'notification'; userId: string; kind: string; title: string; body: string; link?: string };
 
-interface Env {
-	RESEND_API_KEY: string;
-	API_SECRET: string;
+export interface Env {
 	DB: D1Database;
+	SECRETS: SecretsStoreNamespace;
 }
 
-const app = new Hono<{ Bindings: Env }>();
+interface MailerSecrets {
+	resendApiKey: string;
+	mailerApiSecret: string;
+}
+
+const app = new Hono<{ Bindings: Env; Variables: { secrets: MailerSecrets } }>();
+
+// Secrets middleware
+app.use('*', async (c, next) => {
+	const [resendApiKey, mailerApiSecret] = await Promise.all([
+		c.env.SECRETS.get('RESEND_API_KEY'),
+		c.env.SECRETS.get('MAILER_API_SECRET'),
+	]);
+	if (!resendApiKey || !mailerApiSecret) {
+		return c.json({ error: 'Service misconfigured' }, 500);
+	}
+	c.set('secrets', { resendApiKey, mailerApiSecret });
+	await next();
+});
 
 app.get('/health', (c) => c.json({ ok: true }));
 
 app.post('/send', async (c) => {
 	const authHeader = c.req.header('Authorization');
-	if (authHeader !== `Bearer ${c.env.API_SECRET}`) {
+	if (authHeader !== `Bearer ${c.var.secrets.mailerApiSecret}`) {
 		return c.json({ error: 'Unauthorized' }, 401);
 	}
 
@@ -35,7 +52,7 @@ app.post('/send', async (c) => {
 
 	const { subject, html } = await renderTemplate(body.template, body.props ?? {});
 
-	await sendEmail(c.env.RESEND_API_KEY, { to: body.to, subject, html });
+	await sendEmail(c.var.secrets.resendApiKey, { to: body.to, subject, html });
 	return c.json({ success: true });
 });
 
@@ -46,12 +63,20 @@ export default {
 		return app.fetch(request, env);
 	},
 	async queue(batch: MessageBatch<CommsMessage>, env: Env): Promise<void> {
+		// Fetch secrets once for the whole batch
+		const [resendApiKey] = await Promise.all([env.SECRETS.get('RESEND_API_KEY')]);
+		if (!resendApiKey) {
+			console.error('RESEND_API_KEY not configured — acking all messages to avoid poison pill');
+			for (const message of batch.messages) message.ack();
+			return;
+		}
+
 		for (const message of batch.messages) {
 			const msg = message.body;
 			try {
 				if (msg.type === 'email') {
 					const { subject, html } = await renderTemplate(msg.template, msg.props ?? {});
-					await sendEmail(env.RESEND_API_KEY, { to: msg.to, subject, html });
+					await sendEmail(resendApiKey, { to: msg.to, subject, html });
 				} else if (msg.type === 'notification') {
 					const id = crypto.randomUUID();
 					await env.DB.prepare(

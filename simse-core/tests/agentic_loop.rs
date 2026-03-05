@@ -158,6 +158,7 @@ impl MockToolExecutor {
 					output: output.to_string(),
 					is_error: false,
 					duration_ms: Some(42),
+					diff: None,
 				}],
 			);
 		}
@@ -179,6 +180,7 @@ impl MockToolExecutor {
 						output: output.to_string(),
 						is_error: *is_error,
 						duration_ms: Some(10),
+						diff: None,
 					})
 					.collect(),
 			);
@@ -217,6 +219,7 @@ impl ToolExecutor for MockToolExecutor {
 				output: format!("mock result for {}", call.name),
 				is_error: false,
 				duration_ms: Some(1),
+				diff: None,
 			}
 		}
 	}

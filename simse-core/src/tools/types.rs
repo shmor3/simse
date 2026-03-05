@@ -137,6 +137,9 @@ pub struct ToolCallResult {
 	pub is_error: bool,
 	/// Wall-clock execution time in milliseconds.
 	pub duration_ms: Option<u64>,
+	/// Optional unified diff produced by the tool (e.g. file edits).
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub diff: Option<String>,
 }
 
 // ---------------------------------------------------------------------------

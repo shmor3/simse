@@ -23,6 +23,7 @@ fn make_result(output: &str) -> ToolCallResult {
 		output: output.into(),
 		is_error: false,
 		duration_ms: Some(10),
+		diff: None,
 	}
 }
 

@@ -4,6 +4,7 @@ members = [
     "simse-ui-core",
     "simse-tui",
     "simse-bridge",
+    "simse-core",
 ]
 exclude = [
     "simse-vfs",
@@ -12,7 +13,6 @@ exclude = [
     "simse-mcp",
     "simse-vsh",
     "simse-vnet",
-    "simse-core",
     "simse-engine",
     "simse-predictive-coding",
     "simse-sandbox",

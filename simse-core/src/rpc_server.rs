@@ -1161,6 +1161,7 @@ impl CoreRpcServer {
 							output,
 							is_error,
 							duration_ms: context.result.duration_ms,
+							diff: context.result.diff,
 						}
 					}
 					Ok(Err(_)) => context.result,
@@ -2754,6 +2755,7 @@ impl crate::agentic_loop::ToolExecutor for CallbackLoopToolExecutor {
 					output,
 					is_error,
 					duration_ms: Some(start.elapsed().as_millis() as u64),
+					diff: None,
 				}
 			}
 			Ok(Err(_)) => ToolCallResult {
@@ -2762,6 +2764,7 @@ impl crate::agentic_loop::ToolExecutor for CallbackLoopToolExecutor {
 				output: "Tool callback channel closed".to_string(),
 				is_error: true,
 				duration_ms: Some(start.elapsed().as_millis() as u64),
+				diff: None,
 			},
 			Err(_) => {
 				// Clean up pending entry on timeout
@@ -2773,6 +2776,7 @@ impl crate::agentic_loop::ToolExecutor for CallbackLoopToolExecutor {
 					output: "Tool callback timed out (120s)".to_string(),
 					is_error: true,
 					duration_ms: Some(start.elapsed().as_millis() as u64),
+					diff: None,
 				}
 			}
 		}

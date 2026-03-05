@@ -1,6 +1,7 @@
 mod r#mod;
 mod acp_flow;
 mod autocomplete;
+mod bridge_actions;
 mod command_feedback;
 mod commands_config;
 mod commands_files;

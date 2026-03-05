@@ -1,23 +1,23 @@
 import { render } from '@react-email/render';
 import type { ComponentType } from 'react';
 import { createElement } from 'react';
-import EmailChange from './templates/email-change';
-import FeatureAnnouncement from './templates/feature-announcement';
-import FreeCredit from './templates/free-credit';
-import InviteFriend from './templates/invite-friend';
-import NewDevice from './templates/new-device';
-import Onboarding from './templates/onboarding';
-import PaymentFailed from './templates/payment-failed';
-import PaymentReceipt from './templates/payment-receipt';
-import ReEngagement from './templates/re-engagement';
-import ResetPassword from './templates/reset-password';
-import RoleChange from './templates/role-change';
-import SuspiciousActivity from './templates/suspicious-activity';
-import TeamInvite from './templates/team-invite';
-import TwoFactor from './templates/two-factor';
-import UsageWarning from './templates/usage-warning';
-import Verify from './templates/verify';
-import WeeklyDigest from './templates/weekly-digest';
+import EmailChange from './email-change';
+import FeatureAnnouncement from './feature-announcement';
+import FreeCredit from './free-credit';
+import InviteFriend from './invite-friend';
+import NewDevice from './new-device';
+import Onboarding from './onboarding';
+import PaymentFailed from './payment-failed';
+import PaymentReceipt from './payment-receipt';
+import ReEngagement from './re-engagement';
+import ResetPassword from './reset-password';
+import RoleChange from './role-change';
+import SuspiciousActivity from './suspicious-activity';
+import TeamInvite from './team-invite';
+import TwoFactor from './two-factor';
+import UsageWarning from './usage-warning';
+import Verify from './verify';
+import WeeklyDigest from './weekly-digest';
 
 interface TemplateEntry {
 	// biome-ignore lint/suspicious/noExplicitAny: template props vary per component

@@ -201,22 +201,26 @@ pub async fn request_streaming(
 /// Handle a server-to-client JSON-RPC request received during streaming.
 ///
 /// Currently handles:
-/// - `session/request_permission`: Auto-approves with "allow_once" so the
-///   ACP agent can proceed with tool execution. The request is also forwarded
-///   as a notification for UI display.
+/// - `session/request_permission`: Auto-approves with the best available
+///   option so the ACP agent can proceed with tool execution. The request
+///   is also forwarded as a notification for UI display.
 async fn handle_server_request(
 	bridge: &mut BridgeProcess,
 	req: &crate::protocol::JsonRpcServerRequest,
 	notification_tx: &mpsc::UnboundedSender<JsonRpcNotification>,
 ) -> Result<(), BridgeError> {
 	if req.method == "session/request_permission" {
-		// Auto-approve: respond with "allow_once" so the agent can continue.
+		// Pick the best option from the request params, matching the
+		// auto-approve logic in simse-acp/src/permission.rs.
+		let outcome = pick_permission_outcome(req.params.as_ref());
+
+		// The result must match ACP's PermissionResult format:
+		// { outcome: { outcome: "selected"|"cancelled", optionId?: "..." } }
 		let response = serde_json::json!({
 			"jsonrpc": "2.0",
 			"id": req.id,
 			"result": {
-				"outcome": "selected",
-				"optionId": "allow_once"
+				"outcome": outcome
 			}
 		});
 		let line = serde_json::to_string(&response)
@@ -232,6 +236,48 @@ async fn handle_server_request(
 	});
 
 	Ok(())
+}
+
+/// Pick the best permission option from a `session/request_permission` request.
+///
+/// Prefers `allow_always` > `allow_once` > first option.
+/// Returns a `PermissionOutcome` JSON value matching the ACP protocol format.
+fn pick_permission_outcome(params: Option<&serde_json::Value>) -> serde_json::Value {
+	if let Some(option_id) = pick_option_id(params) {
+		serde_json::json!({ "outcome": "selected", "optionId": option_id })
+	} else {
+		serde_json::json!({ "outcome": "cancelled" })
+	}
+}
+
+/// Extract the best `optionId` from the permission request's `options` array.
+///
+/// Each option has `optionId` (the ID to return) and `kind` (the type, e.g.
+/// `"allow_once"`, `"allow_always"`). This matches the auto-approve strategy
+/// in `simse-acp/src/permission.rs::resolve_auto_approve`.
+fn pick_option_id(params: Option<&serde_json::Value>) -> Option<String> {
+	let options = params?.get("options")?.as_array()?;
+
+	// Prefer allow_always
+	for opt in options {
+		if opt.get("kind").and_then(|v| v.as_str()) == Some("allow_always") {
+			return opt.get("optionId").and_then(|v| v.as_str()).map(String::from);
+		}
+	}
+
+	// Fallback to allow_once
+	for opt in options {
+		if opt.get("kind").and_then(|v| v.as_str()) == Some("allow_once") {
+			return opt.get("optionId").and_then(|v| v.as_str()).map(String::from);
+		}
+	}
+
+	// Fallback to first option
+	options
+		.first()?
+		.get("optionId")
+		.and_then(|v| v.as_str())
+		.map(String::from)
 }
 
 #[cfg(test)]
@@ -345,6 +391,70 @@ mod tests {
 		}
 
 		kill_bridge(bridge).await;
+	}
+
+	#[test]
+	fn pick_option_id_prefers_allow_always() {
+		let params = serde_json::json!({
+			"options": [
+				{ "optionId": "reject", "kind": "reject_once" },
+				{ "optionId": "once", "kind": "allow_once" },
+				{ "optionId": "always", "kind": "allow_always" }
+			]
+		});
+		assert_eq!(pick_option_id(Some(&params)).as_deref(), Some("always"));
+	}
+
+	#[test]
+	fn pick_option_id_falls_back_to_allow_once() {
+		let params = serde_json::json!({
+			"options": [
+				{ "optionId": "reject", "kind": "reject_once" },
+				{ "optionId": "once", "kind": "allow_once" }
+			]
+		});
+		assert_eq!(pick_option_id(Some(&params)).as_deref(), Some("once"));
+	}
+
+	#[test]
+	fn pick_option_id_falls_back_to_first() {
+		let params = serde_json::json!({
+			"options": [
+				{ "optionId": "reject", "kind": "reject_once" }
+			]
+		});
+		assert_eq!(pick_option_id(Some(&params)).as_deref(), Some("reject"));
+	}
+
+	#[test]
+	fn pick_option_id_none_when_empty() {
+		let params = serde_json::json!({ "options": [] });
+		assert!(pick_option_id(Some(&params)).is_none());
+	}
+
+	#[test]
+	fn pick_option_id_none_when_no_params() {
+		assert!(pick_option_id(None).is_none());
+	}
+
+	#[test]
+	fn pick_permission_outcome_selected() {
+		let params = serde_json::json!({
+			"options": [
+				{ "optionId": "once", "kind": "allow_once" }
+			]
+		});
+		let outcome = pick_permission_outcome(Some(&params));
+		assert_eq!(outcome["outcome"], "selected");
+		assert_eq!(outcome["optionId"], "once");
+	}
+
+	#[test]
+	fn pick_permission_outcome_cancelled_when_no_options() {
+		let params = serde_json::json!({ "options": [] });
+		let outcome = pick_permission_outcome(Some(&params));
+		assert_eq!(outcome["outcome"], "cancelled");
+		assert!(outcome.get("optionId").is_none());
 	}
 
 	#[tokio::test]

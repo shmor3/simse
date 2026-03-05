@@ -1621,6 +1621,7 @@ dependencies = [
  "clap",
  "crossterm",
  "futures",
+ "portable-pty",
  "pulldown-cmark",
  "ratatui",
  "ratatui-testlib",

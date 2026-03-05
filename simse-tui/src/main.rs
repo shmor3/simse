@@ -23,10 +23,7 @@ use std::io;
 use std::path::PathBuf;
 
 use crossterm::{
-	event::{
-		DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEventKind,
-		KeyModifiers,
-	},
+	event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers},
 	execute,
 	terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -57,18 +54,14 @@ impl LoopCallbacks for TuiLoopCallbacks {
 async fn main() -> io::Result<()> {
 	enable_raw_mode()?;
 	let mut stdout = io::stdout();
-	execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+	execute!(stdout, EnterAlternateScreen)?;
 	let backend = CrosstermBackend::new(stdout);
 	let mut terminal = Terminal::new(backend)?;
 
 	let result = run_app(&mut terminal).await;
 
 	disable_raw_mode()?;
-	execute!(
-		terminal.backend_mut(),
-		LeaveAlternateScreen,
-		DisableMouseCapture
-	)?;
+	execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
 	terminal.show_cursor()?;
 
 	result

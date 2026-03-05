@@ -21,6 +21,7 @@ pub mod tool_call_box;
 
 use std::io;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use crossterm::{
 	event::{Event, EventStream, KeyCode, KeyEventKind, KeyModifiers},
@@ -29,7 +30,7 @@ use crossterm::{
 };
 use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 
 use app::{update, view, App, AppMessage};
 use cli_args::parse_cli_args;
@@ -80,8 +81,9 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 		server_name: cli.server.clone(),
 	};
 	let config = simse_bridge::config::load_config(&config_options);
-	let mut runtime = event_loop::TuiRuntime::new(config);
-	runtime.verbose = cli.verbose;
+	let mut rt = event_loop::TuiRuntime::new(config);
+	rt.verbose = cli.verbose;
+	let runtime = Arc::new(Mutex::new(rt));
 
 	let mut app = App::new();
 	let (msg_tx, mut msg_rx) = mpsc::unbounded_channel::<AppMessage>();
@@ -110,18 +112,25 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 		}
 
 		// Dispatch pending bridge action (e.g. after confirming factory-reset).
+		// Use try_lock to avoid blocking the UI while the agentic loop runs.
 		if let Some(action) = app.pending_bridge_action.take() {
-			let result_msg = runtime.dispatch_bridge_action(action).await;
-			app = update(app, result_msg);
+			if let Ok(mut rt) = runtime.try_lock() {
+				let result_msg = rt.dispatch_bridge_action(action).await;
+				app = update(app, result_msg);
+			} else {
+				// Runtime busy (agentic loop running), defer until next iteration.
+				app.pending_bridge_action = Some(action);
+			}
 		}
 
 		// Dispatch pending chat message through the agentic loop.
 		if let Some(text) = app.pending_chat_message.take() {
 			// Lazily connect to ACP on first chat message.
-			if !runtime.is_connected() && !runtime.needs_onboarding() {
-				match runtime.connect().await {
+			let mut rt = runtime.lock().await;
+			if !rt.is_connected() && !rt.needs_onboarding() {
+				match rt.connect().await {
 					Ok(()) => {
-						let ctx = runtime.build_command_context();
+						let ctx = rt.build_command_context();
 						app = update(app, AppMessage::RefreshContext(ctx));
 					}
 					Err(e) => {
@@ -133,20 +142,25 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 					}
 				}
 			}
+			drop(rt);
 
-			let tx = msg_tx.clone();
-			let callbacks = TuiLoopCallbacks { tx: tx.clone() };
 			app = update(app, AppMessage::StreamStart);
 			terminal.draw(|frame| view(&app, frame))?;
 
-			match runtime.handle_submit(&text, &callbacks).await {
-				Ok(final_text) => {
-					app = update(app, AppMessage::StreamEnd { text: final_text });
+			// Spawn the agentic loop as a background task so the UI stays responsive.
+			let rt = Arc::clone(&runtime);
+			let tx = msg_tx.clone();
+			tokio::spawn(async move {
+				let callbacks = TuiLoopCallbacks { tx: tx.clone() };
+				match rt.lock().await.handle_submit(&text, &callbacks).await {
+					Ok(final_text) => {
+						let _ = tx.send(AppMessage::StreamEnd { text: final_text });
+					}
+					Err(e) => {
+						let _ = tx.send(AppMessage::LoopError(e.to_string()));
+					}
 				}
-				Err(e) => {
-					app = update(app, AppMessage::LoopError(e.to_string()));
-				}
-			}
+			});
 		}
 
 		if app.should_quit {

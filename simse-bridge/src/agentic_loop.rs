@@ -450,6 +450,7 @@ pub async fn run_agentic_loop(
 					name: tc.name.clone(),
 					output: "Permission denied by user.".into(),
 					is_error: true,
+					duration_ms: None,
 					diff: None,
 				});
 				continue;
@@ -603,6 +604,7 @@ mod tests {
 			name: "search".into(),
 			output: "Found 3 results".into(),
 			is_error: false,
+			duration_ms: None,
 			diff: None,
 		};
 		let turn = LoopTurn {
@@ -713,6 +715,7 @@ mod tests {
 			name: "test".into(),
 			output: "ok".into(),
 			is_error: false,
+			duration_ms: None,
 			diff: None,
 		});
 		cb.on_turn_complete(&LoopTurn {

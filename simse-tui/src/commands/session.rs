@@ -6,7 +6,7 @@ use super::{BridgeAction, CommandContext, CommandOutput};
 /// `/sessions` -- list saved sessions.
 pub fn handle_sessions(_args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 	if ctx.sessions.is_empty() {
-		return vec![CommandOutput::Info("No saved sessions.".into())];
+		return vec![CommandOutput::Info("No saved sessions. Start chatting to create one.".into())];
 	}
 
 	let headers = vec![
@@ -197,7 +197,7 @@ mod tests {
 	fn sessions_empty_returns_info() {
 		let out = handle_sessions("", &empty_ctx());
 		assert_eq!(out.len(), 1);
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "No saved sessions."));
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "No saved sessions. Start chatting to create one."));
 	}
 
 	#[test]

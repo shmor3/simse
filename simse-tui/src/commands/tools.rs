@@ -5,7 +5,7 @@ use super::{CommandContext, CommandOutput};
 /// `/tools [filter]` -- list available tools, optionally filtering by name.
 pub fn handle_tools(args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 	if ctx.tool_defs.is_empty() {
-		return vec![CommandOutput::Info("No tools registered.".into())];
+		return vec![CommandOutput::Info("No tools registered. Connect to an ACP server with /setup to get started.".into())];
 	}
 
 	let filter = args.trim();
@@ -44,7 +44,7 @@ pub fn handle_tools(args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 /// `/agents` -- list available agents.
 pub fn handle_agents(_args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 	if ctx.agents.is_empty() {
-		return vec![CommandOutput::Info("No agents configured.".into())];
+		return vec![CommandOutput::Info("No agents configured. Add agent files to .simse/agents/ to define custom agents.".into())];
 	}
 
 	let rows: Vec<Vec<String>> = ctx
@@ -67,7 +67,7 @@ pub fn handle_agents(_args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 /// `/skills` -- list available skills.
 pub fn handle_skills(_args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 	if ctx.skills.is_empty() {
-		return vec![CommandOutput::Info("No skills configured.".into())];
+		return vec![CommandOutput::Info("No skills configured. Add skills to .simse/skills/ to extend functionality.".into())];
 	}
 
 	let rows: Vec<Vec<String>> = ctx
@@ -153,7 +153,7 @@ mod tests {
 	#[test]
 	fn tools_empty_returns_info() {
 		let out = handle_tools("", &empty_ctx());
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "No tools registered."));
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "No tools registered. Connect to an ACP server with /setup to get started."));
 	}
 
 	#[test]
@@ -234,7 +234,7 @@ mod tests {
 	#[test]
 	fn agents_empty_returns_info() {
 		let out = handle_agents("", &empty_ctx());
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "No agents configured."));
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "No agents configured. Add agent files to .simse/agents/ to define custom agents."));
 	}
 
 	#[test]
@@ -259,7 +259,7 @@ mod tests {
 	#[test]
 	fn skills_empty_returns_info() {
 		let out = handle_skills("", &empty_ctx());
-		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "No skills configured."));
+		assert!(matches!(&out[0], CommandOutput::Info(msg) if msg == "No skills configured. Add skills to .simse/skills/ to extend functionality."));
 	}
 
 	#[test]

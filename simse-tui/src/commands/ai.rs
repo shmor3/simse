@@ -38,7 +38,7 @@ pub fn handle_chain(args: &str) -> Vec<CommandOutput> {
 pub fn handle_prompts(_args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 	if ctx.prompts.is_empty() {
 		return vec![CommandOutput::Info(
-			"No prompt templates configured.".into(),
+			"No prompt templates configured. Add prompts to .simse/prompts.json.".into(),
 		)];
 	}
 
@@ -164,7 +164,7 @@ mod tests {
 	fn prompts_empty_returns_info() {
 		let out = handle_prompts("", &empty_ctx());
 		assert!(
-			matches!(&out[0], CommandOutput::Info(msg) if msg == "No prompt templates configured.")
+			matches!(&out[0], CommandOutput::Info(msg) if msg == "No prompt templates configured. Add prompts to .simse/prompts.json.")
 		);
 	}
 

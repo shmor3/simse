@@ -46,7 +46,7 @@ pub fn handle_config(args: &str, ctx: &CommandContext) -> Vec<CommandOutput> {
 	let key = args.trim();
 	if key.is_empty() {
 		if ctx.config_values.is_empty() {
-			vec![CommandOutput::Info("No configuration loaded.".into())]
+			vec![CommandOutput::Info("No configuration loaded. Run /init to create project configuration, or /setup for first-time setup.".into())]
 		} else {
 			let headers = vec!["Key".into(), "Value".into()];
 			let rows: Vec<Vec<String>> = ctx
@@ -199,7 +199,7 @@ mod tests {
 		assert_eq!(out.len(), 1);
 		assert!(matches!(
 			&out[0],
-			CommandOutput::Info(msg) if msg == "No configuration loaded."
+			CommandOutput::Info(msg) if msg == "No configuration loaded. Run /init to create project configuration, or /setup for first-time setup."
 		));
 	}
 

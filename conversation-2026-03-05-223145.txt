@@ -1,7 +1,0 @@
-
- ▐▛███▜▌   Claude Code v2.1.69
-▝▜█████▛▘  Opus 4.6 · Claude Pro
-  ▘▘ ▝▝    /workspaces/simse
-
-❯ /usage 
-  ⎿  Status dialog dismissed

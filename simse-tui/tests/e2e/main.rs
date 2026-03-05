@@ -11,6 +11,7 @@
 
 mod acp_integration;
 mod autocomplete;
+mod command_feedback;
 mod commands_config;
 mod commands_files;
 mod commands_library;

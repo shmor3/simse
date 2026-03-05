@@ -3,10 +3,13 @@
 //!
 //! Config commands exercise three patterns:
 //!
-//! - **Info output** (`/config` with no loaded config) -- rendered to screen.
+//! - **Info output** (`/config` with no loaded config) -- rendered to screen
+//!   with actionable guidance.
 //! - **Overlay transitions** (`/settings`, `/setup`) -- change `app.screen`.
-//! - **Bridge requests** (`/init`, `/factory-reset`) -- stored in
-//!   `app.pending_bridge_action` for the event loop to dispatch.
+//! - **Bridge requests** (`/init`) -- stored in `app.pending_bridge_action`
+//!   with a feedback message on screen.
+//! - **Confirmation dialog** (`/factory-reset`) -- opens a confirm screen
+//!   before creating a bridge action.
 
 use simse_tui::app::Screen;
 use simse_tui::commands::BridgeAction;
@@ -14,7 +17,7 @@ use simse_tui::commands::BridgeAction;
 use crate::harness::SimseTestHarness;
 
 // ===================================================================
-// 1. /config shows "No configuration loaded" when config_values is empty
+// 1. /config shows actionable guidance when config_values is empty
 // ===================================================================
 
 #[test]
@@ -22,8 +25,9 @@ fn config_command_shows_no_config() {
 	let mut h = SimseTestHarness::new();
 	h.submit("/config");
 	// Default CommandContext has an empty config_values vec, so the handler
-	// returns CommandOutput::Info("No configuration loaded.").
+	// returns an Info message with actionable guidance.
 	h.assert_contains("No configuration loaded");
+	h.assert_contains("/init");
 }
 
 // ===================================================================
@@ -62,6 +66,9 @@ fn init_command_creates_bridge_action() {
 	);
 
 	h.submit("/init");
+
+	// Verify feedback message appears on screen.
+	h.assert_contains("Initializing project configuration...");
 
 	let action = h
 		.app
@@ -118,6 +125,10 @@ fn factory_reset_opens_confirm_dialog() {
 		"Expected Screen::Confirm after /factory-reset, got: {:?}",
 		h.app.screen
 	);
+
+	// Verify the confirmation message appears on screen.
+	h.assert_contains("Are you sure");
+
 	assert!(
 		h.app.pending_bridge_action.is_none(),
 		"Should NOT have a pending bridge action before confirming"

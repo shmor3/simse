@@ -3,7 +3,8 @@
 //!
 //! Library commands produce `BridgeRequest(BridgeAction::Library*)` items that
 //! are stored in `app.pending_bridge_action` for the event loop to dispatch
-//! asynchronously via the bridge.
+//! asynchronously via the bridge.  Each also emits an Info feedback message
+//! that should appear on screen.
 
 use simse_tui::commands::BridgeAction;
 
@@ -22,6 +23,9 @@ fn add_command_creates_bridge_action() {
 	);
 
 	h.submit("/add topic some text");
+
+	// Verify feedback message appears on screen.
+	h.assert_contains("Adding to library...");
 
 	let action = h
 		.app
@@ -52,6 +56,9 @@ fn search_command_creates_bridge_action() {
 
 	h.submit("/search query");
 
+	// Verify feedback message appears on screen.
+	h.assert_contains("Searching library for: query");
+
 	let action = h
 		.app
 		.pending_bridge_action
@@ -79,6 +86,9 @@ fn recommend_command_creates_bridge_action() {
 	);
 
 	h.submit("/recommend patterns");
+
+	// Verify feedback message appears on screen.
+	h.assert_contains("Getting recommendations...");
 
 	let action = h
 		.app
@@ -108,6 +118,9 @@ fn topics_command_creates_bridge_action() {
 
 	h.submit("/topics");
 
+	// Verify feedback message appears on screen.
+	h.assert_contains("Listing library topics...");
+
 	let action = h
 		.app
 		.pending_bridge_action
@@ -130,6 +143,9 @@ fn volumes_command_creates_bridge_action() {
 	);
 
 	h.submit("/volumes rust");
+
+	// Verify feedback message appears on screen.
+	h.assert_contains("Listing library volumes...");
 
 	let action = h
 		.app
@@ -159,6 +175,9 @@ fn get_command_creates_bridge_action() {
 
 	h.submit("/get id-42");
 
+	// Verify feedback message appears on screen.
+	h.assert_contains("Retrieving volume...");
+
 	let action = h
 		.app
 		.pending_bridge_action
@@ -186,6 +205,9 @@ fn delete_command_creates_bridge_action() {
 	);
 
 	h.submit("/delete id-99");
+
+	// Verify feedback message appears on screen.
+	h.assert_contains("Deleting volume...");
 
 	let action = h
 		.app

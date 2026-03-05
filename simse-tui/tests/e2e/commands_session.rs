@@ -3,7 +3,8 @@
 //!
 //! Session commands that require async bridge operations produce
 //! `BridgeRequest(BridgeAction::*)` items stored in `app.pending_bridge_action`
-//! for the event loop to dispatch.  Commands that return sync info or success
+//! for the event loop to dispatch.  Each also emits an Info feedback message
+//! that should appear on screen.  Commands that return sync info or success
 //! messages are rendered directly to the screen.
 
 use simse_tui::commands::BridgeAction;
@@ -11,7 +12,7 @@ use simse_tui::commands::BridgeAction;
 use crate::harness::SimseTestHarness;
 
 // ===================================================================
-// 1. /sessions shows "No saved sessions" when list is empty
+// 1. /sessions shows actionable guidance when list is empty
 // ===================================================================
 
 #[test]
@@ -19,8 +20,9 @@ fn sessions_command_shows_no_sessions() {
 	let mut h = SimseTestHarness::new();
 	h.submit("/sessions");
 	// Default CommandContext has an empty sessions vec, so the handler returns
-	// CommandOutput::Info("No saved sessions."), rendered as an Info item.
+	// an Info with actionable guidance.
 	h.assert_contains("No saved sessions");
+	h.assert_contains("Start chatting");
 }
 
 // ===================================================================
@@ -36,6 +38,9 @@ fn resume_command_creates_bridge_action() {
 	);
 
 	h.submit("/resume sess-1");
+
+	// Verify feedback message appears on screen.
+	h.assert_contains("Resuming session...");
 
 	let action = h
 		.app
@@ -65,6 +70,9 @@ fn rename_command_creates_bridge_action() {
 
 	h.submit("/rename Cool Name");
 
+	// Verify feedback message appears on screen.
+	h.assert_contains("Renaming session to: Cool Name");
+
 	let action = h
 		.app
 		.pending_bridge_action
@@ -93,6 +101,9 @@ fn server_command_creates_bridge_action() {
 
 	h.submit("/server ollama");
 
+	// Verify feedback message appears on screen.
+	h.assert_contains("Switching to server: ollama");
+
 	let action = h
 		.app
 		.pending_bridge_action
@@ -120,6 +131,9 @@ fn model_command_creates_bridge_action() {
 	);
 
 	h.submit("/model gpt-4o");
+
+	// Verify feedback message appears on screen.
+	h.assert_contains("Switching to model: gpt-4o");
 
 	let action = h
 		.app
@@ -162,6 +176,9 @@ fn acp_restart_creates_bridge_action() {
 	);
 
 	h.submit("/acp restart");
+
+	// Verify feedback message appears on screen.
+	h.assert_contains("Restarting ACP connection...");
 
 	let action = h
 		.app

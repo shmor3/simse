@@ -131,7 +131,7 @@ fn context_command_shows_stats() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 8. /compact produces a bridge action
+// 8. /compact produces a bridge action with feedback
 // ═══════════════════════════════════════════════════════════════
 
 #[test]
@@ -143,6 +143,9 @@ fn compact_command() {
 	);
 
 	h.submit("/compact");
+
+	// Verify feedback message appears on screen.
+	h.assert_contains("Compacting conversation history...");
 
 	// /compact returns BridgeRequest(Compact), which is stored as a pending
 	// bridge action for the event loop to pick up.

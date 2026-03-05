@@ -1,10 +1,16 @@
 name = "simse-landing"
-pages_build_output_dir = "./dist"
 compatibility_date = "2026-02-28"
+pages_build_output_dir = "./build/client"
 
 routes = [{ pattern = "simse.dev", custom_domain = true }]
 
 [[d1_databases]]
-binding = "simse_waitlist"
+binding = "DB"
 database_name = "simse_waitlist"
 database_id = "e5659e77-878c-440c-bbf6-dd74a324938b"
+
+[[queues.producers]]
+queue = "simse-landing-comms"
+binding = "COMMS_QUEUE"
+
+# No RESEND_API_KEY — emails enqueued to simse-landing-comms → simse-mailer

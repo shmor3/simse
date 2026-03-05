@@ -11,7 +11,11 @@
 		"resolveJsonModule": true,
 		"isolatedModules": true,
 		"noEmit": true,
-		"types": ["@cloudflare/workers-types"]
+		"types": ["@cloudflare/workers-types", "vite/client"],
+		"paths": {
+			"~/*": ["./app/*"]
+		},
+		"rootDirs": [".", "./.react-router/types"]
 	},
-	"include": ["src", "functions"]
+	"include": ["app", ".react-router/types/**/*"]
 }

@@ -1,10 +1,14 @@
+import { reactRouter } from '@react-router/dev/vite';
+import { cloudflareDevProxy } from '@react-router/dev/vite/cloudflare';
 import tailwindcss from '@tailwindcss/vite';
-import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
+import tsconfigPaths from 'vite-tsconfig-paths';
 
 export default defineConfig({
-	plugins: [react(), tailwindcss()],
-	preview: {
-		allowedHosts: ['rog.solarflare-mintaka.ts.net'],
-	},
+	plugins: [
+		cloudflareDevProxy(),
+		reactRouter(),
+		tailwindcss(),
+		tsconfigPaths(),
+	],
 });

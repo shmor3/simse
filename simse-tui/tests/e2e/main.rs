@@ -26,6 +26,7 @@ pub mod harness;
 mod input;
 mod onboarding;
 mod overlays;
+mod real_acp;
 mod runtime_harness;
 mod setup_wizard;
 mod startup;

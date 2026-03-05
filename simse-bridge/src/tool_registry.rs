@@ -605,6 +605,7 @@ impl ToolRegistry {
 					name: call.name.clone(),
 					output: format!("Unknown tool: \"{}\"", call.name),
 					is_error: true,
+					duration_ms: None,
 					diff: None,
 				};
 			}
@@ -623,6 +624,7 @@ impl ToolRegistry {
 					name: call.name.clone(),
 					output,
 					is_error: false,
+					duration_ms: None,
 					diff: raw.diff,
 				}
 			}
@@ -631,6 +633,7 @@ impl ToolRegistry {
 				name: call.name.clone(),
 				output: format!("Tool error: {err}"),
 				is_error: true,
+				duration_ms: None,
 				diff: None,
 			},
 		}
@@ -685,6 +688,9 @@ impl ToolRegistry {
 					);
 					p
 				},
+				category: Default::default(),
+				annotations: None,
+				timeout_ms: None,
 				max_output_chars: None,
 			},
 			LibrarySearchHandler {
@@ -716,6 +722,9 @@ impl ToolRegistry {
 					);
 					p
 				},
+				category: Default::default(),
+				annotations: None,
+				timeout_ms: None,
 				max_output_chars: None,
 			},
 			LibraryShelveHandler {
@@ -741,6 +750,9 @@ impl ToolRegistry {
 					);
 					p
 				},
+				category: Default::default(),
+				annotations: None,
+				timeout_ms: None,
 				max_output_chars: None,
 			},
 			VfsReadHandler {
@@ -773,6 +785,9 @@ impl ToolRegistry {
 					);
 					p
 				},
+				category: Default::default(),
+				annotations: None,
+				timeout_ms: None,
 				max_output_chars: None,
 			},
 			VfsWriteHandler {
@@ -798,6 +813,9 @@ impl ToolRegistry {
 					);
 					p
 				},
+				category: Default::default(),
+				annotations: None,
+				timeout_ms: None,
 				max_output_chars: None,
 			},
 			VfsListHandler {
@@ -822,6 +840,9 @@ impl ToolRegistry {
 					);
 					p
 				},
+				category: Default::default(),
+				annotations: None,
+				timeout_ms: None,
 				max_output_chars: None,
 			},
 			VfsTreeHandler {
@@ -1001,6 +1022,9 @@ impl ToolRegistry {
 					name: registry_name,
 					description,
 					parameters,
+					category: Default::default(),
+					annotations: None,
+					timeout_ms: None,
 					max_output_chars: None,
 				};
 
@@ -1113,6 +1137,9 @@ mod tests {
 			name: name.into(),
 			description: format!("Test tool: {name}"),
 			parameters: HashMap::new(),
+			category: Default::default(),
+			annotations: None,
+			timeout_ms: None,
 			max_output_chars: None,
 		}
 	}

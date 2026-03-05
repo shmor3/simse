@@ -392,6 +392,9 @@ fn tool_definition_format_truncate_and_conversation_flow() {
 		name: "file_read".into(),
 		description: "Read a file from disk".into(),
 		parameters: params,
+		category: simse_ui_core::tools::ToolCategory::default(),
+		annotations: None,
+		timeout_ms: None,
 		max_output_chars: Some(100),
 	};
 

@@ -2306,8 +2306,11 @@ dependencies = [
 name = "simse-tui"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "chrono",
  "clap",
  "crossterm",
+ "dirs 6.0.0",
  "futures",
  "portable-pty",
  "pulldown-cmark",
@@ -2315,12 +2318,13 @@ dependencies = [
  "ratatui-testlib",
  "serde",
  "serde_json",
- "simse-bridge",
+ "simse-core",
  "simse-ui-core",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tui-textarea",
+ "uuid",
  "vt100-ctt",
 ]
 

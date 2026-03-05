@@ -37,24 +37,26 @@ use tokio::sync::{mpsc, Mutex};
 
 use app::{update, view, App, AppMessage};
 use cli_args::parse_cli_args;
-use simse_bridge::agentic_loop::LoopCallbacks;
 
-/// Callbacks that forward agentic loop events to the TUI as AppMessages.
-struct TuiLoopCallbacks {
+/// Create `LoopCallbacks` that forward agentic loop events to the TUI as
+/// `AppMessage`s via an unbounded channel.
+fn create_loop_callbacks(
 	tx: mpsc::UnboundedSender<AppMessage>,
-}
-
-impl LoopCallbacks for TuiLoopCallbacks {
-	fn on_stream_start(&self) {
-		let _ = self.tx.send(AppMessage::StreamStart);
-	}
-
-	fn on_stream_delta(&self, delta: &str) {
-		let _ = self.tx.send(AppMessage::StreamDelta(delta.to_string()));
-	}
-
-	fn on_error(&self, error: &str) {
-		let _ = self.tx.send(AppMessage::LoopError(error.to_string()));
+) -> simse_core::agentic_loop::LoopCallbacks {
+	let tx1 = tx.clone();
+	let tx2 = tx.clone();
+	let tx3 = tx.clone();
+	simse_core::agentic_loop::LoopCallbacks {
+		on_stream_start: Some(Box::new(move || {
+			let _ = tx1.send(AppMessage::StreamStart);
+		})),
+		on_stream_delta: Some(Box::new(move |delta: &str| {
+			let _ = tx2.send(AppMessage::StreamDelta(delta.to_string()));
+		})),
+		on_error: Some(Box::new(move |error: &simse_core::SimseError| {
+			let _ = tx3.send(AppMessage::LoopError(error.to_string()));
+		})),
+		..Default::default()
 	}
 }
 
@@ -80,14 +82,14 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 	let args: Vec<String> = std::env::args().collect();
 	let cli = parse_cli_args(&args);
 
-	let config_options = simse_bridge::config::ConfigOptions {
+	let config_options = crate::config::ConfigOptions {
 		data_dir: cli.data_dir.map(PathBuf::from),
 		work_dir: None,
 		default_agent: cli.agent.clone(),
 		log_level: None,
 		server_name: cli.server.clone(),
 	};
-	let config = simse_bridge::config::load_config(&config_options);
+	let config = crate::config::load_config(&config_options);
 	let mut rt = event_loop::TuiRuntime::new(config);
 	rt.verbose = cli.verbose;
 	let runtime = Arc::new(Mutex::new(rt));
@@ -158,8 +160,8 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 			let rt = Arc::clone(&runtime);
 			let tx = msg_tx.clone();
 			tokio::spawn(async move {
-				let callbacks = TuiLoopCallbacks { tx: tx.clone() };
-				match rt.lock().await.handle_submit(&text, &callbacks).await {
+				let callbacks = create_loop_callbacks(tx.clone());
+				match rt.lock().await.handle_submit(&text, callbacks).await {
 					Ok(final_text) => {
 						let _ = tx.send(AppMessage::StreamEnd { text: final_text });
 					}

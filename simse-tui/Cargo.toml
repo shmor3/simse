@@ -7,8 +7,8 @@ license.workspace = true
 
 [dependencies]
 simse-ui-core = { path = "../simse-ui-core" }
-simse-bridge = { path = "../simse-bridge" }
 simse-core = { path = "../simse-core" }
+async-trait = "0.1"
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 tui-textarea = { workspace = true }

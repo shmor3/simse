@@ -25,7 +25,6 @@ cd simse-vsh && cargo test     # Rust VSH engine tests
 cd simse-vnet && cargo test    # Rust vnet engine tests
 cd simse-core && cargo test    # Rust core orchestration tests
 cd simse-ui-core && cargo test # Rust UI core tests
-cd simse-bridge && cargo test  # Rust bridge tests
 cd simse-sandbox && cargo test # Rust sandbox engine tests
 cd simse-tui && cargo test     # Rust TUI tests (unit + integration)
 
@@ -57,8 +56,7 @@ simse-vsh/                  # Pure Rust crate — virtual shell engine (JSON-RPC
 simse-vnet/                 # Pure Rust crate — virtual network engine (JSON-RPC over stdio)
 simse-sandbox/              # Pure Rust crate — unified sandbox engine (JSON-RPC over stdio)
 simse-ui-core/              # Pure Rust crate — platform-agnostic UI logic (no I/O)
-simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Architecture)
-simse-bridge/               # Pure Rust crate — async I/O bridge (ACP client, config, sessions, storage)
+simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Architecture, depends on simse-core directly)
 simse-engine/               # Pure Rust crate — core engine
 simse-cdn/                  # TypeScript — CDN worker (R2 + KV, Cloudflare Worker)
 simse-cloud/                # TypeScript — SaaS web app (React Router + Cloudflare Pages)
@@ -219,11 +217,14 @@ simse-ui-core/              # Platform-agnostic UI logic (no I/O, no async)
     commands/                # Command registry (34 commands)
     config/                  # Settings schemas
 
-simse-tui/                  # Terminal UI (ratatui + crossterm + tokio)
+simse-tui/                  # Terminal UI (ratatui + crossterm + tokio, depends on simse-core directly)
   src/
     app.rs                  # App model (Elm Architecture: Model/Update/View)
-    event_loop.rs           # TuiRuntime: bridges App to simse-bridge
+    event_loop.rs           # TuiRuntime: bridges App to simse-core (ACP, tools, config, sessions)
     cli_args.rs             # CLI argument parsing
+    config.rs               # Config loading (8 files, agents, skills, SIMSE.md)
+    session_store.rs        # JSONL session persistence
+    json_io.rs              # JSON/JSONL utilities
     onboarding.rs           # First-run setup detection
     dispatch.rs             # Command dispatch routing
     markdown.rs             # Markdown→ratatui with syntax highlighting
@@ -236,17 +237,6 @@ simse-tui/                  # Terminal UI (ratatui + crossterm + tokio)
     dialogs/                # Permission + confirm dialogs
     overlays/               # Settings, librarian, setup, ollama wizard
     commands/               # Feature command handlers (library, session, config, files, ai, tools, meta)
-
-simse-bridge/               # Async I/O bridge (tokio)
-  src/
-    client.rs               # JSON-RPC client (subprocess management)
-    acp_client.rs           # ACP client (connect, generate, stream, embed)
-    config.rs               # Config loading (8 files, agents, skills, SIMSE.md)
-    session_store.rs        # JSONL session persistence
-    storage.rs              # Binary storage backend (SIMK format, gzip, atomic writes)
-    tool_registry.rs        # Tool registry (register, discover, execute)
-    agentic_loop.rs         # Agentic loop (conversation→ACP→parse→execute→repeat)
-    json_io.rs              # JSON/JSONL utilities
 ```
 
 ### CDN Worker

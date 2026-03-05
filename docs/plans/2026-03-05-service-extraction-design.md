@@ -23,6 +23,15 @@ Extract auth, payments, and email logic from simse-cloud into dedicated services
 - Services own their own emails (auth emails in simse-auth templates rendered by simse-mailer, payment emails owned by simse-payments)
 - simse-mailer is shared infrastructure for rendering + delivery
 - simse-api is the single entry point for simse-cloud
+- Fire-and-forget operations (emails, notifications) go through Cloudflare Queues; synchronous operations (auth, payments, reading data) use direct HTTP
+
+### Cloudflare Queues
+
+| Queue | Producer | Consumer | Message types |
+|-------|----------|----------|---------------|
+| `simse-auth-comms` | simse-auth | simse-mailer | emails + notifications |
+| `simse-api-comms` | simse-api | simse-mailer | emails + notifications |
+| `simse-landing-comms` | simse-landing | simse-mailer | emails |
 
 ---
 
@@ -73,13 +82,15 @@ Called by simse-api gateway on every authenticated request. Accepts Bearer token
 { "userId": "...", "teamId": "...", "role": "owner" }
 ```
 
-### Calls to simse-mailer
+### Sends to simse-mailer (via `simse-auth-comms` queue)
 
-- Registration: `{ template: "verify-email", to, props: { code } }`
-- Login (2FA): `{ template: "two-factor", to, props: { code } }`
-- Password reset: `{ template: "reset-password", to, props: { resetUrl } }`
-- Team invite: `{ template: "team-invite", to, props: { inviterName, teamName, inviteUrl } }`
-- Role change: `{ template: "role-change", to, props: { teamName, newRole } }`
+All email and notification sends use `env.COMMS_QUEUE.send(message)` (not HTTP):
+
+- Registration: `{ type: "email", template: "verify-email", to, props: { code } }`
+- Login (2FA): `{ type: "email", template: "two-factor", to, props: { code } }`
+- Password reset: `{ type: "email", template: "reset-password", to, props: { resetUrl } }`
+- Team invite: `{ type: "email", template: "team-invite", to, props: { inviterName, teamName, inviteUrl } }`
+- Role change: `{ type: "email", template: "role-change", to, props: { teamName, newRole } }`
 
 ---
 
@@ -124,9 +135,13 @@ Called by simse-api gateway on every authenticated request. Accepts Bearer token
 | Product | feature-announcement |
 | Waitlist | waitlist-welcome, waitlist-early-preview, waitlist-invite |
 
+### Queue consumer
+
+simse-mailer exports both `fetch` (HTTP) and `queue` (batch consumer) handlers. The queue handler processes all three producer queues (`simse-auth-comms`, `simse-api-comms`, `simse-landing-comms`). Each message is either `{ type: "email", template, to, props }` or `{ type: "notification", userId, kind, title, body, link }`.
+
 ### Auth between services
 
-Incoming requests from simse-auth, simse-payments, simse-api use `X-Service-Secret` header. Notification read endpoints accept `X-User-Id` from the gateway.
+Notification reads (GET/PUT) accessed via simse-api gateway with `X-User-Id` header. Email/notification writes go through queues (infrastructure-level trust — no auth needed).
 
 ---
 

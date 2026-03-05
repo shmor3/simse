@@ -159,18 +159,19 @@ pages_build_output_dir = "./build/client"
 
 routes = [{ pattern = "simse.dev", custom_domain = true }]
 
-[vars]
-API_URL = "https://api.simse.dev"
-
 [[d1_databases]]
 binding = "DB"
 database_name = "simse_waitlist"
 database_id = "e5659e77-878c-440c-bbf6-dd74a324938b"
 
-# No RESEND_API_KEY — emails sent via simse-api → simse-mailer
+[[queues.producers]]
+queue = "simse-landing-comms"
+binding = "COMMS_QUEUE"
+
+# No RESEND_API_KEY — emails enqueued to simse-landing-comms → simse-mailer
 ```
 
-**Changes:** `./dist` → `./build/client`, binding renamed from `simse_waitlist` to `DB`, removed `RESEND_API_KEY` (emails go through API), added `API_URL`.
+**Changes:** `./dist` → `./build/client`, binding renamed from `simse_waitlist` to `DB`, removed `RESEND_API_KEY`, added `COMMS_QUEUE` queue producer (emails go directly to simse-mailer queue).
 
 **Step 5: Update .gitignore** — add `.react-router/` to .gitignore
 
@@ -403,7 +404,6 @@ export async function action({ request, context }: Route.ActionArgs) {
 	}
 
 	const db = context.cloudflare.env.DB;
-	const apiUrl = context.cloudflare.env.API_URL;
 
 	let shouldEmail = false;
 	try {
@@ -425,16 +425,13 @@ export async function action({ request, context }: Route.ActionArgs) {
 		const origin = new URL(request.url).origin;
 		const unsubscribeUrl = `${origin}/unsubscribe?email=${encodeURIComponent(email)}`;
 
-		// Send welcome email via simse-api → simse-mailer
+		// Enqueue welcome email to simse-mailer via Cloudflare Queue
 		context.cloudflare.ctx.waitUntil(
-			fetch(`${apiUrl}/emails/send`, {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					template: 'waitlist-welcome',
-					to: email,
-					props: { unsubscribeUrl },
-				}),
+			context.cloudflare.env.COMMS_QUEUE.send({
+				type: 'email',
+				template: 'waitlist-welcome',
+				to: email,
+				props: { unsubscribeUrl },
 			}).catch(() => {}),
 		);
 	}
@@ -456,7 +453,7 @@ export default function Home() {
 - `context.env.simse_waitlist` → `context.cloudflare.env.DB`
 - `context.waitUntil()` → `context.cloudflare.ctx.waitUntil()`
 - `context.request` → `request` (direct param)
-- `sendWelcomeEmail(email, apiKey, url)` → `fetch(apiUrl/emails/send, { template, to, props })` (emails via API)
+- `sendWelcomeEmail(email, apiKey, url)` → `env.COMMS_QUEUE.send({ type: 'email', template, to, props })` (emails via queue)
 
 **Step 2: Update WaitlistForm to POST to current route**
 

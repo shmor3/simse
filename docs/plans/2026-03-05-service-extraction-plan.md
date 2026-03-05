@@ -70,9 +70,9 @@ binding = "DB"
 database_name = "simse-auth-db"
 database_id = "PLACEHOLDER_FILL_AFTER_CREATION"
 
-# Secrets (set via `wrangler secret put`):
-# MAILER_API_URL
-# MAILER_API_SECRET
+[[queues.producers]]
+queue = "simse-auth-comms"
+binding = "COMMS_QUEUE"
 ```
 
 **Step 3: Create tsconfig.json** (copy from simse-api)
@@ -106,8 +106,7 @@ dist/
 ```typescript
 export interface Env {
 	DB: D1Database;
-	MAILER_API_URL: string;
-	MAILER_API_SECRET: string;
+	COMMS_QUEUE: Queue;
 }
 
 export interface AuthContext {
@@ -250,36 +249,34 @@ feat(simse-auth): add database migration
 - Create: `simse-auth/src/lib/token.ts` (from `simse-api/src/lib/token.ts`)
 - Create: `simse-auth/src/lib/session.ts` (from `simse-api/src/lib/session.ts`)
 - Create: `simse-auth/src/lib/api-key.ts` (from `simse-api/src/lib/api-key.ts`)
-- Create: `simse-auth/src/lib/mailer.ts` (new — calls simse-mailer)
+- Create: `simse-auth/src/lib/comms.ts` (new — enqueues to COMMS_QUEUE)
 - Create: `simse-auth/src/schemas.ts` (from `simse-api/src/schemas.ts`)
 
 **Step 1: Copy db.ts, password.ts, token.ts, session.ts, api-key.ts, schemas.ts**
 
 These are direct copies from simse-api — identical code.
 
-**Step 2: Create src/lib/mailer.ts**
+**Step 2: Create src/lib/comms.ts**
 
 ```typescript
-export async function sendTemplateEmail(
-	mailerUrl: string,
-	mailerSecret: string,
+export async function sendEmail(
+	queue: Queue,
 	template: string,
 	to: string,
 	props: Record<string, string>,
 ): Promise<void> {
-	const res = await fetch(`${mailerUrl}/send`, {
-		method: 'POST',
-		headers: {
-			Authorization: `Bearer ${mailerSecret}`,
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify({ template, to, props }),
-	});
+	await queue.send({ type: 'email', template, to, props });
+}
 
-	if (!res.ok) {
-		const body = await res.text();
-		console.error(`Mailer error (${res.status}): ${body}`);
-	}
+export async function sendNotification(
+	queue: Queue,
+	userId: string,
+	kind: string,
+	title: string,
+	body: string,
+	link?: string,
+): Promise<void> {
+	await queue.send({ type: 'notification', userId, kind, title, body, link });
 }
 ```
 
@@ -301,14 +298,14 @@ feat(simse-auth): add lib helpers and schemas
 
 Copy from `simse-api/src/routes/auth.ts` with these additions:
 
-1. After registration, call simse-mailer with `verify-email` template
-2. After 2FA token creation in login, call simse-mailer with `two-factor` template
-3. After password reset token creation, call simse-mailer with `reset-password` template
+1. After registration, send `verify-email` to COMMS_QUEUE
+2. After 2FA token creation in login, send `two-factor` to COMMS_QUEUE
+3. After password reset token creation, send `reset-password` to COMMS_QUEUE
 
 ```typescript
 import { Hono } from 'hono';
 import { generateId } from '../lib/db';
-import { sendTemplateEmail } from '../lib/mailer';
+import { sendEmail } from '../lib/comms';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { createSession, deleteSession } from '../lib/session';
 import { createToken, generateCode, markTokenUsed, validateToken } from '../lib/token';
@@ -363,8 +360,8 @@ auth.post('/register', async (c) => {
 
 	const token = await createSession(db, userId);
 
-	// Send verification email
-	await sendTemplateEmail(c.env.MAILER_API_URL, c.env.MAILER_API_SECRET, 'verify-email', normalizedEmail, { code: verifyCode });
+	// Send verification email via queue
+	await sendEmail(c.env.COMMS_QUEUE, 'verify-email', normalizedEmail, { code: verifyCode });
 
 	return c.json({
 		data: {
@@ -396,8 +393,8 @@ auth.post('/login', async (c) => {
 
 	if (user.two_factor_enabled) {
 		const { id, code } = await createToken(db, user.id, '2fa', 10);
-		// Send 2FA code via email
-		await sendTemplateEmail(c.env.MAILER_API_URL, c.env.MAILER_API_SECRET, 'two-factor', user.email, { code });
+		// Send 2FA code via queue
+		await sendEmail(c.env.COMMS_QUEUE, 'two-factor', user.email, { code });
 		return c.json({ data: { requires2fa: true, pendingToken: id } });
 	}
 
@@ -462,7 +459,7 @@ auth.post('/reset-password', async (c) => {
 
 	if (user) {
 		const { code } = await createToken(db, user.id, 'password_reset', 60);
-		await sendTemplateEmail(c.env.MAILER_API_URL, c.env.MAILER_API_SECRET, 'reset-password', user.email, { code });
+		await sendEmail(c.env.COMMS_QUEUE, 'reset-password', user.email, { code });
 	}
 
 	return c.json({ data: { ok: true } });
@@ -747,7 +744,7 @@ Copy from `simse-api/src/routes/teams.ts` but use `X-User-Id` header and add mai
 ```typescript
 import { Hono } from 'hono';
 import { generateId } from '../lib/db';
-import { sendTemplateEmail } from '../lib/mailer';
+import { sendEmail } from '../lib/comms';
 import { inviteSchema } from '../schemas';
 import type { Env } from '../types';
 
@@ -831,7 +828,7 @@ teams.post('/me/invite', async (c) => {
 	// Get inviter name for email
 	const inviter = await db.prepare('SELECT name FROM users WHERE id = ?').bind(userId).first<{ name: string }>();
 
-	await sendTemplateEmail(c.env.MAILER_API_URL, c.env.MAILER_API_SECRET, 'team-invite', parsed.data.email, {
+	await sendEmail(c.env.COMMS_QUEUE, 'team-invite', parsed.data.email, {
 		inviterName: inviter?.name ?? 'A team member',
 		teamName: membership.team_name,
 		inviteUrl: `https://app.simse.dev/invite/${inviteId}`,
@@ -1051,7 +1048,7 @@ export interface Env {
 	PAYMENTS_API_URL: string;
 	PAYMENTS_API_SECRET: string;
 	MAILER_API_URL: string;
-	MAILER_API_SECRET: string;
+	COMMS_QUEUE: Queue;
 }
 
 export interface ValidateResponse {
@@ -1141,8 +1138,19 @@ async function proxyNotifications(c: any) {
 		return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } }, 401);
 	}
 
+	// POST /notifications → enqueue (fire-and-forget)
+	if (c.req.method === 'POST') {
+		const body = await c.req.json();
+		await c.env.COMMS_QUEUE.send({
+			type: 'notification',
+			userId: auth.userId,
+			...body,
+		});
+		return c.json({ data: { ok: true } });
+	}
+
+	// GET/PUT → proxy to mailer HTTP (needs response)
 	const headers = new Headers();
-	headers.set('Authorization', `Bearer ${c.env.MAILER_API_SECRET}`);
 	headers.set('Content-Type', 'application/json');
 	headers.set('X-User-Id', auth.userId);
 
@@ -1248,13 +1256,16 @@ routes = [
 
 # No database — pure gateway
 
+[[queues.producers]]
+queue = "simse-api-comms"
+binding = "COMMS_QUEUE"
+
 # Secrets (set via `wrangler secret put`):
 # AUTH_API_URL
 # AUTH_API_SECRET
 # PAYMENTS_API_URL
 # PAYMENTS_API_SECRET
-# MAILER_API_URL
-# MAILER_API_SECRET
+# MAILER_API_URL (for reading notifications)
 ```
 
 **Step 6: Verify build**
@@ -1484,10 +1495,61 @@ app.post('/send', async (c) => {
 
 Import the template registry from the copied email templates, look up by name, render to HTML, extract subject.
 
-**Step 5: Commit**
+**Step 5: Add queue consumer to src/index.ts**
+
+simse-mailer must export both `fetch` and `queue` handlers so it can process messages from all three producer queues:
+
+```typescript
+type CommsMessage =
+	| { type: 'email'; template: string; to: string; props?: Record<string, string> }
+	| { type: 'notification'; userId: string; kind: string; title: string; body: string; link?: string };
+
+export default {
+	async fetch(request: Request, env: Env): Promise<Response> {
+		return app.fetch(request, env);
+	},
+	async queue(batch: MessageBatch<CommsMessage>, env: Env): Promise<void> {
+		for (const message of batch.messages) {
+			const msg = message.body;
+			try {
+				if (msg.type === 'email') {
+					const { subject, html } = renderTemplate(msg.template, msg.props ?? {});
+					await sendEmail(env.RESEND_API_KEY, { to: msg.to, subject, html });
+				} else if (msg.type === 'notification') {
+					const id = crypto.randomUUID();
+					await env.DB.prepare(
+						'INSERT INTO notifications (id, user_id, type, title, body, link) VALUES (?, ?, ?, ?, ?, ?)',
+					)
+						.bind(id, msg.userId, msg.kind ?? 'info', msg.title, msg.body, msg.link ?? null)
+						.run();
+				}
+				message.ack();
+			} catch (e) {
+				console.error('Queue processing error:', e);
+				message.retry();
+			}
+		}
+	},
+};
+```
+
+**Step 6: Update wrangler.toml — add queue consumers**
+
+```toml
+[[queues.consumers]]
+queue = "simse-auth-comms"
+
+[[queues.consumers]]
+queue = "simse-api-comms"
+
+[[queues.consumers]]
+queue = "simse-landing-comms"
+```
+
+**Step 7: Commit**
 
 ```
-feat(simse-mailer): add email template rendering with React Email
+feat(simse-mailer): add email template rendering with React Email and queue consumer
 ```
 
 ---

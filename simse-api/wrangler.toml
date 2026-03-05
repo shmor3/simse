@@ -8,13 +8,15 @@ routes = [
   { pattern = "api.simse.dev", custom_domain = true }
 ]
 
-[[d1_databases]]
-binding = "DB"
-database_name = "simse-api-db"
-database_id = "a2a07725-b216-4ab0-bb60-6fd83db97e3d"
+# No database — pure gateway
+
+[[queues.producers]]
+queue = "simse-api-comms"
+binding = "COMMS_QUEUE"
 
 # Secrets (set via `wrangler secret put`):
+# AUTH_API_URL
+# AUTH_API_SECRET
 # PAYMENTS_API_URL
 # PAYMENTS_API_SECRET
-# MAILER_API_URL
-# MAILER_API_SECRET
+# MAILER_API_URL (for reading notifications)

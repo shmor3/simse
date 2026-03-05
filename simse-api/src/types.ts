@@ -1,12 +1,17 @@
 export interface Env {
-	DB: D1Database;
+	AUTH_API_URL: string;
+	AUTH_API_SECRET: string;
 	PAYMENTS_API_URL: string;
 	PAYMENTS_API_SECRET: string;
 	MAILER_API_URL: string;
-	MAILER_API_SECRET: string;
+	COMMS_QUEUE: Queue;
 }
 
-export interface AuthContext {
-	userId: string;
-	sessionId?: string;
+export interface ValidateResponse {
+	data: {
+		userId: string;
+		sessionId?: string;
+		teamId: string | null;
+		role: string | null;
+	};
 }

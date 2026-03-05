@@ -171,6 +171,7 @@ async fn hook_system_after_chains_results() {
 				output: format!("{} [transformed]", ctx.result.output),
 				is_error: ctx.result.is_error,
 				duration_ms: ctx.result.duration_ms,
+				diff: ctx.result.diff,
 			}
 		})
 	});
@@ -188,6 +189,7 @@ async fn hook_system_after_chains_results() {
 		output: "file contents".to_string(),
 		is_error: false,
 		duration_ms: Some(10),
+		diff: None,
 	};
 
 	let transformed = hs.run_after(request, result).await;
@@ -220,6 +222,7 @@ async fn hook_system_validate_concatenates_messages() {
 		output: "ok".to_string(),
 		is_error: false,
 		duration_ms: None,
+		diff: None,
 	};
 
 	let messages = hs.run_validate(request, result).await;
@@ -364,6 +367,7 @@ async fn hook_system_no_handlers_returns_defaults() {
 		output: "original".to_string(),
 		is_error: false,
 		duration_ms: None,
+		diff: None,
 	};
 	let after = hs.run_after(request2, result).await;
 	assert_eq!(after.output, "original");
@@ -380,6 +384,7 @@ async fn hook_system_no_handlers_returns_defaults() {
 		output: "ok".to_string(),
 		is_error: false,
 		duration_ms: None,
+		diff: None,
 	};
 	let messages = hs.run_validate(request3, result3).await;
 	assert!(messages.is_empty());

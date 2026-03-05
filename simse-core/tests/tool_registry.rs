@@ -867,6 +867,7 @@ fn test_tool_call_result_serde() {
 		output: "hello".to_string(),
 		is_error: false,
 		duration_ms: Some(42),
+		diff: None,
 	};
 	let json = serde_json::to_string(&result).unwrap();
 	let restored: ToolCallResult = serde_json::from_str(&json).unwrap();

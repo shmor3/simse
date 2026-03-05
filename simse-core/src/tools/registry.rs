@@ -145,6 +145,7 @@ impl ToolRegistry {
 					output: format!("Tool not found: \"{}\"", call.name),
 					is_error: true,
 					duration_ms: None,
+					diff: None,
 				};
 			}
 		};
@@ -161,6 +162,7 @@ impl ToolRegistry {
 					output: format!("Permission denied for tool: \"{}\"", call.name),
 					is_error: true,
 					duration_ms: None,
+					diff: None,
 				};
 			}
 		}
@@ -218,6 +220,7 @@ impl ToolRegistry {
 						output,
 						is_error: false,
 						duration_ms: Some(start.elapsed().as_millis() as u64),
+						diff: None,
 					}
 				}
 				Err(err) => {
@@ -231,6 +234,7 @@ impl ToolRegistry {
 						),
 						is_error: true,
 						duration_ms: Some(start.elapsed().as_millis() as u64),
+						diff: None,
 					}
 				}
 			}

@@ -1,16 +1,17 @@
-import { waitlistSchema } from '../../src/lib/schema';
-import { sendWelcomeEmail } from '../lib/send-email';
-import { validateEmail } from '../lib/validate-email';
+import Footer from '~/components/Footer';
+import Hero from '~/components/Hero';
+import { waitlistSchema } from '~/lib/schema';
+import { validateEmail } from '~/lib/validate-email.server';
+import type { Route } from './+types/home';
 
-interface Env {
-	simse_waitlist: D1Database;
-	RESEND_API_KEY: string;
+export function meta(): Route.MetaDescriptors {
+	return [{ title: 'simse — The assistant that evolves with you' }];
 }
 
-export const onRequestPost: PagesFunction<Env> = async (context) => {
+export async function action({ request, context }: Route.ActionArgs) {
 	let body: unknown;
 	try {
-		body = await context.request.json();
+		body = await request.json();
 	} catch {
 		return Response.json({ error: 'Invalid JSON' }, { status: 400 });
 	}
@@ -30,12 +31,11 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 		return Response.json({ error: validation.reason }, { status: 422 });
 	}
 
+	const db = context.cloudflare.env.DB;
+
 	let shouldEmail = false;
 	try {
-		// Insert new row, or re-subscribe if previously unsubscribed with a 24h cooldown.
-		// The WHERE clause prevents re-subscribing within 24h of unsubscribing,
-		// blocking subscribe/unsubscribe cycling that wastes emails.
-		const result = await context.env.simse_waitlist
+		const result = await db
 			.prepare(
 				`INSERT INTO waitlist (email, subscribed, updated_at) VALUES (?, 1, datetime('now'))
 				ON CONFLICT (email) DO UPDATE SET subscribed = 1, updated_at = datetime('now')
@@ -50,16 +50,28 @@ export const onRequestPost: PagesFunction<Env> = async (context) => {
 	}
 
 	if (shouldEmail) {
-		const origin = new URL(context.request.url).origin;
+		const origin = new URL(request.url).origin;
 		const unsubscribeUrl = `${origin}/unsubscribe?email=${encodeURIComponent(email)}`;
 
-		context.waitUntil(
-			sendWelcomeEmail(email, context.env.RESEND_API_KEY, unsubscribeUrl).catch(
-				() => {},
-			),
+		// Enqueue welcome email to simse-mailer via Cloudflare Queue
+		context.cloudflare.ctx.waitUntil(
+			context.cloudflare.env.COMMS_QUEUE.send({
+				type: 'email',
+				template: 'waitlist-welcome',
+				to: email,
+				props: { unsubscribeUrl },
+			}).catch(() => {}),
 		);
 	}
 
-	// Always return success to avoid leaking whether the email is already on the list
 	return Response.json({ success: true });
-};
+}
+
+export default function Home() {
+	return (
+		<>
+			<Hero />
+			<Footer />
+		</>
+	);
+}

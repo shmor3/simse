@@ -192,6 +192,11 @@ impl TuiRuntime {
 			system_prompt: self.config.workspace_prompt.clone(),
 			agent_manages_tools: false,
 			session_id: self.session_id.clone(),
+			user_input: if self.session_id.is_some() {
+				Some(input.to_string())
+			} else {
+				None
+			},
 		};
 
 		let result = agentic_loop::run_agentic_loop(
@@ -521,12 +526,10 @@ impl TuiRuntime {
 					.as_ref()
 					.ok_or(RuntimeError::NotConnected)?;
 
-				self.conversation.add_user(&format!(
-					"[chain:{name}] {args}"
-				));
+				let chain_input = format!("[chain:{name}] {args}");
+				self.conversation.add_user(&chain_input);
 
 				self.abort_signal.store(false, Ordering::Relaxed);
-
 				let options = AgenticLoopOptions {
 					max_turns: 10,
 					server_name: self.config.default_server.clone(),
@@ -534,6 +537,11 @@ impl TuiRuntime {
 					system_prompt: self.config.workspace_prompt.clone(),
 					agent_manages_tools: false,
 					session_id: self.session_id.clone(),
+					user_input: if self.session_id.is_some() {
+						Some(chain_input)
+					} else {
+						None
+					},
 				};
 
 				let callbacks = simse_bridge::agentic_loop::NoopCallbacks;

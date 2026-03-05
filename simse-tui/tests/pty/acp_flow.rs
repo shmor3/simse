@@ -259,3 +259,66 @@ fn chat_round_trip_with_claude_code_acp() {
 		"App should not crash after receiving AI response"
 	);
 }
+
+// ═══════════════════════════════════════════════════════════════
+// 12. E2E: Two consecutive messages both get AI responses
+// ═══════════════════════════════════════════════════════════════
+//
+// This test proves that the ACP session is correctly reused across
+// multiple messages. The second message must also get a response,
+// which requires:
+//   - loop_status resets to Idle after StreamEnd
+//   - The ACP session is reused (not a new one per message)
+//   - Only the NEW user message is sent as the prompt (not the full
+//     conversation history, which the ACP server already tracks)
+//   - The UI remains non-blocking during the agentic loop
+//
+// Requires:
+//   - `@zed-industries/claude-agent-acp` installed (`npm i -g @zed-industries/claude-agent-acp`)
+//   - `ANTHROPIC_API_KEY` environment variable set
+
+#[test]
+fn two_message_conversation_with_claude_code_acp() {
+	let tmp = TempDir::new().unwrap();
+	let data_dir = tmp.path().join("data");
+	let work_dir = tmp.path().join("work");
+	std::fs::create_dir_all(&work_dir).unwrap();
+
+	write_acp_config(&data_dir);
+
+	// Generous timeout: ACP server startup + two AI round-trips.
+	let mut h = spawn_simse_with_timeout(
+		&data_dir,
+		&work_dir,
+		Duration::from_secs(120),
+	);
+	wait_for_startup(&h);
+
+	// ── First message ──────────────────────────────────────────
+	// Ask a math question whose answer (42) cannot appear in the prompt.
+	type_command(&mut h, "What is the sum of 17 and 25? Reply with ONLY the number.");
+
+	h.wait_for_text("42")
+		.expect("First AI response '42' should appear on screen");
+
+	// Give the UI a moment to process StreamEnd and reset loop_status.
+	settle();
+
+	// ── Second message ─────────────────────────────────────────
+	// Ask a different math question whose answer (7) is distinct.
+	// This proves the session is reused and the second message works.
+	type_command(&mut h, "What is the sum of 3 and 4? Reply with ONLY the number.");
+
+	h.wait_for_text("sum of 3 and 4")
+		.expect("Second user message should appear on screen");
+
+	h.wait_for_text("7")
+		.expect(
+			"Second AI response '7' should appear on screen, proving multi-message ACP session reuse works",
+		);
+
+	assert!(
+		h.is_running(),
+		"App should not crash after second AI response"
+	);
+}

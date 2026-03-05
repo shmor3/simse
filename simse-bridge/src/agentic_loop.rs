@@ -35,6 +35,11 @@ pub struct AgenticLoopOptions {
 	pub agent_manages_tools: bool,
 	/// Existing ACP session ID to reuse. If None, a new session is created per turn.
 	pub session_id: Option<String>,
+	/// Raw user input for session-reuse mode. When both `session_id` and
+	/// `user_input` are set, the loop sends only this text as the prompt
+	/// instead of the full serialized conversation (since the ACP server
+	/// already maintains conversation state in the session).
+	pub user_input: Option<String>,
 }
 
 impl Default for AgenticLoopOptions {
@@ -46,6 +51,7 @@ impl Default for AgenticLoopOptions {
 			system_prompt: None,
 			agent_manages_tools: false,
 			session_id: None,
+			user_input: None,
 		}
 	}
 }
@@ -266,24 +272,30 @@ pub async fn run_agentic_loop(
 	let mut final_text = String::new();
 	let mut aborted = false;
 
-	// Build system prompt with tool definitions (unless agent manages tools)
-	if !options.agent_manages_tools {
-		let tool_defs = tool_registry.get_tool_definitions();
-		let mut system_prompt_parts = Vec::new();
+	// When reusing an ACP session, the server manages conversation state and
+	// system prompts. Skip local system prompt injection in that case.
+	let session_manages_state = options.session_id.is_some() && options.user_input.is_some();
 
-		if let Some(ref user_prompt) = options.system_prompt {
-			system_prompt_parts.push(user_prompt.clone());
-		}
+	if !session_manages_state {
+		// Build system prompt with tool definitions (unless agent manages tools)
+		if !options.agent_manages_tools {
+			let tool_defs = tool_registry.get_tool_definitions();
+			let mut system_prompt_parts = Vec::new();
 
-		if !tool_defs.is_empty() {
-			system_prompt_parts.push(format_tools_for_system_prompt(&tool_defs));
-		}
+			if let Some(ref user_prompt) = options.system_prompt {
+				system_prompt_parts.push(user_prompt.clone());
+			}
 
-		if !system_prompt_parts.is_empty() {
-			conversation.set_system_prompt(&system_prompt_parts.join("\n\n"));
+			if !tool_defs.is_empty() {
+				system_prompt_parts.push(format_tools_for_system_prompt(&tool_defs));
+			}
+
+			if !system_prompt_parts.is_empty() {
+				conversation.set_system_prompt(&system_prompt_parts.join("\n\n"));
+			}
+		} else if let Some(ref user_prompt) = options.system_prompt {
+			conversation.set_system_prompt(user_prompt);
 		}
-	} else if let Some(ref user_prompt) = options.system_prompt {
-		conversation.set_system_prompt(user_prompt);
 	}
 
 	// Main loop
@@ -304,7 +316,13 @@ pub async fn run_agentic_loop(
 		// (c) Serialize conversation and stream from ACP
 		callbacks.on_stream_start();
 
-		let prompt_text = conversation.serialize();
+		// When reusing an ACP session, the server already tracks conversation
+		// history. Send only the new user input instead of the full history.
+		let prompt_text = if session_manages_state {
+			options.user_input.clone().unwrap_or_else(|| conversation.serialize())
+		} else {
+			conversation.serialize()
+		};
 		let gen_options = GenerateOptions {
 			agent_id: options.agent_id.clone(),
 			server_name: options.server_name.clone(),
@@ -518,6 +536,7 @@ mod tests {
 			system_prompt: Some("Be helpful".into()),
 			agent_manages_tools: true,
 			session_id: Some("sess-42".into()),
+			user_input: Some("hello".into()),
 		};
 		assert_eq!(opts.max_turns, 5);
 		assert_eq!(opts.server_name.as_deref(), Some("ollama"));
@@ -525,6 +544,7 @@ mod tests {
 		assert_eq!(opts.system_prompt.as_deref(), Some("Be helpful"));
 		assert!(opts.agent_manages_tools);
 		assert_eq!(opts.session_id.as_deref(), Some("sess-42"));
+		assert_eq!(opts.user_input.as_deref(), Some("hello"));
 	}
 
 	// -- TurnType enum --

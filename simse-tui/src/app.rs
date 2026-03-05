@@ -20,6 +20,7 @@ use crate::onboarding::OnboardingState;
 /// Maximum height (in rows) for the inline completions area.
 const MAX_VISIBLE_COMPLETIONS: u16 = 8;
 use crate::banner;
+use crate::status_bar::{render_status_bar, StatusBarState};
 use crate::commands::{
 	format_table, AgentInfo, BridgeAction, CommandContext, CommandOutput, OverlayAction,
 	PromptInfo, SessionInfo, SkillInfo, ToolDefInfo,
@@ -886,8 +887,17 @@ pub fn view(app: &App, frame: &mut Frame) {
 	}
 
 	// 4. Status bar
-	let status = render_status_line(app, chunks[3].width);
-	frame.render_widget(Paragraph::new(status), chunks[3]);
+	let status_state = StatusBarState {
+		permission_mode: app.permission_mode.clone(),
+		server_name: app.server_name.clone(),
+		model_name: app.model_name.clone(),
+		loop_active: app.loop_status != LoopStatus::Idle,
+		plan_mode: app.plan_mode,
+		verbose: app.verbose,
+		token_count: app.total_tokens,
+		context_percent: app.context_percent,
+	};
+	render_status_bar(frame, chunks[3], &status_state);
 
 	// 5. Overlay screens (rendered on top of everything)
 	match &app.screen {
@@ -1091,41 +1101,6 @@ fn render_confirm_overlay(frame: &mut Frame, area: Rect, message: &str) {
 	frame.render_widget(popup, popup_area);
 }
 
-fn render_status_line(app: &App, width: u16) -> Line<'static> {
-	let sep = " \u{00b7} ";
-	let mut hints = Vec::new();
-
-	hints.push(format!("{} (shift+tab)", app.permission_mode));
-	if app.loop_status != LoopStatus::Idle {
-		hints.push("esc to interrupt".into());
-	}
-	if app.plan_mode {
-		hints.push("plan mode".into());
-	}
-	if app.verbose {
-		hints.push("verbose on".into());
-	}
-	hints.push("? for shortcuts".into());
-
-	let left = hints.join(sep);
-
-	let mut stats = Vec::new();
-	if app.total_tokens > 0 {
-		stats.push(format!("{} tokens", format_tokens(app.total_tokens)));
-	}
-	if app.context_percent > 0 {
-		stats.push(format!("{}% context", app.context_percent));
-	}
-	let right = stats.join(sep);
-
-	let gap = (width as usize).saturating_sub(left.chars().count() + right.chars().count() + 2);
-	let full = format!(" {left}{}{right} ", " ".repeat(gap));
-
-	Line::from(Span::styled(
-		full,
-		Style::default().fg(Color::DarkGray),
-	))
-}
 
 /// Get the current value string for the selected settings field.
 fn get_settings_current_value(app: &App) -> String {

@@ -20,34 +20,7 @@
 //!   4. factory_reset_full_cycle (reset → confirm → data deleted → can /setup)
 
 use super::r#mod::*;
-use portable_pty::CommandBuilder;
-use std::time::Duration;
 use tempfile::TempDir;
-
-/// Spawn simse-tui with an explicit working directory.
-fn spawn_simse_with_cwd(data_dir: &std::path::Path, work_dir: &std::path::Path) -> PtyHarness {
-	let binary = env!("CARGO_BIN_EXE_simse-tui");
-	let mut cmd = CommandBuilder::new(binary);
-	cmd.arg("--data-dir");
-	cmd.arg(data_dir.to_str().expect("data_dir must be valid UTF-8"));
-	cmd.cwd(work_dir);
-	PtyHarness::spawn(cmd, 120, 40, Duration::from_secs(15))
-}
-
-/// Pre-configure a data directory so the app starts in configured mode.
-fn write_config(data_dir: &std::path::Path) {
-	std::fs::create_dir_all(data_dir).unwrap();
-	std::fs::write(
-		data_dir.join("config.json"),
-		r#"{"logLevel": "warn"}"#,
-	)
-	.unwrap();
-	std::fs::write(
-		data_dir.join("acp.json"),
-		r#"{"servers": [{"name": "claude-code", "command": "claude"}]}"#,
-	)
-	.unwrap();
-}
 
 // ═══════════════════════════════════════════════════════════════
 // 1. /compact dispatches through bridge and shows result
@@ -59,7 +32,7 @@ fn compact_dispatches_and_shows_result() {
 	let data_dir = tmp.path().join("data");
 	let work_dir = tmp.path().join("work");
 	std::fs::create_dir_all(&work_dir).unwrap();
-	write_config(&data_dir);
+	write_default_config(&data_dir);
 
 	let mut h = spawn_simse_with_cwd(&data_dir, &work_dir);
 	wait_for_startup(&h);
@@ -85,7 +58,7 @@ fn bridge_error_shows_on_screen() {
 	let data_dir = tmp.path().join("data");
 	let work_dir = tmp.path().join("work");
 	std::fs::create_dir_all(&work_dir).unwrap();
-	write_config(&data_dir);
+	write_default_config(&data_dir);
 
 	let mut h = spawn_simse_with_cwd(&data_dir, &work_dir);
 	wait_for_startup(&h);
@@ -104,6 +77,12 @@ fn bridge_error_shows_on_screen() {
 	// "Session not found" or "not found".
 	h.wait_for_text("not found")
 		.expect("Bridge error for nonexistent session should be displayed on screen, not swallowed");
+
+	// The app should remain running after a bridge error (not crash/panic).
+	assert!(
+		h.is_running(),
+		"App should not crash on bridge error"
+	);
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -158,7 +137,7 @@ fn factory_reset_full_cycle() {
 	let data_dir = tmp.path().join("data");
 	let work_dir = tmp.path().join("work");
 	std::fs::create_dir_all(&work_dir).unwrap();
-	write_config(&data_dir);
+	write_default_config(&data_dir);
 
 	let mut h = spawn_simse_with_cwd(&data_dir, &work_dir);
 	wait_for_startup(&h);

@@ -10,19 +10,7 @@
 //! - init_creates_project_directory (covered by init_command_creates_project_directory)
 
 use super::r#mod::*;
-use portable_pty::CommandBuilder;
-use std::time::Duration;
 use tempfile::TempDir;
-
-/// Spawn simse-tui with an explicit working directory.
-fn spawn_simse_with_cwd(data_dir: &std::path::Path, work_dir: &std::path::Path) -> PtyHarness {
-	let binary = env!("CARGO_BIN_EXE_simse-tui");
-	let mut cmd = CommandBuilder::new(binary);
-	cmd.arg("--data-dir");
-	cmd.arg(data_dir.to_str().expect("data_dir must be valid UTF-8"));
-	cmd.cwd(work_dir);
-	PtyHarness::spawn(cmd, 120, 40, Duration::from_secs(15))
-}
 
 // ═══════════════════════════════════════════════════════════════
 // 1. /factory-reset-project deletes .simse/ in work_dir
@@ -36,17 +24,7 @@ fn factory_reset_project_deletes_project_config() {
 	std::fs::create_dir_all(&data_dir).unwrap();
 	std::fs::create_dir_all(&work_dir).unwrap();
 
-	// Pre-configure the data_dir so the app starts in configured mode.
-	std::fs::write(
-		data_dir.join("config.json"),
-		r#"{"logLevel": "warn"}"#,
-	)
-	.unwrap();
-	std::fs::write(
-		data_dir.join("acp.json"),
-		r#"{"servers": [{"name": "claude-code", "command": "claude"}]}"#,
-	)
-	.unwrap();
+	write_default_config(&data_dir);
 
 	// Create a .simse/ project directory in work_dir.
 	let project_dir = work_dir.join(".simse");
@@ -130,17 +108,7 @@ fn global_vs_project_directories_separate() {
 		"data_dir and work_dir should be separate paths"
 	);
 
-	// Pre-configure the data_dir.
-	std::fs::write(
-		data_dir.join("config.json"),
-		r#"{"logLevel": "warn"}"#,
-	)
-	.unwrap();
-	std::fs::write(
-		data_dir.join("acp.json"),
-		r#"{"servers": [{"name": "claude-code", "command": "claude"}]}"#,
-	)
-	.unwrap();
+	write_default_config(&data_dir);
 
 	let mut h = spawn_simse_with_cwd(&data_dir, &work_dir);
 	wait_for_startup(&h);

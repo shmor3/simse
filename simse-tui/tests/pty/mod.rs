@@ -235,8 +235,18 @@ pub fn spawn_simse(data_dir: &Path) -> PtyHarness {
     PtyHarness::spawn(cmd, 120, 40, Duration::from_secs(10))
 }
 
-/// Spawn simse-tui with a pre-configured data directory.
-pub fn spawn_simse_configured(data_dir: &Path) -> PtyHarness {
+/// Spawn simse-tui with an explicit working directory.
+pub fn spawn_simse_with_cwd(data_dir: &Path, work_dir: &Path) -> PtyHarness {
+    let binary = env!("CARGO_BIN_EXE_simse-tui");
+    let mut cmd = CommandBuilder::new(binary);
+    cmd.arg("--data-dir");
+    cmd.arg(data_dir.to_str().expect("data_dir must be valid UTF-8"));
+    cmd.cwd(work_dir);
+    PtyHarness::spawn(cmd, 120, 40, Duration::from_secs(15))
+}
+
+/// Write default config files (config.json + acp.json) to a data directory.
+pub fn write_default_config(data_dir: &Path) {
     std::fs::create_dir_all(data_dir).unwrap();
     std::fs::write(
         data_dir.join("config.json"),
@@ -248,6 +258,11 @@ pub fn spawn_simse_configured(data_dir: &Path) -> PtyHarness {
         r#"{"servers": [{"name": "claude-code", "command": "claude"}]}"#,
     )
     .unwrap();
+}
+
+/// Spawn simse-tui with a pre-configured data directory.
+pub fn spawn_simse_configured(data_dir: &Path) -> PtyHarness {
+    write_default_config(data_dir);
     spawn_simse(data_dir)
 }
 

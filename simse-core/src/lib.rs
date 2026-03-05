@@ -22,6 +22,9 @@ pub mod tools;
 pub mod utils;
 pub mod vfs;
 
+// Re-export engine crates for consumers
+pub use simse_acp_engine as acp;
+
 // Re-export key types at the crate root for convenience
 pub use config::AppConfig;
 pub use context::CoreContext;

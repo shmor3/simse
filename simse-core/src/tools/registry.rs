@@ -9,6 +9,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use regex::Regex;
 
+use async_trait::async_trait;
+
+use crate::agentic_loop::ToolExecutor;
 use crate::tools::permissions::ToolPermissionResolver;
 use crate::tools::types::{
 	ParsedResponse, RegisteredTool, ToolCallRequest, ToolCallResult, ToolDefinition, ToolHandler,
@@ -441,5 +444,20 @@ impl ToolRegistry {
 	pub fn clear_metrics(&self) {
 		let mut metrics = self.metrics.lock().unwrap_or_else(|e| e.into_inner());
 		metrics.clear();
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ToolExecutor trait implementation
+// ---------------------------------------------------------------------------
+
+#[async_trait]
+impl ToolExecutor for ToolRegistry {
+	fn parse_tool_calls(&self, response: &str) -> ParsedResponse {
+		ToolRegistry::parse_tool_calls(response)
+	}
+
+	async fn execute(&self, call: &ToolCallRequest) -> ToolCallResult {
+		Self::execute(self, call).await
 	}
 }

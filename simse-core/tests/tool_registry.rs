@@ -6,6 +6,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 
 use simse_core::error::SimseError;
+use simse_core::agentic_loop::ToolExecutor;
 use simse_core::tools::{
 	ToolCallRequest, ToolCallResult, ToolCategory, ToolDefinition, ToolHandler, ToolParameter,
 	ToolPermissionResolver, ToolRegistry, ToolRegistryOptions,
@@ -916,4 +917,46 @@ fn test_registry_debug_format() {
 	let debug = format!("{:?}", registry);
 	assert!(debug.contains("ToolRegistry"));
 	assert!(debug.contains("tool_count"));
+}
+
+// ---------------------------------------------------------------------------
+// ToolExecutor trait implementation
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_tool_registry_implements_tool_executor() {
+	let registry = make_registry();
+	let executor: &dyn ToolExecutor = &registry;
+
+	// Test parse_tool_calls via trait object
+	let parsed = executor.parse_tool_calls("hello world");
+	assert!(parsed.tool_calls.is_empty());
+	assert_eq!(parsed.text, "hello world");
+
+	// Test parse_tool_calls with actual tool use block
+	let response = r#"Some text <tool_use>
+{"id": "c1", "name": "test", "arguments": {"key": "value"}}
+</tool_use>"#;
+	let parsed = executor.parse_tool_calls(response);
+	assert_eq!(parsed.tool_calls.len(), 1);
+	assert_eq!(parsed.tool_calls[0].name, "test");
+
+	// Test execute via trait object (non-existent tool)
+	let call = make_call("c1", "nonexistent");
+	let result = executor.execute(&call).await;
+	assert!(result.is_error);
+	assert!(result.output.contains("Tool not found"));
+}
+
+#[tokio::test]
+async fn test_tool_executor_execute_success() {
+	let mut registry = make_registry();
+	registry.register(make_definition("echo"), make_echo_handler());
+
+	let executor: &dyn ToolExecutor = &registry;
+	let call = make_call("c1", "echo");
+	let result = executor.execute(&call).await;
+
+	assert!(!result.is_error);
+	assert_eq!(result.output, "echo: hello");
 }

@@ -9,4 +9,4 @@ bun.lock
 .worktrees/
 target/
 .moon/cache
-.moon/docker
+.moon/docker.worktrees/

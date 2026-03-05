@@ -2,26 +2,22 @@ import { Link } from 'react-router';
 import PageHeader from '~/components/layout/PageHeader';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
-import { createPaymentsClient } from '~/lib/payments.server';
-import { getSession } from '~/lib/session.server';
+import { authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.billing.credit';
 
-export async function loader({ request, context }: Route.LoaderArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (!session) return { balance: 0, history: [] };
+export async function loader({ request }: Route.LoaderArgs) {
+	try {
+		const res = await authenticatedApi(request, '/payments/credits');
+		if (!res.ok) return { balance: 0, history: [] };
 
-	const env = context.cloudflare.env;
-	const payments = createPaymentsClient({
-		apiUrl: env.PAYMENTS_API_URL,
-		apiSecret: env.PAYMENTS_API_SECRET,
-	});
-
-	const data = await payments.getCredits(session.userId);
-
-	return {
-		balance: data.balance,
-		history: data.history,
-	};
+		const json = await res.json() as any;
+		return {
+			balance: json.data?.balance ?? 0,
+			history: json.data?.history ?? [],
+		};
+	} catch {
+		return { balance: 0, history: [] };
+	}
 }
 
 export default function Credit({ loaderData }: Route.ComponentProps) {
@@ -76,7 +72,7 @@ export default function Credit({ loaderData }: Route.ComponentProps) {
 								</tr>
 							</thead>
 							<tbody>
-								{history.map((tx) => (
+								{history.map((tx: any) => (
 									<tr
 										key={tx.id}
 										className="border-b border-zinc-800/50 last:border-0"

@@ -6,51 +6,39 @@ import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
 import Input from '~/components/ui/Input';
 import Modal from '~/components/ui/Modal';
-import { hashPassword, verifyPassword } from '~/lib/auth.server';
-import { clearSessionCookie, getSession } from '~/lib/session.server';
+import { authenticatedApi } from '~/lib/api.server';
+import { clearSessionCookie } from '~/lib/session.server';
 import type { Route } from './+types/dashboard.account';
 
-export async function loader({ request, context }: Route.LoaderArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (!session) throw redirect('/auth/login');
+export async function loader({ request }: Route.LoaderArgs) {
+	const res = await authenticatedApi(request, '/auth/me');
+	if (!res.ok) throw redirect('/auth/login');
 
-	const db = context.cloudflare.env.DB;
-	const user = await db
-		.prepare('SELECT id, name, email, created_at FROM users WHERE id = ?')
-		.bind(session.userId)
-		.first<{ id: string; name: string; email: string; created_at: string }>();
-
-	if (!user) throw redirect('/auth/login');
+	const json = await res.json() as any;
+	const user = json.data;
 
 	return {
 		user: {
 			name: user.name,
 			email: user.email,
-			createdAt: user.created_at,
+			createdAt: user.createdAt,
 		},
 	};
 }
 
-export async function action({ request, context }: Route.ActionArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (!session) throw redirect('/auth/login');
-
+export async function action({ request }: Route.ActionArgs) {
 	const formData = await request.formData();
 	const intent = formData.get('intent');
-	const db = context.cloudflare.env.DB;
 
 	if (intent === 'update-name') {
 		const name = (formData.get('name') as string)?.trim();
 		if (!name || name.length < 2) {
-			return {
-				error: 'Name must be at least 2 characters.',
-				intent: 'update-name',
-			};
+			return { error: 'Name must be at least 2 characters.', intent: 'update-name' };
 		}
-		await db
-			.prepare('UPDATE users SET name = ? WHERE id = ?')
-			.bind(name, session.userId)
-			.run();
+		await authenticatedApi(request, '/users/me/name', {
+			method: 'PUT',
+			body: JSON.stringify({ name }),
+		});
 		return { success: true, intent: 'update-name' };
 	}
 
@@ -60,74 +48,38 @@ export async function action({ request, context }: Route.ActionArgs) {
 		const confirmPassword = formData.get('confirmPassword') as string;
 
 		if (!currentPassword || !newPassword || !confirmPassword) {
-			return {
-				error: 'All fields are required.',
-				intent: 'change-password',
-			};
+			return { error: 'All fields are required.', intent: 'change-password' };
 		}
 		if (newPassword.length < 8) {
-			return {
-				error: 'New password must be at least 8 characters.',
-				intent: 'change-password',
-			};
+			return { error: 'New password must be at least 8 characters.', intent: 'change-password' };
 		}
 		if (newPassword !== confirmPassword) {
-			return {
-				error: 'Passwords do not match.',
-				intent: 'change-password',
-			};
+			return { error: 'Passwords do not match.', intent: 'change-password' };
 		}
 
-		const user = await db
-			.prepare('SELECT password_hash FROM users WHERE id = ?')
-			.bind(session.userId)
-			.first<{ password_hash: string }>();
+		const res = await authenticatedApi(request, '/users/me/password', {
+			method: 'PUT',
+			body: JSON.stringify({ currentPassword, newPassword }),
+		});
 
-		if (!user || !(await verifyPassword(currentPassword, user.password_hash))) {
-			return {
-				error: 'Current password is incorrect.',
-				intent: 'change-password',
-			};
+		if (!res.ok) {
+			return { error: 'Current password is incorrect.', intent: 'change-password' };
 		}
 
-		const hash = await hashPassword(newPassword);
-		await db
-			.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
-			.bind(hash, session.userId)
-			.run();
 		return { success: true, intent: 'change-password' };
 	}
 
 	if (intent === 'delete-account') {
-		const confirmEmail = (formData.get('confirmEmail') as string)
-			?.trim()
-			.toLowerCase();
-		const user = await db
-			.prepare('SELECT email FROM users WHERE id = ?')
-			.bind(session.userId)
-			.first<{ email: string }>();
+		const confirmEmail = (formData.get('confirmEmail') as string)?.trim().toLowerCase();
 
-		if (!user || confirmEmail !== user.email.toLowerCase()) {
+		const res = await authenticatedApi(request, '/users/me', {
+			method: 'DELETE',
+			body: JSON.stringify({ confirmEmail }),
+		});
+
+		if (!res.ok) {
 			return { error: 'Email does not match.', intent: 'delete-account' };
 		}
-
-		// Delete user and cascade
-		await db
-			.prepare('DELETE FROM sessions WHERE user_id = ?')
-			.bind(session.userId)
-			.run();
-		await db
-			.prepare('DELETE FROM notifications WHERE user_id = ?')
-			.bind(session.userId)
-			.run();
-		await db
-			.prepare('DELETE FROM team_members WHERE user_id = ?')
-			.bind(session.userId)
-			.run();
-		await db
-			.prepare('DELETE FROM users WHERE id = ?')
-			.bind(session.userId)
-			.run();
 
 		return redirect('/auth/login', {
 			headers: { 'Set-Cookie': clearSessionCookie() },

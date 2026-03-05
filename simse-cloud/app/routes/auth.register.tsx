@@ -1,89 +1,38 @@
 import { Form, Link, redirect, useNavigation } from 'react-router';
 import Button from '~/components/ui/Button';
 import Input from '~/components/ui/Input';
-import { createSession, generateCode, hashPassword } from '~/lib/auth.server';
-import { generateId } from '~/lib/db.server';
-import { registerSchema } from '~/lib/schemas';
-import { getSession, setSessionCookie } from '~/lib/session.server';
+import { api } from '~/lib/api.server';
+import { setSessionCookie } from '~/lib/session.server';
 import type { Route } from './+types/auth.register';
 
-export async function loader({ request, context }: Route.LoaderArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (session) throw redirect('/dashboard');
+export async function loader({ request }: Route.LoaderArgs) {
+	const cookie = request.headers.get('Cookie') ?? '';
+	if (cookie.includes('simse_session=')) throw redirect('/dashboard');
 	return null;
 }
 
-export async function action({ request, context }: Route.ActionArgs) {
+export async function action({ request }: Route.ActionArgs) {
 	const formData = await request.formData();
 	const raw = Object.fromEntries(formData);
-	const parsed = registerSchema.safeParse(raw);
 
-	if (!parsed.success) {
-		const errors: Record<string, string> = {};
-		for (const issue of parsed.error.issues) {
-			const key = String(issue.path[0]);
-			errors[key] = issue.message;
+	const res = await api('/auth/register', {
+		method: 'POST',
+		body: JSON.stringify({ name: raw.name, email: raw.email, password: raw.password }),
+	});
+
+	const json = await res.json() as any;
+
+	if (!res.ok) {
+		const message = json.error?.message ?? 'Registration failed';
+		const code = json.error?.code;
+		if (code === 'EMAIL_EXISTS') {
+			return { errors: { email: 'An account with this email already exists' }, values: raw };
 		}
-		return { errors, values: raw };
+		return { errors: { email: message }, values: raw };
 	}
-
-	const { name, email, password } = parsed.data;
-	const db = context.cloudflare.env.DB;
-
-	// Check if email already exists
-	const existing = await db
-		.prepare('SELECT id FROM users WHERE email = ?')
-		.bind(email.toLowerCase())
-		.first();
-
-	if (existing) {
-		return {
-			errors: { email: 'An account with this email already exists' },
-			values: raw,
-		};
-	}
-
-	const userId = generateId();
-	const passwordHash = await hashPassword(password);
-
-	await db
-		.prepare(
-			'INSERT INTO users (id, email, name, password_hash) VALUES (?, ?, ?, ?)',
-		)
-		.bind(userId, email.toLowerCase(), name, passwordHash)
-		.run();
-
-	// Create a default team for the user
-	const teamId = generateId();
-	await db.batch([
-		db
-			.prepare('INSERT INTO teams (id, name) VALUES (?, ?)')
-			.bind(teamId, `${name}'s Team`),
-		db
-			.prepare(
-				"INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'owner')",
-			)
-			.bind(teamId, userId),
-	]);
-
-	// Create email verification token
-	const code = generateCode();
-	const tokenId = generateId();
-	await db
-		.prepare(
-			"INSERT INTO tokens (id, user_id, type, code, expires_at) VALUES (?, ?, 'email_verify', ?, datetime('now', '+15 minutes'))",
-		)
-		.bind(tokenId, userId, code)
-		.run();
-
-	// TODO: Send verification email via email API (Task 6)
-
-	const sessionId = await createSession(db, userId);
 
 	return redirect('/dashboard', {
-		headers: {
-			'Set-Cookie': setSessionCookie(sessionId),
-		},
+		headers: { 'Set-Cookie': setSessionCookie(json.data.token) },
 	});
 }
 

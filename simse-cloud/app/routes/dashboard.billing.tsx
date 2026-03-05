@@ -3,76 +3,37 @@ import PageHeader from '~/components/layout/PageHeader';
 import Badge from '~/components/ui/Badge';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
-import { createPaymentsClient } from '~/lib/payments.server';
-import { getSession } from '~/lib/session.server';
+import { authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.billing';
 
-export async function loader({ request, context }: Route.LoaderArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (!session) throw redirect('/auth/login');
+export async function loader({ request }: Route.LoaderArgs) {
+	const res = await authenticatedApi(request, '/payments/billing');
+	if (!res.ok) throw redirect('/auth/login');
 
-	const env = context.cloudflare.env;
-	const payments = createPaymentsClient({
-		apiUrl: env.PAYMENTS_API_URL,
-		apiSecret: env.PAYMENTS_API_SECRET,
-	});
-
-	// Get user's team
-	const db = env.DB;
-	const team = await db
-		.prepare(
-			"SELECT t.id, t.name FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role = 'owner' LIMIT 1",
-		)
-		.bind(session.userId)
-		.first<{ id: string; name: string }>();
-
-	const [subscription, credits] = await Promise.all([
-		team ? payments.getSubscription(team.id) : null,
-		payments.getCredits(session.userId),
-	]);
+	const json = await res.json() as any;
+	const data = json.data;
 
 	return {
-		plan: subscription?.plan ?? 'free',
-		teamName: team?.name ?? '',
-		hasPaymentMethod: !!subscription?.stripeSubscriptionId,
-		creditBalance: credits.balance,
+		plan: data?.plan ?? 'free',
+		teamName: data?.teamName ?? '',
+		hasPaymentMethod: !!data?.hasPaymentMethod,
+		creditBalance: data?.creditBalance ?? 0,
 	};
 }
 
-export async function action({ request, context }: Route.ActionArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (!session) throw redirect('/auth/login');
-
+export async function action({ request }: Route.ActionArgs) {
 	const formData = await request.formData();
 	const intent = formData.get('intent');
-	const env = context.cloudflare.env;
-	const db = env.DB;
-
-	const payments = createPaymentsClient({
-		apiUrl: env.PAYMENTS_API_URL,
-		apiSecret: env.PAYMENTS_API_SECRET,
-	});
-
-	const user = await db
-		.prepare('SELECT email, name FROM users WHERE id = ?')
-		.bind(session.userId)
-		.first<{ email: string; name: string }>();
-
-	const team = await db
-		.prepare(
-			"SELECT t.id FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role = 'owner' LIMIT 1",
-		)
-		.bind(session.userId)
-		.first<{ id: string }>();
-
-	if (!user || !team) throw redirect('/dashboard');
-
-	// Ensure customer exists
-	await payments.getOrCreateCustomer(team.id, user.email, user.name);
 
 	if (intent === 'manage') {
-		const { url } = await payments.createPortalSession(team.id, env.APP_URL);
-		throw redirect(url);
+		const res = await authenticatedApi(request, '/payments/portal', {
+			method: 'POST',
+		});
+
+		if (res.ok) {
+			const json = await res.json() as any;
+			if (json.data?.url) throw redirect(json.data.url);
+		}
 	}
 
 	return null;

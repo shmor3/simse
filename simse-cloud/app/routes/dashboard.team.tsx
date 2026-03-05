@@ -4,92 +4,58 @@ import Avatar from '~/components/ui/Avatar';
 import Badge from '~/components/ui/Badge';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
-import { getSession } from '~/lib/session.server';
+import { authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.team';
 
-export async function loader({ request, context }: Route.LoaderArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (!session) return { team: null, members: [], invites: [] };
+export async function loader({ request }: Route.LoaderArgs) {
+	try {
+		const res = await authenticatedApi(request, '/teams/me');
+		if (!res.ok) return { team: null, members: [], invites: [] };
 
-	const db = context.cloudflare.env.DB;
+		const json = await res.json() as any;
+		const team = json.data;
 
-	// Get user's team
-	const team = await db
-		.prepare(
-			'SELECT t.id, t.name, t.plan FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? LIMIT 1',
-		)
-		.bind(session.userId)
-		.first<{ id: string; name: string; plan: string }>();
+		const myRole = team.members.find((m: any) => m.role === 'owner')?.role ?? 'member';
 
-	if (!team) return { team: null, members: [], invites: [] };
+		// Determine current user's role by looking at the session token
+		// We get this from the /auth/me endpoint
+		const meRes = await authenticatedApi(request, '/auth/me');
+		const meJson = await meRes.json() as any;
+		const userId = meJson.data?.id;
+		const currentMember = team.members.find((m: any) => m.id === userId);
 
-	// Get team members
-	const members = await db
-		.prepare(
-			'SELECT u.id, u.name, u.email, tm.role, tm.joined_at FROM team_members tm JOIN users u ON tm.user_id = u.id WHERE tm.team_id = ?',
-		)
-		.bind(team.id)
-		.all<{
-			id: string;
-			name: string;
-			email: string;
-			role: string;
-			joined_at: string;
-		}>();
-
-	// Get pending invites
-	const invites = await db
-		.prepare(
-			"SELECT ti.id, ti.email, ti.role, ti.created_at FROM team_invites ti WHERE ti.team_id = ? AND ti.expires_at > datetime('now')",
-		)
-		.bind(team.id)
-		.all<{
-			id: string;
-			email: string;
-			role: string;
-			created_at: string;
-		}>();
-
-	// Get current user's role
-	const myRole = members.results.find((m) => m.id === session.userId)?.role;
-
-	return {
-		team,
-		members: members.results,
-		invites: invites.results,
-		myRole: myRole ?? 'member',
-	};
+		return {
+			team: { id: team.id, name: team.name, plan: team.plan },
+			members: team.members,
+			invites: team.invites,
+			myRole: currentMember?.role ?? 'member',
+		};
+	} catch {
+		return { team: null, members: [], invites: [] };
+	}
 }
 
-export async function action({ request, context }: Route.ActionArgs) {
-	const session = await getSession(request, context.cloudflare.env);
-	if (!session) return null;
-
+export async function action({ request }: Route.ActionArgs) {
 	const formData = await request.formData();
 	const intent = formData.get('intent');
-	const db = context.cloudflare.env.DB;
 
 	if (intent === 'change-role') {
 		const memberId = formData.get('memberId') as string;
 		const newRole = formData.get('role') as string;
-		const teamId = formData.get('teamId') as string;
 
 		if (!['admin', 'member'].includes(newRole)) return null;
 
-		await db
-			.prepare(
-				'UPDATE team_members SET role = ? WHERE team_id = ? AND user_id = ?',
-			)
-			.bind(newRole, teamId, memberId)
-			.run();
+		await authenticatedApi(request, `/teams/me/members/${memberId}/role`, {
+			method: 'PUT',
+			body: JSON.stringify({ role: newRole }),
+		});
 	}
 
 	if (intent === 'revoke-invite') {
 		const inviteId = formData.get('inviteId') as string;
-		await db
-			.prepare('DELETE FROM team_invites WHERE id = ?')
-			.bind(inviteId)
-			.run();
+		await authenticatedApi(request, `/teams/me/invites/${inviteId}`, {
+			method: 'DELETE',
+		});
 	}
 
 	return null;

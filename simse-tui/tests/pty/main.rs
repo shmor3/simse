@@ -8,6 +8,8 @@ mod commands_library;
 mod commands_meta;
 mod commands_session;
 mod commands_tools;
+mod config_settings;
+mod error_states;
 mod input;
 mod onboarding;
 mod overlays;

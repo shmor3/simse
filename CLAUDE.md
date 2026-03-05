@@ -29,6 +29,12 @@ cd simse-bridge && cargo test  # Rust bridge tests
 cd simse-sandbox && cargo test # Rust sandbox engine tests
 cd simse-tui && cargo test     # Rust TUI tests (unit + integration)
 
+# TypeScript lint (all TS services use Biome)
+cd simse-api && npm run lint       # API gateway lint
+cd simse-auth && npm run lint      # Auth service lint
+cd simse-payments && npm run lint  # Payments service lint
+cd simse-cdn && npm run lint       # CDN worker lint
+
 # TypeScript tests
 cd simse-cdn && npm run test   # CDN worker tests (Vitest + @cloudflare/vitest-pool-workers)
 ```
@@ -55,9 +61,14 @@ simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Arch
 simse-bridge/               # Pure Rust crate — async I/O bridge (ACP client, config, sessions, storage)
 simse-engine/               # Pure Rust crate — core engine
 simse-cdn/                  # TypeScript — CDN worker (R2 + KV, Cloudflare Worker)
-simse-cloud/                # TypeScript — SaaS web app (React Router + Cloudflare)
-simse-landing/              # TypeScript — Landing page (Remix)
-simse-mailer/               # TypeScript — Email templates
+simse-cloud/                # TypeScript — SaaS web app (React Router + Cloudflare Pages)
+simse-api/                  # TypeScript — API gateway (Cloudflare Worker, proxies to backend services)
+simse-auth/                 # TypeScript — Auth service (Cloudflare Worker, D1, users/sessions/teams/API keys)
+simse-payments/             # TypeScript — Payments service (Cloudflare Worker, Stripe)
+simse-landing/              # TypeScript — Landing page (React Router + Cloudflare)
+simse-mailer/               # TypeScript — Email templates + notifications
+simse-brand/                # Brand assets (logos, screenshots, guidelines, copy)
+simse-predictive-coding/    # Pure Rust crate — predictive coding engine (JSON-RPC over stdio)
 ```
 
 ### simse-core Module Layout
@@ -75,15 +86,15 @@ simse-core/
     events.rs               # EventBus: thread-safe pub/sub
     conversation.rs         # Conversation: message management, JSON serialization
     tasks.rs                # TaskList: CRUD, dependencies, blocking
-    prompts.rs              # SystemPromptBuilder
+    prompts/                # SystemPromptBuilder, environment, provider
     agentic_loop.rs         # run_agentic_loop: generate→parse→execute→repeat
+    agent.rs                # Agent executor (dispatch steps)
     hooks.rs                # HookSystem: 6 hook types with chaining/blocking
     rpc_server.rs           # JSON-RPC dispatcher (48 methods across 9 domains)
     rpc_protocol.rs         # JSON-RPC 2.0 framing types
     rpc_transport.rs        # NDJSON stdio transport
     chain/                  # Chain execution (run_chain, ChainStep)
-    agent/                  # Agent executor (dispatch steps)
-    tools/                  # ToolRegistry, builtin/host/subagent tools
+    tools/                  # ToolRegistry, builtin/host/subagent/delegation tools
     library/                # Library, Stacks, Shelf, Librarian, Registry, CirculationDesk
     vfs/                    # VirtualFs, VfsDisk, VfsExec, validators
     server/                 # SessionManager with fork support
@@ -262,9 +273,78 @@ simse-cdn/                  # TypeScript — Cloudflare Worker at cdn.simse.dev
 **R2 key layout:** `media/{file}` and `releases/{os}/{arch}/{version}/{filename}`
 **KV keys:** `latest:{os}-{arch}` → version string
 
+### TypeScript Services (Cloudflare Workers)
+
+```tree
+simse-api/                  # API gateway — proxies to backend services
+  src/
+    index.ts                # Hono app, health + secrets middleware + gateway routes
+    routes/gateway.ts       # Route map, auth validation, proxy helpers
+    middleware/secrets.ts    # Cloudflare Secrets Store middleware
+    types.ts                # Env (Queue, SecretsStore), ApiSecrets, ValidateResponse
+
+simse-auth/                 # Auth service — users, sessions, teams, API keys
+  src/
+    index.ts                # Hono app entry
+    schemas.ts              # Zod validation schemas
+    types.ts                # Env (D1, Queue, SecretsStore)
+    routes/
+      auth.ts               # Register, login, 2FA, reset, verify
+      users.ts              # Profile update, password change, delete
+      teams.ts              # Team CRUD, invites, member roles
+      api-keys.ts           # API key CRUD
+    lib/
+      db.ts                 # D1 query helpers
+      password.ts           # Argon2 hashing
+      session.ts            # Session token management
+      token.ts              # Verification/reset token management
+      api-key.ts            # API key generation + validation
+      comms.ts              # Queue message helpers (emails, notifications)
+
+simse-payments/             # Payments service — Stripe subscriptions, credits, usage
+  src/
+    index.ts                # Hono app entry
+    types.ts                # Env (D1, SecretsStore)
+    routes/
+      checkout.ts           # Stripe checkout session creation
+      subscriptions.ts      # Plan management
+      credits.ts            # Credit balance + top-ups
+      customers.ts          # Stripe customer sync
+      portal.ts             # Stripe billing portal
+      webhooks.ts           # Stripe webhook handler
+    lib/
+      stripe.ts             # Stripe client wrapper
+      db.ts                 # D1 query helpers
+      mailer.ts             # Email trigger helpers
+    middleware/
+      auth.ts               # Service-to-service auth (X-User-Id)
+```
+
+### Predictive Coding Engine
+
+```tree
+simse-predictive-coding/    # Pure Rust crate — predictive coding engine
+  src/
+    lib.rs                  # Module declarations
+    main.rs                 # Binary entry point (JSON-RPC server)
+    config.rs               # Model configuration
+    encoder.rs              # Input encoding
+    vocabulary.rs           # Token vocabulary management
+    network.rs              # Neural network layers
+    layer.rs                # Layer implementation
+    predictor.rs            # Prediction engine
+    trainer.rs              # Model training
+    snapshot.rs             # Model snapshots
+    persistence.rs          # Save/load persistence
+    error.rs                # Error types
+    protocol.rs             # JSON-RPC protocol types
+    transport.rs            # NDJSON transport
+    server.rs               # JSON-RPC dispatcher
+```
+
 ### Key Patterns
 
-- **Rust-first architecture**: All core logic is in Rust. TS packages (simse-cloud, simse-landing, simse-mailer) are application layers only.
+- **Rust-first architecture**: All core logic is in Rust. TS packages are application/service layers (simse-cloud, simse-api, simse-auth, simse-payments, simse-cdn, simse-landing, simse-mailer).
 - **JSON-RPC 2.0 / NDJSON stdio**: All Rust crates expose their APIs via JSON-RPC over newline-delimited JSON on stdin/stdout. Tracing/logs go to stderr.
 - **Callback pattern**: Tools, hooks, chains, and loops registered from external callers use oneshot channels + JSON-RPC notifications for async callback execution.
 - **CoreContext wiring**: `CoreContext` ties together EventBus, Logger, AppConfig, TaskList, HookSystem, SessionManager, ToolRegistry, and optional Library/VFS.

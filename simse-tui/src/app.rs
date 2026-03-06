@@ -30,6 +30,7 @@ use crate::dispatch::{parse_command_line, DispatchContext};
 use crate::output;
 use crate::overlays::librarian::{render_librarian_explorer, LibrarianExplorerState};
 use crate::overlays::settings::{render_settings_explorer, SettingsExplorerState};
+use simse_ui_core::config::settings_state::{SettingsFormState, SettingsAction, SettingsLevel};
 use crate::overlays::setup::{render_setup_selector, SetupSelectorState};
 
 // ── Screen ──────────────────────────────────────────────
@@ -99,10 +100,8 @@ pub struct App {
 	pub pending_chat_message: Option<String>,
 	/// Pending action waiting for confirmation via Screen::Confirm.
 	pub pending_confirm_action: Option<BridgeAction>,
-	/// Overlay state for the settings explorer.
-	pub settings_state: SettingsExplorerState,
-	/// Overlay state for the settings explorer config data.
-	pub settings_config_data: serde_json::Value,
+	/// Overlay state for the settings form.
+	pub settings_state: SettingsFormState,
 	/// Overlay state for the librarian explorer.
 	pub librarian_state: LibrarianExplorerState,
 	/// Overlay state for the setup selector.
@@ -152,8 +151,7 @@ impl App {
 			pending_bridge_action: None,
 			pending_chat_message: None,
 			pending_confirm_action: None,
-			settings_state: SettingsExplorerState::new(),
-			settings_config_data: serde_json::Value::Null,
+			settings_state: SettingsFormState::new(),
 			librarian_state: LibrarianExplorerState::new(Vec::new()),
 			setup_state: SetupSelectorState::new(),
 			onboarding: OnboardingState::default(),
@@ -242,6 +240,14 @@ pub enum AppMessage {
 	},
 	RefreshContext(CommandContext),
 
+	// Settings
+	/// Settings config file loaded from storage.
+	SettingsFileLoaded(serde_json::Value),
+	/// Settings field saved to storage.
+	SettingsFieldSaved { key: String, value: serde_json::Value },
+	/// Settings error occurred.
+	SettingsError(String),
+
 	// Timer
 	Tick,
 
@@ -268,7 +274,16 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		// ── Input ────────────────────────────────────
 		AppMessage::CharInput(c) => {
 			match &app.screen {
-				Screen::Settings => { app.settings_state.type_char(c); return app; }
+				Screen::Settings => {
+					// Check if current field is a boolean — space toggles
+					if c == ' ' {
+						let action = app.settings_state.toggle();
+						handle_settings_action(&mut app, action);
+					} else {
+						app.settings_state.type_char(c);
+					}
+					return app;
+				}
 				Screen::Librarians => { app.librarian_state.type_char(c); return app; }
 				Screen::Setup { .. } => { app.setup_state.type_char(c); return app; }
 				_ => {}
@@ -291,8 +306,8 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		AppMessage::Submit => {
 			match &app.screen {
 				Screen::Settings => {
-					let current_value = get_settings_current_value(&app);
-					app.settings_state.enter(&current_value);
+					let action = app.settings_state.enter();
+					handle_settings_action(&mut app, action);
 					return app;
 				}
 				Screen::Librarians => { app.librarian_state.enter(); return app; }
@@ -355,7 +370,10 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		}
 		AppMessage::Backspace => {
 			match &app.screen {
-				Screen::Settings => { app.settings_state.backspace(); return app; }
+				Screen::Settings => {
+					app.settings_state.backspace();
+					return app;
+				}
 				Screen::Librarians => { app.librarian_state.backspace(); return app; }
 				Screen::Setup { .. } => { app.setup_state.backspace(); return app; }
 				_ => {}
@@ -364,6 +382,7 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::Delete => {
+			if app.screen == Screen::Settings { app.settings_state.delete(); return app; }
 			app.input = input::delete(&app.input);
 			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
@@ -372,9 +391,11 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::CursorLeft => {
+			if app.screen == Screen::Settings { app.settings_state.cursor_left(); return app; }
 			app.input = input::move_left(&app.input, false);
 		}
 		AppMessage::CursorRight => {
+			if app.screen == Screen::Settings { app.settings_state.cursor_right(); return app; }
 			app.input = input::move_right(&app.input, false);
 		}
 		AppMessage::WordLeft => {
@@ -384,9 +405,11 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.input = input::move_word_right(&app.input, false);
 		}
 		AppMessage::Home => {
+			if app.screen == Screen::Settings { app.settings_state.cursor_home(); return app; }
 			app.input = input::move_home(&app.input, false);
 		}
 		AppMessage::End => {
+			if app.screen == Screen::Settings { app.settings_state.cursor_end(); return app; }
 			app.input = input::move_end(&app.input, false);
 		}
 		AppMessage::SelectLeft => {
@@ -441,19 +464,7 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		AppMessage::HistoryDown => {
 			match &app.screen {
 				Screen::Settings => {
-					let count = match app.settings_state.level {
-						crate::overlays::settings::SettingsLevel::FileList => {
-							crate::overlays::settings::CONFIG_FILES.len()
-						}
-						_ => {
-							if let Some(obj) = app.settings_config_data.as_object() {
-								obj.len()
-							} else {
-								0
-							}
-						}
-					};
-					app.settings_state.move_down(count);
+					app.settings_state.move_down();
 					return app;
 				}
 				Screen::Librarians => { app.librarian_state.move_down(); return app; }
@@ -512,9 +523,8 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			} else {
 				match &app.screen {
 					Screen::Settings => {
-						if app.settings_state.back() {
-							app.screen = Screen::Chat;
-						}
+						let action = app.settings_state.back();
+						handle_settings_action(&mut app, action);
 					}
 					Screen::Librarians => {
 						if app.librarian_state.back() {
@@ -689,6 +699,17 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.config_values = ctx.config_values;
 		}
 
+		// ── Settings ────────────────────────────────
+		AppMessage::SettingsFileLoaded(data) => {
+			app.settings_state.file_loaded(data);
+		}
+		AppMessage::SettingsFieldSaved { key, value } => {
+			app.settings_state.field_saved(&key, &value);
+		}
+		AppMessage::SettingsError(msg) => {
+			app.settings_state.set_error(msg);
+		}
+
 		// ── Timer ───────────────────────────────────
 		AppMessage::Tick => {
 			if let Some(ref mut spinner) = app.spinner {
@@ -801,7 +822,7 @@ fn dispatch_command(mut app: App, text: &str) -> App {
 			}
 			CommandOutput::OpenOverlay(action) => match action {
 				OverlayAction::Settings => {
-					app.settings_state = SettingsExplorerState::new();
+					app.settings_state = SettingsFormState::new();
 					app.screen = Screen::Settings;
 				}
 				OverlayAction::Shortcuts => {
@@ -934,7 +955,10 @@ pub fn view(app: &App, frame: &mut Frame) {
 	match &app.screen {
 		Screen::Shortcuts => render_shortcuts_overlay(frame, area),
 		Screen::Settings => {
-			render_settings_explorer(frame, area, &app.settings_state, &app.settings_config_data);
+			// Temporary bridge: SettingsFormState → SettingsExplorerState for rendering.
+			// This will be replaced by render_settings_form() in Task 7.
+			let compat = settings_form_to_explorer(&app.settings_state);
+			render_settings_explorer(frame, area, &compat, &app.settings_state.config_data);
 		}
 		Screen::Librarians => {
 			render_librarian_explorer(frame, area, &app.librarian_state);
@@ -1138,20 +1162,46 @@ fn render_confirm_overlay(frame: &mut Frame, area: Rect, message: &str) {
 }
 
 
-/// Get the current value string for the selected settings field.
-fn get_settings_current_value(app: &App) -> String {
-	if let Some(obj) = app.settings_config_data.as_object() {
-		let keys: Vec<&String> = obj.keys().collect();
-		if let Some(key) = keys.get(app.settings_state.selected_field) {
-			if let Some(val) = obj.get(*key) {
-				return match val {
-					serde_json::Value::String(s) => s.clone(),
-					other => other.to_string(),
-				};
-			}
+/// Temporary bridge: convert SettingsFormState to SettingsExplorerState for rendering.
+///
+/// This will be removed in Task 7 when the render function is updated to accept
+/// SettingsFormState directly.
+fn settings_form_to_explorer(form: &SettingsFormState) -> SettingsExplorerState {
+	use crate::overlays::settings::SettingsLevel as OldLevel;
+	let level = match form.level {
+		SettingsLevel::FileList => OldLevel::FileList,
+		SettingsLevel::FieldList => OldLevel::FieldList,
+		SettingsLevel::Editing | SettingsLevel::ArrayEntry => OldLevel::Editing,
+	};
+	SettingsExplorerState {
+		level,
+		selected_file: form.selected_file,
+		selected_field: form.selected_field,
+		edit_value: form.edit_value.clone(),
+		saved_indicator: form.saved_indicator,
+	}
+}
+
+/// Handle a SettingsAction by converting it to the appropriate app state change.
+fn handle_settings_action(app: &mut App, action: SettingsAction) {
+	match action {
+		SettingsAction::None => {}
+		SettingsAction::LoadFile { filename, scope } => {
+			app.pending_bridge_action = Some(BridgeAction::LoadConfigFile { filename, scope });
+		}
+		SettingsAction::SaveField { filename, scope, key, value } => {
+			app.pending_bridge_action = Some(BridgeAction::SaveConfigField { filename, scope, key, value });
+		}
+		SettingsAction::AddEntry { .. } => {
+			// TODO: array entry support
+		}
+		SettingsAction::RemoveEntry { .. } => {
+			// TODO: array entry support
+		}
+		SettingsAction::Dismiss => {
+			app.screen = Screen::Chat;
 		}
 	}
-	String::new()
 }
 
 /// Handle a SetupAction returned by the setup selector.
@@ -1618,11 +1668,8 @@ mod tests {
 		let app = App::new();
 		assert!(app.librarian_state.librarians.is_empty());
 		assert_eq!(app.setup_state.selected, 0);
-		assert_eq!(
-			app.settings_state.level,
-			crate::overlays::settings::SettingsLevel::FileList
-		);
-		assert_eq!(app.settings_config_data, serde_json::Value::Null);
+		assert_eq!(app.settings_state.level, SettingsLevel::FileList);
+		assert_eq!(app.settings_state.config_data, serde_json::Value::Null);
 	}
 
 	#[test]
@@ -1733,7 +1780,7 @@ mod tests {
 		let backend = ratatui::backend::TestBackend::new(80, 24);
 		let mut terminal = ratatui::Terminal::new(backend).unwrap();
 		let mut app = App::new();
-		app.settings_config_data = serde_json::json!({
+		app.settings_state.config_data = serde_json::json!({
 			"host": "localhost",
 			"port": 8080,
 			"debug": true
@@ -1841,7 +1888,6 @@ mod tests {
 
 	#[test]
 	fn settings_overlay_enter_goes_to_field_list() {
-		use crate::overlays::settings::SettingsLevel;
 		let mut app = App::new();
 		app.screen = Screen::Settings;
 		app = update(app, AppMessage::Submit);

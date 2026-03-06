@@ -110,6 +110,18 @@ pub enum BridgeAction {
 		command: String,
 		args: Vec<String>,
 	},
+	/// Load a config file for the settings UI.
+	LoadConfigFile {
+		filename: String,
+		scope: simse_ui_core::config::storage::ConfigScope,
+	},
+	/// Save a field in a config file from the settings UI.
+	SaveConfigField {
+		filename: String,
+		scope: simse_ui_core::config::storage::ConfigScope,
+		key: String,
+		value: serde_json::Value,
+	},
 
 	// ── AI ───────────────────────────────────────────────────────────
 	/// Run a named chain with the given arguments.
@@ -146,6 +158,8 @@ impl BridgeAction {
 			BridgeAction::FactoryReset => "factory-reset",
 			BridgeAction::FactoryResetProject => "factory-reset-project",
 			BridgeAction::SetupAcp { .. } => "setup-acp",
+			BridgeAction::LoadConfigFile { .. } => "load-config-file",
+			BridgeAction::SaveConfigField { .. } => "save-config-field",
 			BridgeAction::RunChain { .. } => "run-chain",
 			BridgeAction::Compact => "compact",
 		}
@@ -424,6 +438,8 @@ mod tests {
 			BridgeAction::FactoryReset,
 			BridgeAction::FactoryResetProject,
 			BridgeAction::SetupAcp { name: "n".into(), command: "c".into(), args: vec![] },
+			BridgeAction::LoadConfigFile { filename: "config.json".into(), scope: simse_ui_core::config::storage::ConfigScope::Global },
+			BridgeAction::SaveConfigField { filename: "config.json".into(), scope: simse_ui_core::config::storage::ConfigScope::Global, key: "k".into(), value: serde_json::json!("v") },
 			BridgeAction::RunChain { name: "c".into(), args: "a".into() },
 			BridgeAction::Compact,
 		];

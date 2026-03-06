@@ -19,6 +19,14 @@ tasks:
     command: 'cargo build'
     inputs:
       - '@globs(sources)'
+  lint:
+    command: 'cargo clippy -- -D warnings'
+    inputs:
+      - '@globs(sources)'
+  format-check:
+    command: 'cargo fmt --check'
+    inputs:
+      - '@globs(sources)'
   test:
     command: 'cargo test'
     inputs:

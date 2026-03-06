@@ -54,7 +54,7 @@ thiserror = "2"
 anyhow = "1"
 
 # PRNG for sampling
-rand = "0.9"
+rand = "0.10"
 
 # HTTP client (for TEI bridge)
 ureq = { version = "3", features = ["json"] }

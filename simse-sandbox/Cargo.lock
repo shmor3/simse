@@ -2706,61 +2706,16 @@ dependencies = [
 name = "simse-sandbox-engine"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "base64",
+ "regex",
+ "reqwest",
  "russh",
  "russh-keys",
  "russh-sftp",
  "serde",
  "serde_json",
- "simse-vfs-engine",
- "simse-vnet-engine",
- "simse-vsh-engine",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "simse-vfs-engine"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64",
- "regex",
- "serde",
- "serde_json",
  "sha2 0.10.9",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "simse-vnet-engine"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "regex",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "simse-vsh-engine"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "serde",
- "serde_json",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -3043,7 +2998,6 @@ dependencies = [
  "bytes",
  "libc",
  "mio",
- "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
  "socket2",

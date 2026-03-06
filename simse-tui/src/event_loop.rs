@@ -14,11 +14,13 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use futures::StreamExt;
+
 // simse-core types
 use simse_core::acp::client::{
-	AcpClient as AcpEngine, AcpConfig as AcpEngineConfig, ChatMessage, ChatOptions, ServerEntry,
+	AcpClient as AcpEngine, AcpConfig as AcpEngineConfig, ServerEntry, StreamOptions,
 };
-use simse_core::acp::protocol::ContentBlock;
+use simse_core::acp::protocol::{PermissionPolicy, StreamChunk};
 use simse_core::agentic_loop::{
 	self, AcpClient as AcpClientTrait, AgenticLoopOptions, CancellationToken, GenerateResponse,
 	LoopCallbacks, Message, MessageRole, TokenUsage,
@@ -43,6 +45,11 @@ use crate::session_store::SessionStore;
 
 /// Adapter that wraps the simse-acp engine `AcpClient` and implements the
 /// simse-core `AcpClient` trait so it can be used with `run_agentic_loop`.
+///
+/// Uses `generate_stream()` internally because ACP servers (like
+/// claude-agent-acp) deliver content via `session/update` streaming
+/// notifications. The synchronous `chat()` method only reads the final
+/// `session/prompt` response which has empty content.
 struct AcpAdapter {
 	engine: Arc<AcpEngine>,
 	session_id: Option<String>,
@@ -56,48 +63,54 @@ impl AcpClientTrait for AcpAdapter {
 		messages: &[Message],
 		system: Option<&str>,
 	) -> Result<GenerateResponse, SimseError> {
-		let mut chat_messages: Vec<ChatMessage> = Vec::new();
-
-		// Add system message if present
-		if let Some(sys) = system {
-			chat_messages.push(ChatMessage {
-				role: "system".to_string(),
-				content: vec![ContentBlock::Text {
-					text: sys.to_string(),
-				}],
-			});
-		}
-
+		// Build a single prompt string from all messages with role prefixes.
+		// This mirrors what AcpEngine::chat() does internally when flattening
+		// ChatMessage structs into a single Vec<ContentBlock>.
+		let mut prompt_parts: Vec<String> = Vec::new();
 		for m in messages {
-			let role = match m.role {
-				MessageRole::User => "user",
-				MessageRole::Assistant => "assistant",
-				MessageRole::System => "system",
+			let prefix = match m.role {
+				MessageRole::System => "[System] ",
+				MessageRole::Assistant => "[Assistant] ",
+				MessageRole::User => "",
 			};
-			chat_messages.push(ChatMessage {
-				role: role.to_string(),
-				content: vec![ContentBlock::Text {
-					text: m.content.clone(),
-				}],
-			});
+			prompt_parts.push(format!("{prefix}{}", m.content));
 		}
+		let prompt = prompt_parts.join("\n");
 
-		let result = self
+		let options = StreamOptions {
+			server_name: self.server_name.clone(),
+			session_id: self.session_id.clone(),
+			system_prompt: system.map(|s| s.to_string()),
+			..Default::default()
+		};
+
+		let mut stream = self
 			.engine
-			.chat(
-				&chat_messages,
-				ChatOptions {
-					server_name: self.server_name.clone(),
-					session_id: self.session_id.clone(),
-					..Default::default()
-				},
-			)
+			.generate_stream(&prompt, options)
 			.await
 			.map_err(|e| SimseError::other(e.to_string()))?;
 
+		// Collect all streaming deltas into the full response text.
+		let mut text = String::new();
+		let mut usage = None;
+		while let Some(chunk) = stream.next().await {
+			match chunk {
+				StreamChunk::Delta { text: delta } => {
+					text.push_str(&delta);
+				}
+				StreamChunk::Complete {
+					usage: chunk_usage,
+				} => {
+					usage = chunk_usage;
+					break;
+				}
+				_ => {}
+			}
+		}
+
 		Ok(GenerateResponse {
-			text: result.content,
-			usage: result.usage.map(|u| TokenUsage {
+			text,
+			usage: usage.map(|u| TokenUsage {
 				prompt_tokens: Some(u.prompt_tokens),
 				completion_tokens: Some(u.completion_tokens),
 				total_tokens: Some(u.total_tokens),
@@ -189,7 +202,7 @@ impl TuiRuntime {
 				env: server_config.env.clone(),
 				default_agent: server_config.default_agent.clone(),
 				timeout_ms: server_config.timeout_ms,
-				permission_policy: None,
+				permission_policy: Some(PermissionPolicy::AutoApprove),
 			}],
 			default_server: Some(server_config.name.clone()),
 			default_agent: self.config.default_agent.clone(),
@@ -218,7 +231,7 @@ impl TuiRuntime {
 				env: server_config.env.clone(),
 				default_agent: server_config.default_agent.clone(),
 				timeout_ms: server_config.timeout_ms,
-				permission_policy: None,
+				permission_policy: Some(PermissionPolicy::AutoApprove),
 			}],
 			default_server: Some(server_config.name.clone()),
 			default_agent: self.config.default_agent.clone(),

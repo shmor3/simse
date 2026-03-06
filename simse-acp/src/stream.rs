@@ -56,6 +56,10 @@ pub struct AcpStream {
 	cancellation: CancellationToken,
 	/// Whether the stream has completed (no more items will be yielded).
 	completed: bool,
+	/// Opaque handle(s) kept alive for the lifetime of the stream.
+	/// Used to hold `SubscriptionHandle` so the notification handler
+	/// remains active until the stream is consumed and dropped.
+	_keep_alive: Vec<Box<dyn std::any::Any + Send>>,
 }
 
 impl AcpStream {
@@ -84,7 +88,16 @@ impl AcpStream {
 			permission_active,
 			cancellation,
 			completed: false,
+			_keep_alive: Vec::new(),
 		}
+	}
+
+	/// Add handles that must be kept alive for the lifetime of the stream.
+	///
+	/// This is used to hold `SubscriptionHandle` instances so the
+	/// notification handlers remain active while the stream is alive.
+	pub fn keep_alive(&mut self, handle: Box<dyn std::any::Any + Send>) {
+		self._keep_alive.push(handle);
 	}
 }
 

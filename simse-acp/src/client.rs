@@ -452,7 +452,7 @@ impl AcpClient {
 		let permission_active = Arc::new(AtomicBool::new(false));
 		let cancellation = CancellationToken::new();
 
-		let (stream, tx) = create_stream(
+		let (mut stream, tx) = create_stream(
 			timeout_ms,
 			Arc::clone(&permission_active),
 			cancellation.clone(),
@@ -461,7 +461,7 @@ impl AcpClient {
 		// Register notification handler for session/update.
 		let tx_clone = tx.clone();
 		let session_id_for_handler = session_id.clone();
-		let _subscription = conn.on_notification(
+		let subscription = conn.on_notification(
 			"session/update",
 			Box::new(move |params: serde_json::Value| {
 				// Only process updates for our session.
@@ -478,6 +478,11 @@ impl AcpClient {
 				}
 			}),
 		);
+
+		// Keep the subscription handle alive for the lifetime of the stream.
+		// Without this, the handler is deactivated when generate_stream()
+		// returns and no session/update notifications are routed to the stream.
+		stream.keep_alive(Box::new(subscription));
 
 		// Send the prompt asynchronously — the response completing will
 		// trigger the Complete chunk.

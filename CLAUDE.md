@@ -71,6 +71,7 @@ simse-auth/                 # TypeScript — Auth service (Cloudflare Worker, D1
 simse-payments/             # TypeScript — Payments service (Cloudflare Worker, Stripe)
 simse-landing/              # TypeScript — Landing page (React Router + Cloudflare)
 simse-mailer/               # TypeScript — Email templates + notifications
+simse-status/               # TypeScript — Status page (React Router v7 + Cloudflare Pages + D1 + Cron)
 simse-brand/                # Brand assets (logos, screenshots, guidelines, copy)
 ```
 

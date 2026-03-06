@@ -1,10 +1,22 @@
 import { createMiddleware } from 'hono/factory';
-import type { ApiSecrets, Env } from '../types';
+import type { ApiSecrets, AppVariables, Env } from '../types';
+
+let cachedSecrets: ApiSecrets | null = null;
+let cacheTime = 0;
+const CACHE_TTL_MS = 300_000; // 5 minutes
 
 export const secretsMiddleware = createMiddleware<{
 	Bindings: Env;
-	Variables: { secrets: ApiSecrets };
+	Variables: AppVariables;
 }>(async (c, next) => {
+	const now = Date.now();
+
+	if (cachedSecrets && now - cacheTime < CACHE_TTL_MS) {
+		c.set('secrets', cachedSecrets);
+		await next();
+		return;
+	}
+
 	const [
 		authApiUrl,
 		authApiSecret,
@@ -38,7 +50,7 @@ export const secretsMiddleware = createMiddleware<{
 		);
 	}
 
-	c.set('secrets', {
+	cachedSecrets = {
 		authApiUrl,
 		authApiSecret,
 		paymentsApiUrl,
@@ -46,6 +58,9 @@ export const secretsMiddleware = createMiddleware<{
 		mailerApiUrl,
 		mailerApiSecret,
 		jwtSecret,
-	});
+	};
+	cacheTime = now;
+
+	c.set('secrets', cachedSecrets);
 	await next();
 });

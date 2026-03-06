@@ -4,7 +4,11 @@ export async function sendEmail(
 	to: string,
 	props: Record<string, string>,
 ): Promise<void> {
-	await queue.send({ type: 'email', template, to, props });
+	try {
+		await queue.send({ type: 'email', template, to, props });
+	} catch (err) {
+		console.error('Failed to queue email', { template, to, error: err });
+	}
 }
 
 export async function sendNotification(
@@ -15,5 +19,9 @@ export async function sendNotification(
 	body: string,
 	link?: string,
 ): Promise<void> {
-	await queue.send({ type: 'notification', userId, kind, title, body, link });
+	try {
+		await queue.send({ type: 'notification', userId, kind, title, body, link });
+	} catch (err) {
+		console.error('Failed to queue notification', { kind, userId, error: err });
+	}
 }

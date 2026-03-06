@@ -45,10 +45,13 @@ export async function verifyJwt(
 
 	if (!valid) return null;
 
-	const payload = JSON.parse(
-		new TextDecoder().decode(base64UrlDecode(body)),
-	) as JwtPayload;
-
-	const now = Math.floor(Date.now() / 1000);
-	return { payload, expired: payload.exp <= now };
+	try {
+		const payload = JSON.parse(
+			new TextDecoder().decode(base64UrlDecode(body)),
+		) as JwtPayload;
+		const now = Math.floor(Date.now() / 1000);
+		return { payload, expired: payload.exp < now };
+	} catch {
+		return null;
+	}
 }

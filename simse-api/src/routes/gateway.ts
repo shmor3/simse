@@ -112,12 +112,33 @@ async function proxyNotifications(c: GatewayContext) {
 	}
 
 	if (c.req.method === 'POST') {
-		const body = await c.req.json();
-		await c.env.COMMS_QUEUE.send({
-			type: 'notification',
-			userId: auth.userId,
-			...body,
-		});
+		let body: Record<string, unknown>;
+		try {
+			body = await c.req.json();
+		} catch {
+			return c.json(
+				{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+				400,
+			);
+		}
+
+		try {
+			await c.env.COMMS_QUEUE.send({
+				type: 'notification',
+				userId: auth.userId,
+				...body,
+			});
+		} catch {
+			return c.json(
+				{
+					error: {
+						code: 'SERVICE_UNAVAILABLE',
+						message: 'Notification service unavailable',
+					},
+				},
+				503,
+			);
+		}
 		return c.json({ data: { ok: true } });
 	}
 
@@ -199,8 +220,12 @@ async function validateTokenViaService(
 
 	if (!res.ok) return null;
 
-	const json = (await res.json()) as ValidateResponse;
-	return json.data;
+	try {
+		const json = (await res.json()) as ValidateResponse;
+		return json.data;
+	} catch {
+		return null;
+	}
 }
 
 function setAuthHeaders(headers: Headers, auth: AuthResult): void {

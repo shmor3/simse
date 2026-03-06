@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { sendEmail } from '../lib/comms';
 import { generateId } from '../lib/db';
-import { inviteSchema } from '../schemas';
+import { inviteSchema, updateRoleSchema } from '../schemas';
 import type { Env } from '../types';
 
 const teams = new Hono<{ Bindings: Env }>();
@@ -188,9 +188,10 @@ teams.put('/me/members/:userId/role', async (c) => {
 		);
 
 	const targetUserId = c.req.param('userId');
-	const body = await c.req.json<{ role: string }>();
+	const body = await c.req.json();
+	const parsed = updateRoleSchema.safeParse(body);
 
-	if (!body.role || !['admin', 'member'].includes(body.role)) {
+	if (!parsed.success) {
 		return c.json(
 			{
 				error: {
@@ -219,7 +220,7 @@ teams.put('/me/members/:userId/role', async (c) => {
 	}
 
 	// Only owners can promote to admin
-	if (body.role === 'admin' && membership.role !== 'owner') {
+	if (parsed.data.role === 'admin' && membership.role !== 'owner') {
 		return c.json(
 			{
 				error: {
@@ -259,7 +260,7 @@ teams.put('/me/members/:userId/role', async (c) => {
 		.prepare(
 			'UPDATE team_members SET role = ? WHERE team_id = ? AND user_id = ?',
 		)
-		.bind(body.role, membership.team_id, targetUserId)
+		.bind(parsed.data.role, membership.team_id, targetUserId)
 		.run();
 
 	return c.json({ data: { ok: true } });

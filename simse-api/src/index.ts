@@ -16,6 +16,26 @@ export const breakers = {
 
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
+app.onError((err, c) => {
+	console.error('Unhandled error', err);
+	return c.json(
+		{
+			error: {
+				code: 'INTERNAL_ERROR',
+				message: 'An unexpected error occurred',
+			},
+		},
+		500,
+	);
+});
+
+app.notFound((c) => {
+	return c.json(
+		{ error: { code: 'NOT_FOUND', message: 'Route not found' } },
+		404,
+	);
+});
+
 app.use('*', analyticsMiddleware);
 app.use('*', requestValidationMiddleware);
 app.use('*', rateLimitMiddleware);

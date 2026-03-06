@@ -54,9 +54,10 @@ export async function resilientFetch(
 			}
 		}
 
+		let timeoutId: ReturnType<typeof setTimeout> | undefined;
 		try {
 			const controller = new AbortController();
-			const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+			timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
 			const response = await fetch(url, {
 				...init,
@@ -83,6 +84,7 @@ export async function resilientFetch(
 
 			return response;
 		} catch (error) {
+			clearTimeout(timeoutId);
 			lastError = error as Error;
 			breaker.recordFailure();
 

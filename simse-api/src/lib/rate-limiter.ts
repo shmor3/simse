@@ -3,6 +3,8 @@ interface WindowEntry {
 	resetAt: number;
 }
 
+const MAX_ENTRIES = 10_000;
+
 export class RateLimiter {
 	private windows = new Map<string, WindowEntry>();
 	private readonly windowMs: number;
@@ -19,6 +21,16 @@ export class RateLimiter {
 		const entry = this.windows.get(key);
 
 		if (!entry || now >= entry.resetAt) {
+			// Enforce max size before inserting new entry
+			if (this.windows.size >= MAX_ENTRIES) {
+				this.prune();
+			}
+			if (this.windows.size >= MAX_ENTRIES) {
+				// Still over limit after prune — evict oldest
+				const oldest = this.windows.keys().next().value;
+				if (oldest !== undefined) this.windows.delete(oldest);
+			}
+
 			const resetAt = now + this.windowMs;
 			this.windows.set(key, { count: 1, resetAt });
 			return { allowed: true, remaining: limit - 1, resetAt };

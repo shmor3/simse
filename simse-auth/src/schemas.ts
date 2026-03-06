@@ -68,3 +68,7 @@ export const refreshSchema = z.object({
 export const revokeSchema = z.object({
 	refreshToken: z.string().startsWith('rt_'),
 });
+
+export const updateRoleSchema = z.object({
+	role: z.enum(['admin', 'member']),
+});

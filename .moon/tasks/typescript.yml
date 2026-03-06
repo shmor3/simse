@@ -3,7 +3,7 @@ inheritedBy:
 
 tasks:
   lint:
-    command: 'biome check .'
+    command: 'bunx biome check .'
   setup:
     command: 'bun install'
   build:

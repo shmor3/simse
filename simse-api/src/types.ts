@@ -2,6 +2,7 @@ export interface Env {
 	COMMS_QUEUE: Queue;
 	SECRETS: SecretsStoreNamespace;
 	ANALYTICS: AnalyticsEngineDataset;
+	CLOUD_SERVICE: Fetcher;
 }
 
 export interface AppVariables {

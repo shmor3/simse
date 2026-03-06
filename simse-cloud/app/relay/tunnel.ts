@@ -7,12 +7,10 @@ interface SessionState {
 
 export class TunnelSession implements DurableObject {
 	private state: DurableObjectState;
-	private env: Env;
 	private session: SessionState | null = null;
 
-	constructor(state: DurableObjectState, env: Env) {
+	constructor(state: DurableObjectState, _env: Env) {
 		this.state = state;
-		this.env = env;
 	}
 
 	async fetch(request: Request): Promise<Response> {
@@ -81,9 +79,7 @@ export class TunnelSession implements DurableObject {
 
 		const tags = this.state.getTags(ws);
 		const msgStr =
-			typeof message === 'string'
-				? message
-				: new TextDecoder().decode(message);
+			typeof message === 'string' ? message : new TextDecoder().decode(message);
 
 		if (tags.includes('tunnel')) {
 			if (this.session.clientWs) {

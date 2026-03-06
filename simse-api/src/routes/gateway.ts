@@ -156,6 +156,61 @@ async function proxyNotifications(c: GatewayContext) {
 	);
 }
 
+// --- Relay proxy (WebSocket tunnel + REST) ---
+for (const path of ['/ws/tunnel', '/ws/client']) {
+	gateway.get(path, async (c) => {
+		// WebSocket clients pass token as query param (can't set headers)
+		const token = c.req.query('token');
+		if (!token) {
+			return c.json(
+				{
+					error: {
+						code: 'MISSING_TOKEN',
+						message: 'token query param required',
+					},
+				},
+				401,
+			);
+		}
+
+		const auth = await authenticateToken(c, token);
+		if (!auth) {
+			return c.json(
+				{ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } },
+				401,
+			);
+		}
+
+		// Forward to simse-cloud with userId; strip token from query
+		const url = new URL(c.req.url);
+		url.searchParams.delete('token');
+		url.searchParams.set('userId', auth.userId);
+
+		return c.env.CLOUD_SERVICE.fetch(
+			new Request(url.toString(), {
+				headers: c.req.raw.headers,
+			}),
+		);
+	});
+}
+
+gateway.get('/tunnels', async (c) => {
+	const auth = await authenticateRequest(c);
+	if (!auth) {
+		return c.json(
+			{ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } },
+			401,
+		);
+	}
+
+	const url = new URL(c.req.url);
+	const headers = new Headers();
+	headers.set('X-User-Id', auth.userId);
+	headers.set('X-Request-Id', c.get('requestId') ?? '');
+
+	return c.env.CLOUD_SERVICE.fetch(new Request(url.toString(), { headers }));
+});
+
 // --- Helpers ---
 
 interface AuthResult {
@@ -171,8 +226,13 @@ async function authenticateRequest(
 	const authHeader = c.req.header('Authorization');
 	if (!authHeader?.startsWith('Bearer ')) return null;
 
-	const token = authHeader.slice(7);
+	return authenticateToken(c, authHeader.slice(7));
+}
 
+async function authenticateToken(
+	c: GatewayContext,
+	token: string,
+): Promise<AuthResult | null> {
 	// API keys — validate via auth service
 	if (token.startsWith('sk_')) {
 		return validateTokenViaService(c, token);

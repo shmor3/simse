@@ -1,5 +1,5 @@
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, RngExt, SeedableRng};
 
 use crate::pcn_config::Activation;
 
@@ -46,7 +46,7 @@ impl PcnLayer {
     /// * `input_dim` - number of nodes in the layer above (input to generative model)
     /// * `activation` - nonlinearity applied after the linear transform
     pub fn new(dim: usize, input_dim: usize, activation: Activation) -> Self {
-        let mut rng = StdRng::from_entropy();
+        let mut rng = StdRng::from_rng(&mut rand::rng());
         Self::new_with_rng(dim, input_dim, activation, &mut rng)
     }
 
@@ -60,7 +60,7 @@ impl PcnLayer {
         // Xavier initialization: W ~ U(-limit, +limit) where limit = sqrt(6 / (fan_in + fan_out))
         let limit = (6.0 / (input_dim as f64 + dim as f64)).sqrt();
         let weights: Vec<f64> = (0..dim * input_dim)
-            .map(|_| rng.gen_range(-limit..limit))
+            .map(|_| rng.random_range(-limit..limit))
             .collect();
 
         Self {
@@ -185,7 +185,7 @@ impl PcnLayer {
     pub fn randomize_values(&mut self, seed: u64) {
         let mut rng = StdRng::seed_from_u64(seed);
         for v in self.values.iter_mut() {
-            *v = rng.gen_range(-0.1..0.1);
+            *v = rng.random_range(-0.1..0.1);
         }
     }
 
@@ -209,7 +209,7 @@ impl PcnLayer {
             return;
         }
 
-        let mut rng = StdRng::from_entropy();
+        let mut rng = StdRng::from_rng(&mut rand::rng());
         let limit = (6.0 / (new_input_dim as f64 + self.dim as f64)).sqrt();
 
         let mut new_weights = vec![0.0; self.dim * new_input_dim];
@@ -222,7 +222,7 @@ impl PcnLayer {
 
             // Xavier-init new columns
             for j in self.input_dim..new_input_dim {
-                new_weights[new_start + j] = rng.gen_range(-limit..limit);
+                new_weights[new_start + j] = rng.random_range(-limit..limit);
             }
         }
 

@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use simse_vector_engine::types::{Lookup, Volume};
+use simse_adaptive_engine::types::{Lookup, Volume};
 
 use crate::error::SimseError;
 

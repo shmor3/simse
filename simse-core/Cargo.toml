@@ -14,7 +14,7 @@ path = "src/main.rs"
 [dependencies]
 simse-acp-engine = { path = "../simse-acp" }
 simse-mcp-engine = { path = "../simse-mcp" }
-simse-vector-engine = { path = "../simse-vector" }
+simse-adaptive-engine = { path = "../simse-adaptive" }
 simse-vfs-engine = { path = "../simse-vfs" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }

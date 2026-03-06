@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use simse_vector_engine::prompt_injection::{format_memory_context, PromptInjectionOptions};
+use simse_adaptive_engine::prompt_injection::{format_memory_context, PromptInjectionOptions};
 
 use crate::error::SimseError;
 use crate::library::Library;

@@ -1,4 +1,4 @@
-//! Library orchestration layer wrapping `simse_vector_engine::store::VolumeStore`.
+//! Library orchestration layer wrapping `simse_adaptive_engine::store::VolumeStore`.
 //!
 //! Provides:
 //! - [`Library`] — high-level API with automatic embedding, event publishing, and shelf management

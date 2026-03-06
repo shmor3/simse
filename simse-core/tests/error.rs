@@ -71,7 +71,7 @@ fn all_error_code_strings_are_unique() {
 		// Passthrough codes
 		"ACP_ERROR",
 		"MCP_ENGINE_ERROR",
-		"VECTOR_ERROR",
+		"ADAPTIVE_ERROR",
 		"VFS_ENGINE_ERROR",
 		"IO_ERROR",
 		"OTHER_ERROR",
@@ -460,10 +460,10 @@ fn from_mcp_error() {
 }
 
 #[test]
-fn from_vector_error() {
-	let vec_err = simse_vector_engine::error::VectorError::EmptyText;
-	let err: SimseError = vec_err.into();
-	assert_eq!(err.code(), "VECTOR_ERROR");
+fn from_adaptive_error() {
+	let adaptive_err = simse_adaptive_engine::error::AdaptiveError::EmptyText;
+	let err: SimseError = adaptive_err.into();
+	assert_eq!(err.code(), "ADAPTIVE_ERROR");
 	assert!(
 		err.to_string().contains("empty text"),
 		"expected 'empty text' in: {}",

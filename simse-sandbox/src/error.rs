@@ -1,18 +1,9 @@
-use simse_vfs_engine::error::VfsError;
-use simse_vnet_engine::error::VnetError;
-use simse_vsh_engine::error::VshError;
 use thiserror::Error;
 
 /// Unified error type for the sandbox engine.
 ///
-/// Contains:
-/// - Sandbox-level variants (SSH, backend switching, etc.)
-/// - Inlined VFS domain variants (`Vfs*` prefix)
-/// - Inlined VSH domain variants (`Vsh*` prefix)
-/// - Inlined VNet domain variants (`Vnet*` prefix)
-/// - Temporary wrapper variants (`Vfs`, `Vsh`, `Vnet`) kept so existing code
-///   that converts from the old per-crate error types still compiles. These
-///   will be removed once all domain code is migrated into simse-sandbox.
+/// Contains sandbox-level variants (SSH, backend switching, etc.) plus
+/// domain-specific variants with `Vfs*`, `Vsh*`, and `Vnet*` prefixes.
 #[derive(Debug, Error)]
 pub enum SandboxError {
     // ── Sandbox-level ────────────────────────────────────────────────
@@ -109,13 +100,6 @@ pub enum SandboxError {
     #[error("VNet JSON error: {0}")]
     VnetJson(String),
 
-    // ── Temporary wrappers (will be removed after migration) ─────────
-    #[error("VFS error: {0}")]
-    Vfs(#[from] VfsError),
-    #[error("VSH error: {0}")]
-    Vsh(#[from] VshError),
-    #[error("VNet error: {0}")]
-    Vnet(#[from] VnetError),
 }
 
 impl SandboxError {
@@ -172,10 +156,6 @@ impl SandboxError {
             Self::VnetIo(_) => "SANDBOX_VNET_IO_ERROR",
             Self::VnetJson(_) => "SANDBOX_VNET_JSON_ERROR",
 
-            // Temporary wrappers — delegate to the old per-crate code()
-            Self::Vfs(e) => e.code(),
-            Self::Vsh(e) => e.code(),
-            Self::Vnet(e) => e.code(),
         }
     }
 
@@ -261,18 +241,6 @@ mod tests {
         for (err, expected) in cases {
             assert_eq!(err.code(), expected, "wrong code for {err}");
         }
-    }
-
-    #[test]
-    fn temporary_wrapper_delegates_code() {
-        let vfs_err = SandboxError::Vfs(VfsError::NotFound("x".into()));
-        assert_eq!(vfs_err.code(), "VFS_NOT_FOUND");
-
-        let vsh_err = SandboxError::Vsh(VshError::SessionNotFound("x".into()));
-        assert_eq!(vsh_err.code(), "VSH_SESSION_NOT_FOUND");
-
-        let vnet_err = SandboxError::Vnet(VnetError::SandboxViolation("x".into()));
-        assert_eq!(vnet_err.code(), "VNET_SANDBOX_VIOLATION");
     }
 
     #[test]

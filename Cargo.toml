@@ -6,12 +6,9 @@ members = [
     "simse-core",
 ]
 exclude = [
-    "simse-vfs",
     "simse-adaptive",
     "simse-acp",
     "simse-mcp",
-    "simse-vsh",
-    "simse-vnet",
     "simse-engine",
     "simse-sandbox",
     "simse-remote",

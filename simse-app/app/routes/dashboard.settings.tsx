@@ -5,6 +5,8 @@ const tabs = [
 	{ label: 'General', to: '/dashboard/settings' },
 	{ label: 'Billing', to: '/dashboard/settings/billing' },
 	{ label: 'Team', to: '/dashboard/settings/team' },
+	{ label: 'Devices', to: '/dashboard/settings/devices' },
+	{ label: 'Remotes', to: '/dashboard/settings/remotes' },
 ];
 
 export default function SettingsLayout() {

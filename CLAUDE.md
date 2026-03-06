@@ -54,7 +54,7 @@ simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Arch
 simse-remote/               # Pure Rust crate — remote access engine (JSON-RPC over stdio)
 simse-engine/               # Pure Rust crate — core engine
 simse-cdn/                  # TypeScript — CDN worker (R2 + KV, Cloudflare Worker)
-simse-cloud/                # TypeScript — SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects)
+simse-app/                  # TypeScript — SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects)
 simse-api/                  # TypeScript — API gateway (Cloudflare Worker, proxies to backend services)
 simse-auth/                 # TypeScript — Auth service (Cloudflare Worker, D1, users/sessions/teams/API keys)
 simse-payments/             # TypeScript — Payments service (Cloudflare Worker, Stripe)
@@ -334,7 +334,7 @@ simse-cloud/                # SaaS web app + relay (React Router + Cloudflare Pa
 
 ### Key Patterns
 
-- **Rust-first architecture**: All core logic is in Rust. TS packages are application/service layers (simse-cloud (includes relay), simse-api, simse-auth, simse-payments, simse-cdn, simse-landing, simse-mailer).
+- **Rust-first architecture**: All core logic is in Rust. TS packages are application/service layers (simse-app (includes relay), simse-api, simse-auth, simse-payments, simse-cdn, simse-landing, simse-mailer).
 - **JSON-RPC 2.0 / NDJSON stdio**: All Rust crates expose their APIs via JSON-RPC over newline-delimited JSON on stdin/stdout. Tracing/logs go to stderr.
 - **Callback pattern**: Tools, hooks, chains, and loops registered from external callers use oneshot channels + JSON-RPC notifications for async callback execution.
 - **CoreContext wiring**: `CoreContext` ties together EventBus, Logger, AppConfig, TaskList, HookSystem, SessionManager, ToolRegistry, and optional Library.

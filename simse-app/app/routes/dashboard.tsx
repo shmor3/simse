@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { redirect } from 'react-router';
 import DashboardLayout from '~/components/layout/DashboardLayout';
 import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
@@ -33,17 +34,66 @@ export async function loader({ request }: Route.LoaderArgs) {
 		// ignore
 	}
 
+	// Get remotes
+	type Remote = {
+		id: string;
+		name: string;
+		status: 'connected' | 'offline';
+	};
+	let remotes: Remote[] = [];
+	try {
+		const remotesRes = await authenticatedApi(request, '/remotes');
+		if (remotesRes.ok) {
+			const remotesJson = (await remotesRes.json()) as ApiResponse<Remote[]>;
+			remotes = remotesJson.data ?? [];
+		}
+	} catch {
+		// ignore
+	}
+
+	// Get ACP backends
+	type AcpBackend = {
+		id: string;
+		name: string;
+		provider: string;
+	};
+	let acpBackends: AcpBackend[] = [];
+	try {
+		const backendsRes = await authenticatedApi(request, '/acp/backends');
+		if (backendsRes.ok) {
+			const backendsJson = (await backendsRes.json()) as ApiResponse<
+				AcpBackend[]
+			>;
+			acpBackends = backendsJson.data ?? [];
+		}
+	} catch {
+		// ignore
+	}
+
 	return {
 		unreadCount: notifications.filter((n) => !n.read).length,
 		notifications,
 		userName: user?.name ?? '',
 		userEmail: user?.email ?? '',
+		remotes,
+		acpBackends,
 	};
 }
 
 export default function Dashboard({ loaderData }: Route.ComponentProps) {
+	const [activeRemoteId, setActiveRemoteId] = useState<string | null>(null);
+	const [activeAcpId, setActiveAcpId] = useState<string>(
+		loaderData.acpBackends[0]?.id ?? '',
+	);
+
 	return (
 		<DashboardLayout
+			remotes={loaderData.remotes}
+			activeRemoteId={activeRemoteId}
+			onRemoteSelect={setActiveRemoteId}
+			acpBackends={loaderData.acpBackends}
+			activeAcpId={activeAcpId}
+			onAcpSelect={setActiveAcpId}
 			unreadCount={loaderData.unreadCount}
 			notifications={loaderData.notifications}
 			userName={loaderData.userName}

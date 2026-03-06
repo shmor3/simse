@@ -86,7 +86,7 @@ updates:
       interval: weekly
 
   - package-ecosystem: npm
-    directory: /simse-cloud
+    directory: /simse-app
     schedule:
       interval: weekly
 

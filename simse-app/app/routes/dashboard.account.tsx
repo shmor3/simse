@@ -23,9 +23,9 @@ export async function loader({ request }: Route.LoaderArgs) {
 
 	return {
 		user: {
-			name: user.name,
-			email: user.email,
-			createdAt: user.createdAt,
+			name: user?.name ?? '',
+			email: user?.email ?? '',
+			createdAt: user?.createdAt ?? '',
 		},
 	};
 }

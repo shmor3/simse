@@ -45,12 +45,12 @@ export default {
 		ctx.waitUntil(
 			Promise.resolve(
 				env.ANALYTICS.writeDataPoint({
-					indexes: ['simse-cloud'],
+					indexes: ['simse-app'],
 					blobs: [
 						request.method,
 						url.pathname,
 						String(response.status),
-						'simse-cloud',
+						'simse-app',
 						'',
 						'',
 						cf?.country ?? '',

@@ -10,14 +10,14 @@
 
 ---
 
-### Task 1: Add /health endpoint to simse-cloud
+### Task 1: Add /health endpoint to simse-app
 
 **Files:**
-- Modify: `simse-cloud/worker.ts:17-19` (add early return before requestHandler)
+- Modify: `simse-app/worker.ts:17-19` (add early return before requestHandler)
 
 **Step 1: Add health check in worker.ts**
 
-In `simse-cloud/worker.ts`, add an early return for `/health` before the `requestHandler` call. Insert at line 18, before `const start = Date.now();`:
+In `simse-app/worker.ts`, add an early return for `/health` before the `requestHandler` call. Insert at line 18, before `const start = Date.now();`:
 
 ```typescript
 const url = new URL(request.url);
@@ -59,14 +59,14 @@ async fetch(request, env, ctx) {
 
 **Step 2: Verify**
 
-Run: `cd simse-cloud && npx tsc --noEmit`
+Run: `cd simse-app && npx tsc --noEmit`
 Expected: No type errors
 
 **Step 3: Commit**
 
 ```bash
-git add simse-cloud/worker.ts
-git commit -m "feat(simse-cloud): add /health endpoint"
+git add simse-app/worker.ts
+git commit -m "feat(simse-app): add /health endpoint"
 ```
 
 ---
@@ -426,7 +426,7 @@ Note: `payments` and `mailer` are excluded from SERVICES because they don't have
 
 **Step 8: Create app/entry.server.tsx**
 
-Copy from simse-cloud — identical file:
+Copy from simse-app — identical file:
 
 ```tsx
 import { isbot } from 'isbot';

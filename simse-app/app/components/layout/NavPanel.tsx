@@ -1,17 +1,25 @@
 import clsx from 'clsx';
 import { NavLink } from 'react-router';
-import SimseLogo from '../ui/SimseLogo';
+
+interface NavPanelProps {
+	context: 'home' | 'remote';
+	contextName: string;
+	remoteId?: string;
+	onClose?: () => void;
+}
 
 interface NavItem {
 	label: string;
 	to: string;
+	end?: boolean;
 	icon: React.ReactNode;
 }
 
-const nav: NavItem[] = [
+const homeNav: NavItem[] = [
 	{
 		label: 'Overview',
 		to: '/dashboard',
+		end: true,
 		icon: (
 			<svg
 				className="h-4 w-4"
@@ -66,49 +74,138 @@ const nav: NavItem[] = [
 			</svg>
 		),
 	},
-	{
-		label: 'Sessions',
-		to: '/dashboard/sessions',
-		icon: (
-			<svg
-				className="h-4 w-4"
-				fill="none"
-				viewBox="0 0 24 24"
-				stroke="currentColor"
-				strokeWidth={2}
-			>
-				<path
-					strokeLinecap="round"
-					strokeLinejoin="round"
-					d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-				/>
-			</svg>
-		),
-	},
 ];
 
-interface SidebarProps {
-	onClose?: () => void;
+function remoteNav(remoteId: string): NavItem[] {
+	return [
+		{
+			label: 'Chat',
+			to: `/dashboard/chat/${remoteId}`,
+			icon: (
+				<svg
+					className="h-4 w-4"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+					strokeWidth={2}
+				>
+					<path
+						strokeLinecap="round"
+						strokeLinejoin="round"
+						d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+					/>
+				</svg>
+			),
+		},
+		{
+			label: 'Files',
+			to: `/dashboard/remote/${remoteId}/files`,
+			icon: (
+				<svg
+					className="h-4 w-4"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+					strokeWidth={2}
+				>
+					<path
+						strokeLinecap="round"
+						strokeLinejoin="round"
+						d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z"
+					/>
+				</svg>
+			),
+		},
+		{
+			label: 'Shell',
+			to: `/dashboard/remote/${remoteId}/shell`,
+			icon: (
+				<svg
+					className="h-4 w-4"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+					strokeWidth={2}
+				>
+					<path
+						strokeLinecap="round"
+						strokeLinejoin="round"
+						d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
+					/>
+				</svg>
+			),
+		},
+		{
+			label: 'Network',
+			to: `/dashboard/remote/${remoteId}/network`,
+			icon: (
+				<svg
+					className="h-4 w-4"
+					fill="none"
+					viewBox="0 0 24 24"
+					stroke="currentColor"
+					strokeWidth={2}
+				>
+					<path
+						strokeLinecap="round"
+						strokeLinejoin="round"
+						d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"
+					/>
+				</svg>
+			),
+		},
+	];
 }
 
-export default function Sidebar({ onClose }: SidebarProps) {
+export default function NavPanel({
+	context,
+	contextName,
+	remoteId,
+	onClose,
+}: NavPanelProps) {
+	const items = context === 'home' ? homeNav : remoteNav(remoteId ?? '');
+	const settingsTo =
+		context === 'home'
+			? '/dashboard/settings'
+			: `/dashboard/remote/${remoteId}/settings`;
+
 	return (
-		<aside className="flex h-screen w-60 flex-col border-r border-zinc-800 bg-zinc-950">
-			{/* Logo */}
-			<div className="flex items-center gap-2.5 px-5 pt-6 pb-4">
-				<SimseLogo size={20} className="text-zinc-500" />
-				<p className="font-mono text-[11px] font-bold uppercase tracking-[0.35em] text-zinc-500">
-					SIMSE
+		<aside className="flex w-55 flex-col border-r border-zinc-800/50 bg-zinc-950">
+			{/* Header */}
+			<div className="flex items-center justify-between px-5 pt-6 pb-4">
+				<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
+					{contextName}
 				</p>
+				{onClose && (
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-lg p-1 text-zinc-600 transition-colors hover:bg-zinc-800/50 hover:text-zinc-400 md:hidden"
+					>
+						<svg
+							className="h-4 w-4"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke="currentColor"
+							strokeWidth={2}
+						>
+							<path
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								d="M6 18L18 6M6 6l12 12"
+							/>
+						</svg>
+					</button>
+				)}
 			</div>
 
-			{/* Nav */}
+			{/* Nav items */}
 			<nav className="flex-1 space-y-0.5 px-3">
-				{nav.map((item) => (
+				{items.map((item) => (
 					<NavLink
 						key={item.to}
 						to={item.to}
-						end={item.to === '/dashboard'}
+						end={item.end}
 						onClick={() => onClose?.()}
 						className={({ isActive }) =>
 							clsx(
@@ -125,10 +222,10 @@ export default function Sidebar({ onClose }: SidebarProps) {
 				))}
 			</nav>
 
-			{/* Bottom — settings */}
+			{/* Settings */}
 			<div className="border-t border-zinc-800 p-3">
 				<NavLink
-					to="/dashboard/settings"
+					to={settingsTo}
 					onClick={() => onClose?.()}
 					className={({ isActive }) =>
 						clsx(

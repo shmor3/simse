@@ -58,14 +58,14 @@ CREATE INDEX idx_checks_time ON checks(checked_at);
 ## Missing /health Endpoints
 
 Need to add `/health` to:
-- **simse-cloud**: Add a health API route
+- **simse-app**: Add a health API route
 - **simse-landing**: Add a health handler in worker.ts
 
 ## Stack
 
 - React Router v7 + `@react-router/cloudflare`
 - D1 database for check history
-- Tailwind CSS (consistent with simse-cloud/simse-landing)
+- Tailwind CSS (consistent with simse-app/simse-landing)
 - Cron trigger via wrangler.toml
 
 ## Health Check Logic

@@ -621,18 +621,18 @@ git commit -m "feat(simse-cdn): add Workers Analytics Engine"
 
 ---
 
-### Task 6: Add analytics to simse-cloud
+### Task 6: Add analytics to simse-app
 
 The cloud app uses React Router v7 on Cloudflare Pages with a `worker.ts` entry point.
 
 **Files:**
-- Modify: `simse-cloud/wrangler.toml`
-- Modify: `simse-cloud/app/env.d.ts`
-- Modify: `simse-cloud/worker.ts`
+- Modify: `simse-app/wrangler.toml`
+- Modify: `simse-app/app/env.d.ts`
+- Modify: `simse-app/worker.ts`
 
 **Step 1: Add Analytics Engine binding to wrangler.toml**
 
-Append to `simse-cloud/wrangler.toml`:
+Append to `simse-app/wrangler.toml`:
 
 ```toml
 [analytics_engine]
@@ -642,7 +642,7 @@ binding = "ANALYTICS"
 
 **Step 2: Update Env interface**
 
-In `simse-cloud/app/env.d.ts`:
+In `simse-app/app/env.d.ts`:
 
 ```typescript
 interface Env {
@@ -653,7 +653,7 @@ interface Env {
 
 **Step 3: Add analytics to worker.ts**
 
-Update `simse-cloud/worker.ts` to wrap the request handler with analytics:
+Update `simse-app/worker.ts` to wrap the request handler with analytics:
 
 ```typescript
 import { createRequestHandler } from 'react-router';
@@ -686,12 +686,12 @@ export default {
 		ctx.waitUntil(
 			Promise.resolve(
 				env.ANALYTICS.writeDataPoint({
-					indexes: ['simse-cloud'],
+					indexes: ['simse-app'],
 					blobs: [
 						request.method,
 						url.pathname,
 						String(response.status),
-						'simse-cloud',
+						'simse-app',
 						'',
 						'',
 						cf?.country ?? '',
@@ -723,8 +723,8 @@ Note: `ctx.waitUntil` ensures the analytics write doesn't delay the response to 
 **Step 4: Commit**
 
 ```bash
-git add simse-cloud/wrangler.toml simse-cloud/app/env.d.ts simse-cloud/worker.ts
-git commit -m "feat(simse-cloud): add Workers Analytics Engine"
+git add simse-app/wrangler.toml simse-app/app/env.d.ts simse-app/worker.ts
+git commit -m "feat(simse-app): add Workers Analytics Engine"
 ```
 
 ---
@@ -750,7 +750,7 @@ binding = "ANALYTICS"
 
 **Step 2: Create worker.ts**
 
-Create `simse-landing/worker.ts` following the same pattern as simse-cloud:
+Create `simse-landing/worker.ts` following the same pattern as simse-app:
 
 ```typescript
 import { createRequestHandler } from 'react-router';

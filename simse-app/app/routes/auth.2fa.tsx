@@ -37,7 +37,7 @@ export async function action({ request }: Route.ActionArgs) {
 	}
 
 	return redirect('/dashboard', {
-		headers: { 'Set-Cookie': setSessionCookie(json.data.token) },
+		headers: { 'Set-Cookie': setSessionCookie(json.data!.token) },
 	});
 }
 

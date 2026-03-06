@@ -33,7 +33,7 @@ candle-transformers = "0.9"
 
 # HuggingFace model hub
 hf-hub = { version = "0.4", features = ["tokio"] }
-tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }

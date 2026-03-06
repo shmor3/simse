@@ -25,6 +25,7 @@ impl SshShell {
 		Self { pool }
 	}
 
+	#[allow(clippy::too_many_arguments)]
 	pub async fn execute_command(
 		&self,
 		command: &str,

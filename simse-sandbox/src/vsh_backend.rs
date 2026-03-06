@@ -15,6 +15,7 @@ pub enum ShellImpl {
 }
 
 impl ShellImpl {
+    #[allow(clippy::too_many_arguments)]
     pub async fn execute_command(
         &self,
         command: &str,

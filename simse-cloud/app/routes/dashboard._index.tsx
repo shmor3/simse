@@ -70,7 +70,7 @@ export default function DashboardIndex({ loaderData }: Route.ComponentProps) {
 						</p>
 					</Card>
 				</Link>
-				<Link to="/dashboard/team/invite" className="group">
+				<Link to="/dashboard/settings/team/invite" className="group">
 					<Card className="p-5 transition-all group-hover:-translate-y-0.5 group-hover:border-zinc-700">
 						<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
 							Quick action

@@ -4,7 +4,7 @@ import Badge from '~/components/ui/Badge';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
 import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
-import type { Route } from './+types/dashboard.billing';
+import type { Route } from './+types/dashboard.settings.billing';
 
 export async function loader({ request }: Route.LoaderArgs) {
 	const res = await authenticatedApi(request, '/payments/billing');
@@ -147,7 +147,7 @@ export default function Billing({ loaderData }: Route.ComponentProps) {
 					<Button
 						variant="secondary"
 						onClick={() => {
-							window.location.href = '/dashboard/billing/credit';
+							window.location.href = '/dashboard/settings/billing/credit';
 						}}
 					>
 						Manage credit

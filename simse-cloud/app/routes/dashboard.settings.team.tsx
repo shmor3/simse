@@ -5,7 +5,7 @@ import Badge from '~/components/ui/Badge';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
 import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
-import type { Route } from './+types/dashboard.team';
+import type { Route } from './+types/dashboard.settings.team';
 
 export async function loader({ request }: Route.LoaderArgs) {
 	try {
@@ -119,10 +119,10 @@ export default function Team({ loaderData }: Route.ComponentProps) {
 				action={
 					canManage ? (
 						<div className="flex gap-3">
-							<Link to="/dashboard/team/plans">
+							<Link to="/dashboard/settings/team/plans">
 								<Button variant="ghost">Plans</Button>
 							</Link>
-							<Link to="/dashboard/team/invite">
+							<Link to="/dashboard/settings/team/invite">
 								<Button>Invite member</Button>
 							</Link>
 						</div>

@@ -21,12 +21,27 @@ export default [
 	layout('./routes/dashboard.tsx', [
 		route('dashboard', './routes/dashboard._index.tsx'),
 		route('dashboard/usage', './routes/dashboard.usage.tsx'),
-		route('dashboard/billing', './routes/dashboard.billing.tsx'),
-		route('dashboard/billing/credit', './routes/dashboard.billing.credit.tsx'),
-		route('dashboard/team', './routes/dashboard.team.tsx'),
-		route('dashboard/team/plans', './routes/dashboard.team.plans.tsx'),
-		route('dashboard/team/invite', './routes/dashboard.team.invite.tsx'),
 		route('dashboard/notifications', './routes/dashboard.notifications.tsx'),
 		route('dashboard/account', './routes/dashboard.account.tsx'),
+		layout('./routes/dashboard.settings.tsx', [
+			route('dashboard/settings', './routes/dashboard.settings._index.tsx'),
+			route(
+				'dashboard/settings/billing',
+				'./routes/dashboard.settings.billing.tsx',
+			),
+			route(
+				'dashboard/settings/billing/credit',
+				'./routes/dashboard.settings.billing.credit.tsx',
+			),
+			route('dashboard/settings/team', './routes/dashboard.settings.team.tsx'),
+			route(
+				'dashboard/settings/team/plans',
+				'./routes/dashboard.settings.team.plans.tsx',
+			),
+			route(
+				'dashboard/settings/team/invite',
+				'./routes/dashboard.settings.team.invite.tsx',
+			),
+		]),
 	]),
 ] satisfies RouteConfig;

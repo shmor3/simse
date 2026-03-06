@@ -13,23 +13,29 @@ export async function loader({ request }: Route.LoaderArgs) {
 	}>;
 	const user = json.data;
 
-	// Get unread notification count
-	let unreadCount = 0;
+	// Get notifications
+	type Notif = {
+		id: string;
+		type: string;
+		title: string;
+		body: string;
+		read: boolean;
+		created_at: string;
+	};
+	let notifications: Notif[] = [];
 	try {
 		const notifRes = await authenticatedApi(request, '/notifications');
 		if (notifRes.ok) {
-			const notifJson = (await notifRes.json()) as ApiResponse<
-				Array<{ read: boolean }>
-			>;
-			const notifications = notifJson.data ?? [];
-			unreadCount = notifications.filter((n) => !n.read).length;
+			const notifJson = (await notifRes.json()) as ApiResponse<Notif[]>;
+			notifications = notifJson.data ?? [];
 		}
 	} catch {
 		// ignore
 	}
 
 	return {
-		unreadCount,
+		unreadCount: notifications.filter((n) => !n.read).length,
+		notifications,
 		userName: user?.name ?? '',
 		userEmail: user?.email ?? '',
 	};
@@ -39,6 +45,7 @@ export default function Dashboard({ loaderData }: Route.ComponentProps) {
 	return (
 		<DashboardLayout
 			unreadCount={loaderData.unreadCount}
+			notifications={loaderData.notifications}
 			userName={loaderData.userName}
 			userEmail={loaderData.userEmail}
 		/>

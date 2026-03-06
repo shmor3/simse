@@ -4,7 +4,7 @@ import Badge from '~/components/ui/Badge';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
 import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
-import type { Route } from './+types/dashboard.team.plans';
+import type { Route } from './+types/dashboard.settings.team.plans';
 
 export async function loader({ request }: Route.LoaderArgs) {
 	try {
@@ -70,7 +70,7 @@ export default function TeamPlans({ loaderData }: Route.ComponentProps) {
 				title="Plans"
 				description="Compare plans and choose the right one for your team."
 				action={
-					<Link to="/dashboard/team">
+					<Link to="/dashboard/settings/team">
 						<Button variant="ghost">Back</Button>
 					</Link>
 				}
@@ -115,7 +115,7 @@ export default function TeamPlans({ loaderData }: Route.ComponentProps) {
 										Current plan
 									</Button>
 								) : (
-									<Link to="/dashboard/billing">
+									<Link to="/dashboard/settings/billing">
 										<Button
 											variant={plan.id === 'pro' ? 'primary' : 'secondary'}
 											className="w-full"

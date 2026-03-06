@@ -1,16 +1,28 @@
 import { useState } from 'react';
 import { Outlet } from 'react-router';
 import AccountDropdown from '../ui/AccountDropdown';
+import NotificationsBell from '../ui/NotificationsBell';
 import Sidebar from './Sidebar';
+
+interface Notification {
+	id: string;
+	type: string;
+	title: string;
+	body: string;
+	read: boolean;
+	created_at: string;
+}
 
 interface DashboardLayoutProps {
 	unreadCount?: number;
+	notifications?: Notification[];
 	userName: string;
 	userEmail: string;
 }
 
 export default function DashboardLayout({
-	unreadCount,
+	unreadCount = 0,
+	notifications = [],
 	userName,
 	userEmail,
 }: DashboardLayoutProps) {
@@ -34,11 +46,7 @@ export default function DashboardLayout({
 			<div
 				className={`fixed inset-y-0 left-0 z-50 w-60 transform transition-transform duration-200 ease-out md:static md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
 			>
-				<Sidebar
-					unreadCount={unreadCount}
-					userName={userName}
-					onClose={() => setSidebarOpen(false)}
-				/>
+				<Sidebar onClose={() => setSidebarOpen(false)} />
 			</div>
 
 			<div className="flex flex-1 flex-col overflow-hidden">
@@ -65,7 +73,13 @@ export default function DashboardLayout({
 						</svg>
 					</button>
 					<div className="hidden md:block" />
-					<AccountDropdown name={userName} email={userEmail} />
+					<div className="flex items-center gap-1">
+						<NotificationsBell
+							unreadCount={unreadCount}
+							notifications={notifications}
+						/>
+						<AccountDropdown name={userName} email={userEmail} />
+					</div>
 				</header>
 
 				{/* Main content */}

@@ -4,7 +4,7 @@ import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
 import Input from '~/components/ui/Input';
 import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
-import type { Route } from './+types/dashboard.team.invite';
+import type { Route } from './+types/dashboard.settings.team.invite';
 
 export async function action({ request }: Route.ActionArgs) {
 	const formData = await request.formData();
@@ -28,7 +28,7 @@ export async function action({ request }: Route.ActionArgs) {
 		return { errors: { email: message }, values: raw };
 	}
 
-	return redirect('/dashboard/team');
+	return redirect('/dashboard/settings/team');
 }
 
 export default function TeamInvite({ actionData }: Route.ComponentProps) {
@@ -44,7 +44,7 @@ export default function TeamInvite({ actionData }: Route.ComponentProps) {
 				title="Invite member"
 				description="Send an invitation to join your team."
 				action={
-					<Link to="/dashboard/team">
+					<Link to="/dashboard/settings/team">
 						<Button variant="ghost">Back</Button>
 					</Link>
 				}

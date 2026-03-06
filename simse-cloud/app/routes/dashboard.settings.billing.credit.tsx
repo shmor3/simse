@@ -3,7 +3,7 @@ import PageHeader from '~/components/layout/PageHeader';
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
 import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
-import type { Route } from './+types/dashboard.billing.credit';
+import type { Route } from './+types/dashboard.settings.billing.credit';
 
 export async function loader({ request }: Route.LoaderArgs) {
 	try {
@@ -38,7 +38,7 @@ export default function Credit({ loaderData }: Route.ComponentProps) {
 				title="Credit"
 				description="View your credit balance and transaction history."
 				action={
-					<Link to="/dashboard/billing">
+					<Link to="/dashboard/settings/billing">
 						<Button variant="ghost">Back to billing</Button>
 					</Link>
 				}

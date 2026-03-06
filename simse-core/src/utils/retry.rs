@@ -6,7 +6,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use rand::Rng;
+use rand::RngExt;
 use tokio_util::sync::CancellationToken;
 
 use crate::error::{ResilienceErrorCode, SimseError};
@@ -121,8 +121,8 @@ where
                 let capped_secs = exp_delay_secs.min(max_delay.as_secs_f64());
 
                 let jitter = if jitter_factor > 0.0 {
-                    let mut rng = rand::thread_rng();
-                    let j: f64 = rng.gen_range(-1.0..1.0);
+                    let mut rng = rand::rng();
+                    let j: f64 = rng.random_range(-1.0..1.0);
                     capped_secs * jitter_factor * j
                 } else {
                     0.0

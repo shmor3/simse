@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use im::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -30,11 +30,12 @@ pub struct VocabularyState {
 /// The full input vector layout is:
 ///   [ topic_one_hot | tag_bitmap | entry_type_one_hot | temporal_features | action_one_hot ]
 ///     max_topics      max_tags     3                    3                   4
+#[derive(Clone, Debug)]
 pub struct VocabularyManager {
     topic_to_idx: HashMap<String, usize>,
     tag_to_idx: HashMap<String, usize>,
-    topics: Vec<String>,
-    tags: Vec<String>,
+    topics: im::Vector<String>,
+    tags: im::Vector<String>,
     max_topics: usize,
     max_tags: usize,
 }
@@ -45,8 +46,8 @@ impl VocabularyManager {
         Self {
             topic_to_idx: HashMap::new(),
             tag_to_idx: HashMap::new(),
-            topics: Vec::new(),
-            tags: Vec::new(),
+            topics: im::Vector::new(),
+            tags: im::Vector::new(),
             max_topics,
             max_tags,
         }
@@ -54,21 +55,24 @@ impl VocabularyManager {
 
     /// Restore a vocabulary from a serialized state.
     pub fn from_state(state: VocabularyState) -> Self {
-        let mut topic_to_idx = HashMap::with_capacity(state.topics.len());
+        let mut topic_to_idx = HashMap::new();
         for (idx, topic) in state.topics.iter().enumerate() {
-            topic_to_idx.insert(topic.clone(), idx);
+            topic_to_idx = topic_to_idx.update(topic.clone(), idx);
         }
 
-        let mut tag_to_idx = HashMap::with_capacity(state.tags.len());
+        let mut tag_to_idx = HashMap::new();
         for (idx, tag) in state.tags.iter().enumerate() {
-            tag_to_idx.insert(tag.clone(), idx);
+            tag_to_idx = tag_to_idx.update(tag.clone(), idx);
         }
+
+        let topics: im::Vector<String> = state.topics.into_iter().collect();
+        let tags: im::Vector<String> = state.tags.into_iter().collect();
 
         Self {
             topic_to_idx,
             tag_to_idx,
-            topics: state.topics,
-            tags: state.tags,
+            topics,
+            tags,
             max_topics: state.max_topics,
             max_tags: state.max_tags,
         }
@@ -95,9 +99,9 @@ impl VocabularyManager {
     ///
     /// Returns `AdaptiveError::VocabularyOverflow` if the topic limit has been reached
     /// and the topic is not already registered.
-    pub fn register_topic(&mut self, topic: &str) -> Result<usize, AdaptiveError> {
+    pub fn register_topic(self, topic: &str) -> Result<(Self, usize), AdaptiveError> {
         if let Some(&idx) = self.topic_to_idx.get(topic) {
-            return Ok(idx);
+            return Ok((self, idx));
         }
         if self.topics.len() >= self.max_topics {
             return Err(AdaptiveError::VocabularyOverflow(format!(
@@ -106,9 +110,10 @@ impl VocabularyManager {
             )));
         }
         let idx = self.topics.len();
-        self.topics.push(topic.to_string());
-        self.topic_to_idx.insert(topic.to_string(), idx);
-        Ok(idx)
+        let mut topics = self.topics;
+        topics.push_back(topic.to_string());
+        let topic_to_idx = self.topic_to_idx.update(topic.to_string(), idx);
+        Ok((Self { topics, topic_to_idx, ..self }, idx))
     }
 
     /// Register a tag and return its index. Idempotent: returns the existing
@@ -116,9 +121,9 @@ impl VocabularyManager {
     ///
     /// Returns `AdaptiveError::VocabularyOverflow` if the tag limit has been reached
     /// and the tag is not already registered.
-    pub fn register_tag(&mut self, tag: &str) -> Result<usize, AdaptiveError> {
+    pub fn register_tag(self, tag: &str) -> Result<(Self, usize), AdaptiveError> {
         if let Some(&idx) = self.tag_to_idx.get(tag) {
-            return Ok(idx);
+            return Ok((self, idx));
         }
         if self.tags.len() >= self.max_tags {
             return Err(AdaptiveError::VocabularyOverflow(format!(
@@ -127,9 +132,10 @@ impl VocabularyManager {
             )));
         }
         let idx = self.tags.len();
-        self.tags.push(tag.to_string());
-        self.tag_to_idx.insert(tag.to_string(), idx);
-        Ok(idx)
+        let mut tags = self.tags;
+        tags.push_back(tag.to_string());
+        let tag_to_idx = self.tag_to_idx.update(tag.to_string(), idx);
+        Ok((Self { tags, tag_to_idx, ..self }, idx))
     }
 
     /// Encode a topic as a one-hot vector of length `max_topics`.
@@ -196,11 +202,17 @@ impl VocabularyManager {
     /// Serialize the vocabulary state for persistence.
     pub fn serialize(&self) -> VocabularyState {
         VocabularyState {
-            topics: self.topics.clone(),
-            tags: self.tags.clone(),
+            topics: self.topics.iter().cloned().collect(),
+            tags: self.tags.iter().cloned().collect(),
             max_topics: self.max_topics,
             max_tags: self.max_tags,
         }
+    }
+}
+
+impl Default for VocabularyManager {
+    fn default() -> Self {
+        Self::new(0, 0)
     }
 }
 
@@ -219,16 +231,16 @@ mod tests {
 
     #[test]
     fn register_topic_returns_index() {
-        let mut vm = VocabularyManager::new(10, 10);
+        let vm = VocabularyManager::new(10, 10);
 
-        let idx0 = vm.register_topic("rust").unwrap();
+        let (vm, idx0) = vm.register_topic("rust").unwrap();
         assert_eq!(idx0, 0);
 
-        let idx1 = vm.register_topic("python").unwrap();
+        let (vm, idx1) = vm.register_topic("python").unwrap();
         assert_eq!(idx1, 1);
 
         // Idempotent: re-registering returns the same index
-        let idx0_again = vm.register_topic("rust").unwrap();
+        let (vm, idx0_again) = vm.register_topic("rust").unwrap();
         assert_eq!(idx0_again, 0);
 
         assert_eq!(vm.topic_count(), 2);
@@ -236,16 +248,16 @@ mod tests {
 
     #[test]
     fn register_tag_returns_index() {
-        let mut vm = VocabularyManager::new(10, 10);
+        let vm = VocabularyManager::new(10, 10);
 
-        let idx0 = vm.register_tag("important").unwrap();
+        let (vm, idx0) = vm.register_tag("important").unwrap();
         assert_eq!(idx0, 0);
 
-        let idx1 = vm.register_tag("archived").unwrap();
+        let (vm, idx1) = vm.register_tag("archived").unwrap();
         assert_eq!(idx1, 1);
 
         // Idempotent: re-registering returns the same index
-        let idx0_again = vm.register_tag("important").unwrap();
+        let (vm, idx0_again) = vm.register_tag("important").unwrap();
         assert_eq!(idx0_again, 0);
 
         assert_eq!(vm.tag_count(), 2);
@@ -253,10 +265,10 @@ mod tests {
 
     #[test]
     fn topic_overflow_returns_error() {
-        let mut vm = VocabularyManager::new(2, 10);
+        let vm = VocabularyManager::new(2, 10);
 
-        vm.register_topic("a").unwrap();
-        vm.register_topic("b").unwrap();
+        let (vm, _) = vm.register_topic("a").unwrap();
+        let (vm, _) = vm.register_topic("b").unwrap();
 
         let result = vm.register_topic("c");
         assert!(result.is_err());
@@ -266,10 +278,10 @@ mod tests {
 
     #[test]
     fn tag_overflow_returns_error() {
-        let mut vm = VocabularyManager::new(10, 2);
+        let vm = VocabularyManager::new(10, 2);
 
-        vm.register_tag("x").unwrap();
-        vm.register_tag("y").unwrap();
+        let (vm, _) = vm.register_tag("x").unwrap();
+        let (vm, _) = vm.register_tag("y").unwrap();
 
         let result = vm.register_tag("z");
         assert!(result.is_err());
@@ -279,10 +291,10 @@ mod tests {
 
     #[test]
     fn encode_topic_one_hot() {
-        let mut vm = VocabularyManager::new(5, 5);
-        vm.register_topic("alpha").unwrap();
-        vm.register_topic("beta").unwrap();
-        vm.register_topic("gamma").unwrap();
+        let vm = VocabularyManager::new(5, 5);
+        let (vm, _) = vm.register_topic("alpha").unwrap();
+        let (vm, _) = vm.register_topic("beta").unwrap();
+        let (vm, _) = vm.register_topic("gamma").unwrap();
 
         let encoded = vm.encode_topic("beta");
         assert_eq!(encoded.len(), 5);
@@ -303,10 +315,10 @@ mod tests {
 
     #[test]
     fn encode_tags_bitmap() {
-        let mut vm = VocabularyManager::new(5, 5);
-        vm.register_tag("red").unwrap();
-        vm.register_tag("green").unwrap();
-        vm.register_tag("blue").unwrap();
+        let vm = VocabularyManager::new(5, 5);
+        let (vm, _) = vm.register_tag("red").unwrap();
+        let (vm, _) = vm.register_tag("green").unwrap();
+        let (vm, _) = vm.register_tag("blue").unwrap();
 
         let tags = vec!["red".to_string(), "blue".to_string()];
         let encoded = vm.encode_tags(&tags);
@@ -328,12 +340,12 @@ mod tests {
 
     #[test]
     fn serialize_restore_round_trip() {
-        let mut vm = VocabularyManager::new(100, 200);
-        vm.register_topic("rust").unwrap();
-        vm.register_topic("python").unwrap();
-        vm.register_tag("important").unwrap();
-        vm.register_tag("archived").unwrap();
-        vm.register_tag("pinned").unwrap();
+        let vm = VocabularyManager::new(100, 200);
+        let (vm, _) = vm.register_topic("rust").unwrap();
+        let (vm, _) = vm.register_topic("python").unwrap();
+        let (vm, _) = vm.register_tag("important").unwrap();
+        let (vm, _) = vm.register_tag("archived").unwrap();
+        let (vm, _) = vm.register_tag("pinned").unwrap();
 
         let state = vm.serialize();
         let json = serde_json::to_string(&state).unwrap();
@@ -400,8 +412,8 @@ mod tests {
 
     #[test]
     fn encode_tags_ignores_unknown_tags() {
-        let mut vm = VocabularyManager::new(5, 5);
-        vm.register_tag("known").unwrap();
+        let vm = VocabularyManager::new(5, 5);
+        let (vm, _) = vm.register_tag("known").unwrap();
 
         let tags = vec!["known".to_string(), "unknown".to_string()];
         let encoded = vm.encode_tags(&tags);

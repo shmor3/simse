@@ -47,6 +47,11 @@ struct ValidateData {
 
 // ── Auth client ──
 
+/// Authentication client.
+///
+/// State (`Option<AuthState>`) is managed via owned-return transitions.
+/// The HTTP client is an I/O handle and stays as `&self` for async calls.
+#[derive(Clone)]
 pub struct AuthClient {
     http: reqwest::Client,
     state: Option<AuthState>,
@@ -74,38 +79,48 @@ impl AuthClient {
         self.state.is_some()
     }
 
-    /// Login with email/password. Returns auth state on success.
+    /// Login with email/password. Returns (updated self, auth state) on success.
     pub async fn login_password(
-        &mut self,
+        self,
         api_url: &str,
         email: &str,
         password: &str,
-    ) -> Result<AuthState, RemoteError> {
-        let url = format!("{api_url}/auth/login");
+    ) -> Result<(Self, AuthState), (Self, RemoteError)> {
+        // PERF: async I/O — HTTP request to auth service
         let res = self
             .http
-            .post(&url)
+            .post(format!("{api_url}/auth/login"))
             .json(&serde_json::json!({
                 "email": email,
                 "password": password,
             }))
             .send()
-            .await?;
+            .await;
+
+        let res = match res {
+            Ok(r) => r,
+            Err(e) => return Err((self, RemoteError::Http(e))),
+        };
 
         if !res.status().is_success() {
             let status = res.status();
             let body = res.text().await.unwrap_or_default();
-            return Err(RemoteError::AuthFailed(format!(
-                "HTTP {status}: {body}"
-            )));
+            return Err((
+                self,
+                RemoteError::AuthFailed(format!("HTTP {status}: {body}")),
+            ));
         }
 
-        let login_resp: LoginResponse = res.json().await?;
+        let login_resp: LoginResponse = match res.json().await {
+            Ok(r) => r,
+            Err(e) => return Err((self, RemoteError::Http(e))),
+        };
 
         // Validate the token to get team/role info
-        let validate = self
-            .validate_token(api_url, &login_resp.data.session_token)
-            .await?;
+        let validate = match self.validate_token(api_url, &login_resp.data.session_token).await {
+            Ok(v) => v,
+            Err(e) => return Err((self, e)),
+        };
 
         let state = AuthState {
             user_id: login_resp.data.user.id,
@@ -115,17 +130,24 @@ impl AuthClient {
             api_url: api_url.to_string(),
         };
 
-        self.state = Some(state.clone());
-        Ok(state)
+        let new_self = Self {
+            http: self.http,
+            state: Some(state.clone()),
+        };
+        Ok((new_self, state))
     }
 
-    /// Login with API key. Returns auth state on success.
+    /// Login with API key. Returns (updated self, auth state) on success.
     pub async fn login_api_key(
-        &mut self,
+        self,
         api_url: &str,
         api_key: &str,
-    ) -> Result<AuthState, RemoteError> {
-        let validate = self.validate_token(api_url, api_key).await?;
+    ) -> Result<(Self, AuthState), (Self, RemoteError)> {
+        // PERF: async I/O — HTTP request to auth service
+        let validate = match self.validate_token(api_url, api_key).await {
+            Ok(v) => v,
+            Err(e) => return Err((self, e)),
+        };
 
         let state = AuthState {
             user_id: validate.user_id,
@@ -135,13 +157,19 @@ impl AuthClient {
             api_url: api_url.to_string(),
         };
 
-        self.state = Some(state.clone());
-        Ok(state)
+        let new_self = Self {
+            http: self.http,
+            state: Some(state.clone()),
+        };
+        Ok((new_self, state))
     }
 
-    /// Logout: clear local state.
-    pub fn logout(&mut self) {
-        self.state = None;
+    /// Logout: clear local state. Returns updated self.
+    pub fn logout(self) -> Self {
+        Self {
+            http: self.http,
+            state: None,
+        }
     }
 
     /// Validate a token against the auth service.
@@ -150,6 +178,7 @@ impl AuthClient {
         api_url: &str,
         token: &str,
     ) -> Result<ValidateData, RemoteError> {
+        // PERF: async I/O — HTTP request to auth service
         let url = format!("{api_url}/auth/validate");
         let res = self
             .http
@@ -198,16 +227,18 @@ mod tests {
 
     #[test]
     fn logout_clears_state() {
-        let mut client = AuthClient::new();
-        client.state = Some(AuthState {
-            user_id: "u1".into(),
-            session_token: "session_abc".into(),
-            team_id: None,
-            role: None,
-            api_url: "https://api.example.com".into(),
-        });
+        let client = AuthClient {
+            http: reqwest::Client::new(),
+            state: Some(AuthState {
+                user_id: "u1".into(),
+                session_token: "session_abc".into(),
+                team_id: None,
+                role: None,
+                api_url: "https://api.example.com".into(),
+            }),
+        };
         assert!(client.is_authenticated());
-        client.logout();
+        let client = client.logout();
         assert!(!client.is_authenticated());
     }
 }

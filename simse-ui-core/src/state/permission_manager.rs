@@ -9,6 +9,7 @@
 //! Since `simse-ui-core` is a no-I/O crate, serialization/deserialization is to/from
 //! `String` (JSON). The caller is responsible for actual file I/O.
 
+use im::Vector;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
@@ -137,10 +138,14 @@ pub struct PermissionData {
 ///
 /// Combines explicit rules (checked first via glob matching) with mode-based
 /// logic to produce `Allow`, `Deny`, or `Ask` decisions.
+///
+/// Uses `im::Vector` for rules to enable cheap cloning and functional-style
+/// state transitions. All mutating methods take `self` by value and return
+/// the updated `Self` (owned-return pattern).
 #[derive(Debug, Clone)]
 pub struct PermissionManager {
 	mode: PermissionMode,
-	rules: Vec<PermissionRule>,
+	rules: Vector<PermissionRule>,
 	config_path: Option<String>,
 }
 
@@ -157,7 +162,7 @@ impl PermissionManager {
 	pub fn new(mode: PermissionMode) -> Self {
 		Self {
 			mode,
-			rules: Vec::new(),
+			rules: Vector::new(),
 			config_path: None,
 		}
 	}
@@ -166,7 +171,7 @@ impl PermissionManager {
 	pub fn with_config_path(mode: PermissionMode, config_path: String) -> Self {
 		Self {
 			mode,
-			rules: Vec::new(),
+			rules: Vector::new(),
 			config_path: Some(config_path),
 		}
 	}
@@ -176,9 +181,10 @@ impl PermissionManager {
 		self.config_path.as_deref()
 	}
 
-	/// Set the config path.
-	pub fn set_config_path(&mut self, path: Option<String>) {
+	/// Set the config path. Returns the updated manager.
+	pub fn set_config_path(mut self, path: Option<String>) -> Self {
 		self.config_path = path;
+		self
 	}
 
 	/// Check whether a tool call should be allowed, denied, or needs user confirmation.
@@ -230,42 +236,45 @@ impl PermissionManager {
 		self.mode
 	}
 
-	/// Set the permission mode.
-	pub fn set_mode(&mut self, mode: PermissionMode) {
+	/// Set the permission mode. Returns the updated manager.
+	pub fn set_mode(mut self, mode: PermissionMode) -> Self {
 		self.mode = mode;
+		self
 	}
 
 	/// Cycle to the next permission mode.
 	///
 	/// Order: Default -> AcceptEdits -> Plan -> DontAsk -> Default.
-	/// Returns the new mode.
-	pub fn cycle_mode(&mut self) -> PermissionMode {
+	/// Returns `(updated_self, new_mode)`.
+	pub fn cycle_mode(mut self) -> (Self, PermissionMode) {
 		let idx = MODES.iter().position(|m| *m == self.mode).unwrap_or(0);
 		self.mode = MODES[(idx + 1) % MODES.len()];
-		self.mode
+		let mode = self.mode;
+		(self, mode)
 	}
 
 	/// Add a permission rule. If a rule for the same tool pattern already exists,
-	/// it is replaced.
-	pub fn add_rule(&mut self, rule: PermissionRule) {
+	/// it is replaced. Returns the updated manager.
+	pub fn add_rule(mut self, rule: PermissionRule) -> Self {
 		if let Some(idx) = self.rules.iter().position(|r| r.tool == rule.tool) {
 			self.rules.remove(idx);
 		}
-		self.rules.push(rule);
+		self.rules.push_back(rule);
+		self
 	}
 
-	/// Remove a rule by tool name/pattern. Returns `true` if a rule was removed.
-	pub fn remove_rule(&mut self, tool_name: &str) -> bool {
+	/// Remove a rule by tool name/pattern. Returns `(updated_self, was_removed)`.
+	pub fn remove_rule(mut self, tool_name: &str) -> (Self, bool) {
 		if let Some(idx) = self.rules.iter().position(|r| r.tool == tool_name) {
 			self.rules.remove(idx);
-			true
+			(self, true)
 		} else {
-			false
+			(self, false)
 		}
 	}
 
-	/// Get all rules (read-only slice).
-	pub fn get_rules(&self) -> &[PermissionRule] {
+	/// Get all rules as a slice-like view.
+	pub fn get_rules(&self) -> &Vector<PermissionRule> {
 		&self.rules
 	}
 
@@ -284,7 +293,7 @@ impl PermissionManager {
 	pub fn save(&self) -> Result<String, serde_json::Error> {
 		let data = PermissionData {
 			mode: self.mode,
-			rules: self.rules.clone(),
+			rules: self.rules.iter().cloned().collect(),
 		};
 		serde_json::to_string_pretty(&data)
 	}
@@ -292,12 +301,12 @@ impl PermissionManager {
 	/// Load state (mode + rules) from a JSON string.
 	///
 	/// The caller is responsible for reading the string from disk.
-	/// On success, the manager's mode and rules are replaced.
-	pub fn load(&mut self, json: &str) -> Result<(), serde_json::Error> {
+	/// On success, returns the updated manager. On error, returns `self` unchanged.
+	pub fn load(mut self, json: &str) -> Result<Self, serde_json::Error> {
 		let data: PermissionData = serde_json::from_str(json)?;
 		self.mode = data.mode;
-		self.rules = data.rules;
-		Ok(())
+		self.rules = data.rules.into_iter().collect();
+		Ok(self)
 	}
 }
 
@@ -344,27 +353,27 @@ mod tests {
 
 	#[test]
 	fn set_mode() {
-		let mut pm = PermissionManager::default();
-		pm.set_mode(PermissionMode::Plan);
+		let pm = PermissionManager::default();
+		let pm = pm.set_mode(PermissionMode::Plan);
 		assert_eq!(pm.get_mode(), PermissionMode::Plan);
 	}
 
 	#[test]
 	fn cycle_mode_full_circle() {
-		let mut pm = PermissionManager::default();
+		let pm = PermissionManager::default();
 		assert_eq!(pm.get_mode(), PermissionMode::Default);
 
-		let next = pm.cycle_mode();
+		let (pm, next) = pm.cycle_mode();
 		assert_eq!(next, PermissionMode::AcceptEdits);
 		assert_eq!(pm.get_mode(), PermissionMode::AcceptEdits);
 
-		let next = pm.cycle_mode();
+		let (pm, next) = pm.cycle_mode();
 		assert_eq!(next, PermissionMode::Plan);
 
-		let next = pm.cycle_mode();
+		let (pm, next) = pm.cycle_mode();
 		assert_eq!(next, PermissionMode::DontAsk);
 
-		let next = pm.cycle_mode();
+		let (_pm, next) = pm.cycle_mode();
 		assert_eq!(next, PermissionMode::Default);
 	}
 
@@ -561,9 +570,9 @@ mod tests {
 
 	#[test]
 	fn add_rule_overrides_mode() {
-		let mut pm = PermissionManager::default();
+		let pm = PermissionManager::default();
 		// bash would normally Ask in default mode
-		pm.add_rule(PermissionRule {
+		let pm = pm.add_rule(PermissionRule {
 			tool: "bash".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Allow,
@@ -573,15 +582,15 @@ mod tests {
 
 	#[test]
 	fn add_rule_replaces_existing() {
-		let mut pm = PermissionManager::default();
-		pm.add_rule(PermissionRule {
+		let pm = PermissionManager::default();
+		let pm = pm.add_rule(PermissionRule {
 			tool: "bash".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Allow,
 		});
 		assert_eq!(pm.get_rules().len(), 1);
 
-		pm.add_rule(PermissionRule {
+		let pm = pm.add_rule(PermissionRule {
 			tool: "bash".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Deny,
@@ -592,13 +601,14 @@ mod tests {
 
 	#[test]
 	fn remove_rule() {
-		let mut pm = PermissionManager::default();
-		pm.add_rule(PermissionRule {
+		let pm = PermissionManager::default();
+		let pm = pm.add_rule(PermissionRule {
 			tool: "bash".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Allow,
 		});
-		assert!(pm.remove_rule("bash"));
+		let (pm, removed) = pm.remove_rule("bash");
+		assert!(removed);
 		assert!(pm.get_rules().is_empty());
 		// Falls back to mode-based
 		assert_eq!(pm.check("bash", None), PermissionDecision::Ask);
@@ -606,19 +616,20 @@ mod tests {
 
 	#[test]
 	fn remove_rule_nonexistent_returns_false() {
-		let mut pm = PermissionManager::default();
-		assert!(!pm.remove_rule("nonexistent"));
+		let pm = PermissionManager::default();
+		let (_pm, removed) = pm.remove_rule("nonexistent");
+		assert!(!removed);
 	}
 
 	#[test]
 	fn get_rules_returns_all() {
-		let mut pm = PermissionManager::default();
-		pm.add_rule(PermissionRule {
+		let pm = PermissionManager::default();
+		let pm = pm.add_rule(PermissionRule {
 			tool: "bash".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Allow,
 		});
-		pm.add_rule(PermissionRule {
+		let pm = pm.add_rule(PermissionRule {
 			tool: "vfs_write".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Deny,
@@ -632,8 +643,8 @@ mod tests {
 
 	#[test]
 	fn glob_star_matches() {
-		let mut pm = PermissionManager::default();
-		pm.add_rule(PermissionRule {
+		let pm = PermissionManager::default();
+		let pm = pm.add_rule(PermissionRule {
 			tool: "vfs_*".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Allow,
@@ -645,8 +656,8 @@ mod tests {
 
 	#[test]
 	fn glob_question_mark_matches() {
-		let mut pm = PermissionManager::default();
-		pm.add_rule(PermissionRule {
+		let pm = PermissionManager::default();
+		let pm = pm.add_rule(PermissionRule {
 			tool: "bas?".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Allow,
@@ -659,8 +670,8 @@ mod tests {
 
 	#[test]
 	fn glob_does_not_partial_match() {
-		let mut pm = PermissionManager::default();
-		pm.add_rule(PermissionRule {
+		let pm = PermissionManager::default();
+		let pm = pm.add_rule(PermissionRule {
 			tool: "vfs".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Deny,
@@ -672,8 +683,8 @@ mod tests {
 
 	#[test]
 	fn glob_match_all() {
-		let mut pm = PermissionManager::new(PermissionMode::Plan);
-		pm.add_rule(PermissionRule {
+		let pm = PermissionManager::new(PermissionMode::Plan);
+		let pm = pm.add_rule(PermissionRule {
 			tool: "*".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Allow,
@@ -690,9 +701,9 @@ mod tests {
 
 	#[test]
 	fn rule_overrides_plan_mode_deny() {
-		let mut pm = PermissionManager::new(PermissionMode::Plan);
+		let pm = PermissionManager::new(PermissionMode::Plan);
 		// Plan mode denies bash, but a rule can override
-		pm.add_rule(PermissionRule {
+		let pm = pm.add_rule(PermissionRule {
 			tool: "bash".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Allow,
@@ -702,9 +713,9 @@ mod tests {
 
 	#[test]
 	fn rule_overrides_dont_ask_mode_allow() {
-		let mut pm = PermissionManager::new(PermissionMode::DontAsk);
+		let pm = PermissionManager::new(PermissionMode::DontAsk);
 		// DontAsk allows everything, but a rule can deny
-		pm.add_rule(PermissionRule {
+		let pm = pm.add_rule(PermissionRule {
 			tool: "bash".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Deny,
@@ -718,13 +729,13 @@ mod tests {
 
 	#[test]
 	fn save_and_load_roundtrip() {
-		let mut pm = PermissionManager::new(PermissionMode::AcceptEdits);
-		pm.add_rule(PermissionRule {
+		let pm = PermissionManager::new(PermissionMode::AcceptEdits);
+		let pm = pm.add_rule(PermissionRule {
 			tool: "bash".to_string(),
 			pattern: Some("npm *".to_string()),
 			policy: PermissionDecision::Allow,
 		});
-		pm.add_rule(PermissionRule {
+		let pm = pm.add_rule(PermissionRule {
 			tool: "vfs_*".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Deny,
@@ -732,8 +743,8 @@ mod tests {
 
 		let json = pm.save().expect("save should succeed");
 
-		let mut pm2 = PermissionManager::default();
-		pm2.load(&json).expect("load should succeed");
+		let pm2 = PermissionManager::default();
+		let pm2 = pm2.load(&json).expect("load should succeed");
 
 		assert_eq!(pm2.get_mode(), PermissionMode::AcceptEdits);
 		assert_eq!(pm2.get_rules().len(), 2);
@@ -746,15 +757,15 @@ mod tests {
 
 	#[test]
 	fn load_replaces_existing_state() {
-		let mut pm = PermissionManager::new(PermissionMode::DontAsk);
-		pm.add_rule(PermissionRule {
+		let pm = PermissionManager::new(PermissionMode::DontAsk);
+		let pm = pm.add_rule(PermissionRule {
 			tool: "old_rule".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Allow,
 		});
 
 		let json = r#"{"mode":"Plan","rules":[{"tool":"new_rule","pattern":null,"policy":"Deny"}]}"#;
-		pm.load(json).expect("load should succeed");
+		let pm = pm.load(json).expect("load should succeed");
 
 		assert_eq!(pm.get_mode(), PermissionMode::Plan);
 		assert_eq!(pm.get_rules().len(), 1);
@@ -763,7 +774,7 @@ mod tests {
 
 	#[test]
 	fn load_invalid_json_returns_error() {
-		let mut pm = PermissionManager::default();
+		let pm = PermissionManager::default();
 		let result = pm.load("not valid json");
 		assert!(result.is_err());
 	}
@@ -822,13 +833,13 @@ mod tests {
 
 	#[test]
 	fn multiple_rules_first_match_wins() {
-		let mut pm = PermissionManager::default();
-		pm.add_rule(PermissionRule {
+		let pm = PermissionManager::default();
+		let pm = pm.add_rule(PermissionRule {
 			tool: "vfs_*".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Deny,
 		});
-		pm.add_rule(PermissionRule {
+		let pm = pm.add_rule(PermissionRule {
 			tool: "vfs_read".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Allow,
@@ -839,15 +850,15 @@ mod tests {
 
 	#[test]
 	fn exact_rule_match_before_glob() {
-		let mut pm = PermissionManager::default();
+		let pm = PermissionManager::default();
 		// Add exact rule first
-		pm.add_rule(PermissionRule {
+		let pm = pm.add_rule(PermissionRule {
 			tool: "bash".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Allow,
 		});
 		// Add glob rule second
-		pm.add_rule(PermissionRule {
+		let pm = pm.add_rule(PermissionRule {
 			tool: "bas*".to_string(),
 			pattern: None,
 			policy: PermissionDecision::Deny,

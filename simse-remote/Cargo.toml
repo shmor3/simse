@@ -15,6 +15,7 @@ name = "simse-remote-engine"
 path = "src/main.rs"
 
 [dependencies]
+im = { version = "15", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

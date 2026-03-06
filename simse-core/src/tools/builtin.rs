@@ -187,7 +187,7 @@ pub fn register_library_tools(
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// 2. library_shelve
@@ -231,7 +231,7 @@ pub fn register_library_tools(
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// 3. library_withdraw
@@ -273,7 +273,7 @@ pub fn register_library_tools(
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// 4. library_catalog
@@ -343,7 +343,7 @@ pub fn register_library_tools(
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// 5. library_compact
@@ -396,7 +396,7 @@ pub fn register_library_tools(
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 }
 
@@ -488,19 +488,21 @@ pub fn register_task_tools(
 					.map(|s| s.to_string());
 
 				let mut list = tl.lock().unwrap_or_else(|e| e.into_inner());
-				let task = list.create_checked(TaskCreateInput {
+				let taken = std::mem::replace(&mut *list, TaskList::new(None));
+				let (new_list, task) = taken.create_checked(TaskCreateInput {
 					subject: subject.clone(),
 					description,
 					active_form,
 					owner: None,
 					metadata: None,
 				})?;
+				*list = new_list;
 
 				Ok(format!("Created task #{}: {}", task.id, task.subject))
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// 2. task_get
@@ -545,7 +547,7 @@ pub fn register_task_tools(
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// 3. task_update
@@ -650,7 +652,10 @@ pub fn register_task_tools(
 				};
 
 				let mut list = tl.lock().unwrap_or_else(|e| e.into_inner());
-				match list.update(id, update)? {
+				let taken = std::mem::replace(&mut *list, TaskList::new(None));
+				let (new_list, result) = taken.update(id, update)?;
+				*list = new_list;
+				match result {
 					Some(task) => Ok(format!(
 						"Updated task #{}: {} [{:?}]",
 						task.id, task.subject, task.status
@@ -660,7 +665,7 @@ pub fn register_task_tools(
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// 4. task_delete
@@ -694,7 +699,10 @@ pub fn register_task_tools(
 					.unwrap_or("");
 
 				let mut list = tl.lock().unwrap_or_else(|e| e.into_inner());
-				if list.delete(id) {
+				let taken = std::mem::replace(&mut *list, TaskList::new(None));
+				let (new_list, deleted) = taken.delete(id);
+				*list = new_list;
+				if deleted {
 					Ok(format!("Deleted task #{}", id))
 				} else {
 					Ok(format!("Task not found: {}", id))
@@ -702,7 +710,7 @@ pub fn register_task_tools(
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// 5. task_list
@@ -760,6 +768,6 @@ pub fn register_task_tools(
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 }

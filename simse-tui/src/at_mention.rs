@@ -157,24 +157,29 @@ impl AtMentionState {
 	///
 	/// Scans the filesystem starting from the base directory (or cwd), filters
 	/// results, and activates the popup if there are matches.
-	pub fn activate(&mut self, prefix: &str) {
+	/// Returns the updated state (owned-return pattern).
+	pub fn activate(mut self, prefix: &str) -> Self {
 		self.prefix = prefix.to_string();
 		self.entries = resolve_entries(prefix, self.base_dir.as_deref());
 		self.selected = 0;
 		self.active = !self.entries.is_empty();
+		self
 	}
 
 	/// Deactivate the @-mention autocomplete: reset to inactive state.
-	pub fn deactivate(&mut self) {
+	/// Returns the updated state (owned-return pattern).
+	pub fn deactivate(mut self) -> Self {
 		self.prefix.clear();
 		self.entries.clear();
 		self.selected = 0;
 		self.active = false;
+		self
 	}
 
 	/// Re-scan entries as the user types. If there are no matches, the
 	/// autocomplete deactivates.
-	pub fn update(&mut self, prefix: &str) {
+	/// Returns the updated state (owned-return pattern).
+	pub fn update(mut self, prefix: &str) -> Self {
 		self.prefix = prefix.to_string();
 		self.entries = resolve_entries(prefix, self.base_dir.as_deref());
 
@@ -187,53 +192,56 @@ impl AtMentionState {
 				self.selected = self.entries.len() - 1;
 			}
 		}
+		self
 	}
 
 	/// Move selection up by one (wrapping to bottom when at top).
-	pub fn move_up(&mut self) {
-		if self.entries.is_empty() {
-			return;
+	/// Returns the updated state (owned-return pattern).
+	pub fn move_up(mut self) -> Self {
+		if !self.entries.is_empty() {
+			if self.selected == 0 {
+				self.selected = self.entries.len() - 1;
+			} else {
+				self.selected -= 1;
+			}
 		}
-		if self.selected == 0 {
-			self.selected = self.entries.len() - 1;
-		} else {
-			self.selected -= 1;
-		}
+		self
 	}
 
 	/// Move selection down by one (wrapping to top when at bottom).
-	pub fn move_down(&mut self) {
-		if self.entries.is_empty() {
-			return;
+	/// Returns the updated state (owned-return pattern).
+	pub fn move_down(mut self) -> Self {
+		if !self.entries.is_empty() {
+			if self.selected + 1 >= self.entries.len() {
+				self.selected = 0;
+			} else {
+				self.selected += 1;
+			}
 		}
-		if self.selected + 1 >= self.entries.len() {
-			self.selected = 0;
-		} else {
-			self.selected += 1;
-		}
+		self
 	}
 
-	/// Accept the currently selected entry. Returns the value string to insert
-	/// into the input (e.g. `"src/"` or `"Cargo.toml"`), and deactivates the
-	/// autocomplete. Returns `None` if no entries are available.
+	/// Accept the currently selected entry. Returns `(updated_state, value)` where
+	/// `value` is the value string to insert into the input (e.g. `"src/"` or
+	/// `"Cargo.toml"`), or `None` if no entries are available.
 	///
 	/// If the accepted entry is a directory, the autocomplete stays active and
 	/// re-scans the subdirectory contents.
-	pub fn accept(&mut self) -> Option<String> {
+	pub fn accept(self) -> (Self, Option<String>) {
 		if self.entries.is_empty() {
-			return None;
+			return (self, None);
 		}
 		let entry = self.entries[self.selected].clone();
 		let value = entry.value.clone();
 
-		if entry.is_directory {
+		let new_self = if entry.is_directory {
 			// Keep mode active: re-scan subdirectory.
-			self.update(&value);
+			self.update(&value)
 		} else {
-			self.deactivate();
-		}
+			self.deactivate()
+		};
 
-		Some(value)
+		(new_self, Some(value))
 	}
 
 	/// Whether the @-mention autocomplete is currently active (popup should be visible).
@@ -747,7 +755,7 @@ mod tests {
 	fn activate_with_matching_prefix() {
 		let dir = setup_test_dir();
 		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("Car");
+		state = state.activate("Car");
 
 		assert!(state.is_active());
 		assert_eq!(state.entries.len(), 1);
@@ -759,7 +767,7 @@ mod tests {
 	fn activate_with_no_matches_stays_inactive() {
 		let dir = setup_test_dir();
 		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("zzzzz");
+		state = state.activate("zzzzz");
 
 		assert!(!state.is_active());
 		assert!(state.entries.is_empty());
@@ -769,7 +777,7 @@ mod tests {
 	fn activate_empty_prefix_shows_all() {
 		let dir = setup_test_dir();
 		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("");
+		state = state.activate("");
 
 		assert!(state.is_active());
 		// Should have: src/, tests/, Cargo.toml, main.rs, README.md = 5 entries
@@ -782,10 +790,10 @@ mod tests {
 	fn deactivate_resets_state() {
 		let dir = setup_test_dir();
 		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("");
+		state = state.activate("");
 		assert!(state.is_active());
 
-		state.deactivate();
+		state = state.deactivate();
 		assert!(!state.is_active());
 		assert!(state.entries.is_empty());
 		assert_eq!(state.selected, 0);
@@ -798,11 +806,11 @@ mod tests {
 	fn update_narrows_results() {
 		let dir = setup_test_dir();
 		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("");
+		state = state.activate("");
 		let initial_count = state.entries.len();
 		assert!(initial_count > 1);
 
-		state.update("Car");
+		state = state.update("Car");
 		assert_eq!(state.entries.len(), 1);
 		assert_eq!(state.entries[0].display, "Cargo.toml");
 	}
@@ -811,10 +819,10 @@ mod tests {
 	fn update_deactivates_on_no_results() {
 		let dir = setup_test_dir();
 		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("");
+		state = state.activate("");
 		assert!(state.is_active());
 
-		state.update("zzzzz");
+		state = state.update("zzzzz");
 		assert!(!state.is_active());
 	}
 
@@ -822,11 +830,11 @@ mod tests {
 	fn update_clamps_selected_index() {
 		let dir = setup_test_dir();
 		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("");
+		state = state.activate("");
 		assert_eq!(state.entries.len(), 5);
 		state.selected = 4; // last of 5
 
-		state.update("Car");
+		state = state.update("Car");
 		// Only "Cargo.toml" matches now.
 		assert_eq!(state.entries.len(), 1);
 		assert_eq!(state.selected, 0);
@@ -838,18 +846,18 @@ mod tests {
 	fn move_down_wraps_around() {
 		let dir = setup_test_dir();
 		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("");
+		state = state.activate("");
 		let count = state.entries.len();
 		assert!(count > 1);
 
 		// Navigate to the end.
 		for _ in 0..count - 1 {
-			state.move_down();
+			state = state.move_down();
 		}
 		assert_eq!(state.selected, count - 1);
 
 		// Wrap to 0.
-		state.move_down();
+		state = state.move_down();
 		assert_eq!(state.selected, 0);
 	}
 
@@ -857,26 +865,26 @@ mod tests {
 	fn move_up_wraps_around() {
 		let dir = setup_test_dir();
 		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("");
+		state = state.activate("");
 		let count = state.entries.len();
 		assert!(count > 1);
 		assert_eq!(state.selected, 0);
 
 		// Wrap to bottom.
-		state.move_up();
+		state = state.move_up();
 		assert_eq!(state.selected, count - 1);
 
 		// Move up.
-		state.move_up();
+		state = state.move_up();
 		assert_eq!(state.selected, count - 2);
 	}
 
 	#[test]
 	fn move_up_down_noop_when_empty() {
 		let mut state = AtMentionState::new();
-		state.move_up();
+		state = state.move_up();
 		assert_eq!(state.selected, 0);
-		state.move_down();
+		state = state.move_down();
 		assert_eq!(state.selected, 0);
 	}
 
@@ -885,11 +893,11 @@ mod tests {
 	#[test]
 	fn accept_returns_selected_file() {
 		let dir = setup_test_dir();
-		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("Car");
+		let state = AtMentionState::with_base_dir(dir.path());
+		let state = state.activate("Car");
 		assert_eq!(state.entries.len(), 1);
 
-		let result = state.accept();
+		let (state, result) = state.accept();
 		assert_eq!(result, Some("Cargo.toml".into()));
 		assert!(!state.is_active()); // File acceptance deactivates.
 	}
@@ -897,14 +905,14 @@ mod tests {
 	#[test]
 	fn accept_directory_keeps_active() {
 		let dir = setup_test_dir();
-		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("sr");
+		let state = AtMentionState::with_base_dir(dir.path());
+		let state = state.activate("sr");
 		// Should match src/
 		assert!(state.is_active());
 		assert_eq!(state.entries.len(), 1);
 		assert!(state.entries[0].is_directory);
 
-		let result = state.accept();
+		let (state, result) = state.accept();
 		assert_eq!(result, Some("src/".into()));
 		// After accepting a directory, state should re-scan the subdirectory.
 		assert!(state.is_active());
@@ -919,8 +927,8 @@ mod tests {
 
 	#[test]
 	fn accept_returns_none_when_empty() {
-		let mut state = AtMentionState::new();
-		let result = state.accept();
+		let state = AtMentionState::new();
+		let (_state, result) = state.accept();
 		assert_eq!(result, None);
 	}
 
@@ -937,7 +945,7 @@ mod tests {
 		}
 
 		let mut state = AtMentionState::with_base_dir(base);
-		state.activate("");
+		state = state.activate("");
 
 		assert!(
 			state.entries.len() >= 12,
@@ -953,7 +961,7 @@ mod tests {
 	fn visible_entries_returns_all_when_fewer_than_max() {
 		let dir = setup_test_dir();
 		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("Car");
+		state = state.activate("Car");
 
 		let visible = state.visible_entries();
 		assert_eq!(visible.len(), 1);
@@ -1115,7 +1123,7 @@ mod tests {
 		set_vfs_cache(setup_vfs_cache_entries());
 
 		let mut state = AtMentionState::new();
-		state.activate("vfs://workspace/");
+		state = state.activate("vfs://workspace/");
 
 		assert!(state.is_active());
 		assert_eq!(state.entries.len(), 5); // workspace/, main.rs, lib.rs, src/, src/app.rs
@@ -1136,21 +1144,21 @@ mod tests {
 	#[test]
 	fn full_workflow_activate_navigate_accept_file() {
 		let dir = setup_test_dir();
-		let mut state = AtMentionState::with_base_dir(dir.path());
+		let state = AtMentionState::with_base_dir(dir.path());
 
 		// 1. Activate with empty prefix.
-		state.activate("");
+		let state = state.activate("");
 		assert!(state.is_active());
 		let total = state.entries.len();
 		assert!(total > 0);
 
 		// 2. Update with "m" -- should narrow to main.rs.
-		state.update("m");
+		let state = state.update("m");
 		assert_eq!(state.entries.len(), 1);
 		assert_eq!(state.entries[0].display, "main.rs");
 
 		// 3. Accept.
-		let result = state.accept();
+		let (state, result) = state.accept();
 		assert_eq!(result, Some("main.rs".into()));
 		assert!(!state.is_active());
 	}
@@ -1158,21 +1166,21 @@ mod tests {
 	#[test]
 	fn full_workflow_directory_traversal() {
 		let dir = setup_test_dir();
-		let mut state = AtMentionState::with_base_dir(dir.path());
+		let state = AtMentionState::with_base_dir(dir.path());
 
 		// 1. Activate with "s" prefix -- matches src/.
-		state.activate("s");
+		let state = state.activate("s");
 		assert!(state.is_active());
 		// Should match src/ (dir).
 		assert!(state.entries.iter().any(|e| e.display == "src/"));
 
 		// 2. Update to narrow to "sr" -- just src/.
-		state.update("sr");
+		let state = state.update("sr");
 		assert_eq!(state.entries.len(), 1);
 		assert!(state.entries[0].is_directory);
 
 		// 3. Accept directory -- should re-scan src/ contents.
-		let result = state.accept();
+		let (state, result) = state.accept();
 		assert_eq!(result, Some("src/".into()));
 		assert!(state.is_active()); // Still active for subdirectory browsing.
 
@@ -1180,7 +1188,7 @@ mod tests {
 		assert!(state.entries.iter().any(|e| e.display == "lib.rs"));
 
 		// 5. Accept the file.
-		let result = state.accept();
+		let (state, result) = state.accept();
 		assert_eq!(result, Some("src/lib.rs".into()));
 		assert!(!state.is_active());
 	}
@@ -1189,10 +1197,10 @@ mod tests {
 	fn full_workflow_escape_cancels() {
 		let dir = setup_test_dir();
 		let mut state = AtMentionState::with_base_dir(dir.path());
-		state.activate("");
+		state = state.activate("");
 		assert!(state.is_active());
 
-		state.deactivate();
+		state = state.deactivate();
 		assert!(!state.is_active());
 	}
 

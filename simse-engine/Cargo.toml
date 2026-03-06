@@ -26,6 +26,7 @@ accelerate = [
 embed-weights = []
 
 [dependencies]
+im = { version = "15", features = ["serde"] }
 # Candle ML framework
 candle-core = "0.9"
 candle-nn = "0.9"

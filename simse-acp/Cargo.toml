@@ -14,6 +14,8 @@ name = "simse-acp-engine"
 path = "src/main.rs"
 
 [dependencies]
+simse-resilience = { path = "../simse-resilience" }
+im = { version = "15", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"

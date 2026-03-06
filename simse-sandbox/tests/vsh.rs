@@ -3,6 +3,10 @@
 //
 // These tests call the VirtualShell API directly instead of going through
 // JSON-RPC, exercising the same coverage as simse-vsh/tests/integration.rs.
+//
+// FP pattern: VirtualShell is pure state. Mutation methods take `self` by
+// value and return `Self` (or `(Self, T)`). I/O uses the
+// prepare/backend/record three-step flow with a separate backend.
 // ---------------------------------------------------------------------------
 
 use std::collections::HashMap;
@@ -12,7 +16,18 @@ use simse_sandbox_engine::vsh_backend::{LocalShell, ShellImpl};
 use simse_sandbox_engine::vsh_sandbox::SandboxConfig;
 use simse_sandbox_engine::vsh_shell::VirtualShell;
 
-/// Create a VirtualShell backed by a LocalShell with the given temp directory as root.
+/// Detect a working shell path (cross-platform: Linux, macOS, MINGW64/Git Bash).
+fn shell_path() -> String {
+	for candidate in &["/bin/sh", "/usr/bin/sh", "/usr/bin/bash"] {
+		if std::path::Path::new(candidate).exists() {
+			return candidate.to_string();
+		}
+	}
+	// Fallback — tests that execute commands will fail with a clear error.
+	"/bin/sh".to_string()
+}
+
+/// Create a VirtualShell with the given temp directory as root.
 fn make_shell(root: &std::path::Path) -> VirtualShell {
 	let sandbox = SandboxConfig {
 		root_directory: root.to_path_buf(),
@@ -22,7 +37,76 @@ fn make_shell(root: &std::path::Path) -> VirtualShell {
 		default_timeout_ms: 30_000,
 		max_output_bytes: 50_000,
 	};
-	VirtualShell::new(sandbox, "/bin/sh".to_string(), ShellImpl::Local(LocalShell))
+	VirtualShell::new(sandbox, shell_path())
+}
+
+/// Create a local shell backend for I/O.
+fn make_backend() -> ShellImpl {
+	ShellImpl::Local(LocalShell)
+}
+
+/// Helper: prepare + backend I/O + record for a session-bound command.
+async fn run_in_session(
+	shell: VirtualShell,
+	backend: &ShellImpl,
+	session_id: &str,
+	command: &str,
+	timeout_ms: Option<u64>,
+	max_output_bytes: Option<usize>,
+	stdin: Option<&str>,
+) -> (VirtualShell, Result<simse_sandbox_engine::vsh_executor::ExecResult, SandboxError>) {
+	let req = shell
+		.prepare_exec(session_id, command, timeout_ms, max_output_bytes, stdin)
+		.unwrap();
+
+	let env: HashMap<String, String> =
+		req.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+	let result = backend
+		.execute_command(
+			&req.resolved_command,
+			&req.cwd,
+			&env,
+			&req.shell_cmd,
+			req.timeout_ms,
+			req.max_output_bytes,
+			req.stdin.as_deref(),
+		)
+		.await;
+
+	let shell = shell.record_exec(&req.session_id, &req.command, &result);
+	(shell, result)
+}
+
+/// Helper: prepare + backend I/O + record for a raw (session-less) command.
+async fn run_raw(
+	shell: VirtualShell,
+	backend: &ShellImpl,
+	command: &str,
+	cwd: Option<&str>,
+	env: Option<&HashMap<String, String>>,
+	shell_override: Option<&str>,
+	timeout_ms: Option<u64>,
+	max_output_bytes: Option<usize>,
+	stdin: Option<&str>,
+) -> (VirtualShell, Result<simse_sandbox_engine::vsh_executor::ExecResult, SandboxError>) {
+	let req = shell
+		.prepare_exec_raw(command, cwd, env, shell_override, timeout_ms, max_output_bytes, stdin)
+		.unwrap();
+
+	let result = backend
+		.execute_command(
+			&req.command,
+			&req.cwd,
+			&req.env,
+			&req.shell_cmd,
+			req.timeout_ms,
+			req.max_output_bytes,
+			req.stdin.as_deref(),
+		)
+		.await;
+
+	let shell = shell.record_exec_raw(&result);
+	(shell, result)
 }
 
 // ---------------------------------------------------------------------------
@@ -32,9 +116,9 @@ fn make_shell(root: &std::path::Path) -> VirtualShell {
 #[tokio::test]
 async fn create_session_and_verify() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	assert!(!id.is_empty());
@@ -47,21 +131,21 @@ async fn create_session_and_verify() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 2: execute command in session (echo)
+// Test 2: run command in session (echo)
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn exec_run_echo() {
+async fn run_echo() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
+	let backend = make_backend();
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
-	let result = shell
-		.exec_in_session(&id, "echo hello", None, None, None)
-		.await
-		.unwrap();
+	let (_, result) =
+		run_in_session(shell, &backend, &id, "echo hello", None, None, None).await;
+	let result = result.unwrap();
 
 	assert_eq!(result.exit_code, 0);
 	assert!(
@@ -72,19 +156,20 @@ async fn exec_run_echo() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 3: execute command with env vars
+// Test 3: run command with env vars
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn exec_run_with_env() {
+async fn run_with_env() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
+	let backend = make_backend();
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	// Set an env var
-	shell.set_env(&id, "MY_VAR", "hello_env").unwrap();
+	let shell = shell.set_env(&id, "MY_VAR", "hello_env").unwrap();
 
 	// Verify via get_env
 	let val = shell.get_env(&id, "MY_VAR").unwrap();
@@ -94,28 +179,27 @@ async fn exec_run_with_env() {
 	let session_info = shell.get_session(&id).unwrap();
 	assert_eq!(session_info.env.get("MY_VAR").unwrap(), "hello_env");
 
-	// Verify exec still works in this session
-	let result = shell
-		.exec_in_session(&id, "echo works", None, None, None)
-		.await
-		.unwrap();
+	// Verify running a command still works in this session
+	let (_, result) =
+		run_in_session(shell, &backend, &id, "echo works", None, None, None).await;
+	let result = result.unwrap();
 	assert_eq!(result.exit_code, 0);
 	assert!(result.stdout.contains("works"));
 }
 
 // ---------------------------------------------------------------------------
-// Test 4: exec_raw stateless
+// Test 4: raw stateless run
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn exec_raw_stateless() {
+async fn raw_stateless() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
+	let backend = make_backend();
 
-	let result = shell
-		.exec_raw("echo raw_output", None, None, None, None, None, None)
-		.await
-		.unwrap();
+	let (_, result) =
+		run_raw(shell, &backend, "echo raw_output", None, None, None, None, None, None).await;
+	let result = result.unwrap();
 
 	assert_eq!(result.exit_code, 0);
 	assert!(
@@ -135,13 +219,13 @@ async fn session_cwd_changes() {
 	let subdir = dir.path().join("subdir");
 	std::fs::create_dir(&subdir).unwrap();
 
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	// Change cwd
-	shell.set_cwd(&id, subdir.to_str().unwrap()).unwrap();
+	let shell = shell.set_cwd(&id, subdir.to_str().unwrap()).unwrap();
 
 	// Verify cwd
 	let cwd = shell.get_cwd(&id).unwrap();
@@ -159,13 +243,14 @@ async fn session_cwd_changes() {
 #[tokio::test]
 async fn alias_resolution() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
+	let backend = make_backend();
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	// Set alias
-	shell
+	let shell = shell
 		.set_alias(&id, "greet", "echo hello from alias")
 		.unwrap();
 
@@ -174,10 +259,9 @@ async fn alias_resolution() {
 	assert_eq!(aliases.get("greet").unwrap(), "echo hello from alias");
 
 	// Run aliased command
-	let result = shell
-		.exec_in_session(&id, "greet", None, None, None)
-		.await
-		.unwrap();
+	let (_, result) =
+		run_in_session(shell, &backend, &id, "greet", None, None, None).await;
+	let result = result.unwrap();
 
 	assert_eq!(result.exit_code, 0);
 	assert!(
@@ -194,20 +278,17 @@ async fn alias_resolution() {
 #[tokio::test]
 async fn command_history_tracking() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
+	let backend = make_backend();
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	// Run a few commands
-	shell
-		.exec_in_session(&id, "echo one", None, None, None)
-		.await
-		.unwrap();
-	shell
-		.exec_in_session(&id, "echo two", None, None, None)
-		.await
-		.unwrap();
+	let (shell, _) =
+		run_in_session(shell, &backend, &id, "echo one", None, None, None).await;
+	let (shell, _) =
+		run_in_session(shell, &backend, &id, "echo two", None, None, None).await;
 
 	// Get history
 	let history = shell.get_history(&id).unwrap();
@@ -224,12 +305,12 @@ async fn command_history_tracking() {
 #[tokio::test]
 async fn session_list_and_delete() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
 
 	// Create two sessions
-	let s1 = shell.create_session(None, None, None).unwrap();
+	let (shell, s1) = shell.create_session(None, None, None).unwrap();
 	let s1_id = s1.id.clone();
-	let s2 = shell.create_session(None, None, None).unwrap();
+	let (shell, s2) = shell.create_session(None, None, None).unwrap();
 	let s2_id = s2.id.clone();
 
 	// List sessions
@@ -237,7 +318,7 @@ async fn session_list_and_delete() {
 	assert_eq!(sessions.len(), 2);
 
 	// Delete one
-	let deleted = shell.delete_session(&s1_id).unwrap();
+	let (shell, deleted) = shell.delete_session(&s1_id).unwrap();
 	assert!(deleted);
 
 	// List again
@@ -253,9 +334,9 @@ async fn session_list_and_delete() {
 #[tokio::test]
 async fn sandbox_violation() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	// Try to set cwd outside sandbox root
@@ -285,16 +366,33 @@ async fn sandbox_violation() {
 #[tokio::test]
 async fn command_timeout() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
+	let backend = make_backend();
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	// Run a long sleep with a very short timeout
-	let err = shell
-		.exec_in_session(&id, "sleep 10", Some(500), None, None)
-		.await
-		.unwrap_err();
+	let req = shell
+		.prepare_exec(&id, "sleep 10", Some(500), None, None)
+		.unwrap();
+
+	let env: HashMap<String, String> =
+		req.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+	let result = backend
+		.execute_command(
+			&req.resolved_command,
+			&req.cwd,
+			&env,
+			&req.shell_cmd,
+			req.timeout_ms,
+			req.max_output_bytes,
+			req.stdin.as_deref(),
+		)
+		.await;
+
+	// The result should be a timeout error
+	let err = result.unwrap_err();
 
 	match &err {
 		SandboxError::VshTimeout(msg) => {
@@ -317,13 +415,13 @@ async fn command_timeout() {
 #[tokio::test]
 async fn env_operations() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	// Set env var
-	shell.set_env(&id, "TEST_KEY", "test_value").unwrap();
+	let shell = shell.set_env(&id, "TEST_KEY", "test_value").unwrap();
 
 	// Get env var
 	let val = shell.get_env(&id, "TEST_KEY").unwrap();
@@ -334,7 +432,7 @@ async fn env_operations() {
 	assert_eq!(env.get("TEST_KEY").unwrap(), "test_value");
 
 	// Delete env var
-	let deleted = shell.delete_env(&id, "TEST_KEY").unwrap();
+	let (shell, deleted) = shell.delete_env(&id, "TEST_KEY").unwrap();
 	assert!(deleted);
 
 	// Verify it's gone
@@ -349,16 +447,15 @@ async fn env_operations() {
 #[tokio::test]
 async fn shell_metrics() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
+	let backend = make_backend();
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	// Run a command
-	shell
-		.exec_in_session(&id, "echo metric_test", None, None, None)
-		.await
-		.unwrap();
+	let (shell, _) =
+		run_in_session(shell, &backend, &id, "echo metric_test", None, None, None).await;
 
 	// Check metrics
 	assert_eq!(shell.session_count(), 1);
@@ -372,11 +469,10 @@ async fn shell_metrics() {
 #[tokio::test]
 async fn session_not_found() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
 
 	let err = shell
-		.exec_in_session("nonexistent", "echo hello", None, None, None)
-		.await
+		.prepare_exec("nonexistent", "echo hello", None, None, None)
 		.unwrap_err();
 
 	match &err {
@@ -405,18 +501,13 @@ async fn blocked_command_pattern() {
 		default_timeout_ms: 30_000,
 		max_output_bytes: 50_000,
 	};
-	let mut shell = VirtualShell::new(
-		sandbox,
-		"/bin/sh".to_string(),
-		ShellImpl::Local(LocalShell),
-	);
+	let shell = VirtualShell::new(sandbox, shell_path());
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	let err = shell
-		.exec_in_session(&id, "rm -rf /", None, None, None)
-		.await
+		.prepare_exec(&id, "rm -rf /", None, None, None)
 		.unwrap_err();
 
 	match &err {
@@ -447,15 +538,11 @@ async fn session_max_limit() {
 		default_timeout_ms: 30_000,
 		max_output_bytes: 50_000,
 	};
-	let mut shell = VirtualShell::new(
-		sandbox,
-		"/bin/sh".to_string(),
-		ShellImpl::Local(LocalShell),
-	);
+	let shell = VirtualShell::new(sandbox, shell_path());
 
 	// Create two sessions (max)
-	shell.create_session(None, None, None).unwrap();
-	shell.create_session(None, None, None).unwrap();
+	let (shell, _) = shell.create_session(None, None, None).unwrap();
+	let (shell, _) = shell.create_session(None, None, None).unwrap();
 
 	// Third should fail
 	let err = shell.create_session(None, None, None).unwrap_err();
@@ -482,12 +569,12 @@ async fn create_session_with_cwd_and_env() {
 	let subdir = dir.path().join("mydir");
 	std::fs::create_dir(&subdir).unwrap();
 
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
 
 	let mut initial_env = HashMap::new();
 	initial_env.insert("FOO".to_string(), "bar".to_string());
 
-	let session = shell
+	let (_, session) = shell
 		.create_session(
 			Some("my-session".to_string()),
 			Some(subdir.to_str().unwrap().to_string()),
@@ -501,29 +588,31 @@ async fn create_session_with_cwd_and_env() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 17: exec_raw with custom cwd
+// Test 17: raw run with custom cwd
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn exec_raw_with_custom_cwd() {
+async fn raw_with_custom_cwd() {
 	let dir = tempfile::tempdir().unwrap();
 	let subdir = dir.path().join("rawdir");
 	std::fs::create_dir(&subdir).unwrap();
 
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
+	let backend = make_backend();
 
-	let result = shell
-		.exec_raw(
-			"pwd",
-			Some(subdir.to_str().unwrap()),
-			None,
-			None,
-			None,
-			None,
-			None,
-		)
-		.await
-		.unwrap();
+	let (_, result) = run_raw(
+		shell,
+		&backend,
+		"pwd",
+		Some(subdir.to_str().unwrap()),
+		None,
+		None,
+		None,
+		None,
+		None,
+	)
+	.await;
+	let result = result.unwrap();
 
 	assert_eq!(result.exit_code, 0);
 	assert!(
@@ -540,12 +629,12 @@ async fn exec_raw_with_custom_cwd() {
 #[tokio::test]
 async fn delete_nonexistent_env_var() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
-	let deleted = shell.delete_env(&id, "DOES_NOT_EXIST").unwrap();
+	let (_, deleted) = shell.delete_env(&id, "DOES_NOT_EXIST").unwrap();
 	assert!(!deleted);
 }
 
@@ -556,7 +645,7 @@ async fn delete_nonexistent_env_var() {
 #[tokio::test]
 async fn delete_nonexistent_session() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
 
 	let err = shell.delete_session("no-such-id").unwrap_err();
 	match &err {
@@ -574,18 +663,18 @@ async fn delete_nonexistent_session() {
 #[tokio::test]
 async fn alias_with_arguments() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
+	let backend = make_backend();
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	// Set alias that takes additional arguments
-	shell.set_alias(&id, "say", "echo").unwrap();
+	let shell = shell.set_alias(&id, "say", "echo").unwrap();
 
-	let result = shell
-		.exec_in_session(&id, "say hello world", None, None, None)
-		.await
-		.unwrap();
+	let (_, result) =
+		run_in_session(shell, &backend, &id, "say hello world", None, None, None).await;
+	let result = result.unwrap();
 
 	assert_eq!(result.exit_code, 0);
 	assert!(
@@ -602,22 +691,20 @@ async fn alias_with_arguments() {
 #[tokio::test]
 async fn history_records_nonzero_exit() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
+	let backend = make_backend();
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	// Run a command that succeeds
-	shell
-		.exec_in_session(&id, "echo ok", None, None, None)
-		.await
-		.unwrap();
+	let (shell, _) =
+		run_in_session(shell, &backend, &id, "echo ok", None, None, None).await;
 
 	// Run a command that fails (non-zero exit code)
-	let result = shell
-		.exec_in_session(&id, "false", None, None, None)
-		.await
-		.unwrap();
+	let (shell, result) =
+		run_in_session(shell, &backend, &id, "false", None, None, None).await;
+	let result = result.unwrap();
 	assert_ne!(result.exit_code, 0);
 
 	// History should have 2 entries
@@ -645,25 +732,19 @@ async fn blocked_command_skips_history() {
 		default_timeout_ms: 30_000,
 		max_output_bytes: 50_000,
 	};
-	let mut shell = VirtualShell::new(
-		sandbox,
-		"/bin/sh".to_string(),
-		ShellImpl::Local(LocalShell),
-	);
+	let shell = VirtualShell::new(sandbox, shell_path());
+	let backend = make_backend();
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
 	// Run a successful command
-	shell
-		.exec_in_session(&id, "echo ok", None, None, None)
-		.await
-		.unwrap();
+	let (shell, _) =
+		run_in_session(shell, &backend, &id, "echo ok", None, None, None).await;
 
-	// Blocked command is rejected before execution, so no history entry
+	// Blocked command is rejected before I/O, so no history entry
 	let err = shell
-		.exec_in_session(&id, "forbidden_cmd", None, None, None)
-		.await
+		.prepare_exec(&id, "forbidden_cmd", None, None, None)
 		.unwrap_err();
 	assert_eq!(err.code(), "SANDBOX_VSH_SANDBOX_VIOLATION");
 
@@ -674,23 +755,20 @@ async fn blocked_command_skips_history() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 22: metrics track raw exec commands and errors
+// Test 22: metrics track raw commands and errors
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn metrics_track_raw_exec() {
+async fn metrics_track_raw() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
+	let backend = make_backend();
 
-	// exec_raw tracks total_commands independently
-	shell
-		.exec_raw("echo one", None, None, None, None, None, None)
-		.await
-		.unwrap();
-	shell
-		.exec_raw("echo two", None, None, None, None, None, None)
-		.await
-		.unwrap();
+	// raw run tracks total_commands independently
+	let (shell, _) =
+		run_raw(shell, &backend, "echo one", None, None, None, None, None, None).await;
+	let (shell, _) =
+		run_raw(shell, &backend, "echo two", None, None, None, None, None, None).await;
 
 	assert!(
 		shell.total_commands() >= 2,
@@ -700,27 +778,24 @@ async fn metrics_track_raw_exec() {
 }
 
 // ---------------------------------------------------------------------------
-// Test 23: metrics track session exec commands
+// Test 23: metrics track session commands
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn metrics_track_session_exec() {
+async fn metrics_track_session() {
 	let dir = tempfile::tempdir().unwrap();
-	let mut shell = make_shell(dir.path());
+	let shell = make_shell(dir.path());
+	let backend = make_backend();
 
-	let session = shell.create_session(None, None, None).unwrap();
+	let (shell, session) = shell.create_session(None, None, None).unwrap();
 	let id = session.id.clone();
 
-	shell
-		.exec_in_session(&id, "echo a", None, None, None)
-		.await
-		.unwrap();
-	shell
-		.exec_in_session(&id, "echo b", None, None, None)
-		.await
-		.unwrap();
+	let (shell, _) =
+		run_in_session(shell, &backend, &id, "echo a", None, None, None).await;
+	let (shell, _) =
+		run_in_session(shell, &backend, &id, "echo b", None, None, None).await;
 
-	// exec_in_session increments total_commands via record_history
+	// run_in_session increments total_commands via record_exec
 	assert!(
 		shell.total_commands() >= 2,
 		"total_commands should be >= 2, got: {}",

@@ -186,5 +186,5 @@ pub fn register_bash_tool(registry: &mut ToolRegistry, options: BashToolOptions)
 		})
 	});
 
-	registry.register(definition, handler);
+	registry.register_mut(definition, handler);
 }

@@ -251,7 +251,7 @@ pub fn register_filesystem_tools(registry: &mut ToolRegistry, options: Filesyste
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -319,7 +319,7 @@ pub fn register_filesystem_tools(registry: &mut ToolRegistry, options: Filesyste
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -398,7 +398,7 @@ pub fn register_filesystem_tools(registry: &mut ToolRegistry, options: Filesyste
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -452,12 +452,11 @@ pub fn register_filesystem_tools(registry: &mut ToolRegistry, options: Filesyste
 					if matches.len() >= limit {
 						break;
 					}
-					if let Ok(path) = entry {
-						if let Ok(rel) = path.strip_prefix(&*wd) {
+					if let Ok(path) = entry
+						&& let Ok(rel) = path.strip_prefix(&*wd) {
 							let normalized = rel.to_string_lossy().replace('\\', "/");
 							matches.push(normalized);
 						}
-					}
 				}
 
 				if matches.is_empty() {
@@ -474,7 +473,7 @@ pub fn register_filesystem_tools(registry: &mut ToolRegistry, options: Filesyste
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -610,7 +609,7 @@ pub fn register_filesystem_tools(registry: &mut ToolRegistry, options: Filesyste
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -688,7 +687,7 @@ pub fn register_filesystem_tools(registry: &mut ToolRegistry, options: Filesyste
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -782,7 +781,7 @@ pub fn register_filesystem_tools(registry: &mut ToolRegistry, options: Filesyste
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -878,7 +877,7 @@ pub fn register_filesystem_tools(registry: &mut ToolRegistry, options: Filesyste
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -947,6 +946,6 @@ pub fn register_filesystem_tools(registry: &mut ToolRegistry, options: Filesyste
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 }

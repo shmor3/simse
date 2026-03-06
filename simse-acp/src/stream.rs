@@ -96,8 +96,12 @@ impl AcpStream {
 	///
 	/// This is used to hold `SubscriptionHandle` instances so the
 	/// notification handlers remain active while the stream is alive.
-	pub fn keep_alive(&mut self, handle: Box<dyn std::any::Any + Send>) {
+	///
+	/// Uses owned-return pattern: takes `self` by value and returns the
+	/// updated stream.
+	pub fn keep_alive(mut self, handle: Box<dyn std::any::Any + Send>) -> Self {
 		self._keep_alive.push(handle);
+		self
 	}
 }
 

@@ -1,5 +1,3 @@
-use std::collections::{HashMap, HashSet};
-
 use anyhow::Result;
 use uuid::Uuid;
 
@@ -42,16 +40,87 @@ pub struct ServerConfig {
     pub default_sampling: SamplingParams,
 }
 
+// ── Pure state (separated from I/O) ──────────────────────────────────────
+
+/// Pure server state — contains only data, no I/O handles.
+/// Uses `im` persistent collections for efficient functional state transitions.
+#[derive(Clone)]
+struct AcpServerState {
+    sessions: im::HashSet<String>,
+    session_history: im::HashMap<String, im::Vector<HistoryMessage>>,
+    current_model: String,
+}
+
+impl AcpServerState {
+    fn new(default_model: String) -> Self {
+        Self {
+            sessions: im::HashSet::new(),
+            session_history: im::HashMap::new(),
+            current_model: default_model,
+        }
+    }
+
+    /// Create a new session, returning updated state and the session ID.
+    fn create_session(self) -> (Self, String) {
+        let session_id = Uuid::new_v4().to_string();
+        let sessions = self.sessions.update(session_id.clone());
+        let session_history = self.session_history.update(session_id.clone(), im::Vector::new());
+        (
+            Self {
+                sessions,
+                session_history,
+                current_model: self.current_model,
+            },
+            session_id,
+        )
+    }
+
+    /// Delete a session, returning updated state.
+    fn delete_session(self, session_id: &str) -> Self {
+        Self {
+            sessions: self.sessions.without(session_id),
+            session_history: self.session_history.without(session_id),
+            current_model: self.current_model,
+        }
+    }
+
+    /// Record a message in session history, returning updated state.
+    fn record_message(self, session_id: &str, role: String, content: String) -> Self {
+        let session_history = if let Some(history) = self.session_history.get(session_id) {
+            let mut history = history.clone();
+            history.push_back(HistoryMessage { role, content });
+            self.session_history.update(session_id.to_string(), history)
+        } else {
+            self.session_history.clone()
+        };
+        Self {
+            sessions: self.sessions,
+            session_history,
+            current_model: self.current_model,
+        }
+    }
+
+    /// Set the current model, returning updated state.
+    fn set_current_model(self, model_id: String) -> Self {
+        Self {
+            sessions: self.sessions,
+            session_history: self.session_history,
+            current_model: model_id,
+        }
+    }
+}
+
 // ── ACP server ────────────────────────────────────────────────────────────
 
 /// ACP-compatible inference server that handles JSON-RPC messages over stdin/stdout.
+///
+/// Separates pure state (`AcpServerState`) from I/O handles (`transport`, `registry`).
+/// Uses `with_state` for read-only access and `with_state_transition` for mutations.
 pub struct AcpServer {
     config: ServerConfig,
     registry: ModelRegistry,
     transport: NdjsonTransport,
-    sessions: HashSet<String>,
-    session_history: HashMap<String, Vec<HistoryMessage>>,
-    current_model: String,
+    state: Option<AcpServerState>,
 }
 
 impl AcpServer {
@@ -62,13 +131,29 @@ impl AcpServer {
             config,
             registry,
             transport,
-            sessions: HashSet::new(),
-            session_history: HashMap::new(),
-            current_model,
+            state: Some(AcpServerState::new(current_model)),
         }
     }
 
+    /// Borrow the pure state for read-only operations.
+    fn with_state<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(&AcpServerState) -> R,
+    {
+        f(self.state.as_ref().expect("state must be present"))
+    }
+
+    /// Take ownership of the pure state, apply a transition, and put it back.
+    fn with_state_transition<F>(&mut self, f: F)
+    where
+        F: FnOnce(AcpServerState) -> AcpServerState,
+    {
+        let state = self.state.take().expect("state must be present");
+        self.state = Some(f(state));
+    }
+
     /// Main loop: read messages from stdin, dispatch to handlers.
+    // PERF: I/O loop — &mut self required for stdin blocking reads and state transitions
     pub fn run(&mut self) -> Result<()> {
         // Read all messages — this blocks on stdin until EOF
         let stdin = std::io::stdin();
@@ -141,7 +226,7 @@ impl AcpServer {
         }
     }
 
-    fn handle_initialize(&mut self, id: u64) {
+    fn handle_initialize(&self, id: u64) {
         let result = AcpInitializeResult {
             protocol_version: 1,
             agent_info: AcpAgentInfo {
@@ -157,13 +242,16 @@ impl AcpServer {
     }
 
     fn handle_session_new(&mut self, id: u64) {
-        let session_id = Uuid::new_v4().to_string();
-        self.sessions.insert(session_id.clone());
-        self.session_history.insert(session_id.clone(), Vec::new());
+        // State transition: create session (takes owned state, returns new state + session ID)
+        let state = self.state.take().expect("state must be present");
+        let (new_state, session_id) = state.create_session();
+        self.state = Some(new_state);
+
+        let current_model = self.with_state(|s| s.current_model.clone());
 
         let models = AcpModelsInfo {
             available_models: self.registry.available_models(),
-            current_model_id: self.current_model.clone(),
+            current_model_id: current_model,
         };
 
         let result = AcpSessionNewResult {
@@ -191,8 +279,9 @@ impl AcpServer {
         let params_value = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
         let prompt_params: AcpSessionPromptParams = serde_json::from_value(params_value)?;
 
-        // Validate session
-        if !self.sessions.contains(&prompt_params.session_id) {
+        // Validate session (read-only)
+        let session_exists = self.with_state(|s| s.sessions.contains(&prompt_params.session_id));
+        if !session_exists {
             self.transport.write_error(id, INVALID_PARAMS, format!("Session not found: {}", prompt_params.session_id));
             return Ok(());
         }
@@ -230,33 +319,38 @@ impl AcpServer {
             // Extract prompt text
             let (user_prompt, system_prompt) = Self::extract_text_from_content(&prompt_params.prompt);
 
-            // Build conversation context from history for multi-turn
-            let mut context_parts: Vec<String> = Vec::new();
-            if let Some(history) = self.session_history.get(&prompt_params.session_id) {
-                for msg in history {
-                    context_parts.push(format!("{}: {}", msg.role, msg.content));
+            // Build conversation context from history for multi-turn (read-only)
+            let context_parts: Vec<String> = self.with_state(|s| {
+                let mut parts = Vec::new();
+                if let Some(history) = s.session_history.get(&prompt_params.session_id) {
+                    for msg in history {
+                        parts.push(format!("{}: {}", msg.role, msg.content));
+                    }
                 }
-            }
+                parts
+            });
 
             // Prepend history to the user prompt if there is conversation context
             let full_user_prompt = if context_parts.is_empty() {
                 user_prompt.clone()
             } else {
-                context_parts.push(format!("user: {}", user_prompt));
-                context_parts.join("\n")
+                let mut parts = context_parts;
+                parts.push(format!("user: {}", user_prompt));
+                parts.join("\n")
             };
 
-            // Record user message in history
-            if let Some(hist) = self.session_history.get_mut(&prompt_params.session_id) {
-                hist.push(HistoryMessage {
-                    role: "user".to_string(),
-                    content: user_prompt,
-                });
-            }
+            // Record user message in history (state transition)
+            let session_id = prompt_params.session_id.clone();
+            let user_prompt_clone = user_prompt.clone();
+            self.with_state_transition(|state| {
+                state.record_message(&session_id, "user".to_string(), user_prompt_clone)
+            });
+
+            let current_model = self.with_state(|s| s.current_model.clone());
 
             let result = inference::generation::run_generation(
                 &mut self.registry,
-                &self.current_model,
+                &current_model,
                 &full_user_prompt,
                 system_prompt.as_deref(),
                 &sampling,
@@ -265,7 +359,7 @@ impl AcpServer {
                 self.config.streaming,
             )?;
 
-            // Record assistant response in history
+            // Record assistant response in history (state transition)
             let response_text: String = result.content.iter().filter_map(|block| {
                 match block {
                     AcpContentBlock::Text { text } => Some(text.as_str()),
@@ -273,12 +367,10 @@ impl AcpServer {
                 }
             }).collect::<Vec<_>>().join("");
 
-            if let Some(hist) = self.session_history.get_mut(&prompt_params.session_id) {
-                hist.push(HistoryMessage {
-                    role: "assistant".to_string(),
-                    content: response_text,
-                });
-            }
+            let session_id = prompt_params.session_id.clone();
+            self.with_state_transition(|state| {
+                state.record_message(&session_id, "assistant".to_string(), response_text)
+            });
 
             self.transport.write_response(id, serde_json::to_value(result)?);
         }
@@ -289,8 +381,8 @@ impl AcpServer {
     fn handle_session_delete(&mut self, id: u64, params: Option<serde_json::Value>) {
         if let Some(params) = params {
             if let Some(session_id) = params.get("sessionId").and_then(|v| v.as_str()) {
-                self.sessions.remove(session_id);
-                self.session_history.remove(session_id);
+                let sid = session_id.to_string();
+                self.with_state_transition(|state| state.delete_session(&sid));
                 tracing::debug!(session_id, "Session deleted");
                 self.transport.write_response(id, serde_json::json!({}));
                 return;
@@ -305,7 +397,8 @@ impl AcpServer {
                 match config_params.config_option_id.as_str() {
                     "model" => {
                         tracing::info!(model = %config_params.group_id, "Switching model");
-                        self.current_model = config_params.group_id;
+                        let model_id = config_params.group_id;
+                        self.with_state_transition(|state| state.set_current_model(model_id));
                         self.transport.write_response(id, serde_json::json!({}));
                         return;
                     }
@@ -750,5 +843,78 @@ mod tests {
         let meta_one = Some(serde_json::json!({ "top_p": 1.0 }));
         let params = server.extract_sampling_params(&meta_one);
         assert_eq!(params.top_p, Some(1.0));
+    }
+
+    // ── AcpServerState pure state tests ──────────────────────────────────
+
+    #[test]
+    fn state_new_has_empty_sessions() {
+        let state = AcpServerState::new("model-1".to_string());
+        assert!(state.sessions.is_empty());
+        assert!(state.session_history.is_empty());
+        assert_eq!(state.current_model, "model-1");
+    }
+
+    #[test]
+    fn state_create_session_adds_to_sessions() {
+        let state = AcpServerState::new("model-1".to_string());
+        let (state, session_id) = state.create_session();
+        assert!(state.sessions.contains(&session_id));
+        assert!(state.session_history.contains_key(&session_id));
+        assert!(state.session_history.get(&session_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn state_delete_session_removes_from_sessions() {
+        let state = AcpServerState::new("model-1".to_string());
+        let (state, session_id) = state.create_session();
+        let state = state.delete_session(&session_id);
+        assert!(!state.sessions.contains(&session_id));
+        assert!(!state.session_history.contains_key(&session_id));
+    }
+
+    #[test]
+    fn state_record_message_appends_to_history() {
+        let state = AcpServerState::new("model-1".to_string());
+        let (state, session_id) = state.create_session();
+        let state = state.record_message(&session_id, "user".to_string(), "hello".to_string());
+        let state = state.record_message(&session_id, "assistant".to_string(), "hi".to_string());
+        let history = state.session_history.get(&session_id).unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].role, "user");
+        assert_eq!(history[0].content, "hello");
+        assert_eq!(history[1].role, "assistant");
+        assert_eq!(history[1].content, "hi");
+    }
+
+    #[test]
+    fn state_set_current_model_updates_model() {
+        let state = AcpServerState::new("model-1".to_string());
+        let state = state.set_current_model("model-2".to_string());
+        assert_eq!(state.current_model, "model-2");
+    }
+
+    #[test]
+    fn state_transitions_preserve_other_state() {
+        let state = AcpServerState::new("model-1".to_string());
+        let (state, session_id) = state.create_session();
+        let state = state.record_message(&session_id, "user".to_string(), "msg".to_string());
+        let state = state.set_current_model("model-2".to_string());
+        // Session and history should be preserved after model change
+        assert!(state.sessions.contains(&session_id));
+        assert_eq!(state.session_history.get(&session_id).unwrap().len(), 1);
+        assert_eq!(state.current_model, "model-2");
+    }
+
+    #[test]
+    fn state_clone_is_independent() {
+        let state = AcpServerState::new("model-1".to_string());
+        let (state, session_id) = state.create_session();
+        let cloned = state.clone();
+        let state = state.delete_session(&session_id);
+        // Original state should have the session deleted
+        assert!(!state.sessions.contains(&session_id));
+        // Clone should still have the session (persistent data structures)
+        assert!(cloned.sessions.contains(&session_id));
     }
 }

@@ -6,8 +6,6 @@
 // volume tracking, merge, and relocate operations.
 // ---------------------------------------------------------------------------
 
-use std::collections::{HashMap, HashSet};
-
 use crate::text_search::levenshtein_similarity;
 use crate::types::TopicCatalogSection;
 
@@ -15,16 +13,17 @@ use crate::types::TopicCatalogSection;
 // TopicCatalog
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 pub struct TopicCatalog {
 	similarity_threshold: f64,
 	/// topic -> Set<volumeId>
-	topic_to_volumes: HashMap<String, HashSet<String>>,
+	topic_to_volumes: im::HashMap<String, im::HashSet<String>>,
 	/// volumeId -> topic
-	volume_to_topic: HashMap<String, String>,
+	volume_to_topic: im::HashMap<String, String>,
 	/// alias -> canonical topic
-	aliases: HashMap<String, String>,
+	aliases: im::HashMap<String, String>,
 	/// topic -> Set<child topic>
-	topic_to_children: HashMap<String, HashSet<String>>,
+	topic_to_children: im::HashMap<String, im::HashSet<String>>,
 }
 
 impl TopicCatalog {
@@ -32,10 +31,10 @@ impl TopicCatalog {
 	pub fn new(similarity_threshold: f64) -> Self {
 		Self {
 			similarity_threshold,
-			topic_to_volumes: HashMap::new(),
-			volume_to_topic: HashMap::new(),
-			aliases: HashMap::new(),
-			topic_to_children: HashMap::new(),
+			topic_to_volumes: im::HashMap::new(),
+			volume_to_topic: im::HashMap::new(),
+			aliases: im::HashMap::new(),
+			topic_to_children: im::HashMap::new(),
 		}
 	}
 
@@ -43,13 +42,12 @@ impl TopicCatalog {
 	///
 	/// For "code/rust/async", creates "code", "code/rust", "code/rust/async"
 	/// and registers parent-child relationships.
-	fn ensure_topic_exists(&mut self, topic: &str) {
+	fn ensure_topic_exists(mut self, topic: &str) -> Self {
 		let normalized = topic.to_lowercase();
 		let normalized = normalized.trim();
 
 		if !self.topic_to_volumes.contains_key(normalized) {
-			self.topic_to_volumes
-				.insert(normalized.to_string(), HashSet::new());
+			self.topic_to_volumes = self.topic_to_volumes.update(normalized.to_string(), im::HashSet::new());
 		}
 
 		// Ensure all ancestors exist
@@ -59,15 +57,14 @@ impl TopicCatalog {
 			let child = parts[..=i].join("/");
 
 			if !self.topic_to_volumes.contains_key(&parent) {
-				self.topic_to_volumes
-					.insert(parent.clone(), HashSet::new());
+				self.topic_to_volumes = self.topic_to_volumes.update(parent.clone(), im::HashSet::new());
 			}
 
-			self.topic_to_children
-				.entry(parent)
-				.or_default()
-				.insert(child);
+			let children = self.topic_to_children.get(&parent).cloned().unwrap_or_default();
+			let children = children.update(child);
+			self.topic_to_children = self.topic_to_children.update(parent, children);
 		}
+		self
 	}
 
 	/// Resolve a proposed topic to a canonical name.
@@ -78,18 +75,18 @@ impl TopicCatalog {
 	/// 3. Check exact match
 	/// 4. Fuzzy match (Levenshtein >= threshold)
 	/// 5. Register as new topic
-	pub fn resolve(&mut self, proposed_topic: &str) -> String {
+	pub fn resolve(self, proposed_topic: &str) -> (Self, String) {
 		let normalized = proposed_topic.to_lowercase();
 		let normalized = normalized.trim().to_string();
 
 		// 1. Check aliases
-		if let Some(canonical) = self.aliases.get(&normalized) {
-			return canonical.clone();
+		if let Some(canonical) = self.aliases.get(&normalized).cloned() {
+			return (self, canonical);
 		}
 
 		// 2. Check exact match
 		if self.topic_to_volumes.contains_key(&normalized) {
-			return normalized;
+			return (self, normalized);
 		}
 
 		// 3. Check similarity against existing topics
@@ -104,86 +101,92 @@ impl TopicCatalog {
 		}
 
 		if let Some(matched) = best_match {
-			return matched;
+			return (self, matched);
 		}
 
 		// 4. Register as new topic
-		self.ensure_topic_exists(&normalized);
-		normalized
+		let s = self.ensure_topic_exists(&normalized);
+		(s, normalized)
 	}
 
 	/// Register a volume under a topic. Resolves the topic first and removes
 	/// the volume from any previous topic.
-	pub fn register_volume(&mut self, volume_id: &str, topic: &str) {
-		let canonical = self.resolve(topic);
+	pub fn register_volume(self, volume_id: &str, topic: &str) -> Self {
+		let (mut s, canonical) = self.resolve(topic);
 
 		// Remove from old topic if exists
-		if let Some(old_topic) = self.volume_to_topic.get(volume_id).cloned() {
-			if let Some(vols) = self.topic_to_volumes.get_mut(&old_topic) {
-				vols.remove(volume_id);
+		if let Some(old_topic) = s.volume_to_topic.get(volume_id).cloned() {
+			if let Some(vols) = s.topic_to_volumes.get(&old_topic).cloned() {
+				let vols = vols.without(volume_id);
+				s.topic_to_volumes = s.topic_to_volumes.update(old_topic, vols);
 			}
 		}
 
-		if let Some(vols) = self.topic_to_volumes.get_mut(&canonical) {
-			vols.insert(volume_id.to_string());
+		if let Some(vols) = s.topic_to_volumes.get(&canonical).cloned() {
+			let vols = vols.update(volume_id.to_string());
+			s.topic_to_volumes = s.topic_to_volumes.update(canonical.clone(), vols);
 		}
-		self.volume_to_topic
-			.insert(volume_id.to_string(), canonical);
+		s.volume_to_topic = s.volume_to_topic.update(volume_id.to_string(), canonical);
+		s
 	}
 
 	/// Remove a volume from whatever topic it belongs to.
-	pub fn remove_volume(&mut self, volume_id: &str) {
-		if let Some(topic) = self.volume_to_topic.remove(volume_id) {
-			if let Some(vols) = self.topic_to_volumes.get_mut(&topic) {
-				vols.remove(volume_id);
+	pub fn remove_volume(mut self, volume_id: &str) -> Self {
+		if let Some(topic) = self.volume_to_topic.get(volume_id).cloned() {
+			self.volume_to_topic = self.volume_to_topic.without(volume_id);
+			if let Some(vols) = self.topic_to_volumes.get(&topic).cloned() {
+				let vols = vols.without(volume_id);
+				self.topic_to_volumes = self.topic_to_volumes.update(topic, vols);
 			}
 		}
+		self
 	}
 
 	/// Move a volume from its current topic to a new one.
-	pub fn relocate(&mut self, volume_id: &str, new_topic: &str) {
-		self.remove_volume(volume_id);
-		self.register_volume(volume_id, new_topic);
+	pub fn relocate(self, volume_id: &str, new_topic: &str) -> Self {
+		let s = self.remove_volume(volume_id);
+		s.register_volume(volume_id, new_topic)
 	}
 
 	/// Merge all volumes from `source` into `target` and create an alias.
-	pub fn merge(&mut self, source: &str, target: &str) {
+	pub fn merge(self, source: &str, target: &str) -> Self {
 		let src_norm = source.to_lowercase();
 		let src_norm = src_norm.trim().to_string();
-		let tgt_norm = self.resolve(target);
+		let (mut s, tgt_norm) = self.resolve(target);
 
 		// Collect volume IDs from source
-		let volume_ids: Vec<String> = self
+		let volume_ids: Vec<String> = s
 			.topic_to_volumes
 			.get(&src_norm)
-			.map(|s| s.iter().cloned().collect())
+			.map(|set| set.iter().cloned().collect())
 			.unwrap_or_default();
 
-		if volume_ids.is_empty() && !self.topic_to_volumes.contains_key(&src_norm) {
-			return;
+		if volume_ids.is_empty() && !s.topic_to_volumes.contains_key(&src_norm) {
+			return s;
 		}
 
 		// Ensure target exists
-		if !self.topic_to_volumes.contains_key(&tgt_norm) {
-			self.ensure_topic_exists(&tgt_norm);
+		if !s.topic_to_volumes.contains_key(&tgt_norm) {
+			s = s.ensure_topic_exists(&tgt_norm);
 		}
 
 		// Move all volumes
 		for volume_id in &volume_ids {
-			if let Some(vols) = self.topic_to_volumes.get_mut(&tgt_norm) {
-				vols.insert(volume_id.clone());
+			if let Some(vols) = s.topic_to_volumes.get(&tgt_norm).cloned() {
+				let vols = vols.update(volume_id.clone());
+				s.topic_to_volumes = s.topic_to_volumes.update(tgt_norm.clone(), vols);
 			}
-			self.volume_to_topic
-				.insert(volume_id.clone(), tgt_norm.clone());
+			s.volume_to_topic = s.volume_to_topic.update(volume_id.clone(), tgt_norm.clone());
 		}
 
 		// Clear source
-		if let Some(vols) = self.topic_to_volumes.get_mut(&src_norm) {
-			vols.clear();
+		if s.topic_to_volumes.contains_key(&src_norm) {
+			s.topic_to_volumes = s.topic_to_volumes.update(src_norm.clone(), im::HashSet::new());
 		}
 
 		// Add alias
-		self.aliases.insert(src_norm, tgt_norm);
+		s.aliases = s.aliases.update(src_norm, tgt_norm);
+		s
 	}
 
 	/// List all topics with parent/children/volume count.
@@ -222,11 +225,12 @@ impl TopicCatalog {
 	}
 
 	/// Add a manual alias from `alias` to `canonical`.
-	pub fn add_alias(&mut self, alias: &str, canonical: &str) {
-		self.aliases.insert(
+	pub fn add_alias(mut self, alias: &str, canonical: &str) -> Self {
+		self.aliases = self.aliases.update(
 			alias.to_lowercase().trim().to_string(),
 			canonical.to_lowercase().trim().to_string(),
 		);
+		self
 	}
 
 	/// Return the topic a volume belongs to, if any.
@@ -251,8 +255,8 @@ mod tests {
 
 	#[test]
 	fn resolve_creates_new_topic() {
-		let mut catalog = TopicCatalog::default();
-		let topic = catalog.resolve("Rust");
+		let catalog = TopicCatalog::default();
+		let (catalog, topic) = catalog.resolve("Rust");
 		assert_eq!(topic, "rust");
 		let sections = catalog.sections();
 		assert!(sections.iter().any(|s| s.topic == "rust"));
@@ -260,44 +264,44 @@ mod tests {
 
 	#[test]
 	fn resolve_returns_exact_match() {
-		let mut catalog = TopicCatalog::default();
-		catalog.resolve("rust");
-		let topic = catalog.resolve("Rust");
+		let catalog = TopicCatalog::default();
+		let (catalog, _) = catalog.resolve("rust");
+		let (_, topic) = catalog.resolve("Rust");
 		assert_eq!(topic, "rust");
 	}
 
 	#[test]
 	fn resolve_fuzzy_matches() {
-		let mut catalog = TopicCatalog::default();
-		catalog.resolve("programming");
+		let catalog = TopicCatalog::default();
+		let (catalog, _) = catalog.resolve("programming");
 		// "programing" (one 'm') should fuzzy-match "programming"
-		let topic = catalog.resolve("programing");
+		let (_, topic) = catalog.resolve("programing");
 		assert_eq!(topic, "programming");
 	}
 
 	#[test]
 	fn resolve_does_not_fuzzy_match_below_threshold() {
-		let mut catalog = TopicCatalog::new(0.95);
-		catalog.resolve("rust");
+		let catalog = TopicCatalog::new(0.95);
+		let (catalog, _) = catalog.resolve("rust");
 		// "ruby" is too different at threshold 0.95
-		let topic = catalog.resolve("ruby");
+		let (_, topic) = catalog.resolve("ruby");
 		assert_ne!(topic, "rust");
 		assert_eq!(topic, "ruby");
 	}
 
 	#[test]
 	fn resolve_checks_aliases() {
-		let mut catalog = TopicCatalog::default();
-		catalog.resolve("javascript");
-		catalog.add_alias("js", "javascript");
-		let topic = catalog.resolve("js");
+		let catalog = TopicCatalog::default();
+		let (catalog, _) = catalog.resolve("javascript");
+		let catalog = catalog.add_alias("js", "javascript");
+		let (_, topic) = catalog.resolve("js");
 		assert_eq!(topic, "javascript");
 	}
 
 	#[test]
 	fn ensure_topic_exists_creates_hierarchy() {
-		let mut catalog = TopicCatalog::default();
-		catalog.resolve("code/rust/async");
+		let catalog = TopicCatalog::default();
+		let (catalog, _) = catalog.resolve("code/rust/async");
 		let sections = catalog.sections();
 		let topics: Vec<&str> = sections.iter().map(|s| s.topic.as_str()).collect();
 		assert!(topics.contains(&"code"));
@@ -321,8 +325,8 @@ mod tests {
 
 	#[test]
 	fn register_and_get_topic_for_volume() {
-		let mut catalog = TopicCatalog::default();
-		catalog.register_volume("vol-1", "rust");
+		let catalog = TopicCatalog::default();
+		let catalog = catalog.register_volume("vol-1", "rust");
 		assert_eq!(
 			catalog.get_topic_for_volume("vol-1"),
 			Some("rust".to_string())
@@ -333,9 +337,9 @@ mod tests {
 
 	#[test]
 	fn register_volume_moves_from_old_topic() {
-		let mut catalog = TopicCatalog::default();
-		catalog.register_volume("vol-1", "rust");
-		catalog.register_volume("vol-1", "go");
+		let catalog = TopicCatalog::default();
+		let catalog = catalog.register_volume("vol-1", "rust");
+		let catalog = catalog.register_volume("vol-1", "go");
 		assert_eq!(
 			catalog.get_topic_for_volume("vol-1"),
 			Some("go".to_string())
@@ -346,18 +350,18 @@ mod tests {
 
 	#[test]
 	fn remove_volume() {
-		let mut catalog = TopicCatalog::default();
-		catalog.register_volume("vol-1", "rust");
-		catalog.remove_volume("vol-1");
+		let catalog = TopicCatalog::default();
+		let catalog = catalog.register_volume("vol-1", "rust");
+		let catalog = catalog.remove_volume("vol-1");
 		assert_eq!(catalog.get_topic_for_volume("vol-1"), None);
 		assert!(catalog.volumes("rust").is_empty());
 	}
 
 	#[test]
 	fn relocate_volume() {
-		let mut catalog = TopicCatalog::default();
-		catalog.register_volume("vol-1", "rust");
-		catalog.relocate("vol-1", "go");
+		let catalog = TopicCatalog::default();
+		let catalog = catalog.register_volume("vol-1", "rust");
+		let catalog = catalog.relocate("vol-1", "go");
 		assert_eq!(
 			catalog.get_topic_for_volume("vol-1"),
 			Some("go".to_string())
@@ -368,12 +372,12 @@ mod tests {
 
 	#[test]
 	fn merge_topics() {
-		let mut catalog = TopicCatalog::default();
-		catalog.register_volume("vol-1", "javascript");
-		catalog.register_volume("vol-2", "javascript");
-		catalog.register_volume("vol-3", "typescript");
+		let catalog = TopicCatalog::default();
+		let catalog = catalog.register_volume("vol-1", "javascript");
+		let catalog = catalog.register_volume("vol-2", "javascript");
+		let catalog = catalog.register_volume("vol-3", "typescript");
 
-		catalog.merge("javascript", "typescript");
+		let catalog = catalog.merge("javascript", "typescript");
 
 		// All volumes should be under typescript
 		let ts_vols = catalog.volumes("typescript");
@@ -385,16 +389,16 @@ mod tests {
 		assert!(catalog.volumes("javascript").is_empty());
 
 		// Alias should redirect
-		let resolved = catalog.resolve("javascript");
+		let (_, resolved) = catalog.resolve("javascript");
 		assert_eq!(resolved, "typescript");
 	}
 
 	#[test]
 	fn sections_returns_all_topics() {
-		let mut catalog = TopicCatalog::default();
-		catalog.register_volume("vol-1", "rust");
-		catalog.register_volume("vol-2", "go");
-		catalog.register_volume("vol-3", "go");
+		let catalog = TopicCatalog::default();
+		let catalog = catalog.register_volume("vol-1", "rust");
+		let catalog = catalog.register_volume("vol-2", "go");
+		let catalog = catalog.register_volume("vol-3", "go");
 
 		let sections = catalog.sections();
 		let rust_section = sections.iter().find(|s| s.topic == "rust").unwrap();
@@ -412,15 +416,15 @@ mod tests {
 
 	#[test]
 	fn remove_nonexistent_volume_is_noop() {
-		let mut catalog = TopicCatalog::default();
+		let catalog = TopicCatalog::default();
 		// Should not panic
-		catalog.remove_volume("nonexistent");
+		let _catalog = catalog.remove_volume("nonexistent");
 	}
 
 	#[test]
 	fn normalize_trims_whitespace() {
-		let mut catalog = TopicCatalog::default();
-		catalog.register_volume("vol-1", "  Rust  ");
+		let catalog = TopicCatalog::default();
+		let catalog = catalog.register_volume("vol-1", "  Rust  ");
 		assert_eq!(
 			catalog.get_topic_for_volume("vol-1"),
 			Some("rust".to_string())

@@ -1,0 +1,17 @@
+[package]
+name = "simse-resilience"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+description = "Shared resilience primitives: circuit breaker, health monitor, retry with backoff"
+
+[lib]
+name = "simse_resilience"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["time"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["time", "macros", "rt"] }

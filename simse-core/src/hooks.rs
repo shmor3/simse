@@ -219,7 +219,7 @@ impl HookSystem {
 	/// `BeforeHookResult::Blocked`, the chain stops immediately.
 	///
 	/// Returns an unsubscribe closure.
-	pub fn register_before(&self, handler: BeforeHandler) -> impl Fn() {
+	pub fn register_before(&self, handler: BeforeHandler) -> impl Fn() + 'static {
 		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 		let id = inner.next_handler_id();
 		inner.before_handlers.push(BeforeEntry {
@@ -269,7 +269,7 @@ impl HookSystem {
 	///
 	/// Each handler receives the original request and the current result.
 	/// Returns an unsubscribe closure.
-	pub fn register_after(&self, handler: AfterHandler) -> impl Fn() {
+	pub fn register_after(&self, handler: AfterHandler) -> impl Fn() + 'static {
 		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 		let id = inner.next_handler_id();
 		inner.after_handlers.push(AfterEntry {
@@ -318,7 +318,7 @@ impl HookSystem {
 	/// Register a validate-hook that checks tool results.
 	///
 	/// Returns an unsubscribe closure.
-	pub fn register_validate(&self, handler: ValidateHandler) -> impl Fn() {
+	pub fn register_validate(&self, handler: ValidateHandler) -> impl Fn() + 'static {
 		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 		let id = inner.next_handler_id();
 		inner.validate_handlers.push(ValidateEntry {
@@ -368,7 +368,7 @@ impl HookSystem {
 	/// Register a prompt-transform hook that modifies system prompts.
 	///
 	/// Returns an unsubscribe closure.
-	pub fn register_prompt_transform(&self, handler: PromptTransformHandler) -> impl Fn() {
+	pub fn register_prompt_transform(&self, handler: PromptTransformHandler) -> impl Fn() + 'static {
 		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 		let id = inner.next_handler_id();
 		inner
@@ -410,7 +410,7 @@ impl HookSystem {
 	/// Register a messages-transform hook that modifies conversation messages.
 	///
 	/// Returns an unsubscribe closure.
-	pub fn register_messages_transform(&self, handler: MessagesTransformHandler) -> impl Fn() {
+	pub fn register_messages_transform(&self, handler: MessagesTransformHandler) -> impl Fn() + 'static {
 		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 		let id = inner.next_handler_id();
 		inner
@@ -456,7 +456,7 @@ impl HookSystem {
 	///
 	/// Each handler receives the original messages and the current summary.
 	/// Returns an unsubscribe closure.
-	pub fn register_compacting(&self, handler: CompactingHandler) -> impl Fn() {
+	pub fn register_compacting(&self, handler: CompactingHandler) -> impl Fn() + 'static {
 		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 		let id = inner.next_handler_id();
 		inner.compacting_handlers.push(CompactingEntry {

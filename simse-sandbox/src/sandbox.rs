@@ -122,10 +122,11 @@ pub struct Sandbox {
     vfs: Option<VirtualFs>,
     fs_backend: Option<FsImpl>,
 
-    // VSH: owns its backend internally
+    // VSH: pure state + separate backend for I/O
     vsh: Option<VirtualShell>,
+    shell_backend: Option<ShellImpl>,
 
-    // VNet: owns its backend internally
+    // VNet: owns its backend internally (backend stored inside VirtualNetwork)
     vnet: Option<VirtualNetwork>,
 
     // State
@@ -146,6 +147,7 @@ impl Sandbox {
             vfs: None,
             fs_backend: None,
             vsh: None,
+            shell_backend: None,
             vnet: None,
             initialized: false,
             vfs_init: None,
@@ -237,7 +239,8 @@ impl Sandbox {
         // Recreate VSH with new backend
         if let Some(ref vsh_cfg) = self.vsh_init {
             let shell_backend = Self::create_shell_backend(&new_config, &ssh_pool)?;
-            self.vsh = Some(Self::build_vsh(vsh_cfg, shell_backend));
+            self.vsh = Some(Self::build_vsh(vsh_cfg));
+            self.shell_backend = Some(shell_backend);
         }
 
         // Recreate VNet with new backend
@@ -293,6 +296,7 @@ impl Sandbox {
         self.vfs = None;
         self.fs_backend = None;
         self.vsh = None;
+        self.shell_backend = None;
         self.vnet = None;
         self.vfs_init = None;
         self.vsh_init = None;
@@ -310,9 +314,16 @@ impl Sandbox {
         self.vfs.as_ref().ok_or(SandboxError::NotInitialized)
     }
 
-    /// Mutably access the in-memory VFS.
-    pub fn vfs_mut(&mut self) -> Result<&mut VirtualFs, SandboxError> {
-        self.vfs.as_mut().ok_or(SandboxError::NotInitialized)
+    /// Take ownership of the in-memory VFS for a state transition.
+    ///
+    /// The caller must put the updated VFS back via [`vfs_set`].
+    pub fn vfs_take(&mut self) -> Result<VirtualFs, SandboxError> {
+        self.vfs.take().ok_or(SandboxError::NotInitialized)
+    }
+
+    /// Put an updated VFS back after a state transition.
+    pub fn vfs_set(&mut self, vfs: VirtualFs) {
+        self.vfs = Some(vfs);
     }
 
     /// Access the filesystem backend (for `file://` paths).
@@ -322,14 +333,28 @@ impl Sandbox {
             .ok_or(SandboxError::NotInitialized)
     }
 
-    /// Access the virtual shell.
+    /// Access the virtual shell (read-only).
     pub fn vsh(&self) -> Result<&VirtualShell, SandboxError> {
         self.vsh.as_ref().ok_or(SandboxError::NotInitialized)
     }
 
-    /// Mutably access the virtual shell.
-    pub fn vsh_mut(&mut self) -> Result<&mut VirtualShell, SandboxError> {
-        self.vsh.as_mut().ok_or(SandboxError::NotInitialized)
+    /// Take ownership of the virtual shell for a state transition.
+    ///
+    /// The caller must put the updated shell back via [].
+    pub fn vsh_take(&mut self) -> Result<VirtualShell, SandboxError> {
+        self.vsh.take().ok_or(SandboxError::NotInitialized)
+    }
+
+    /// Put an updated virtual shell back after a state transition.
+    pub fn vsh_set(&mut self, vsh: VirtualShell) {
+        self.vsh = Some(vsh);
+    }
+
+    /// Access the shell backend (for I/O execution).
+    pub fn shell_backend(&self) -> Result<&ShellImpl, SandboxError> {
+        self.shell_backend
+            .as_ref()
+            .ok_or(SandboxError::NotInitialized)
     }
 
     /// Access the virtual network.
@@ -337,7 +362,21 @@ impl Sandbox {
         self.vnet.as_ref().ok_or(SandboxError::NotInitialized)
     }
 
-    /// Mutably access the virtual network.
+    /// Take ownership of the virtual network for a state transition.
+    ///
+    /// The caller must put the updated network back via [`vnet_set`].
+    pub fn vnet_take(&mut self) -> Result<VirtualNetwork, SandboxError> {
+        self.vnet.take().ok_or(SandboxError::NotInitialized)
+    }
+
+    /// Put an updated virtual network back after a state transition.
+    pub fn vnet_set(&mut self, vnet: VirtualNetwork) {
+        self.vnet = Some(vnet);
+    }
+
+    /// Mutably access the virtual network for I/O hot-path methods
+    /// (e.g. `net_http_request`) that require `&mut self` on VirtualNetwork.
+    // PERF: hot-path I/O -- needed for backend-delegated async methods
     pub fn vnet_mut(&mut self) -> Result<&mut VirtualNetwork, SandboxError> {
         self.vnet.as_mut().ok_or(SandboxError::NotInitialized)
     }
@@ -372,7 +411,8 @@ impl Sandbox {
         // VSH
         if let Some(ref vsh_cfg) = config.vsh {
             let shell_backend = Self::create_shell_backend(&config.backend, ssh_pool)?;
-            self.vsh = Some(Self::build_vsh(vsh_cfg, shell_backend));
+            self.vsh = Some(Self::build_vsh(vsh_cfg));
+            self.shell_backend = Some(shell_backend);
         }
 
         Ok(())
@@ -451,8 +491,8 @@ impl Sandbox {
             .ok_or_else(|| SandboxError::InvalidParams("SSH pool not available".into()))
     }
 
-    /// Build a VirtualShell from init config and a backend.
-    fn build_vsh(cfg: &VshInitConfig, backend: ShellImpl) -> VirtualShell {
+    /// Build a VirtualShell from init config (pure state, no backend).
+    fn build_vsh(cfg: &VshInitConfig) -> VirtualShell {
         let sandbox_config = VshSandboxConfig {
             root_directory: PathBuf::from(&cfg.root_directory),
             allowed_paths: cfg.allowed_paths.iter().map(PathBuf::from).collect(),
@@ -461,7 +501,7 @@ impl Sandbox {
             max_output_bytes: cfg.max_output_bytes,
             ..VshSandboxConfig::default()
         };
-        VirtualShell::new(sandbox_config, cfg.shell.clone(), backend)
+        VirtualShell::new(sandbox_config, cfg.shell.clone())
     }
 
     /// Build a VirtualNetwork from init config and a backend.
@@ -474,9 +514,7 @@ impl Sandbox {
             max_response_bytes: cfg.max_response_bytes,
             max_connections: cfg.max_connections,
         };
-        let mut vnet = VirtualNetwork::new();
-        vnet.initialize(Some(sandbox_init), Some(net_backend));
-        vnet
+        VirtualNetwork::new().initialize(Some(sandbox_init), Some(net_backend))
     }
 }
 

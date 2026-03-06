@@ -314,24 +314,21 @@ impl CirculationDesk {
 			return new_jobs;
 		}
 
-		if let Ok(volumes) = self.library_ops.get_volumes_for_topic(topic).await {
-			if volumes.len() >= self.thresholds.optimization_topic_threshold {
+		if let Ok(volumes) = self.library_ops.get_volumes_for_topic(topic).await
+			&& volumes.len() >= self.thresholds.optimization_topic_threshold {
 				new_jobs.push(Job::Optimization {
 					topic: topic.to_string(),
 				});
 				return new_jobs;
 			}
-		}
 
-		if let Ok(total) = self.library_ops.get_total_volume_count().await {
-			if total >= self.thresholds.optimization_global_threshold {
-				if let Ok(topics) = self.library_ops.get_all_topics().await {
+		if let Ok(total) = self.library_ops.get_total_volume_count().await
+			&& total >= self.thresholds.optimization_global_threshold
+				&& let Ok(topics) = self.library_ops.get_all_topics().await {
 					for t in topics {
 						new_jobs.push(Job::Optimization { topic: t });
 					}
 				}
-			}
-		}
 
 		new_jobs
 	}
@@ -341,15 +338,12 @@ impl CirculationDesk {
 	// -----------------------------------------------------------------------
 
 	async fn check_spawning(&self, topic: &str) {
-		if let (Some(ref registry), Some(threshold)) =
+		if let (Some(registry), Some(threshold)) =
 			(&self.registry, self.thresholds.spawning_complexity_threshold)
-		{
-			if let Ok(volumes) = self.library_ops.get_volumes_for_topic(topic).await {
-				if volumes.len() >= threshold {
+			&& let Ok(volumes) = self.library_ops.get_volumes_for_topic(topic).await
+				&& volumes.len() >= threshold {
 					let _ = registry.spawn_specialist(topic, &volumes).await;
 				}
-			}
-		}
 	}
 
 	// -----------------------------------------------------------------------

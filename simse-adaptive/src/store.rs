@@ -53,6 +53,7 @@ pub enum DuplicateBehavior {
 
 
 /// Configuration for a `VolumeStore`.
+#[derive(Clone)]
 pub struct StoreConfig {
 	pub storage_path: Option<String>,
 	pub duplicate_threshold: f64,
@@ -97,6 +98,7 @@ pub struct AddEntry {
 // ---------------------------------------------------------------------------
 
 /// Central stateful store for volumes (vector entries).
+#[derive(Clone)]
 pub struct VolumeStore {
 	volumes: Vec<Volume>,
 	topic_index: TopicIndex,
@@ -178,7 +180,7 @@ impl VolumeStore {
 
 	/// Initialize the store. If a storage path is provided (or was set in
 	/// config), load persisted data from disk and rebuild all indexes.
-	pub fn initialize(&mut self, storage_path: Option<&str>) -> Result<(), AdaptiveError> {
+	pub fn initialize(mut self, storage_path: Option<&str>) -> Result<Self, AdaptiveError> {
 		// Use the provided path, or fall back to config
 		let effective_path = storage_path
 			.map(|s| s.to_string())
@@ -214,7 +216,7 @@ impl VolumeStore {
 		}
 
 		// Rebuild all indexes from current volumes
-		self.rebuild_indexes();
+		self = self.rebuild_indexes();
 
 		// Rebuild implicit similarity edges for the graph
 		for i in 0..self.volumes.len() {
@@ -224,7 +226,7 @@ impl VolumeStore {
 					&self.volumes[j].embedding,
 				);
 				let ts = self.volumes[i].timestamp.max(self.volumes[j].timestamp);
-				self.graph_index.add_similarity_edge(
+				self.graph_index = std::mem::take(&mut self.graph_index).add_similarity_edge(
 					&self.volumes[i].id,
 					&self.volumes[j].id,
 					sim,
@@ -236,23 +238,23 @@ impl VolumeStore {
 		self.initialized = true;
 		self.dirty = false;
 
-		Ok(())
+		Ok(self)
 	}
 
 	/// Save if dirty, then clean up resources.
-	pub fn dispose(&mut self) -> Result<(), AdaptiveError> {
+	pub fn dispose(mut self) -> Result<Self, AdaptiveError> {
 		if self.dirty {
-			self.save()?;
+			self = self.save()?;
 		}
 		self.text_cache = None;
-		Ok(())
+		Ok(self)
 	}
 
 	/// Serialize and write all data to disk.
-	pub fn save(&mut self) -> Result<(), AdaptiveError> {
+	pub fn save(mut self) -> Result<Self, AdaptiveError> {
 		let path = match &self.config.storage_path {
 			Some(p) => p.clone(),
-			None => return Ok(()), // no path, nothing to save
+			None => return Ok(self), // no path, nothing to save
 		};
 
 		let learning_state = self.learning_engine.as_ref().map(|e| e.serialize());
@@ -274,59 +276,79 @@ impl VolumeStore {
 		})?;
 
 		self.dirty = false;
-		Ok(())
+		Ok(self)
 	}
 
 	// -- Index management ----------------------------------------------------
 
-	fn index_volume(&mut self, vol: &Volume) {
-		self.topic_index
+	fn index_volume(mut self, vol: &Volume) -> Self {
+		self.topic_index = self.topic_index
 			.add_entry(&vol.id, &vol.text, &vol.metadata);
-		self.metadata_index.add_entry(&vol.id, &vol.metadata);
-		self.magnitude_cache.set(&vol.id, &vol.embedding);
-		self.inverted_index.add_entry(&vol.id, &vol.text);
+		self.metadata_index = self.metadata_index
+			.add_entry(&vol.id, &vol.metadata);
+		self.magnitude_cache = self.magnitude_cache
+			.set(&vol.id, &vol.embedding);
+		self.inverted_index = self.inverted_index
+			.add_entry(&vol.id, &vol.text);
 
 		// Register in topic catalog if the volume has a topic in metadata
 		if let Some(topic) = vol.metadata.get("topic") {
-			self.topic_catalog.register_volume(&vol.id, topic);
+			self.topic_catalog = self.topic_catalog
+				.register_volume(&vol.id, topic);
 		}
+
+		self
 	}
 
-	fn deindex_volume(&mut self, vol: &Volume) {
-		self.topic_index.remove_entry(&vol.id);
-		self.metadata_index.remove_entry(&vol.id, &vol.metadata);
-		self.magnitude_cache.remove(&vol.id);
-		self.inverted_index.remove_entry(&vol.id, &vol.text);
-		self.topic_catalog.remove_volume(&vol.id);
+	fn deindex_volume(mut self, vol: &Volume) -> Self {
+		self.topic_index = self.topic_index
+			.remove_entry(&vol.id);
+		self.metadata_index = self.metadata_index
+			.remove_entry(&vol.id, &vol.metadata);
+		self.magnitude_cache = self.magnitude_cache
+			.remove(&vol.id);
+		self.inverted_index = self.inverted_index
+			.remove_entry(&vol.id, &vol.text);
+		self.topic_catalog = self.topic_catalog
+			.remove_volume(&vol.id);
 
 		// Remove from text cache
-		if let Some(cache) = self.text_cache.as_mut() {
-			cache.remove(&vol.id);
+		if let Some(cache) = self.text_cache.take() {
+			let (cache, _) = cache.remove(&vol.id);
+			self.text_cache = Some(cache);
 		}
+
+		self
 	}
 
-	fn rebuild_indexes(&mut self) {
-		self.topic_index.clear();
-		self.metadata_index.clear();
-		self.magnitude_cache.clear();
-		self.inverted_index.clear();
+	fn rebuild_indexes(mut self) -> Self {
+		self.topic_index = self.topic_index.clear();
+		self.metadata_index = self.metadata_index.clear();
+		self.magnitude_cache = self.magnitude_cache.clear();
+		self.inverted_index = self.inverted_index.clear();
 
 		for vol in &self.volumes {
-			self.topic_index
+			self.topic_index = std::mem::take(&mut self.topic_index)
 				.add_entry(&vol.id, &vol.text, &vol.metadata);
-			self.metadata_index.add_entry(&vol.id, &vol.metadata);
-			self.magnitude_cache.set(&vol.id, &vol.embedding);
-			self.inverted_index.add_entry(&vol.id, &vol.text);
+			self.metadata_index = std::mem::take(&mut self.metadata_index)
+				.add_entry(&vol.id, &vol.metadata);
+			self.magnitude_cache = std::mem::take(&mut self.magnitude_cache)
+				.set(&vol.id, &vol.embedding);
+			self.inverted_index = std::mem::take(&mut self.inverted_index)
+				.add_entry(&vol.id, &vol.text);
 
 			if let Some(topic) = vol.metadata.get("topic") {
-				self.topic_catalog.register_volume(&vol.id, topic);
+				self.topic_catalog = std::mem::take(&mut self.topic_catalog)
+					.register_volume(&vol.id, topic);
 			}
 		}
+
+		self
 	}
 
 	// -- Access tracking -----------------------------------------------------
 
-	fn track_access(&mut self, id: &str) {
+	fn track_access(mut self, id: &str) -> Self {
 		let now = current_timestamp_ms();
 		let stats = self
 			.access_stats
@@ -337,6 +359,7 @@ impl VolumeStore {
 			});
 		stats.access_count += 1;
 		stats.last_accessed = now;
+		self
 	}
 
 	// -- Fast cosine ---------------------------------------------------------
@@ -373,11 +396,11 @@ impl VolumeStore {
 
 	/// Add a single volume. Returns the generated UUID.
 	pub fn add(
-		&mut self,
+		mut self,
 		text: String,
 		embedding: Vec<f32>,
 		metadata: HashMap<String, String>,
-	) -> Result<String, AdaptiveError> {
+	) -> Result<(Self, String), AdaptiveError> {
 		ensure_initialized!(self);
 
 		if text.is_empty() {
@@ -398,7 +421,7 @@ impl VolumeStore {
 				match self.config.duplicate_behavior {
 					DuplicateBehavior::Skip | DuplicateBehavior::Warn => {
 						if let Some(ref existing) = dup_result.existing_volume {
-							return Ok(existing.id.clone());
+							return Ok((self, existing.id.clone()));
 						}
 					}
 					DuplicateBehavior::Error => {
@@ -421,14 +444,14 @@ impl VolumeStore {
 			timestamp: now,
 		};
 
-		self.index_volume(&volume);
+		self = self.index_volume(&volume);
 		self.volumes.push(volume);
 
 		// Wire into graph index: parse explicit edges from rel:* metadata
 		// and create implicit similarity edges with existing volumes.
 		// We need to borrow the newly pushed volume immutably, so use index.
 		let new_idx = self.volumes.len() - 1;
-		self.graph_index.parse_metadata_edges(
+		self.graph_index = std::mem::take(&mut self.graph_index).parse_metadata_edges(
 			&self.volumes[new_idx].id,
 			&self.volumes[new_idx].metadata,
 			self.volumes[new_idx].timestamp,
@@ -446,7 +469,7 @@ impl VolumeStore {
 				new_mag,
 				existing_mag,
 			);
-			self.graph_index.add_similarity_edge(
+			self.graph_index = std::mem::take(&mut self.graph_index).add_similarity_edge(
 				&self.volumes[new_idx].id,
 				&self.volumes[i].id,
 				sim,
@@ -456,35 +479,36 @@ impl VolumeStore {
 
 		self.dirty = true;
 
-		Ok(id)
+		Ok((self, id))
 	}
 
 	/// Batch add multiple entries. Returns a list of generated UUIDs.
 	pub fn add_batch(
-		&mut self,
+		mut self,
 		entries: Vec<AddEntry>,
-	) -> Result<Vec<String>, AdaptiveError> {
+	) -> Result<(Self, Vec<String>), AdaptiveError> {
 		ensure_initialized!(self);
 
 		let mut ids = Vec::with_capacity(entries.len());
 		for entry in entries {
-			let id = self.add(entry.text, entry.embedding, entry.metadata)?;
+			let (new_self, id) = self.add(entry.text, entry.embedding, entry.metadata)?;
+			self = new_self;
 			ids.push(id);
 		}
-		Ok(ids)
+		Ok((self, ids))
 	}
 
 	/// Delete a volume by ID. Returns true if found and removed.
-	pub fn delete(&mut self, id: &str) -> bool {
+	pub fn delete(mut self, id: &str) -> (Self, bool) {
 		if !self.initialized {
-			return false;
+			return (self, false);
 		}
 
 		if let Some(pos) = self.volumes.iter().position(|v| v.id == id) {
 			let vol = self.volumes.remove(pos);
-			self.deindex_volume(&vol);
+			self = self.deindex_volume(&vol);
 			self.access_stats.remove(id);
-			self.graph_index.remove_node(id);
+			self.graph_index = std::mem::take(&mut self.graph_index).remove_node(id);
 			self.dirty = true;
 
 			// Prune learning engine
@@ -494,61 +518,64 @@ impl VolumeStore {
 				engine.prune_entries(&valid_ids);
 			}
 
-			true
+			(self, true)
 		} else {
-			false
+			(self, false)
 		}
 	}
 
 	/// Delete multiple volumes by ID. Returns the count of actually removed volumes.
-	pub fn delete_batch(&mut self, ids: &[String]) -> usize {
+	pub fn delete_batch(mut self, ids: &[String]) -> (Self, usize) {
 		if !self.initialized {
-			return 0;
+			return (self, 0);
 		}
 
 		let mut count = 0;
 		for id in ids {
-			if self.delete(id) {
+			let (new_self, deleted) = self.delete(id);
+			self = new_self;
+			if deleted {
 				count += 1;
 			}
 		}
-		count
+		(self, count)
 	}
 
 	/// Remove all volumes and reset all indexes.
-	pub fn clear(&mut self) {
+	pub fn clear(mut self) -> Self {
 		self.volumes.clear();
-		self.topic_index.clear();
-		self.metadata_index.clear();
-		self.magnitude_cache.clear();
-		self.inverted_index.clear();
+		self.topic_index = self.topic_index.clear();
+		self.metadata_index = self.metadata_index.clear();
+		self.magnitude_cache = self.magnitude_cache.clear();
+		self.inverted_index = self.inverted_index.clear();
 		self.access_stats.clear();
 		self.graph_index = GraphIndex::new(self.config.graph_config.clone());
 
-		if let Some(cache) = self.text_cache.as_mut() {
-			cache.clear();
+		if let Some(cache) = self.text_cache.take() {
+			self.text_cache = Some(cache.clear());
 		}
 		if let Some(engine) = self.learning_engine.as_mut() {
 			engine.clear();
 		}
 
 		self.dirty = true;
+		self
 	}
 
 	// -- Search --------------------------------------------------------------
 
 	/// Vector similarity search using cosine similarity with magnitude cache.
 	pub fn search(
-		&mut self,
+		mut self,
 		query_embedding: &[f32],
 		max_results: usize,
 		threshold: f64,
-	) -> Result<Vec<Lookup>, AdaptiveError> {
+	) -> Result<(Self, Vec<Lookup>), AdaptiveError> {
 		ensure_initialized!(self);
 
 		let query_mag = compute_magnitude(query_embedding);
 		if query_mag == 0.0 {
-			return Ok(Vec::new());
+			return Ok((self, Vec::new()));
 		}
 
 		let mut results: Vec<Lookup> = Vec::new();
@@ -575,14 +602,14 @@ impl VolumeStore {
 		let selected_ids: Vec<String> =
 			results.iter().map(|r| r.volume.id.clone()).collect();
 		for id in &selected_ids {
-			self.track_access(id);
+			self = self.track_access(id);
 		}
 		if let Some(engine) = self.learning_engine.as_mut() {
 			let now = current_timestamp_ms();
 			engine.record_query(query_embedding, &selected_ids, None, now);
 		}
 
-		Ok(results)
+		Ok((self, results))
 	}
 
 	/// Text search using the specified mode (fuzzy, bm25, exact, substring, regex, token).
@@ -713,9 +740,9 @@ impl VolumeStore {
 	/// Advanced search combining vector similarity, text search, metadata
 	/// filters, date range, and topic filter with configurable rank modes.
 	pub fn advanced_search(
-		&mut self,
+		mut self,
 		options: &SearchOptions,
-	) -> Result<Vec<AdvancedLookup>, AdaptiveError> {
+	) -> Result<(Self, Vec<AdvancedLookup>), AdaptiveError> {
 		ensure_initialized!(self);
 
 		let max_results = options.max_results.unwrap_or(10);
@@ -922,10 +949,10 @@ impl VolumeStore {
 		let selected_ids: Vec<String> =
 			results.iter().map(|r| r.volume.id.clone()).collect();
 		for id in &selected_ids {
-			self.track_access(id);
+			self = self.track_access(id);
 		}
 
-		Ok(results)
+		Ok((self, results))
 	}
 
 	// -- Recommendation ------------------------------------------------------
@@ -1124,16 +1151,16 @@ impl VolumeStore {
 	// -- Accessors -----------------------------------------------------------
 
 	/// Get a volume by ID, tracking access on hit.
-	pub fn get_by_id(&mut self, id: &str) -> Option<Volume> {
+	pub fn get_by_id(self, id: &str) -> (Self, Option<Volume>) {
 		if !self.initialized {
-			return None;
+			return (self, None);
 		}
 		if let Some(vol) = self.volumes.iter().find(|v| v.id == id) {
 			let vol = vol.clone();
-			self.track_access(id);
-			Some(vol)
+			let new_self = self.track_access(id);
+			(new_self, Some(vol))
 		} else {
-			None
+			(self, None)
 		}
 	}
 
@@ -1207,19 +1234,21 @@ impl VolumeStore {
 	// -- Learning delegation -------------------------------------------------
 
 	/// Record a completed query for learning engine adaptation.
-	pub fn record_query(&mut self, embedding: &[f32], selected_ids: &[String]) {
+	pub fn record_query(mut self, embedding: &[f32], selected_ids: &[String]) -> Self {
 		if let Some(engine) = self.learning_engine.as_mut() {
 			let now = current_timestamp_ms();
 			engine.record_query(embedding, selected_ids, None, now);
 		}
+		self
 	}
 
 	/// Record explicit user feedback on an entry.
-	pub fn record_feedback(&mut self, entry_id: &str, relevant: bool) {
+	pub fn record_feedback(mut self, entry_id: &str, relevant: bool) -> Self {
 		if let Some(engine) = self.learning_engine.as_mut() {
 			let now = current_timestamp_ms();
 			engine.record_feedback(entry_id, relevant, now);
 		}
+		self
 	}
 
 	/// Get the current learning profile snapshot.
@@ -1230,18 +1259,24 @@ impl VolumeStore {
 	// -- Topic catalog delegation --------------------------------------------
 
 	/// Resolve a proposed topic to a canonical name.
-	pub fn catalog_resolve(&mut self, topic: &str) -> String {
-		self.topic_catalog.resolve(topic)
+	pub fn catalog_resolve(mut self, topic: &str) -> (Self, String) {
+		let (tc, result) = self.topic_catalog.resolve(topic);
+		self.topic_catalog = tc;
+		(self, result)
 	}
 
 	/// Move a volume to a new topic in the catalog.
-	pub fn catalog_relocate(&mut self, volume_id: &str, new_topic: &str) {
-		self.topic_catalog.relocate(volume_id, new_topic);
+	pub fn catalog_relocate(mut self, volume_id: &str, new_topic: &str) -> Self {
+		self.topic_catalog = self.topic_catalog
+			.relocate(volume_id, new_topic);
+		self
 	}
 
 	/// Merge one topic into another in the catalog.
-	pub fn catalog_merge(&mut self, source: &str, target: &str) {
-		self.topic_catalog.merge(source, target);
+	pub fn catalog_merge(mut self, source: &str, target: &str) -> Self {
+		self.topic_catalog = self.topic_catalog
+			.merge(source, target);
+		self
 	}
 
 	/// List all topic catalog sections.
@@ -1385,9 +1420,8 @@ mod tests {
 	}
 
 	fn init_store(config: StoreConfig) -> VolumeStore {
-		let mut store = VolumeStore::new(config);
-		store.initialize(None).unwrap();
-		store
+		let store = VolumeStore::new(config);
+		store.initialize(None).unwrap()
 	}
 
 	fn make_embedding(values: &[f32]) -> Vec<f32> {
@@ -1404,11 +1438,11 @@ mod tests {
 	// 1. new + initialize lifecycle
 	#[test]
 	fn test_new_and_initialize() {
-		let mut store = VolumeStore::new(default_config());
+		let store = VolumeStore::new(default_config());
 		assert!(!store.initialized);
 		assert_eq!(store.size(), 0);
 
-		store.initialize(None).unwrap();
+		let store = store.initialize(None).unwrap();
 		assert!(store.initialized);
 		assert_eq!(store.size(), 0);
 		assert!(!store.is_dirty());
@@ -1417,9 +1451,9 @@ mod tests {
 	// 2. add + get_by_id round-trip
 	#[test]
 	fn test_add_and_get_by_id() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		let id = store
+		let (store, id) = store
 			.add(
 				"hello world".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
@@ -1431,7 +1465,8 @@ mod tests {
 		assert_eq!(store.size(), 1);
 		assert!(store.is_dirty());
 
-		let vol = store.get_by_id(&id).unwrap();
+		let (_store, vol) = store.get_by_id(&id);
+		let vol = vol.unwrap();
 		assert_eq!(vol.text, "hello world");
 		assert_eq!(vol.embedding, vec![1.0, 0.0, 0.0]);
 	}
@@ -1439,7 +1474,7 @@ mod tests {
 	// 3. add with empty text
 	#[test]
 	fn test_add_empty_text_error() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 		let result = store.add(
 			"".to_string(),
 			make_embedding(&[1.0, 0.0, 0.0]),
@@ -1451,7 +1486,7 @@ mod tests {
 	// 4. add with empty embedding
 	#[test]
 	fn test_add_empty_embedding_error() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 		let result = store.add("hello".to_string(), Vec::new(), HashMap::new());
 		assert!(matches!(result, Err(AdaptiveError::EmptyEmbedding)));
 	}
@@ -1459,7 +1494,7 @@ mod tests {
 	// 5. add_batch adds multiple
 	#[test]
 	fn test_add_batch() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
 		let entries = vec![
 			AddEntry {
@@ -1479,7 +1514,7 @@ mod tests {
 			},
 		];
 
-		let ids = store.add_batch(entries).unwrap();
+		let (store, ids) = store.add_batch(entries).unwrap();
 		assert_eq!(ids.len(), 3);
 		assert_eq!(store.size(), 3);
 	}
@@ -1487,9 +1522,9 @@ mod tests {
 	// 6. delete removes volume + from indexes
 	#[test]
 	fn test_delete() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		let id = store
+		let (store, id) = store
 			.add(
 				"test entry".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
@@ -1498,9 +1533,11 @@ mod tests {
 			.unwrap();
 
 		assert_eq!(store.size(), 1);
-		assert!(store.delete(&id));
+		let (store, deleted) = store.delete(&id);
+		assert!(deleted);
 		assert_eq!(store.size(), 0);
-		assert!(store.get_by_id(&id).is_none());
+		let (store, vol) = store.get_by_id(&id);
+		assert!(vol.is_none());
 
 		// Topics should be cleaned up
 		let topics = store.get_topics();
@@ -1509,28 +1546,29 @@ mod tests {
 		for t in rust_entries {
 			assert_eq!(t.entry_count, 0);
 		}
+		let _ = store;
 	}
 
 	// 7. delete_batch removes multiple
 	#[test]
 	fn test_delete_batch() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		let id1 = store
+		let (store, id1) = store
 			.add(
 				"first".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		let id2 = store
+		let (store, id2) = store
 			.add(
 				"second".to_string(),
 				make_embedding(&[0.0, 1.0, 0.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		let _id3 = store
+		let (store, _id3) = store
 			.add(
 				"third".to_string(),
 				make_embedding(&[0.0, 0.0, 1.0]),
@@ -1538,7 +1576,7 @@ mod tests {
 			)
 			.unwrap();
 
-		let removed = store.delete_batch(&[id1, id2]);
+		let (store, removed) = store.delete_batch(&[id1, id2]);
 		assert_eq!(removed, 2);
 		assert_eq!(store.size(), 1);
 	}
@@ -1546,16 +1584,16 @@ mod tests {
 	// 8. clear empties everything
 	#[test]
 	fn test_clear() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"first".to_string(),
 				make_embedding(&[1.0, 0.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"second".to_string(),
 				make_embedding(&[0.0, 1.0]),
@@ -1564,7 +1602,7 @@ mod tests {
 			.unwrap();
 
 		assert_eq!(store.size(), 2);
-		store.clear();
+		let store = store.clear();
 		assert_eq!(store.size(), 0);
 		assert!(store.is_dirty());
 	}
@@ -1572,23 +1610,23 @@ mod tests {
 	// 9. search returns sorted by score
 	#[test]
 	fn test_search_sorted() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"close match".to_string(),
 				make_embedding(&[0.9, 0.1, 0.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"exact match".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"orthogonal".to_string(),
 				make_embedding(&[0.0, 1.0, 0.0]),
@@ -1596,7 +1634,7 @@ mod tests {
 			)
 			.unwrap();
 
-		let results = store
+		let (_store, results) = store
 			.search(&make_embedding(&[1.0, 0.0, 0.0]), 10, 0.5)
 			.unwrap();
 
@@ -1612,23 +1650,23 @@ mod tests {
 	// 10. text_search fuzzy mode
 	#[test]
 	fn test_text_search_fuzzy() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"hello world".to_string(),
 				make_embedding(&[1.0, 0.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"goodbye world".to_string(),
 				make_embedding(&[0.0, 1.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"completely different".to_string(),
 				make_embedding(&[0.5, 0.5]),
@@ -1651,16 +1689,16 @@ mod tests {
 	// 11. text_search bm25 mode
 	#[test]
 	fn test_text_search_bm25() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"rust programming language systems".to_string(),
 				make_embedding(&[1.0, 0.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"python programming language scripting".to_string(),
 				make_embedding(&[0.0, 1.0]),
@@ -1684,16 +1722,16 @@ mod tests {
 	// 12. filter_by_metadata with eq filter
 	#[test]
 	fn test_filter_by_metadata() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"rust entry".to_string(),
 				make_embedding(&[1.0, 0.0]),
 				make_metadata(&[("lang", "rust")]),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"python entry".to_string(),
 				make_embedding(&[0.0, 1.0]),
@@ -1714,9 +1752,9 @@ mod tests {
 	// 13. filter_by_date_range
 	#[test]
 	fn test_filter_by_date_range() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		let id1 = store
+		let (mut store, id1) = store
 			.add(
 				"old entry".to_string(),
 				make_embedding(&[1.0, 0.0]),
@@ -1728,7 +1766,7 @@ mod tests {
 			vol.timestamp = 1000;
 		}
 
-		let id2 = store
+		let (mut store, id2) = store
 			.add(
 				"new entry".to_string(),
 				make_embedding(&[0.0, 1.0]),
@@ -1759,16 +1797,16 @@ mod tests {
 	// 14. advanced_search combined
 	#[test]
 	fn test_advanced_search() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"rust programming language".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
 				make_metadata(&[("lang", "rust")]),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"python programming language".to_string(),
 				make_embedding(&[0.0, 1.0, 0.0]),
@@ -1776,7 +1814,7 @@ mod tests {
 			)
 			.unwrap();
 
-		let results = store
+		let (_store, results) = store
 			.advanced_search(&SearchOptions {
 				query_embedding: Some(make_embedding(&[1.0, 0.0, 0.0])),
 				similarity_threshold: Some(0.0),
@@ -1809,16 +1847,16 @@ mod tests {
 	// 15. recommend returns scored results
 	#[test]
 	fn test_recommend() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"entry one".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"entry two".to_string(),
 				make_embedding(&[0.0, 1.0, 0.0]),
@@ -1848,13 +1886,13 @@ mod tests {
 	// 16. duplicate detection — skip behavior
 	#[test]
 	fn test_duplicate_skip() {
-		let mut store = init_store(StoreConfig {
+		let store = init_store(StoreConfig {
 			duplicate_threshold: 0.99,
 			duplicate_behavior: DuplicateBehavior::Skip,
 			..Default::default()
 		});
 
-		let id1 = store
+		let (store, id1) = store
 			.add(
 				"first".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
@@ -1863,7 +1901,7 @@ mod tests {
 			.unwrap();
 
 		// Same embedding should be skipped, returning the existing ID
-		let id2 = store
+		let (store, id2) = store
 			.add(
 				"duplicate".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
@@ -1878,13 +1916,13 @@ mod tests {
 	// 17. duplicate detection — error behavior
 	#[test]
 	fn test_duplicate_error() {
-		let mut store = init_store(StoreConfig {
+		let store = init_store(StoreConfig {
 			duplicate_threshold: 0.99,
 			duplicate_behavior: DuplicateBehavior::Error,
 			..Default::default()
 		});
 
-		store
+		let (store, _) = store
 			.add(
 				"first".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
@@ -1899,22 +1937,21 @@ mod tests {
 		);
 
 		assert!(matches!(result, Err(AdaptiveError::Duplicate(_))));
-		assert_eq!(store.size(), 1);
 	}
 
 	// 18. get_topics returns indexed topics
 	#[test]
 	fn test_get_topics() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"rust entry".to_string(),
 				make_embedding(&[1.0, 0.0]),
 				make_metadata(&[("topic", "rust")]),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"python entry".to_string(),
 				make_embedding(&[0.0, 1.0]),
@@ -1931,16 +1968,16 @@ mod tests {
 	// 19. filter_by_topic returns matching
 	#[test]
 	fn test_filter_by_topic() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"rust entry".to_string(),
 				make_embedding(&[1.0, 0.0]),
 				make_metadata(&[("topic", "rust")]),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"python entry".to_string(),
 				make_embedding(&[0.0, 1.0]),
@@ -1956,23 +1993,23 @@ mod tests {
 	// 20. find_duplicates finds groups
 	#[test]
 	fn test_find_duplicates() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"entry a".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"entry b".to_string(),
 				make_embedding(&[0.99, 0.01, 0.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"entry c".to_string(),
 				make_embedding(&[0.0, 1.0, 0.0]),
@@ -1988,12 +2025,12 @@ mod tests {
 	// 21. size and is_dirty getters
 	#[test]
 	fn test_size_and_dirty() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
 		assert_eq!(store.size(), 0);
 		assert!(!store.is_dirty());
 
-		store
+		let (store, _) = store
 			.add(
 				"test".to_string(),
 				make_embedding(&[1.0]),
@@ -2008,13 +2045,13 @@ mod tests {
 	// 22. catalog_resolve + catalog_sections
 	#[test]
 	fn test_catalog_resolve_and_sections() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		let topic = store.catalog_resolve("Rust Programming");
+		let (store, topic) = store.catalog_resolve("Rust Programming");
 		assert_eq!(topic, "rust programming");
 
 		// Same topic should resolve to itself
-		let topic2 = store.catalog_resolve("rust programming");
+		let (store, topic2) = store.catalog_resolve("rust programming");
 		assert_eq!(topic2, "rust programming");
 
 		let sections = store.catalog_sections();
@@ -2030,12 +2067,12 @@ mod tests {
 		let dir_path = dir.path().to_str().unwrap().to_string();
 
 		// Create and populate a store
-		let mut store = init_store(StoreConfig {
+		let store = init_store(StoreConfig {
 			storage_path: Some(dir_path.clone()),
 			..Default::default()
 		});
 
-		let id = store
+		let (store, id) = store
 			.add(
 				"persisted entry".to_string(),
 				make_embedding(&[0.1, 0.2, 0.3]),
@@ -2043,18 +2080,19 @@ mod tests {
 			)
 			.unwrap();
 
-		store.save().unwrap();
+		let store = store.save().unwrap();
 		assert!(!store.is_dirty());
 
 		// Create a fresh store and load from disk
-		let mut store2 = VolumeStore::new(StoreConfig {
+		let store2 = VolumeStore::new(StoreConfig {
 			storage_path: Some(dir_path.clone()),
 			..Default::default()
 		});
-		store2.initialize(None).unwrap();
+		let store2 = store2.initialize(None).unwrap();
 
 		assert_eq!(store2.size(), 1);
-		let vol = store2.get_by_id(&id).unwrap();
+		let (_store2, vol) = store2.get_by_id(&id);
+		let vol = vol.unwrap();
 		assert_eq!(vol.text, "persisted entry");
 		assert_eq!(vol.metadata.get("topic").unwrap(), "testing");
 	}
@@ -2062,9 +2100,9 @@ mod tests {
 	// 24. check_duplicate returns correct result
 	#[test]
 	fn test_check_duplicate() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"test".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
@@ -2082,20 +2120,16 @@ mod tests {
 	// 25. not initialized errors
 	#[test]
 	fn test_not_initialized_errors() {
-		let mut store = VolumeStore::new(default_config());
+		let store = VolumeStore::new(default_config());
+
+		let result = store.clone().add("test".to_string(), make_embedding(&[1.0]), HashMap::new());
+		assert!(matches!(result, Err(AdaptiveError::NotInitialized)));
+
+		let result = store.clone().search(&make_embedding(&[1.0]), 10, 0.5);
+		assert!(matches!(result, Err(AdaptiveError::NotInitialized)));
 
 		assert!(matches!(
-			store.add("test".to_string(), make_embedding(&[1.0]), HashMap::new()),
-			Err(AdaptiveError::NotInitialized)
-		));
-
-		assert!(matches!(
-			store.search(&make_embedding(&[1.0]), 10, 0.5),
-			Err(AdaptiveError::NotInitialized)
-		));
-
-		assert!(matches!(
-			store.text_search(&TextSearchOptions {
+			store.clone().text_search(&TextSearchOptions {
 				query: "test".to_string(),
 				mode: None,
 				threshold: None,
@@ -2124,9 +2158,9 @@ mod tests {
 	// 26. learning engine integration
 	#[test]
 	fn test_learning_engine_integration() {
-		let mut store = init_store(learning_config());
+		let store = init_store(learning_config());
 
-		let id = store
+		let (store, id) = store
 			.add(
 				"test entry".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
@@ -2135,13 +2169,13 @@ mod tests {
 			.unwrap();
 
 		// Record query
-		store.record_query(
+		let store = store.record_query(
 			&make_embedding(&[1.0, 0.0, 0.0]),
 			&[id.clone()],
 		);
 
 		// Record feedback
-		store.record_feedback(&id, true);
+		let store = store.record_feedback(&id, true);
 
 		// Profile should exist
 		let profile = store.get_profile();
@@ -2153,16 +2187,16 @@ mod tests {
 	// 27. text_search with exact mode
 	#[test]
 	fn test_text_search_exact() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"exact match text".to_string(),
 				make_embedding(&[1.0, 0.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"no match here".to_string(),
 				make_embedding(&[0.0, 1.0]),
@@ -2186,16 +2220,16 @@ mod tests {
 	// 28. advanced_search with metadata filter
 	#[test]
 	fn test_advanced_search_with_metadata() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"rust systems".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
 				make_metadata(&[("lang", "rust")]),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"python scripting".to_string(),
 				make_embedding(&[0.9, 0.1, 0.0]),
@@ -2203,7 +2237,7 @@ mod tests {
 			)
 			.unwrap();
 
-		let results = store
+		let (_store, results) = store
 			.advanced_search(&SearchOptions {
 				query_embedding: Some(make_embedding(&[1.0, 0.0, 0.0])),
 				similarity_threshold: Some(0.0),
@@ -2230,16 +2264,16 @@ mod tests {
 	// 29. recommend with topic filter
 	#[test]
 	fn test_recommend_with_topic_filter() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"rust entry".to_string(),
 				make_embedding(&[1.0, 0.0, 0.0]),
 				make_metadata(&[("topic", "rust")]),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"python entry".to_string(),
 				make_embedding(&[0.0, 1.0, 0.0]),
@@ -2268,12 +2302,13 @@ mod tests {
 	fn test_catalog_relocate() {
 		let mut store = init_store(default_config());
 
-		store.topic_catalog.register_volume("vol-1", "old-topic");
+		store.topic_catalog = std::mem::take(&mut store.topic_catalog)
+			.register_volume("vol-1", "old-topic");
 		assert!(store
 			.catalog_volumes("old-topic")
 			.contains(&"vol-1".to_string()));
 
-		store.catalog_relocate("vol-1", "new-topic");
+		let store = store.catalog_relocate("vol-1", "new-topic");
 		assert!(store.catalog_volumes("old-topic").is_empty());
 		assert!(store
 			.catalog_volumes("new-topic")
@@ -2285,10 +2320,12 @@ mod tests {
 	fn test_catalog_merge() {
 		let mut store = init_store(default_config());
 
-		store.topic_catalog.register_volume("vol-1", "javascript");
-		store.topic_catalog.register_volume("vol-2", "typescript");
+		store.topic_catalog = std::mem::take(&mut store.topic_catalog)
+			.register_volume("vol-1", "javascript");
+		store.topic_catalog = std::mem::take(&mut store.topic_catalog)
+			.register_volume("vol-2", "typescript");
 
-		store.catalog_merge("javascript", "typescript");
+		let store = store.catalog_merge("javascript", "typescript");
 
 		let ts_vols = store.catalog_volumes("typescript");
 		assert!(ts_vols.contains(&"vol-1".to_string()));
@@ -2302,12 +2339,12 @@ mod tests {
 		let dir = tempfile::tempdir().unwrap();
 		let dir_path = dir.path().to_str().unwrap().to_string();
 
-		let mut store = init_store(StoreConfig {
+		let store = init_store(StoreConfig {
 			storage_path: Some(dir_path.clone()),
 			..Default::default()
 		});
 
-		store
+		let (store, _) = store
 			.add(
 				"test".to_string(),
 				make_embedding(&[1.0]),
@@ -2316,23 +2353,23 @@ mod tests {
 			.unwrap();
 
 		assert!(store.is_dirty());
-		store.dispose().unwrap();
+		let _store = store.dispose().unwrap();
 
 		// Verify data was saved
-		let mut store2 = VolumeStore::new(StoreConfig {
+		let store2 = VolumeStore::new(StoreConfig {
 			storage_path: Some(dir_path),
 			..Default::default()
 		});
-		store2.initialize(None).unwrap();
+		let store2 = store2.initialize(None).unwrap();
 		assert_eq!(store2.size(), 1);
 	}
 
 	// 33. search with zero magnitude query returns empty
 	#[test]
 	fn test_search_zero_magnitude() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"test".to_string(),
 				make_embedding(&[1.0, 0.0]),
@@ -2340,7 +2377,7 @@ mod tests {
 			)
 			.unwrap();
 
-		let results = store
+		let (_store, results) = store
 			.search(&make_embedding(&[0.0, 0.0]), 10, 0.0)
 			.unwrap();
 		assert!(results.is_empty());
@@ -2349,16 +2386,16 @@ mod tests {
 	// 34. get_all returns clones
 	#[test]
 	fn test_get_all() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"first".to_string(),
 				make_embedding(&[1.0]),
 				HashMap::new(),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"second".to_string(),
 				make_embedding(&[0.0]),
@@ -2373,16 +2410,16 @@ mod tests {
 	// 35. filter_by_metadata complex filter (linear scan)
 	#[test]
 	fn test_filter_by_metadata_contains() {
-		let mut store = init_store(default_config());
+		let store = init_store(default_config());
 
-		store
+		let (store, _) = store
 			.add(
 				"entry a".to_string(),
 				make_embedding(&[1.0, 0.0]),
 				make_metadata(&[("desc", "hello world")]),
 			)
 			.unwrap();
-		store
+		let (store, _) = store
 			.add(
 				"entry b".to_string(),
 				make_embedding(&[0.0, 1.0]),

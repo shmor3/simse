@@ -15,7 +15,7 @@ use crate::types::TopicInfo;
 // Default stop words for topic extraction
 // ---------------------------------------------------------------------------
 
-fn default_stop_words() -> HashSet<String> {
+fn default_stop_words() -> im::HashSet<String> {
 	[
 		"a", "an", "and", "are", "as", "at", "be", "but", "by", "do", "for", "from", "had",
 		"has", "have", "he", "her", "his", "how", "i", "if", "in", "into", "is", "it", "its",
@@ -57,7 +57,7 @@ fn co_occurrence_key(a: &str, b: &str) -> String {
 /// 5. Take top N
 fn extract_topics_from_text(
 	text: &str,
-	stop_words: &HashSet<String>,
+	stop_words: &im::HashSet<String>,
 	max_topics: usize,
 ) -> Vec<String> {
 	let lowered = text.to_lowercase();
@@ -90,7 +90,7 @@ fn extract_topics_from_text(
 fn resolve_topics(
 	text: &str,
 	metadata: &HashMap<String, String>,
-	stop_words: &HashSet<String>,
+	stop_words: &im::HashSet<String>,
 	max_topics: usize,
 ) -> Vec<String> {
 	// 1. metadata.topics (JSON array)
@@ -131,17 +131,18 @@ fn resolve_topics(
 
 /// Tracks topics associated with entries (volumes). Topics can be hierarchical
 /// (e.g. "code/rust" is a child of "code").
+#[derive(Clone)]
 pub struct TopicIndex {
 	/// topic -> direct entry IDs
-	topic_to_entries: HashMap<String, HashSet<String>>,
+	topic_to_entries: im::HashMap<String, im::HashSet<String>>,
 	/// entry ID -> topic paths
-	entry_to_topics: HashMap<String, Vec<String>>,
+	entry_to_topics: im::HashMap<String, im::Vector<String>>,
 	/// topic -> direct child topics
-	topic_to_children: HashMap<String, HashSet<String>>,
+	topic_to_children: im::HashMap<String, im::HashSet<String>>,
 	/// pair key -> count
-	co_occurrence: HashMap<String, usize>,
+	co_occurrence: im::HashMap<String, usize>,
 	/// words to ignore during auto-extraction
-	stop_words: HashSet<String>,
+	stop_words: im::HashSet<String>,
 	/// max auto-extracted topics per entry
 	max_topics_per_entry: usize,
 }
@@ -157,32 +158,32 @@ impl TopicIndex {
 			stop_words.insert(w.to_lowercase());
 		}
 		Self {
-			topic_to_entries: HashMap::new(),
-			entry_to_topics: HashMap::new(),
-			topic_to_children: HashMap::new(),
-			co_occurrence: HashMap::new(),
+			topic_to_entries: im::HashMap::new(),
+			entry_to_topics: im::HashMap::new(),
+			topic_to_children: im::HashMap::new(),
+			co_occurrence: im::HashMap::new(),
 			stop_words,
 			max_topics_per_entry: max_topics,
 		}
 	}
 
 	/// Ensure a topic and all its ancestors exist in the index structures.
-	fn ensure_topic_exists(&mut self, topic: &str) {
+	fn ensure_topic_exists(mut self, topic: &str) -> Self {
 		if !self.topic_to_entries.contains_key(topic) {
-			self.topic_to_entries.insert(topic.to_string(), HashSet::new());
+			self.topic_to_entries = self.topic_to_entries.update(topic.to_string(), im::HashSet::new());
 		}
 		if let Some(parent) = get_parent_path(topic) {
-			self.ensure_topic_exists(&parent);
-			self.topic_to_children
-				.entry(parent)
-				.or_default()
-				.insert(topic.to_string());
+			self = self.ensure_topic_exists(&parent);
+			let children = self.topic_to_children.get(&parent).cloned().unwrap_or_default();
+			let children = children.update(topic.to_string());
+			self.topic_to_children = self.topic_to_children.update(parent, children);
 		}
+		self
 	}
 
 	/// Clean up a topic node if it has no direct entries and no children.
 	/// Recursively cleans up ancestors.
-	fn cleanup_topic(&mut self, topic: &str) {
+	fn cleanup_topic(mut self, topic: &str) -> Self {
 		let has_entries = self
 			.topic_to_entries
 			.get(topic)
@@ -193,41 +194,46 @@ impl TopicIndex {
 			.is_some_and(|c| !c.is_empty());
 
 		if !has_entries && !has_children {
-			self.topic_to_entries.remove(topic);
-			self.topic_to_children.remove(topic);
+			self.topic_to_entries = self.topic_to_entries.without(topic);
+			self.topic_to_children = self.topic_to_children.without(topic);
 			if let Some(parent) = get_parent_path(topic) {
-				if let Some(children) = self.topic_to_children.get_mut(&parent) {
-					children.remove(topic);
+				if let Some(children) = self.topic_to_children.get(&parent).cloned() {
+					let children = children.without(topic);
+					self.topic_to_children = self.topic_to_children.update(parent.clone(), children);
 				}
-				self.cleanup_topic(&parent);
+				self = self.cleanup_topic(&parent);
 			}
 		}
+		self
 	}
 
 	/// Increment pairwise co-occurrence counters for a set of topics.
-	fn increment_co_occurrence(&mut self, topics: &[String]) {
+	fn increment_co_occurrence(mut self, topics: &[String]) -> Self {
 		for i in 0..topics.len() {
 			for j in (i + 1)..topics.len() {
 				let key = co_occurrence_key(&topics[i], &topics[j]);
-				*self.co_occurrence.entry(key).or_insert(0) += 1;
+				let current = self.co_occurrence.get(&key).copied().unwrap_or(0);
+				self.co_occurrence = self.co_occurrence.update(key, current + 1);
 			}
 		}
+		self
 	}
 
 	/// Decrement pairwise co-occurrence counters for a set of topics.
-	fn decrement_co_occurrence(&mut self, topics: &[String]) {
+	fn decrement_co_occurrence(mut self, topics: &[String]) -> Self {
 		for i in 0..topics.len() {
 			for j in (i + 1)..topics.len() {
 				let key = co_occurrence_key(&topics[i], &topics[j]);
-				if let Some(current) = self.co_occurrence.get(&key).copied() {
+				if let Some(&current) = self.co_occurrence.get(&key) {
 					if current <= 1 {
-						self.co_occurrence.remove(&key);
+						self.co_occurrence = self.co_occurrence.without(&key);
 					} else {
-						self.co_occurrence.insert(key, current - 1);
+						self.co_occurrence = self.co_occurrence.update(key, current - 1);
 					}
 				}
 			}
 		}
+		self
 	}
 
 	/// Collect all entry IDs for a topic and all its descendants.
@@ -251,44 +257,53 @@ impl TopicIndex {
 	/// Add an entry to the index, extracting topics from text and metadata.
 	///
 	/// If the entry already exists, it is removed first (re-indexing).
-	pub fn add_entry(&mut self, id: &str, text: &str, metadata: &HashMap<String, String>) {
+	pub fn add_entry(self, id: &str, text: &str, metadata: &HashMap<String, String>) -> Self {
 		// Remove existing mapping if re-indexing
-		self.remove_entry(id);
+		let mut s = self.remove_entry(id);
 
-		let topics = resolve_topics(text, metadata, &self.stop_words, self.max_topics_per_entry);
-		self.entry_to_topics.insert(id.to_string(), topics.clone());
+		let topics = resolve_topics(text, metadata, &s.stop_words, s.max_topics_per_entry);
+		s.entry_to_topics = s.entry_to_topics.update(id.to_string(), topics.clone().into_iter().collect());
 
 		for topic in &topics {
-			self.ensure_topic_exists(topic);
-			if let Some(set) = self.topic_to_entries.get_mut(topic) {
-				set.insert(id.to_string());
+			s = s.ensure_topic_exists(topic);
+			if let Some(set) = s.topic_to_entries.get(topic).cloned() {
+				let set = set.update(id.to_string());
+				s.topic_to_entries = s.topic_to_entries.update(topic.clone(), set);
 			}
 		}
 
 		// Track co-occurrence between all topics on this entry
 		if topics.len() > 1 {
-			self.increment_co_occurrence(&topics);
+			s = s.increment_co_occurrence(&topics);
 		}
+		s
 	}
 
 	/// Remove an entry from the index. Cleans up empty topics.
-	pub fn remove_entry(&mut self, id: &str) {
-		let topics = match self.entry_to_topics.remove(id) {
-			Some(t) => t,
-			None => return,
+	pub fn remove_entry(mut self, id: &str) -> Self {
+		let topics = match self.entry_to_topics.get(id).cloned() {
+			Some(t) => {
+				self.entry_to_topics = self.entry_to_topics.without(id);
+				t
+			}
+			None => return self,
 		};
 
+		let topics_vec: Vec<String> = topics.iter().cloned().collect();
+
 		// Decrement co-occurrence before removing
-		if topics.len() > 1 {
-			self.decrement_co_occurrence(&topics);
+		if topics_vec.len() > 1 {
+			self = self.decrement_co_occurrence(&topics_vec);
 		}
 
-		for topic in &topics {
-			if let Some(set) = self.topic_to_entries.get_mut(topic) {
-				set.remove(id);
+		for topic in &topics_vec {
+			if let Some(set) = self.topic_to_entries.get(topic).cloned() {
+				let set = set.without(id);
+				self.topic_to_entries = self.topic_to_entries.update(topic.clone(), set);
 			}
-			self.cleanup_topic(topic);
+			self = self.cleanup_topic(topic);
 		}
+		self
 	}
 
 	/// Get all entry IDs associated with a topic and its descendants.
@@ -319,7 +334,10 @@ impl TopicIndex {
 
 	/// Get topics for a specific entry.
 	pub fn get_topics(&self, id: &str) -> Vec<String> {
-		self.entry_to_topics.get(id).cloned().unwrap_or_default()
+		self.entry_to_topics
+			.get(id)
+			.map(|v| v.iter().cloned().collect())
+			.unwrap_or_default()
 	}
 
 	/// Get topics that co-occur with the given topic, sorted by count descending.
@@ -342,37 +360,38 @@ impl TopicIndex {
 	}
 
 	/// Move all entries from one topic to another. Update co-occurrence.
-	pub fn merge_topic(&mut self, from: &str, to: &str) {
+	pub fn merge_topic(mut self, from: &str, to: &str) -> Self {
 		let from_norm = from.to_lowercase();
 		let to_norm = to.to_lowercase();
 
 		// Collect from entries
 		let from_entry_ids: Vec<String> = match self.topic_to_entries.get(&from_norm) {
 			Some(entries) if !entries.is_empty() => entries.iter().cloned().collect(),
-			_ => return,
+			_ => return self,
 		};
 
 		// Ensure the target topic exists
-		self.ensure_topic_exists(&to_norm);
+		self = self.ensure_topic_exists(&to_norm);
 
 		// Move each entry from `from` to `to`
 		for id in &from_entry_ids {
 			// Add to target topic
-			if let Some(to_entries) = self.topic_to_entries.get_mut(&to_norm) {
-				to_entries.insert(id.clone());
+			if let Some(to_entries) = self.topic_to_entries.get(&to_norm).cloned() {
+				let to_entries = to_entries.update(id.clone());
+				self.topic_to_entries = self.topic_to_entries.update(to_norm.clone(), to_entries);
 			}
 
-			// Update the entry-to-topics mapping:
-			// Clone topics out to avoid holding a mutable borrow on entry_to_topics
-			// while calling co-occurrence methods that also need &mut self.
+			// Update the entry-to-topics mapping
 			if let Some(old_topics) = self.entry_to_topics.get(id).cloned() {
+				let old_topics_vec: Vec<String> = old_topics.iter().cloned().collect();
+
 				// Decrement old co-occurrence for this entry's topic set
-				if old_topics.len() > 1 {
-					self.decrement_co_occurrence(&old_topics);
+				if old_topics_vec.len() > 1 {
+					self = self.decrement_co_occurrence(&old_topics_vec);
 				}
 
 				// Build updated topic list
-				let mut new_topics = old_topics;
+				let mut new_topics = old_topics_vec;
 				if let Some(idx) = new_topics.iter().position(|t| *t == from_norm) {
 					if new_topics.contains(&to_norm) {
 						// Avoid duplicates: just remove
@@ -384,19 +403,19 @@ impl TopicIndex {
 
 				// Increment new co-occurrence for updated topic set
 				if new_topics.len() > 1 {
-					self.increment_co_occurrence(&new_topics);
+					self = self.increment_co_occurrence(&new_topics);
 				}
 
 				// Write updated topics back
-				self.entry_to_topics.insert(id.clone(), new_topics);
+				self.entry_to_topics = self.entry_to_topics.update(id.clone(), new_topics.into_iter().collect());
 			}
 		}
 
 		// Clear the `from` topic entries and clean up
-		if let Some(from_entries) = self.topic_to_entries.get_mut(&from_norm) {
-			from_entries.clear();
+		if self.topic_to_entries.contains_key(&from_norm) {
+			self.topic_to_entries = self.topic_to_entries.update(from_norm.clone(), im::HashSet::new());
 		}
-		self.cleanup_topic(&from_norm);
+		self = self.cleanup_topic(&from_norm);
 
 		// Move co-occurrence counters that reference `from` to `to`
 		let keys_to_remove: Vec<String> = self
@@ -425,11 +444,12 @@ impl TopicIndex {
 			}
 		}
 		for key in keys_to_remove {
-			self.co_occurrence.remove(&key);
+			self.co_occurrence = self.co_occurrence.without(&key);
 		}
 		for (key, count) in updates {
-			self.co_occurrence.insert(key, count);
+			self.co_occurrence = self.co_occurrence.update(key, count);
 		}
+		self
 	}
 
 	/// Get direct child topic paths (not grandchildren).
@@ -442,11 +462,12 @@ impl TopicIndex {
 	}
 
 	/// Remove all entries and topics from the index.
-	pub fn clear(&mut self) {
-		self.topic_to_entries.clear();
-		self.entry_to_topics.clear();
-		self.topic_to_children.clear();
-		self.co_occurrence.clear();
+	pub fn clear(mut self) -> Self {
+		self.topic_to_entries = im::HashMap::new();
+		self.entry_to_topics = im::HashMap::new();
+		self.topic_to_children = im::HashMap::new();
+		self.co_occurrence = im::HashMap::new();
+		self
 	}
 
 	/// Number of distinct topics tracked.
@@ -466,18 +487,19 @@ impl Default for TopicIndex {
 // ---------------------------------------------------------------------------
 
 /// O(1) lookup by (key, value) -> Set of entry IDs.
+#[derive(Clone)]
 pub struct MetadataIndex {
 	/// "key\0value" -> entry IDs
-	kv_index: HashMap<String, HashSet<String>>,
+	kv_index: im::HashMap<String, im::HashSet<String>>,
 	/// "key" -> entry IDs
-	key_index: HashMap<String, HashSet<String>>,
+	key_index: im::HashMap<String, im::HashSet<String>>,
 }
 
 impl MetadataIndex {
 	pub fn new() -> Self {
 		Self {
-			kv_index: HashMap::new(),
-			key_index: HashMap::new(),
+			kv_index: im::HashMap::new(),
+			key_index: im::HashMap::new(),
 		}
 	}
 
@@ -487,60 +509,68 @@ impl MetadataIndex {
 	}
 
 	/// Add an entry's metadata to the index.
-	pub fn add_entry(&mut self, id: &str, metadata: &HashMap<String, String>) {
+	pub fn add_entry(mut self, id: &str, metadata: &HashMap<String, String>) -> Self {
 		for (key, value) in metadata {
 			// Key-value index
 			let composite = Self::kv_key(key, value);
-			self.kv_index
-				.entry(composite)
-				.or_default()
-				.insert(id.to_string());
+			let set = self.kv_index.get(&composite).cloned().unwrap_or_default();
+			let set = set.update(id.to_string());
+			self.kv_index = self.kv_index.update(composite, set);
 
 			// Key-only index
-			self.key_index
-				.entry(key.clone())
-				.or_default()
-				.insert(id.to_string());
+			let key_set = self.key_index.get(key).cloned().unwrap_or_default();
+			let key_set = key_set.update(id.to_string());
+			self.key_index = self.key_index.update(key.clone(), key_set);
 		}
+		self
 	}
 
 	/// Remove an entry from the index.
-	pub fn remove_entry(&mut self, id: &str, metadata: &HashMap<String, String>) {
+	pub fn remove_entry(mut self, id: &str, metadata: &HashMap<String, String>) -> Self {
 		for (key, value) in metadata {
 			let composite = Self::kv_key(key, value);
-			if let Some(kv_set) = self.kv_index.get_mut(&composite) {
-				kv_set.remove(id);
+			if let Some(kv_set) = self.kv_index.get(&composite).cloned() {
+				let kv_set = kv_set.without(id);
 				if kv_set.is_empty() {
-					self.kv_index.remove(&composite);
+					self.kv_index = self.kv_index.without(&composite);
+				} else {
+					self.kv_index = self.kv_index.update(composite, kv_set);
 				}
 			}
 
-			if let Some(key_set) = self.key_index.get_mut(key) {
-				key_set.remove(id);
+			if let Some(key_set) = self.key_index.get(key).cloned() {
+				let key_set = key_set.without(id);
 				if key_set.is_empty() {
-					self.key_index.remove(key);
+					self.key_index = self.key_index.without(key);
+				} else {
+					self.key_index = self.key_index.update(key.clone(), key_set);
 				}
 			}
 		}
+		self
 	}
 
 	/// Get entry IDs matching an exact key-value pair.
 	pub fn get_entries(&self, key: &str, value: &str) -> HashSet<String> {
 		self.kv_index
 			.get(&Self::kv_key(key, value))
-			.cloned()
+			.map(|s| s.iter().cloned().collect())
 			.unwrap_or_default()
 	}
 
 	/// Get entry IDs that have a specific metadata key.
 	pub fn get_entries_with_key(&self, key: &str) -> HashSet<String> {
-		self.key_index.get(key).cloned().unwrap_or_default()
+		self.key_index
+			.get(key)
+			.map(|s| s.iter().cloned().collect())
+			.unwrap_or_default()
 	}
 
 	/// Remove all entries from the index.
-	pub fn clear(&mut self) {
-		self.kv_index.clear();
-		self.key_index.clear();
+	pub fn clear(mut self) -> Self {
+		self.kv_index = im::HashMap::new();
+		self.key_index = im::HashMap::new();
+		self
 	}
 }
 
@@ -555,14 +585,15 @@ impl Default for MetadataIndex {
 // ---------------------------------------------------------------------------
 
 /// Simple cache for computed L2 magnitudes.
+#[derive(Clone)]
 pub struct MagnitudeCache {
-	cache: HashMap<String, f64>,
+	cache: im::HashMap<String, f64>,
 }
 
 impl MagnitudeCache {
 	pub fn new() -> Self {
 		Self {
-			cache: HashMap::new(),
+			cache: im::HashMap::new(),
 		}
 	}
 
@@ -572,19 +603,25 @@ impl MagnitudeCache {
 	}
 
 	/// Compute and cache the magnitude for an entry's embedding.
-	pub fn set(&mut self, id: &str, embedding: &[f32]) {
+	pub fn set(self, id: &str, embedding: &[f32]) -> Self {
 		let magnitude = compute_magnitude(embedding);
-		self.cache.insert(id.to_string(), magnitude);
+		Self {
+			cache: self.cache.update(id.to_string(), magnitude),
+		}
 	}
 
 	/// Remove a cached magnitude.
-	pub fn remove(&mut self, id: &str) {
-		self.cache.remove(id);
+	pub fn remove(self, id: &str) -> Self {
+		Self {
+			cache: self.cache.without(id),
+		}
 	}
 
 	/// Clear all cached magnitudes.
-	pub fn clear(&mut self) {
-		self.cache.clear();
+	pub fn clear(self) -> Self {
+		Self {
+			cache: im::HashMap::new(),
+		}
 	}
 }
 
@@ -608,10 +645,10 @@ mod tests {
 
 	#[test]
 	fn topic_from_metadata_topic() {
-		let mut index = TopicIndex::new(5, &[]);
+		let index = TopicIndex::new(5, &[]);
 		let mut metadata = HashMap::new();
 		metadata.insert("topic".to_string(), "rust".to_string());
-		index.add_entry("e1", "some text here", &metadata);
+		let index = index.add_entry("e1", "some text here", &metadata);
 
 		let topics = index.get_topics("e1");
 		assert_eq!(topics, vec!["rust"]);
@@ -619,10 +656,10 @@ mod tests {
 
 	#[test]
 	fn topic_from_metadata_topics_json() {
-		let mut index = TopicIndex::new(5, &[]);
+		let index = TopicIndex::new(5, &[]);
 		let mut metadata = HashMap::new();
 		metadata.insert("topics".to_string(), r#"["alpha","beta"]"#.to_string());
-		index.add_entry("e1", "some text here", &metadata);
+		let index = index.add_entry("e1", "some text here", &metadata);
 
 		let mut topics = index.get_topics("e1");
 		topics.sort();
@@ -631,11 +668,11 @@ mod tests {
 
 	#[test]
 	fn topic_auto_extract() {
-		let mut index = TopicIndex::new(3, &[]);
+		let index = TopicIndex::new(3, &[]);
 		let metadata = HashMap::new();
 		// "rust" and "programming" appear twice, "language" once
 		let text = "rust programming rust programming language";
-		index.add_entry("e1", text, &metadata);
+		let index = index.add_entry("e1", text, &metadata);
 
 		let topics = index.get_topics("e1");
 		// Should auto-extract top 3 frequent words (> 2 chars, not stop words)
@@ -648,10 +685,10 @@ mod tests {
 
 	#[test]
 	fn topic_hierarchy() {
-		let mut index = TopicIndex::new(5, &[]);
+		let index = TopicIndex::new(5, &[]);
 		let mut metadata = HashMap::new();
 		metadata.insert("topic".to_string(), "code/rust".to_string());
-		index.add_entry("e1", "some text", &metadata);
+		let index = index.add_entry("e1", "some text", &metadata);
 
 		// Should create both "code/rust" and parent "code"
 		let all = index.get_all_topics();
@@ -666,15 +703,15 @@ mod tests {
 
 	#[test]
 	fn topic_get_entries_includes_descendants() {
-		let mut index = TopicIndex::new(5, &[]);
+		let index = TopicIndex::new(5, &[]);
 
 		let mut meta1 = HashMap::new();
 		meta1.insert("topic".to_string(), "code/rust".to_string());
-		index.add_entry("e1", "text", &meta1);
+		let index = index.add_entry("e1", "text", &meta1);
 
 		let mut meta2 = HashMap::new();
 		meta2.insert("topic".to_string(), "code".to_string());
-		index.add_entry("e2", "text", &meta2);
+		let index = index.add_entry("e2", "text", &meta2);
 
 		// Querying "code" should return both e1 (descendant) and e2 (direct)
 		let mut entries = index.get_entries("code");
@@ -688,15 +725,15 @@ mod tests {
 
 	#[test]
 	fn topic_get_children() {
-		let mut index = TopicIndex::new(5, &[]);
+		let index = TopicIndex::new(5, &[]);
 
 		let mut meta1 = HashMap::new();
 		meta1.insert("topic".to_string(), "code/rust".to_string());
-		index.add_entry("e1", "text", &meta1);
+		let index = index.add_entry("e1", "text", &meta1);
 
 		let mut meta2 = HashMap::new();
 		meta2.insert("topic".to_string(), "code/python".to_string());
-		index.add_entry("e2", "text", &meta2);
+		let index = index.add_entry("e2", "text", &meta2);
 
 		let mut children = index.get_children("code");
 		children.sort();
@@ -705,17 +742,17 @@ mod tests {
 
 	#[test]
 	fn topic_remove_cleanup() {
-		let mut index = TopicIndex::new(5, &[]);
+		let index = TopicIndex::new(5, &[]);
 
 		let mut metadata = HashMap::new();
 		metadata.insert("topic".to_string(), "code/rust".to_string());
-		index.add_entry("e1", "text", &metadata);
+		let index = index.add_entry("e1", "text", &metadata);
 
 		// Before removal, topics exist
 		assert!(index.topic_count() >= 2); // "code" and "code/rust"
 
 		// Remove the only entry
-		index.remove_entry("e1");
+		let index = index.remove_entry("e1");
 
 		// After removal, empty topics should be cleaned up
 		assert_eq!(index.topic_count(), 0);
@@ -724,18 +761,18 @@ mod tests {
 
 	#[test]
 	fn topic_merge() {
-		let mut index = TopicIndex::new(5, &[]);
+		let index = TopicIndex::new(5, &[]);
 
 		let mut meta1 = HashMap::new();
 		meta1.insert("topic".to_string(), "old_topic".to_string());
-		index.add_entry("e1", "text", &meta1);
+		let index = index.add_entry("e1", "text", &meta1);
 
 		let mut meta2 = HashMap::new();
 		meta2.insert("topic".to_string(), "old_topic".to_string());
-		index.add_entry("e2", "text", &meta2);
+		let index = index.add_entry("e2", "text", &meta2);
 
 		// Merge old_topic into new_topic
-		index.merge_topic("old_topic", "new_topic");
+		let index = index.merge_topic("old_topic", "new_topic");
 
 		// Entries should now be under new_topic
 		let mut entries = index.get_entries("new_topic");
@@ -752,12 +789,12 @@ mod tests {
 
 	#[test]
 	fn topic_co_occurrence() {
-		let mut index = TopicIndex::new(5, &[]);
+		let index = TopicIndex::new(5, &[]);
 
 		// Entry with two topics -> co-occurrence
 		let mut metadata = HashMap::new();
 		metadata.insert("topics".to_string(), r#"["alpha","beta"]"#.to_string());
-		index.add_entry("e1", "text", &metadata);
+		let index = index.add_entry("e1", "text", &metadata);
 
 		let related = index.get_related_topics("alpha");
 		assert_eq!(related.len(), 1);
@@ -767,7 +804,7 @@ mod tests {
 		// Add another entry with same pair -> count increases
 		let mut metadata2 = HashMap::new();
 		metadata2.insert("topics".to_string(), r#"["alpha","beta"]"#.to_string());
-		index.add_entry("e2", "text", &metadata2);
+		let index = index.add_entry("e2", "text", &metadata2);
 
 		let related = index.get_related_topics("alpha");
 		assert_eq!(related.len(), 1);
@@ -777,15 +814,15 @@ mod tests {
 
 	#[test]
 	fn topic_clear() {
-		let mut index = TopicIndex::new(5, &[]);
+		let index = TopicIndex::new(5, &[]);
 
 		let mut metadata = HashMap::new();
 		metadata.insert("topic".to_string(), "rust".to_string());
-		index.add_entry("e1", "text", &metadata);
+		let index = index.add_entry("e1", "text", &metadata);
 
 		assert!(index.topic_count() > 0);
 
-		index.clear();
+		let index = index.clear();
 
 		assert_eq!(index.topic_count(), 0);
 		assert!(index.get_all_topics().is_empty());
@@ -794,10 +831,10 @@ mod tests {
 
 	#[test]
 	fn topic_extra_stop_words() {
-		let mut index = TopicIndex::new(5, &["rust", "code"]);
+		let index = TopicIndex::new(5, &["rust", "code"]);
 		let metadata = HashMap::new();
 		let text = "rust code programming language design";
-		index.add_entry("e1", text, &metadata);
+		let index = index.add_entry("e1", text, &metadata);
 
 		let topics = index.get_topics("e1");
 		// "rust" and "code" should be filtered out as stop words
@@ -807,17 +844,17 @@ mod tests {
 
 	#[test]
 	fn topic_reindex_entry() {
-		let mut index = TopicIndex::new(5, &[]);
+		let index = TopicIndex::new(5, &[]);
 
 		let mut meta1 = HashMap::new();
 		meta1.insert("topic".to_string(), "old".to_string());
-		index.add_entry("e1", "text", &meta1);
+		let index = index.add_entry("e1", "text", &meta1);
 		assert_eq!(index.get_topics("e1"), vec!["old"]);
 
 		// Re-index with new topic
 		let mut meta2 = HashMap::new();
 		meta2.insert("topic".to_string(), "new".to_string());
-		index.add_entry("e1", "text", &meta2);
+		let index = index.add_entry("e1", "text", &meta2);
 		assert_eq!(index.get_topics("e1"), vec!["new"]);
 
 		// Old topic should be cleaned up
@@ -826,10 +863,10 @@ mod tests {
 
 	#[test]
 	fn topic_comma_separated() {
-		let mut index = TopicIndex::new(5, &[]);
+		let index = TopicIndex::new(5, &[]);
 		let mut metadata = HashMap::new();
 		metadata.insert("topic".to_string(), "rust, python, java".to_string());
-		index.add_entry("e1", "text", &metadata);
+		let index = index.add_entry("e1", "text", &metadata);
 
 		let mut topics = index.get_topics("e1");
 		topics.sort();
@@ -842,12 +879,12 @@ mod tests {
 
 	#[test]
 	fn metadata_index_basic() {
-		let mut index = MetadataIndex::new();
+		let index = MetadataIndex::new();
 		let mut metadata = HashMap::new();
 		metadata.insert("lang".to_string(), "rust".to_string());
 		metadata.insert("type".to_string(), "article".to_string());
 
-		index.add_entry("e1", &metadata);
+		let index = index.add_entry("e1", &metadata);
 
 		let result = index.get_entries("lang", "rust");
 		assert!(result.contains("e1"));
@@ -859,14 +896,14 @@ mod tests {
 
 	#[test]
 	fn metadata_index_key_only() {
-		let mut index = MetadataIndex::new();
+		let index = MetadataIndex::new();
 		let mut meta1 = HashMap::new();
 		meta1.insert("lang".to_string(), "rust".to_string());
-		index.add_entry("e1", &meta1);
+		let index = index.add_entry("e1", &meta1);
 
 		let mut meta2 = HashMap::new();
 		meta2.insert("lang".to_string(), "python".to_string());
-		index.add_entry("e2", &meta2);
+		let index = index.add_entry("e2", &meta2);
 
 		let result = index.get_entries_with_key("lang");
 		assert!(result.contains("e1"));
@@ -876,14 +913,14 @@ mod tests {
 
 	#[test]
 	fn metadata_index_remove() {
-		let mut index = MetadataIndex::new();
+		let index = MetadataIndex::new();
 		let mut metadata = HashMap::new();
 		metadata.insert("lang".to_string(), "rust".to_string());
-		index.add_entry("e1", &metadata);
+		let index = index.add_entry("e1", &metadata);
 
 		assert_eq!(index.get_entries("lang", "rust").len(), 1);
 
-		index.remove_entry("e1", &metadata);
+		let index = index.remove_entry("e1", &metadata);
 
 		assert!(index.get_entries("lang", "rust").is_empty());
 		assert!(index.get_entries_with_key("lang").is_empty());
@@ -891,14 +928,14 @@ mod tests {
 
 	#[test]
 	fn metadata_index_clear() {
-		let mut index = MetadataIndex::new();
+		let index = MetadataIndex::new();
 		let mut metadata = HashMap::new();
 		metadata.insert("lang".to_string(), "rust".to_string());
-		index.add_entry("e1", &metadata);
+		let index = index.add_entry("e1", &metadata);
 
 		assert!(!index.get_entries("lang", "rust").is_empty());
 
-		index.clear();
+		let index = index.clear();
 
 		assert!(index.get_entries("lang", "rust").is_empty());
 		assert!(index.get_entries_with_key("lang").is_empty());
@@ -906,12 +943,12 @@ mod tests {
 
 	#[test]
 	fn metadata_index_multiple_entries_same_key_value() {
-		let mut index = MetadataIndex::new();
+		let index = MetadataIndex::new();
 		let mut metadata = HashMap::new();
 		metadata.insert("lang".to_string(), "rust".to_string());
 
-		index.add_entry("e1", &metadata);
-		index.add_entry("e2", &metadata);
+		let index = index.add_entry("e1", &metadata);
+		let index = index.add_entry("e2", &metadata);
 
 		let result = index.get_entries("lang", "rust");
 		assert!(result.contains("e1"));
@@ -925,9 +962,9 @@ mod tests {
 
 	#[test]
 	fn magnitude_cache_basic() {
-		let mut cache = MagnitudeCache::new();
+		let cache = MagnitudeCache::new();
 		let embedding = vec![3.0f32, 4.0];
-		cache.set("e1", &embedding);
+		let cache = cache.set("e1", &embedding);
 
 		let mag = cache.get("e1").unwrap();
 		assert!((mag - 5.0).abs() < 1e-10);
@@ -941,24 +978,24 @@ mod tests {
 
 	#[test]
 	fn magnitude_cache_remove() {
-		let mut cache = MagnitudeCache::new();
-		cache.set("e1", &[3.0, 4.0]);
+		let cache = MagnitudeCache::new();
+		let cache = cache.set("e1", &[3.0, 4.0]);
 		assert!(cache.get("e1").is_some());
 
-		cache.remove("e1");
+		let cache = cache.remove("e1");
 		assert!(cache.get("e1").is_none());
 	}
 
 	#[test]
 	fn magnitude_cache_clear() {
-		let mut cache = MagnitudeCache::new();
-		cache.set("e1", &[3.0, 4.0]);
-		cache.set("e2", &[1.0, 0.0]);
+		let cache = MagnitudeCache::new();
+		let cache = cache.set("e1", &[3.0, 4.0]);
+		let cache = cache.set("e2", &[1.0, 0.0]);
 
 		assert!(cache.get("e1").is_some());
 		assert!(cache.get("e2").is_some());
 
-		cache.clear();
+		let cache = cache.clear();
 
 		assert!(cache.get("e1").is_none());
 		assert!(cache.get("e2").is_none());
@@ -966,11 +1003,11 @@ mod tests {
 
 	#[test]
 	fn magnitude_cache_overwrite() {
-		let mut cache = MagnitudeCache::new();
-		cache.set("e1", &[3.0, 4.0]);
+		let cache = MagnitudeCache::new();
+		let cache = cache.set("e1", &[3.0, 4.0]);
 		assert!((cache.get("e1").unwrap() - 5.0).abs() < 1e-10);
 
-		cache.set("e1", &[1.0, 0.0]);
+		let cache = cache.set("e1", &[1.0, 0.0]);
 		assert!((cache.get("e1").unwrap() - 1.0).abs() < 1e-10);
 	}
 

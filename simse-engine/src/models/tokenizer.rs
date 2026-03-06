@@ -26,6 +26,7 @@ impl TokenOutputStream {
     ///
     /// Returns `None` if the token is part of a multi-byte sequence
     /// that isn't complete yet.
+    // PERF: hot-path token decoding during generation — &mut self avoids cloning token buffer
     pub fn next_token(&mut self, token: u32) -> Result<Option<String>> {
         let prev_text = if self.tokens.is_empty() {
             String::new()

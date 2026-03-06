@@ -201,15 +201,15 @@ fn input_state_slash_command_autocomplete() {
 
 #[test]
 fn conversation_tool_results_match_permission_tool_names() {
-	let mut conv = ConversationBuffer::new(ConversationOptions {
+	let conv = ConversationBuffer::new(ConversationOptions {
 		system_prompt: Some("You are an assistant.".into()),
 		..ConversationOptions::default()
 	});
 
 	// Simulate an agentic loop: user asks, assistant responds with tool calls,
 	// tool results come back, then assistant gives final answer.
-	conv.add_user("Read the config file and write a summary.");
-	conv.add_assistant("I'll read the file first.");
+	let conv = conv.add_user("Read the config file and write a summary.");
+	let conv = conv.add_assistant("I'll read the file first.");
 
 	let tool_calls = vec![
 		("tc_1", "file_read", "/app/config.toml contents here"),
@@ -217,16 +217,17 @@ fn conversation_tool_results_match_permission_tool_names() {
 		("tc_3", "bash", "cargo test output: 42 tests passed"),
 	];
 
-	let mut pm = PermissionManager::new(PermissionMode::AcceptEdits);
+	let pm = PermissionManager::new(PermissionMode::AcceptEdits);
 	// Add a rule: deny bash even in AcceptEdits mode
-	pm.add_rule(PermissionRule {
+	let pm = pm.add_rule(PermissionRule {
 		tool: "bash".to_string(),
 		pattern: None,
 		policy: PermissionDecision::Deny,
 	});
 
+	let mut conv = conv;
 	for (id, name, content) in &tool_calls {
-		conv.add_tool_result(id, name, content);
+		conv = conv.add_tool_result(id, name, content);
 
 		let decision = pm.check(name, None);
 		match *name {
@@ -241,7 +242,7 @@ fn conversation_tool_results_match_permission_tool_names() {
 		}
 	}
 
-	conv.add_assistant("All done. Here is your summary.");
+	let conv = conv.add_assistant("All done. Here is your summary.");
 
 	// Verify conversation state
 	let messages = conv.to_messages();
@@ -299,9 +300,9 @@ fn config_schema_field_keys_are_unique_within_files() {
 #[test]
 fn keybinding_triggers_select_all_then_replace() {
 	// Set up keybinding registry
-	let mut registry = KeybindingRegistry::new();
-	let select_all_id = registry.register(KeyCombo::new("a").ctrl(), "Select All");
-	let _copy_id = registry.register(KeyCombo::new("c").ctrl(), "Copy");
+	let registry = KeybindingRegistry::new();
+	let (registry, select_all_id) = registry.register(KeyCombo::new("a").ctrl(), "Select All");
+	let (registry, _copy_id) = registry.register(KeyCombo::new("c").ctrl(), "Copy");
 
 	// Start with some typed text
 	let mut state = InputState {
@@ -411,15 +412,15 @@ fn tool_definition_format_truncate_and_conversation_flow() {
 	assert!(truncated.ends_with("[OUTPUT TRUNCATED]"));
 
 	// Add the truncated output as a tool result in the conversation
-	let mut conv = ConversationBuffer::new(ConversationOptions {
+	let conv = ConversationBuffer::new(ConversationOptions {
 		system_prompt: Some(simse_ui_core::tools::format_tools_for_system_prompt(&[
 			tool,
 		])),
 		..ConversationOptions::default()
 	});
-	conv.add_user("Read the file at /app/big.log");
-	conv.add_tool_result("tc_1", "file_read", &truncated);
-	conv.add_assistant("The file was too large, output was truncated.");
+	let conv = conv.add_user("Read the file at /app/big.log");
+	let conv = conv.add_tool_result("tc_1", "file_read", &truncated);
+	let conv = conv.add_assistant("The file was too large, output was truncated.");
 
 	// Verify the conversation structure
 	let messages = conv.to_messages();

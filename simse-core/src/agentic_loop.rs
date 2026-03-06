@@ -397,7 +397,7 @@ async fn execute_with_retry(
 
 /// Publish an event if an event bus is available.
 fn emit(bus: &Option<Arc<EventBus>>, event: &str, payload: serde_json::Value) {
-	if let Some(ref bus) = bus {
+	if let Some(bus) = bus {
 		bus.publish(event, payload);
 	}
 }
@@ -454,8 +454,8 @@ pub async fn run_agentic_loop(
 		let turn_start = Instant::now();
 
 		// 1. Check cancellation
-		if let Some(token) = cancellation_token {
-			if token.is_cancelled() {
+		if let Some(token) = cancellation_token
+			&& token.is_cancelled() {
 				let result = AgenticLoopResult {
 					final_text: turns
 						.last()
@@ -477,7 +477,6 @@ pub async fn run_agentic_loop(
 
 				return Ok(result);
 			}
-		}
 
 		// 2. Two-stage compaction (if auto_compact and conversation is long enough)
 		if options.auto_compact && estimate_chars(messages) > 100_000 {
@@ -489,8 +488,8 @@ pub async fn run_agentic_loop(
 
 			// Stage 2: summarise (with LLM) — if still over threshold
 			// Use 100_000 chars as the threshold (matching conversation.rs default)
-			if let Some(provider) = compaction_provider {
-				if estimate_chars(messages) > 100_000 {
+			if let Some(provider) = compaction_provider
+				&& estimate_chars(messages) > 100_000 {
 					let compaction_prompt = options
 						.compaction_prompt
 						.as_deref()
@@ -553,7 +552,6 @@ pub async fn run_agentic_loop(
 						}
 					}
 				}
-			}
 		}
 
 		// 3. Generate response from ACP with retry

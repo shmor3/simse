@@ -148,7 +148,7 @@ impl ToolPermissionResolver for DenySpecificResolver {
 fn test_register_and_retrieve_tool() {
 	let mut registry = make_registry();
 	let def = make_definition("echo");
-	registry.register(def, make_echo_handler());
+	registry.register_mut(def, make_echo_handler());
 
 	assert!(registry.is_registered("echo"));
 	assert_eq!(registry.tool_count(), 1);
@@ -163,8 +163,8 @@ fn test_register_and_retrieve_tool() {
 #[test]
 fn test_get_tool_definitions_returns_all() {
 	let mut registry = make_registry();
-	registry.register(make_definition("alpha"), make_echo_handler());
-	registry.register(make_definition("beta"), make_echo_handler());
+	registry.register_mut(make_definition("alpha"), make_echo_handler());
+	registry.register_mut(make_definition("beta"), make_echo_handler());
 
 	let defs = registry.get_tool_definitions();
 	assert_eq!(defs.len(), 2);
@@ -183,10 +183,10 @@ fn test_get_nonexistent_tool_returns_none() {
 #[test]
 fn test_unregister_tool() {
 	let mut registry = make_registry();
-	registry.register(make_definition("to_remove"), make_echo_handler());
+	registry.register_mut(make_definition("to_remove"), make_echo_handler());
 	assert!(registry.is_registered("to_remove"));
 
-	let removed = registry.unregister("to_remove");
+	let removed = registry.unregister_mut("to_remove");
 	assert!(removed);
 	assert!(!registry.is_registered("to_remove"));
 	assert_eq!(registry.tool_count(), 0);
@@ -195,7 +195,7 @@ fn test_unregister_tool() {
 #[test]
 fn test_unregister_nonexistent_returns_false() {
 	let mut registry = make_registry();
-	assert!(!registry.unregister("ghost"));
+	assert!(!registry.unregister_mut("ghost"));
 }
 
 // ---------------------------------------------------------------------------
@@ -205,7 +205,7 @@ fn test_unregister_nonexistent_returns_false() {
 #[tokio::test]
 async fn test_execute_tool_success() {
 	let mut registry = make_registry();
-	registry.register(make_definition("echo"), make_echo_handler());
+	registry.register_mut(make_definition("echo"), make_echo_handler());
 
 	let call = make_call("c1", "echo");
 	let result = registry.execute(&call).await;
@@ -228,7 +228,7 @@ async fn test_execute_with_output_truncation() {
 		..Default::default()
 	});
 	// Handler produces 200 chars
-	registry.register(make_definition("big"), make_large_output_handler(200));
+	registry.register_mut(make_definition("big"), make_large_output_handler(200));
 
 	let call = ToolCallRequest {
 		id: "c1".to_string(),
@@ -253,7 +253,7 @@ async fn test_execute_with_per_tool_output_limit() {
 	});
 	let mut def = make_definition("limited");
 	def.max_output_chars = Some(20); // per-tool override
-	registry.register(def, make_large_output_handler(100));
+	registry.register_mut(def, make_large_output_handler(100));
 
 	let call = ToolCallRequest {
 		id: "c1".to_string(),
@@ -274,7 +274,7 @@ async fn test_no_truncation_when_within_limit() {
 		max_output_chars: Some(500),
 		..Default::default()
 	});
-	registry.register(make_definition("small"), make_large_output_handler(100));
+	registry.register_mut(make_definition("small"), make_large_output_handler(100));
 
 	let call = ToolCallRequest {
 		id: "c1".to_string(),
@@ -315,7 +315,7 @@ async fn test_execute_permission_denied() {
 		permission_resolver: Some(Arc::new(DenyAllResolver)),
 		..Default::default()
 	});
-	registry.register(make_definition("secret"), make_echo_handler());
+	registry.register_mut(make_definition("secret"), make_echo_handler());
 
 	let call = make_call("c1", "secret");
 	let result = registry.execute(&call).await;
@@ -331,7 +331,7 @@ async fn test_execute_permission_allowed() {
 		permission_resolver: Some(Arc::new(AllowAllResolver)),
 		..Default::default()
 	});
-	registry.register(make_definition("allowed"), make_echo_handler());
+	registry.register_mut(make_definition("allowed"), make_echo_handler());
 
 	let call = make_call("c1", "allowed");
 	let result = registry.execute(&call).await;
@@ -348,8 +348,8 @@ async fn test_execute_selective_permission() {
 		})),
 		..Default::default()
 	});
-	registry.register(make_definition("restricted"), make_echo_handler());
-	registry.register(make_definition("open"), make_echo_handler());
+	registry.register_mut(make_definition("restricted"), make_echo_handler());
+	registry.register_mut(make_definition("open"), make_echo_handler());
 
 	let denied_result = registry.execute(&make_call("c1", "restricted")).await;
 	assert!(denied_result.is_error);
@@ -369,7 +369,7 @@ async fn test_execute_with_timeout() {
 	let mut registry = make_registry();
 	let mut def = make_definition("slow");
 	def.timeout_ms = Some(50); // 50ms timeout
-	registry.register(def, make_slow_handler(5000)); // handler takes 5s
+	registry.register_mut(def, make_slow_handler(5000)); // handler takes 5s
 
 	let call = make_call("c1", "slow");
 	let result = registry.execute(&call).await;
@@ -384,7 +384,7 @@ async fn test_execute_with_default_timeout() {
 		default_timeout_ms: Some(50),
 		..Default::default()
 	});
-	registry.register(make_definition("slow"), make_slow_handler(5000));
+	registry.register_mut(make_definition("slow"), make_slow_handler(5000));
 
 	let call = make_call("c1", "slow");
 	let result = registry.execute(&call).await;
@@ -398,7 +398,7 @@ async fn test_execute_completes_within_timeout() {
 	let mut registry = make_registry();
 	let mut def = make_definition("quick");
 	def.timeout_ms = Some(5000); // generous timeout
-	registry.register(def, make_slow_handler(10)); // 10ms handler
+	registry.register_mut(def, make_slow_handler(10)); // 10ms handler
 
 	let call = make_call("c1", "quick");
 	let result = registry.execute(&call).await;
@@ -414,7 +414,7 @@ async fn test_execute_completes_within_timeout() {
 #[tokio::test]
 async fn test_batch_execute() {
 	let mut registry = make_registry();
-	registry.register(make_definition("echo"), make_echo_handler());
+	registry.register_mut(make_definition("echo"), make_echo_handler());
 
 	let calls = vec![
 		make_call("c1", "echo"),
@@ -442,7 +442,7 @@ async fn test_batch_execute_empty() {
 #[tokio::test]
 async fn test_batch_execute_with_concurrency_limit() {
 	let mut registry = make_registry();
-	registry.register(make_definition("echo"), make_echo_handler());
+	registry.register_mut(make_definition("echo"), make_echo_handler());
 
 	let calls: Vec<ToolCallRequest> = (0..10)
 		.map(|i| make_call(&format!("c{}", i), "echo"))
@@ -460,8 +460,8 @@ async fn test_batch_execute_with_concurrency_limit() {
 #[tokio::test]
 async fn test_batch_execute_mixed_success_and_failure() {
 	let mut registry = make_registry();
-	registry.register(make_definition("good"), make_echo_handler());
-	registry.register(make_definition("bad"), make_failing_handler("boom"));
+	registry.register_mut(make_definition("good"), make_echo_handler());
+	registry.register_mut(make_definition("bad"), make_failing_handler("boom"));
 
 	let calls = vec![
 		make_call("c1", "good"),
@@ -614,8 +614,8 @@ fn test_parse_empty_string() {
 #[test]
 fn test_format_for_system_prompt() {
 	let mut registry = make_registry();
-	registry.register(make_definition("search"), make_echo_handler());
-	registry.register(make_definition("read_file"), make_echo_handler());
+	registry.register_mut(make_definition("search"), make_echo_handler());
+	registry.register_mut(make_definition("read_file"), make_echo_handler());
 
 	let prompt = registry.format_for_system_prompt();
 
@@ -648,7 +648,7 @@ fn test_format_tool_without_parameters() {
 		timeout_ms: None,
 		max_output_chars: None,
 	};
-	registry.register(def, make_echo_handler());
+	registry.register_mut(def, make_echo_handler());
 
 	let prompt = registry.format_for_system_prompt();
 	assert!(prompt.contains("- noop: Does nothing"));
@@ -663,7 +663,7 @@ fn test_format_tool_without_parameters() {
 #[tokio::test]
 async fn test_metrics_tracking() {
 	let mut registry = make_registry();
-	registry.register(make_definition("echo"), make_echo_handler());
+	registry.register_mut(make_definition("echo"), make_echo_handler());
 
 	// Execute twice
 	registry.execute(&make_call("c1", "echo")).await;
@@ -682,7 +682,7 @@ async fn test_metrics_tracking() {
 #[tokio::test]
 async fn test_metrics_error_tracking() {
 	let mut registry = make_registry();
-	registry.register(make_definition("fail"), make_failing_handler("oops"));
+	registry.register_mut(make_definition("fail"), make_failing_handler("oops"));
 
 	registry.execute(&make_call("c1", "fail")).await;
 	registry.execute(&make_call("c2", "fail")).await;
@@ -695,8 +695,8 @@ async fn test_metrics_error_tracking() {
 #[tokio::test]
 async fn test_metrics_mixed_success_error() {
 	let mut registry = make_registry();
-	registry.register(make_definition("echo"), make_echo_handler());
-	registry.register(make_definition("fail"), make_failing_handler("oops"));
+	registry.register_mut(make_definition("echo"), make_echo_handler());
+	registry.register_mut(make_definition("fail"), make_failing_handler("oops"));
 
 	registry.execute(&make_call("c1", "echo")).await;
 	registry.execute(&make_call("c2", "fail")).await;
@@ -714,8 +714,8 @@ async fn test_metrics_mixed_success_error() {
 #[tokio::test]
 async fn test_get_all_tool_metrics() {
 	let mut registry = make_registry();
-	registry.register(make_definition("alpha"), make_echo_handler());
-	registry.register(make_definition("beta"), make_echo_handler());
+	registry.register_mut(make_definition("alpha"), make_echo_handler());
+	registry.register_mut(make_definition("beta"), make_echo_handler());
 
 	registry.execute(&make_call("c1", "alpha")).await;
 	registry.execute(&make_call("c2", "beta")).await;
@@ -744,7 +744,7 @@ fn test_get_metrics_for_uncalled_tool_returns_none() {
 #[tokio::test]
 async fn test_clear_metrics() {
 	let mut registry = make_registry();
-	registry.register(make_definition("echo"), make_echo_handler());
+	registry.register_mut(make_definition("echo"), make_echo_handler());
 
 	registry.execute(&make_call("c1", "echo")).await;
 	assert!(registry.get_tool_metrics("echo").is_some());
@@ -764,8 +764,8 @@ fn test_tool_count_and_names() {
 	assert_eq!(registry.tool_count(), 0);
 	assert!(registry.tool_names().is_empty());
 
-	registry.register(make_definition("alpha"), make_echo_handler());
-	registry.register(make_definition("beta"), make_echo_handler());
+	registry.register_mut(make_definition("alpha"), make_echo_handler());
+	registry.register_mut(make_definition("beta"), make_echo_handler());
 
 	assert_eq!(registry.tool_count(), 2);
 
@@ -780,10 +780,10 @@ fn test_is_registered() {
 	let mut registry = make_registry();
 	assert!(!registry.is_registered("test"));
 
-	registry.register(make_definition("test"), make_echo_handler());
+	registry.register_mut(make_definition("test"), make_echo_handler());
 	assert!(registry.is_registered("test"));
 
-	registry.unregister("test");
+	registry.unregister_mut("test");
 	assert!(!registry.is_registered("test"));
 }
 
@@ -794,7 +794,7 @@ fn test_is_registered() {
 #[tokio::test]
 async fn test_execute_handler_error_is_captured() {
 	let mut registry = make_registry();
-	registry.register(
+	registry.register_mut(
 		make_definition("kaboom"),
 		make_failing_handler("something went wrong"),
 	);
@@ -812,11 +812,11 @@ fn test_register_overwrites_existing() {
 	let mut registry = make_registry();
 	let mut def1 = make_definition("tool");
 	def1.description = "version 1".to_string();
-	registry.register(def1, make_echo_handler());
+	registry.register_mut(def1, make_echo_handler());
 
 	let mut def2 = make_definition("tool");
 	def2.description = "version 2".to_string();
-	registry.register(def2, make_echo_handler());
+	registry.register_mut(def2, make_echo_handler());
 
 	assert_eq!(registry.tool_count(), 1);
 	let retrieved = registry.get_tool_definition("tool").unwrap();
@@ -887,7 +887,7 @@ async fn test_batch_execute_preserves_order() {
 			let name = n.clone();
 			Box::pin(async move { Ok(format!("result_{}", name)) })
 		});
-		registry.register(make_definition(name), handler);
+		registry.register_mut(make_definition(name), handler);
 	}
 
 	let calls = vec![
@@ -950,7 +950,7 @@ async fn test_tool_registry_implements_tool_executor() {
 #[tokio::test]
 async fn test_tool_executor_execute_success() {
 	let mut registry = make_registry();
-	registry.register(make_definition("echo"), make_echo_handler());
+	registry.register_mut(make_definition("echo"), make_echo_handler());
 
 	let executor: &dyn ToolExecutor = &registry;
 	let call = make_call("c1", "echo");

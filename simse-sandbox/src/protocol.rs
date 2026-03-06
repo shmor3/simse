@@ -47,6 +47,9 @@ pub struct SshParams {
     pub auth: SshAuthParams,
     pub max_channels: Option<usize>,
     pub keepalive_interval_ms: Option<u64>,
+    /// Expected server host key fingerprint (`SHA256:<base64>`).
+    /// When set, connections are rejected if the server key doesn't match.
+    pub host_key_fingerprint: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

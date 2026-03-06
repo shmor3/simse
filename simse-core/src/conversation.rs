@@ -7,6 +7,7 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use im::Vector;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -68,9 +69,12 @@ pub struct ConversationOptions {
 ///
 /// Tracks user messages, assistant responses, and tool results to build the
 /// full conversation context for each ACP call.
-#[derive(Debug)]
+///
+/// Uses `im::Vector` for persistent (structural sharing) message storage,
+/// enabling cheap cloning and functional-style state transitions.
+#[derive(Debug, Clone)]
 pub struct Conversation {
-	messages: Vec<ConversationMessage>,
+	messages: Vector<ConversationMessage>,
 	system_prompt: Option<String>,
 	max_messages: usize,
 	auto_compact_chars: usize,
@@ -90,7 +94,7 @@ impl Conversation {
 	pub fn new(options: Option<ConversationOptions>) -> Self {
 		let opts = options.unwrap_or_default();
 		Self {
-			messages: Vec::new(),
+			messages: Vector::new(),
 			system_prompt: opts.system_prompt,
 			max_messages: opts.max_messages.unwrap_or(0),
 			auto_compact_chars: opts.auto_compact_chars.unwrap_or(100_000),
@@ -98,85 +102,90 @@ impl Conversation {
 		}
 	}
 
-	// -- Mutators ----------------------------------------------------------
+	// -- Mutators (owned-return) -------------------------------------------
 
-	/// Add a user message.
-	pub fn add_user(&mut self, content: &str) {
-		self.messages.push(ConversationMessage {
+	/// Add a user message. Returns the updated conversation.
+	pub fn add_user(mut self, content: &str) -> Self {
+		self.messages.push_back(ConversationMessage {
 			role: Role::User,
 			content: content.to_string(),
 			tool_call_id: None,
 			tool_name: None,
 			timestamp: Some(now_millis()),
 		});
-		self.trim_if_needed();
+		self.trim_if_needed()
 	}
 
-	/// Add an assistant message.
-	pub fn add_assistant(&mut self, content: &str) {
-		self.messages.push(ConversationMessage {
+	/// Add an assistant message. Returns the updated conversation.
+	pub fn add_assistant(mut self, content: &str) -> Self {
+		self.messages.push_back(ConversationMessage {
 			role: Role::Assistant,
 			content: content.to_string(),
 			tool_call_id: None,
 			tool_name: None,
 			timestamp: Some(now_millis()),
 		});
-		self.trim_if_needed();
+		self.trim_if_needed()
 	}
 
-	/// Add a tool result message.
-	pub fn add_tool_result(&mut self, tool_call_id: &str, tool_name: &str, content: &str) {
-		self.messages.push(ConversationMessage {
+	/// Add a tool result message. Returns the updated conversation.
+	pub fn add_tool_result(mut self, tool_call_id: &str, tool_name: &str, content: &str) -> Self {
+		self.messages.push_back(ConversationMessage {
 			role: Role::ToolResult,
 			content: content.to_string(),
 			tool_call_id: Some(tool_call_id.to_string()),
 			tool_name: Some(tool_name.to_string()),
 			timestamp: Some(now_millis()),
 		});
-		self.trim_if_needed();
+		self.trim_if_needed()
 	}
 
-	/// Set the system prompt.
-	pub fn set_system_prompt(&mut self, prompt: String) {
+	/// Set the system prompt. Returns the updated conversation.
+	pub fn set_system_prompt(mut self, prompt: String) -> Self {
 		self.system_prompt = Some(prompt);
+		self
 	}
 
-	/// Clear all messages (does not clear the system prompt).
-	pub fn clear(&mut self) {
-		self.messages.clear();
+	/// Clear all messages (does not clear the system prompt). Returns the updated conversation.
+	pub fn clear(mut self) -> Self {
+		self.messages = Vector::new();
+		self
 	}
 
 	/// Replace all messages with a single user summary message.
 	///
 	/// Used for conversation compaction: clears all existing messages and
-	/// inserts a `[Conversation summary]` user message.
-	pub fn compact(&mut self, summary: &str) {
-		self.messages.clear();
-		self.messages.push(ConversationMessage {
+	/// inserts a `[Conversation summary]` user message. Returns the updated conversation.
+	pub fn compact(mut self, summary: &str) -> Self {
+		self.messages = Vector::new();
+		self.messages.push_back(ConversationMessage {
 			role: Role::User,
 			content: format!("[Conversation summary]\n{summary}"),
 			tool_call_id: None,
 			tool_name: None,
 			timestamp: Some(now_millis()),
 		});
+		self
 	}
 
 	/// Replace all non-system messages with the provided slice.
 	///
 	/// System-role messages in `new_messages` are filtered out since the
 	/// system prompt is managed separately via [`set_system_prompt`].
-	pub fn replace_messages(&mut self, new_messages: &[ConversationMessage]) {
-		self.messages.clear();
-		for msg in new_messages {
-			if msg.role != Role::System {
-				self.messages.push(msg.clone());
-			}
-		}
+	/// Returns the updated conversation.
+	pub fn replace_messages(mut self, new_messages: &[ConversationMessage]) -> Self {
+		self.messages = new_messages
+			.iter()
+			.filter(|msg| msg.role != Role::System)
+			.cloned()
+			.collect();
+		self
 	}
 
-	/// Load messages directly (used for restoring state).
-	pub fn load_messages(&mut self, msgs: Vec<ConversationMessage>) {
-		self.messages = msgs;
+	/// Load messages directly (used for restoring state). Returns the updated conversation.
+	pub fn load_messages(mut self, msgs: Vec<ConversationMessage>) -> Self {
+		self.messages = msgs.into_iter().collect();
+		self
 	}
 
 	// -- Queries -----------------------------------------------------------
@@ -187,7 +196,7 @@ impl Conversation {
 	}
 
 	/// Get a reference to the conversation messages (excludes system prompt).
-	pub fn messages(&self) -> &[ConversationMessage] {
+	pub fn messages(&self) -> &Vector<ConversationMessage> {
 		&self.messages
 	}
 
@@ -253,43 +262,42 @@ impl Conversation {
 	pub fn to_json(&self) -> String {
 		let payload = ConversationJson {
 			system_prompt: self.system_prompt.clone(),
-			messages: self.messages.clone(),
+			messages: self.messages.iter().cloned().collect(),
 		};
 		serde_json::to_string(&payload).expect("ConversationJson serialization is infallible")
 	}
 
 	/// Replace conversation content from a JSON string produced by [`to_json`].
-	pub fn from_json(&mut self, json: &str) {
+	/// Returns the updated conversation.
+	pub fn from_json(mut self, json: &str) -> Self {
 		let data: ConversationJson = match serde_json::from_str(json) {
 			Ok(d) => d,
 			Err(e) => {
 				tracing::warn!("failed to parse conversation JSON: {e}");
-				return;
+				return self;
 			}
 		};
-		if let Some(prompt) = data.system_prompt {
-			if !prompt.is_empty() {
+		if let Some(prompt) = data.system_prompt
+			&& !prompt.is_empty() {
 				self.system_prompt = Some(prompt);
 			}
-		}
-		self.messages.clear();
-		for msg in data.messages {
-			// Skip system messages in the message array (system prompt is separate)
-			if msg.role == Role::System {
-				continue;
-			}
-			self.messages.push(msg);
-		}
+		self.messages = data
+			.messages
+			.into_iter()
+			.filter(|msg| msg.role != Role::System)
+			.collect();
+		self
 	}
 
 	// -- Internal ----------------------------------------------------------
 
 	/// Trim oldest messages when the count exceeds `max_messages`.
-	fn trim_if_needed(&mut self) {
+	fn trim_if_needed(mut self) -> Self {
 		if self.max_messages > 0 && self.messages.len() > self.max_messages {
 			let excess = self.messages.len() - self.max_messages;
-			self.messages.drain(..excess);
+			self.messages = self.messages.skip(excess);
 		}
+		self
 	}
 }
 

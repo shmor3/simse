@@ -97,10 +97,21 @@ impl Default for GraphConfig {
 ///
 /// `adjacency` maps source_id → outgoing edges.
 /// `reverse` maps target_id → incoming edges.
+#[derive(Clone)]
 pub struct GraphIndex {
-	adjacency: HashMap<String, Vec<Edge>>,
-	reverse: HashMap<String, Vec<Edge>>,
+	adjacency: im::HashMap<String, im::Vector<Edge>>,
+	reverse: im::HashMap<String, im::Vector<Edge>>,
 	config: GraphConfig,
+}
+
+impl Default for GraphIndex {
+	fn default() -> Self {
+		Self {
+			adjacency: im::HashMap::new(),
+			reverse: im::HashMap::new(),
+			config: GraphConfig::default(),
+		}
+	}
 }
 
 impl GraphIndex {
@@ -108,8 +119,8 @@ impl GraphIndex {
 
 	pub fn new(config: GraphConfig) -> Self {
 		Self {
-			adjacency: HashMap::new(),
-			reverse: HashMap::new(),
+			adjacency: im::HashMap::new(),
+			reverse: im::HashMap::new(),
 			config,
 		}
 	}
@@ -130,12 +141,12 @@ impl GraphIndex {
 	/// it is updated only when the new weight is stronger. After insertion
 	/// the source node's edge list is capped at `max_edges_per_node` by
 	/// evicting the weakest edge.
-	pub fn add_edge(&mut self, edge: Edge) {
-		// Try to update existing edge with same (source, target, type)
-		let edges = self
-			.adjacency
-			.entry(edge.source_id.clone())
-			.or_default();
+	pub fn add_edge(self, edge: Edge) -> Self {
+		let mut adjacency = self.adjacency;
+		let mut reverse = self.reverse;
+
+		// Get or create the edge list for this source
+		let mut edges = adjacency.get(&edge.source_id).cloned().unwrap_or_default();
 
 		let mut found = false;
 		for existing in edges.iter_mut() {
@@ -151,46 +162,49 @@ impl GraphIndex {
 		}
 
 		if !found {
-			edges.push(edge.clone());
+			edges.push_back(edge.clone());
 		}
 
 		// Enforce max_edges_per_node by evicting weakest
-		let edges = self.adjacency.get_mut(&edge.source_id).unwrap();
 		if edges.len() > self.config.max_edges_per_node {
-			// Sort ascending by weight so we can pop the weakest
-			edges.sort_by(|a, b| a.weight.partial_cmp(&b.weight).unwrap_or(std::cmp::Ordering::Equal));
-			let evicted = edges.remove(0);
+			// Sort ascending by weight so we can remove the weakest (index 0)
+			let mut sorted: Vec<Edge> = edges.into_iter().collect();
+			sorted.sort_by(|a, b| a.weight.partial_cmp(&b.weight).unwrap_or(std::cmp::Ordering::Equal));
+			let evicted = sorted.remove(0);
+			edges = sorted.into_iter().collect();
+
 			// Also remove from reverse index
-			if let Some(rev) = self.reverse.get_mut(&evicted.target_id) {
-				rev.retain(|e| {
-					!(e.source_id == evicted.source_id && e.edge_type == evicted.edge_type)
-				});
+			if let Some(rev) = reverse.get(&evicted.target_id) {
+				let filtered: im::Vector<Edge> = rev
+					.iter()
+					.filter(|e| {
+						!(e.source_id == evicted.source_id && e.edge_type == evicted.edge_type)
+					})
+					.cloned()
+					.collect();
+				reverse = reverse.update(evicted.target_id.clone(), filtered);
 			}
 		}
 
-		// Update reverse index (only if we didn't just update in-place via found)
+		adjacency = adjacency.update(edge.source_id.clone(), edges.clone());
+
+		// Update reverse index
 		if !found {
-			// Check if the newly added edge survived eviction before updating reverse index
-			let survived = self
-				.adjacency
-				.get(&edge.source_id)
-				.map(|edges| {
-					edges.iter().any(|e| {
-						e.target_id == edge.target_id && e.edge_type == edge.edge_type
-					})
-				})
-				.unwrap_or(false);
+			// Check if the newly added edge survived eviction
+			let survived = edges.iter().any(|e| {
+				e.target_id == edge.target_id && e.edge_type == edge.edge_type
+			});
 
 			if survived {
-				let rev = self
-					.reverse
-					.entry(edge.target_id.clone())
-					.or_default();
-				rev.push(edge);
+				let target_id = edge.target_id.clone();
+				let mut rev = reverse.get(&target_id).cloned().unwrap_or_default();
+				rev.push_back(edge);
+				reverse = reverse.update(target_id, rev);
 			}
 		} else {
 			// Update the weight in reverse index too
-			if let Some(rev) = self.reverse.get_mut(&edge.target_id) {
+			if let Some(rev) = reverse.get(&edge.target_id) {
+				let mut rev = rev.clone();
 				for existing in rev.iter_mut() {
 					if existing.source_id == edge.source_id
 						&& existing.edge_type == edge.edge_type
@@ -203,21 +217,24 @@ impl GraphIndex {
 						break;
 					}
 				}
+				reverse = reverse.update(edge.target_id.clone(), rev);
 			}
 		}
+
+		Self { adjacency, reverse, ..self }
 	}
 
 	/// Create edges in both directions between `a` and `b`.
 	pub fn add_bidirectional_edge(
-		&mut self,
+		self,
 		a: &str,
 		b: &str,
 		edge_type: EdgeType,
 		weight: f64,
 		origin: EdgeOrigin,
 		timestamp: u64,
-	) {
-		self.add_edge(Edge {
+	) -> Self {
+		let result = self.add_edge(Edge {
 			source_id: a.to_string(),
 			target_id: b.to_string(),
 			edge_type: edge_type.clone(),
@@ -225,41 +242,60 @@ impl GraphIndex {
 			origin: origin.clone(),
 			timestamp,
 		});
-		self.add_edge(Edge {
+		result.add_edge(Edge {
 			source_id: b.to_string(),
 			target_id: a.to_string(),
 			edge_type,
 			weight,
 			origin,
 			timestamp,
-		});
+		})
 	}
 
 	/// Remove all edges that involve `id` (both as source and target).
-	pub fn remove_node(&mut self, id: &str) {
+	pub fn remove_node(self, id: &str) -> Self {
+		let mut adjacency = self.adjacency;
+		let mut reverse = self.reverse;
+
 		// Remove outgoing edges for this node, and clean up reverse entries
-		if let Some(outgoing) = self.adjacency.remove(id) {
-			for edge in &outgoing {
-				if let Some(rev) = self.reverse.get_mut(&edge.target_id) {
-					rev.retain(|e| e.source_id != id);
-					if rev.is_empty() {
-						self.reverse.remove(&edge.target_id);
+		if let Some(outgoing) = adjacency.get(id) {
+			for edge in outgoing.iter() {
+				if let Some(rev) = reverse.get(&edge.target_id) {
+					let filtered: im::Vector<Edge> = rev
+						.iter()
+						.filter(|e| e.source_id != id)
+						.cloned()
+						.collect();
+					if filtered.is_empty() {
+						reverse = reverse.without(&edge.target_id);
+					} else {
+						reverse = reverse.update(edge.target_id.clone(), filtered);
 					}
 				}
 			}
+			adjacency = adjacency.without(id);
 		}
 
 		// Remove incoming edges for this node, and clean up adjacency entries
-		if let Some(incoming) = self.reverse.remove(id) {
-			for edge in &incoming {
-				if let Some(adj) = self.adjacency.get_mut(&edge.source_id) {
-					adj.retain(|e| e.target_id != id);
-					if adj.is_empty() {
-						self.adjacency.remove(&edge.source_id);
+		if let Some(incoming) = reverse.get(id).cloned() {
+			for edge in incoming.iter() {
+				if let Some(adj) = adjacency.get(&edge.source_id) {
+					let filtered: im::Vector<Edge> = adj
+						.iter()
+						.filter(|e| e.target_id != id)
+						.cloned()
+						.collect();
+					if filtered.is_empty() {
+						adjacency = adjacency.without(&edge.source_id);
+					} else {
+						adjacency = adjacency.update(edge.source_id.clone(), filtered);
 					}
 				}
 			}
+			reverse = reverse.without(id);
 		}
+
+		Self { adjacency, reverse, ..self }
 	}
 
 	/// Outgoing edges from `id`, sorted by weight descending.
@@ -298,18 +334,20 @@ impl GraphIndex {
 	///
 	/// Values are comma-separated volume IDs.
 	pub fn parse_metadata_edges(
-		&mut self,
+		self,
 		source_id: &str,
 		metadata: &HashMap<String, String>,
 		timestamp: u64,
-	) {
+	) -> Self {
+		let mut result = self;
+
 		for (key, value) in metadata {
 			let targets: Vec<&str> = value.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
 
 			match key.as_str() {
 				"rel:related" => {
 					for target in &targets {
-						self.add_bidirectional_edge(
+						result = result.add_bidirectional_edge(
 							source_id,
 							target,
 							EdgeType::Related,
@@ -322,7 +360,7 @@ impl GraphIndex {
 				"rel:parent" => {
 					for target in &targets {
 						// source → target = Parent
-						self.add_edge(Edge {
+						result = result.add_edge(Edge {
 							source_id: source_id.to_string(),
 							target_id: target.to_string(),
 							edge_type: EdgeType::Parent,
@@ -331,7 +369,7 @@ impl GraphIndex {
 							timestamp,
 						});
 						// target → source = Child
-						self.add_edge(Edge {
+						result = result.add_edge(Edge {
 							source_id: target.to_string(),
 							target_id: source_id.to_string(),
 							edge_type: EdgeType::Child,
@@ -343,7 +381,7 @@ impl GraphIndex {
 				}
 				"rel:extends" => {
 					for target in &targets {
-						self.add_edge(Edge {
+						result = result.add_edge(Edge {
 							source_id: source_id.to_string(),
 							target_id: target.to_string(),
 							edge_type: EdgeType::Extends,
@@ -355,7 +393,7 @@ impl GraphIndex {
 				}
 				"rel:contradicts" => {
 					for target in &targets {
-						self.add_bidirectional_edge(
+						result = result.add_bidirectional_edge(
 							source_id,
 							target,
 							EdgeType::Contradicts,
@@ -368,6 +406,8 @@ impl GraphIndex {
 				_ => {}
 			}
 		}
+
+		result
 	}
 
 	// -- Implicit similarity edges ----------------------------------------
@@ -390,17 +430,17 @@ impl GraphIndex {
 	/// `similarity >= config.similarity_threshold` and no explicit edge
 	/// exists between the pair.
 	pub fn add_similarity_edge(
-		&mut self,
+		self,
 		a: &str,
 		b: &str,
 		similarity: f64,
 		timestamp: u64,
-	) {
+	) -> Self {
 		if similarity < self.config.similarity_threshold {
-			return;
+			return self;
 		}
 		if self.has_explicit_edge(a, b) {
-			return;
+			return self;
 		}
 		self.add_bidirectional_edge(
 			a,
@@ -409,7 +449,7 @@ impl GraphIndex {
 			similarity,
 			EdgeOrigin::Similarity,
 			timestamp,
-		);
+		)
 	}
 
 	// -- Implicit correlation edges ---------------------------------------
@@ -423,21 +463,23 @@ impl GraphIndex {
 	/// Creates `CoOccurs` edges for pairs whose count >= `correlation_threshold`.
 	/// Skips pairs that already have an explicit edge.
 	pub fn sync_correlations(
-		&mut self,
+		self,
 		correlations: &HashMap<String, HashMap<String, usize>>,
 		max_count: usize,
 		timestamp: u64,
-	) {
+	) -> Self {
 		if max_count == 0 {
-			return;
+			return self;
 		}
+
+		let mut result = self;
 
 		// Track pairs already processed to avoid double-adding
 		let mut processed: HashSet<(String, String)> = HashSet::new();
 
 		for (entry_id, peers) in correlations {
 			for (peer_id, &count) in peers {
-				if count < self.config.correlation_threshold {
+				if count < result.config.correlation_threshold {
 					continue;
 				}
 				// Normalize pair order so we only process each pair once
@@ -451,12 +493,12 @@ impl GraphIndex {
 				}
 				processed.insert(pair);
 
-				if self.has_explicit_edge(entry_id, peer_id) {
+				if result.has_explicit_edge(entry_id, peer_id) {
 					continue;
 				}
 
 				let weight = count as f64 / max_count as f64;
-				self.add_bidirectional_edge(
+				result = result.add_bidirectional_edge(
 					entry_id,
 					peer_id,
 					EdgeType::CoOccurs,
@@ -466,15 +508,20 @@ impl GraphIndex {
 				);
 			}
 		}
+
+		result
 	}
 
 	/// Remove implicit (Similarity / Correlation) edges with weight below
 	/// `min_weight`. Cleans up empty adjacency entries.
-	pub fn prune_weak_implicit_edges(&mut self, min_weight: f64) {
-		let sources: Vec<String> = self.adjacency.keys().cloned().collect();
+	pub fn prune_weak_implicit_edges(self, min_weight: f64) -> Self {
+		let mut adjacency = self.adjacency;
+		let mut reverse = self.reverse;
+
+		let sources: Vec<String> = adjacency.keys().cloned().collect();
 
 		for source in &sources {
-			if let Some(edges) = self.adjacency.get_mut(source) {
+			if let Some(edges) = adjacency.get(source) {
 				let to_remove: Vec<(String, EdgeType)> = edges
 					.iter()
 					.filter(|e| {
@@ -484,23 +531,47 @@ impl GraphIndex {
 					.collect();
 
 				for (target_id, edge_type) in &to_remove {
-					// Remove from reverse index
-					if let Some(rev) = self.reverse.get_mut(target_id) {
-						rev.retain(|e| {
-							!(e.source_id == *source && e.edge_type == *edge_type)
-						});
+					if let Some(rev) = reverse.get(target_id) {
+						let filtered: im::Vector<Edge> = rev
+							.iter()
+							.filter(|e| {
+								!(e.source_id == *source && e.edge_type == *edge_type)
+							})
+							.cloned()
+							.collect();
+						reverse = reverse.update(target_id.clone(), filtered);
 					}
 				}
 
-				edges.retain(|e| {
-					e.origin == EdgeOrigin::Explicit || e.weight >= min_weight
-				});
+				let filtered: im::Vector<Edge> = edges
+					.iter()
+					.filter(|e| {
+						e.origin == EdgeOrigin::Explicit || e.weight >= min_weight
+					})
+					.cloned()
+					.collect();
+				adjacency = adjacency.update(source.clone(), filtered);
 			}
 		}
 
 		// Clean up empty entries
-		self.adjacency.retain(|_, edges| !edges.is_empty());
-		self.reverse.retain(|_, edges| !edges.is_empty());
+		let empty_adj: Vec<String> = adjacency.iter()
+			.filter(|(_, edges)| edges.is_empty())
+			.map(|(k, _)| k.clone())
+			.collect();
+		for k in empty_adj {
+			adjacency = adjacency.without(&k);
+		}
+
+		let empty_rev: Vec<String> = reverse.iter()
+			.filter(|(_, edges)| edges.is_empty())
+			.map(|(k, _)| k.clone())
+			.collect();
+		for k in empty_rev {
+			reverse = reverse.without(&k);
+		}
+
+		Self { adjacency, reverse, ..self }
 	}
 
 	// -- Traversal --------------------------------------------------------
@@ -627,7 +698,7 @@ impl GraphIndex {
 		let mut graph = Self::new(config);
 
 		for edge in state.explicit_edges {
-			graph.add_edge(Edge {
+			graph = graph.add_edge(Edge {
 				source_id: edge.source_id,
 				target_id: edge.target_id,
 				edge_type: edge.edge_type,
@@ -724,9 +795,9 @@ mod tests {
 
 	#[test]
 	fn add_edge_and_retrieve_neighbors() {
-		let mut graph = default_graph();
-		graph.add_edge(make_edge("a", "b", EdgeType::Related, 0.9, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("a", "c", EdgeType::Related, 0.7, EdgeOrigin::Explicit));
+		let graph = default_graph();
+		let graph = graph.add_edge(make_edge("a", "b", EdgeType::Related, 0.9, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "c", EdgeType::Related, 0.7, EdgeOrigin::Explicit));
 
 		let neighbors = graph.neighbors("a");
 		assert_eq!(neighbors.len(), 2);
@@ -738,8 +809,8 @@ mod tests {
 
 	#[test]
 	fn bidirectional_edge_creates_both_directions() {
-		let mut graph = default_graph();
-		graph.add_bidirectional_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit, 1000);
+		let graph = default_graph();
+		let graph = graph.add_bidirectional_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit, 1000);
 
 		let from_a = graph.neighbors("a");
 		assert_eq!(from_a.len(), 1);
@@ -754,13 +825,13 @@ mod tests {
 
 	#[test]
 	fn remove_edges_for_node_cascades() {
-		let mut graph = default_graph();
-		graph.add_bidirectional_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit, 1000);
-		graph.add_bidirectional_edge("a", "c", EdgeType::Related, 0.8, EdgeOrigin::Explicit, 1000);
-		graph.add_bidirectional_edge("b", "c", EdgeType::Related, 0.6, EdgeOrigin::Explicit, 1000);
+		let graph = default_graph();
+		let graph = graph.add_bidirectional_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit, 1000);
+		let graph = graph.add_bidirectional_edge("a", "c", EdgeType::Related, 0.8, EdgeOrigin::Explicit, 1000);
+		let graph = graph.add_bidirectional_edge("b", "c", EdgeType::Related, 0.6, EdgeOrigin::Explicit, 1000);
 		assert_eq!(graph.edge_count(), 6);
 
-		graph.remove_node("a");
+		let graph = graph.remove_node("a");
 
 		// Edges from/to "a" should be gone
 		assert!(graph.neighbors("a").is_empty());
@@ -778,18 +849,18 @@ mod tests {
 
 	#[test]
 	fn max_edges_per_node_evicts_weakest() {
-		let mut graph = GraphIndex::new(GraphConfig {
+		let graph = GraphIndex::new(GraphConfig {
 			max_edges_per_node: 3,
 			..Default::default()
 		});
 
-		graph.add_edge(make_edge("a", "b", EdgeType::Related, 0.5, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("a", "c", EdgeType::Related, 0.8, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("a", "d", EdgeType::Related, 0.3, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "b", EdgeType::Related, 0.5, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "c", EdgeType::Related, 0.8, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "d", EdgeType::Related, 0.3, EdgeOrigin::Explicit));
 		assert_eq!(graph.neighbors("a").len(), 3);
 
 		// Adding a 4th edge should evict the weakest (d at 0.3)
-		graph.add_edge(make_edge("a", "e", EdgeType::Related, 0.9, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "e", EdgeType::Related, 0.9, EdgeOrigin::Explicit));
 		let neighbors = graph.neighbors("a");
 		assert_eq!(neighbors.len(), 3);
 
@@ -802,10 +873,10 @@ mod tests {
 
 	#[test]
 	fn neighbors_filtered_by_edge_type() {
-		let mut graph = default_graph();
-		graph.add_edge(make_edge("a", "b", EdgeType::Related, 0.9, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("a", "c", EdgeType::Parent, 1.0, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("a", "d", EdgeType::Similar, 0.85, EdgeOrigin::Similarity));
+		let graph = default_graph();
+		let graph = graph.add_edge(make_edge("a", "b", EdgeType::Related, 0.9, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "c", EdgeType::Parent, 1.0, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "d", EdgeType::Similar, 0.85, EdgeOrigin::Similarity));
 
 		let related = graph.neighbors_by_type("a", &[EdgeType::Related]);
 		assert_eq!(related.len(), 1);
@@ -818,18 +889,18 @@ mod tests {
 
 	#[test]
 	fn update_edge_weight_when_stronger() {
-		let mut graph = default_graph();
-		graph.add_edge(make_edge("a", "b", EdgeType::Related, 0.5, EdgeOrigin::Explicit));
+		let graph = default_graph();
+		let graph = graph.add_edge(make_edge("a", "b", EdgeType::Related, 0.5, EdgeOrigin::Explicit));
 
 		// Same source+target+type but stronger weight
-		graph.add_edge(make_edge("a", "b", EdgeType::Related, 0.9, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "b", EdgeType::Related, 0.9, EdgeOrigin::Explicit));
 
 		let neighbors = graph.neighbors("a");
 		assert_eq!(neighbors.len(), 1);
 		assert!((neighbors[0].weight - 0.9).abs() < 1e-10);
 
 		// Weaker weight should NOT update
-		graph.add_edge(make_edge("a", "b", EdgeType::Related, 0.3, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "b", EdgeType::Related, 0.3, EdgeOrigin::Explicit));
 		let neighbors = graph.neighbors("a");
 		assert!((neighbors[0].weight - 0.9).abs() < 1e-10);
 	}
@@ -838,11 +909,11 @@ mod tests {
 
 	#[test]
 	fn parse_rel_metadata_creates_related_edges() {
-		let mut graph = default_graph();
+		let graph = default_graph();
 		let mut metadata = HashMap::new();
 		metadata.insert("rel:related".to_string(), "b,c".to_string());
 
-		graph.parse_metadata_edges("a", &metadata, 1000);
+		let graph = graph.parse_metadata_edges("a", &metadata, 1000);
 
 		// Bidirectional: a→b, b→a, a→c, c→a
 		assert_eq!(graph.edge_count(), 4);
@@ -858,11 +929,11 @@ mod tests {
 
 	#[test]
 	fn parse_rel_parent_creates_parent_child_edges() {
-		let mut graph = default_graph();
+		let graph = default_graph();
 		let mut metadata = HashMap::new();
 		metadata.insert("rel:parent".to_string(), "p1".to_string());
 
-		graph.parse_metadata_edges("child1", &metadata, 1000);
+		let graph = graph.parse_metadata_edges("child1", &metadata, 1000);
 
 		// child1 → p1 (Parent), p1 → child1 (Child)
 		assert_eq!(graph.edge_count(), 2);
@@ -880,11 +951,11 @@ mod tests {
 
 	#[test]
 	fn parse_rel_extends_creates_directed_edge() {
-		let mut graph = default_graph();
+		let graph = default_graph();
 		let mut metadata = HashMap::new();
 		metadata.insert("rel:extends".to_string(), "base".to_string());
 
-		graph.parse_metadata_edges("derived", &metadata, 1000);
+		let graph = graph.parse_metadata_edges("derived", &metadata, 1000);
 
 		// Only one direction: derived → base (Extends)
 		assert_eq!(graph.edge_count(), 1);
@@ -900,11 +971,11 @@ mod tests {
 
 	#[test]
 	fn parse_rel_contradicts_creates_bidirectional_edges() {
-		let mut graph = default_graph();
+		let graph = default_graph();
 		let mut metadata = HashMap::new();
 		metadata.insert("rel:contradicts".to_string(), "claim2".to_string());
 
-		graph.parse_metadata_edges("claim1", &metadata, 1000);
+		let graph = graph.parse_metadata_edges("claim1", &metadata, 1000);
 
 		assert_eq!(graph.edge_count(), 2);
 
@@ -921,8 +992,8 @@ mod tests {
 
 	#[test]
 	fn add_similarity_edge_above_threshold() {
-		let mut graph = default_graph(); // threshold = 0.85
-		graph.add_similarity_edge("a", "b", 0.90, 1000);
+		let graph = default_graph(); // threshold = 0.85
+		let graph = graph.add_similarity_edge("a", "b", 0.90, 1000);
 
 		assert_eq!(graph.edge_count(), 2); // bidirectional
 		let neighbors = graph.neighbors("a");
@@ -933,17 +1004,17 @@ mod tests {
 
 	#[test]
 	fn skip_similarity_edge_below_threshold() {
-		let mut graph = default_graph(); // threshold = 0.85
-		graph.add_similarity_edge("a", "b", 0.80, 1000);
+		let graph = default_graph(); // threshold = 0.85
+		let graph = graph.add_similarity_edge("a", "b", 0.80, 1000);
 		assert_eq!(graph.edge_count(), 0);
 	}
 
 	#[test]
 	fn skip_similarity_edge_when_explicit_exists() {
-		let mut graph = default_graph();
-		graph.add_edge(make_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit));
+		let graph = default_graph();
+		let graph = graph.add_edge(make_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit));
 
-		graph.add_similarity_edge("a", "b", 0.95, 2000);
+		let graph = graph.add_similarity_edge("a", "b", 0.95, 2000);
 		// Should still only have the original explicit edge
 		let neighbors = graph.neighbors("a");
 		assert_eq!(neighbors.len(), 1);
@@ -954,7 +1025,7 @@ mod tests {
 
 	#[test]
 	fn sync_correlation_above_threshold() {
-		let mut graph = default_graph(); // correlation_threshold = 3
+		let graph = default_graph(); // correlation_threshold = 3
 
 		let mut correlations: HashMap<String, HashMap<String, usize>> = HashMap::new();
 		let mut peers = HashMap::new();
@@ -965,7 +1036,7 @@ mod tests {
 		peers_b.insert("a".to_string(), 5);
 		correlations.insert("b".to_string(), peers_b);
 
-		graph.sync_correlations(&correlations, 10, 1000);
+		let graph = graph.sync_correlations(&correlations, 10, 1000);
 
 		assert_eq!(graph.edge_count(), 2); // bidirectional
 		let neighbors = graph.neighbors("a");
@@ -978,24 +1049,24 @@ mod tests {
 
 	#[test]
 	fn skip_correlation_below_threshold() {
-		let mut graph = default_graph(); // correlation_threshold = 3
+		let graph = default_graph(); // correlation_threshold = 3
 
 		let mut correlations: HashMap<String, HashMap<String, usize>> = HashMap::new();
 		let mut peers = HashMap::new();
 		peers.insert("b".to_string(), 2); // below threshold of 3
 		correlations.insert("a".to_string(), peers);
 
-		graph.sync_correlations(&correlations, 10, 1000);
+		let graph = graph.sync_correlations(&correlations, 10, 1000);
 
 		assert_eq!(graph.edge_count(), 0);
 	}
 
 	#[test]
 	fn prune_implicit_edges_below_threshold() {
-		let mut graph = default_graph();
+		let graph = default_graph();
 
 		// Add an implicit similarity edge with low weight
-		graph.add_bidirectional_edge(
+		let graph = graph.add_bidirectional_edge(
 			"a",
 			"b",
 			EdgeType::Similar,
@@ -1005,7 +1076,7 @@ mod tests {
 		);
 
 		// Add an implicit correlation edge with higher weight
-		graph.add_bidirectional_edge(
+		let graph = graph.add_bidirectional_edge(
 			"c",
 			"d",
 			EdgeType::CoOccurs,
@@ -1015,11 +1086,11 @@ mod tests {
 		);
 
 		// Add an explicit edge with low weight (should NOT be pruned)
-		graph.add_edge(make_edge("e", "f", EdgeType::Related, 0.1, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("e", "f", EdgeType::Related, 0.1, EdgeOrigin::Explicit));
 
 		assert_eq!(graph.edge_count(), 5); // 2 + 2 + 1
 
-		graph.prune_weak_implicit_edges(0.5);
+		let graph = graph.prune_weak_implicit_edges(0.5);
 
 		// a↔b (0.2 similarity) pruned, c↔d (0.8 correlation) kept, e→f (explicit) kept
 		assert_eq!(graph.edge_count(), 3);
@@ -1032,9 +1103,9 @@ mod tests {
 
 	#[test]
 	fn traverse_one_hop() {
-		let mut graph = default_graph();
-		graph.add_edge(make_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("a", "c", EdgeType::Related, 0.8, EdgeOrigin::Explicit));
+		let graph = default_graph();
+		let graph = graph.add_edge(make_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "c", EdgeType::Related, 0.8, EdgeOrigin::Explicit));
 
 		let results = graph.traverse("a", 1, None, 100);
 		assert_eq!(results.len(), 2);
@@ -1047,9 +1118,9 @@ mod tests {
 
 	#[test]
 	fn traverse_two_hops() {
-		let mut graph = default_graph();
-		graph.add_edge(make_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("b", "c", EdgeType::Related, 0.8, EdgeOrigin::Explicit));
+		let graph = default_graph();
+		let graph = graph.add_edge(make_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("b", "c", EdgeType::Related, 0.8, EdgeOrigin::Explicit));
 
 		let results = graph.traverse("a", 2, None, 100);
 		assert_eq!(results.len(), 2);
@@ -1066,11 +1137,11 @@ mod tests {
 
 	#[test]
 	fn traverse_deduplicates_visited_nodes() {
-		let mut graph = default_graph();
+		let graph = default_graph();
 		// a → b, a → c, b → c (c reachable via two paths)
-		graph.add_edge(make_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("a", "c", EdgeType::Related, 0.8, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("b", "c", EdgeType::Related, 0.6, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "c", EdgeType::Related, 0.8, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("b", "c", EdgeType::Related, 0.6, EdgeOrigin::Explicit));
 
 		let results = graph.traverse("a", 2, None, 100);
 		// c should only appear once (at depth 1 from a→c, since a's neighbors
@@ -1081,10 +1152,10 @@ mod tests {
 
 	#[test]
 	fn traverse_with_edge_type_filter() {
-		let mut graph = default_graph();
-		graph.add_edge(make_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("a", "c", EdgeType::Parent, 1.0, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("a", "d", EdgeType::Similar, 0.9, EdgeOrigin::Similarity));
+		let graph = default_graph();
+		let graph = graph.add_edge(make_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "c", EdgeType::Parent, 1.0, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "d", EdgeType::Similar, 0.9, EdgeOrigin::Similarity));
 
 		let results = graph.traverse("a", 1, Some(&[EdgeType::Related]), 100);
 		assert_eq!(results.len(), 1);
@@ -1093,10 +1164,10 @@ mod tests {
 
 	#[test]
 	fn traverse_respects_max_results() {
-		let mut graph = default_graph();
-		graph.add_edge(make_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("a", "c", EdgeType::Related, 0.9, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("a", "d", EdgeType::Related, 0.8, EdgeOrigin::Explicit));
+		let graph = default_graph();
+		let graph = graph.add_edge(make_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "c", EdgeType::Related, 0.9, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("a", "d", EdgeType::Related, 0.8, EdgeOrigin::Explicit));
 
 		let results = graph.traverse("a", 1, None, 2);
 		assert_eq!(results.len(), 2);
@@ -1106,9 +1177,9 @@ mod tests {
 
 	#[test]
 	fn compute_graph_score_for_connected_candidates() {
-		let mut graph = default_graph();
-		graph.add_edge(make_edge("x", "a", EdgeType::Related, 0.9, EdgeOrigin::Explicit));
-		graph.add_edge(make_edge("x", "b", EdgeType::Similar, 0.7, EdgeOrigin::Similarity));
+		let graph = default_graph();
+		let graph = graph.add_edge(make_edge("x", "a", EdgeType::Related, 0.9, EdgeOrigin::Explicit));
+		let graph = graph.add_edge(make_edge("x", "b", EdgeType::Similar, 0.7, EdgeOrigin::Similarity));
 
 		let relevant = vec!["a".to_string(), "b".to_string()];
 		let score = graph.compute_graph_score("x", &relevant);
@@ -1144,9 +1215,9 @@ mod tests {
 
 	#[test]
 	fn serialize_deserialize_graph_state() {
-		let mut graph = default_graph();
-		graph.add_bidirectional_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit, 1000);
-		graph.add_similarity_edge("c", "d", 0.90, 2000); // implicit — should not be serialized
+		let graph = default_graph();
+		let graph = graph.add_bidirectional_edge("a", "b", EdgeType::Related, 1.0, EdgeOrigin::Explicit, 1000);
+		let graph = graph.add_similarity_edge("c", "d", 0.90, 2000); // implicit — should not be serialized
 
 		let state = graph.serialize();
 		assert_eq!(state.explicit_edges.len(), 2); // only a→b and b→a

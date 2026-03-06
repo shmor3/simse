@@ -20,15 +20,12 @@ use simse_sandbox_engine::vnet_session::{Scheme, SessionType};
 
 /// Create a VirtualNetwork initialized with default (empty) sandbox config.
 fn new_initialized() -> VirtualNetwork {
-    let mut net = VirtualNetwork::new();
-    net.initialize(None, Some(NetImpl::Local(LocalNet::new())));
-    net
+    VirtualNetwork::new().initialize(None, Some(NetImpl::Local(LocalNet::new())))
 }
 
 /// Create a VirtualNetwork initialized with a sandbox config that allows
 /// specific hosts via wildcard subdomain patterns.
 fn new_with_allowed_hosts(hosts: Vec<String>) -> VirtualNetwork {
-    let mut net = VirtualNetwork::new();
     let sandbox = SandboxInit {
         allowed_hosts: hosts,
         allowed_ports: vec![],
@@ -37,8 +34,7 @@ fn new_with_allowed_hosts(hosts: Vec<String>) -> VirtualNetwork {
         max_response_bytes: 10 * 1024 * 1024,
         max_connections: 50,
     };
-    net.initialize(Some(sandbox), Some(NetImpl::Local(LocalNet::new())));
-    net
+    VirtualNetwork::new().initialize(Some(sandbox), Some(NetImpl::Local(LocalNet::new())))
 }
 
 /// Helper to create a simple text MockResponse.
@@ -73,9 +69,9 @@ fn mock_response_with_headers(
 
 #[test]
 fn initialize_returns_ok() {
-    let mut net = VirtualNetwork::new();
+    let net = VirtualNetwork::new();
     assert!(!net.is_initialized());
-    net.initialize(None, Some(NetImpl::Local(LocalNet::new())));
+    let net = net.initialize(None, Some(NetImpl::Local(LocalNet::new())));
     assert!(net.is_initialized());
 }
 
@@ -93,10 +89,9 @@ fn method_before_init_returns_error() {
 
 #[test]
 fn mock_http_request_before_init_returns_error() {
-    let mut net = VirtualNetwork::new();
-    let err = net
-        .mock_http_request("mock://x", Some("GET"), None, None)
-        .unwrap_err();
+    let net = VirtualNetwork::new();
+    let (_, result) = net.mock_http_request("mock://x", Some("GET"), None, None);
+    let err = result.unwrap_err();
     assert!(matches!(err, SandboxError::VnetNotInitialized));
 }
 
@@ -115,12 +110,12 @@ fn metrics_before_init_succeeds() {
 
 #[test]
 fn mock_register_and_http_request() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
     let mut headers = HashMap::new();
     headers.insert("Content-Type".to_string(), "application/json".to_string());
 
-    let id = net.register_mock(
+    let (net, id) = net.register_mock(
         Some("GET".into()),
         "mock://api.example.com/users",
         mock_response_with_headers(200, "[{\"id\":1}]", headers),
@@ -128,14 +123,13 @@ fn mock_register_and_http_request() {
     );
     assert!(!id.is_empty());
 
-    let resp = net
-        .mock_http_request(
-            "mock://api.example.com/users",
-            Some("GET"),
-            None,
-            None,
-        )
-        .unwrap();
+    let (_, result) = net.mock_http_request(
+        "mock://api.example.com/users",
+        Some("GET"),
+        None,
+        None,
+    );
+    let resp = result.unwrap();
     assert_eq!(resp.status, 200);
     assert_eq!(resp.body, "[{\"id\":1}]");
 }
@@ -146,18 +140,17 @@ fn mock_register_and_http_request() {
 
 #[test]
 fn mock_glob_pattern() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    net.register_mock(
+    let (net, _) = net.register_mock(
         None,
         "mock://api/*",
         mock_response(200, "ok"),
         None,
     );
 
-    let resp = net
-        .mock_http_request("mock://api/anything/here", None, None, None)
-        .unwrap();
+    let (_, result) = net.mock_http_request("mock://api/anything/here", None, None, None);
+    let resp = result.unwrap();
     assert_eq!(resp.status, 200);
     assert_eq!(resp.body, "ok");
 }
@@ -168,10 +161,9 @@ fn mock_glob_pattern() {
 
 #[test]
 fn mock_no_match_returns_error() {
-    let mut net = new_initialized();
-    let err = net
-        .mock_http_request("mock://nothing", None, None, None)
-        .unwrap_err();
+    let net = new_initialized();
+    let (_, result) = net.mock_http_request("mock://nothing", None, None, None);
+    let err = result.unwrap_err();
     assert!(matches!(err, SandboxError::VnetNoMockMatch(_)));
     assert_eq!(err.code(), "SANDBOX_VNET_NO_MOCK_MATCH");
 }
@@ -182,9 +174,9 @@ fn mock_no_match_returns_error() {
 
 #[test]
 fn mock_times_limit() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    net.register_mock(
+    let (net, _) = net.register_mock(
         None,
         "mock://once",
         mock_response(200, "x"),
@@ -192,15 +184,13 @@ fn mock_times_limit() {
     );
 
     // First request succeeds
-    let resp = net
-        .mock_http_request("mock://once", None, None, None)
-        .unwrap();
+    let (net, result) = net.mock_http_request("mock://once", None, None, None);
+    let resp = result.unwrap();
     assert_eq!(resp.status, 200);
 
     // Second request fails (mock consumed)
-    let err = net
-        .mock_http_request("mock://once", None, None, None)
-        .unwrap_err();
+    let (_, result) = net.mock_http_request("mock://once", None, None, None);
+    let err = result.unwrap_err();
     assert!(matches!(err, SandboxError::VnetNoMockMatch(_)));
 }
 
@@ -210,9 +200,9 @@ fn mock_times_limit() {
 
 #[test]
 fn mock_list_and_unregister() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    let id = net.register_mock(
+    let (net, id) = net.register_mock(
         None,
         "mock://a",
         mock_response(200, ""),
@@ -223,7 +213,8 @@ fn mock_list_and_unregister() {
     assert_eq!(list.len(), 1);
     assert_eq!(list[0].id, id);
 
-    net.unregister_mock(&id).unwrap();
+    let (net, result) = net.unregister_mock(&id);
+    result.unwrap();
 
     let list = net.list_mocks();
     assert!(list.is_empty());
@@ -235,26 +226,24 @@ fn mock_list_and_unregister() {
 
 #[test]
 fn mock_clear_and_history() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    net.register_mock(
+    let (net, _) = net.register_mock(
         None,
         "mock://test/*",
         mock_response(200, "ok"),
         None,
     );
 
-    net.mock_http_request("mock://test/1", None, None, None)
-        .unwrap();
-    net.mock_http_request("mock://test/2", None, None, None)
-        .unwrap();
+    let (net, _) = net.mock_http_request("mock://test/1", None, None, None);
+    let (net, _) = net.mock_http_request("mock://test/2", None, None, None);
 
     let history = net.mock_history();
     assert_eq!(history.len(), 2);
     assert_eq!(history[0].url, "mock://test/1");
     assert_eq!(history[1].url, "mock://test/2");
 
-    net.clear_mocks();
+    let net = net.clear_mocks();
 
     let list = net.list_mocks();
     assert!(list.is_empty());
@@ -266,12 +255,12 @@ fn mock_clear_and_history() {
 
 #[test]
 fn ws_connect_send_close() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
     // Create a mock WS session (same as the JSON-RPC server does for mock:// WS)
     let target = "ws.example.com/chat";
     net.check_connection_limit().unwrap();
-    let session_id = net.create_session(SessionType::Ws, target, Scheme::Mock);
+    let (net, session_id) = net.create_session(SessionType::Ws, target, Scheme::Mock);
 
     // Verify session exists
     let info = net.get_session(&session_id).unwrap();
@@ -282,10 +271,11 @@ fn ws_connect_send_close() {
     // Simulate sending a message (record activity)
     let data = "hello";
     let data_len = data.len() as u64;
-    net.record_session_activity(&session_id, data_len, 0);
+    let net = net.record_session_activity(&session_id, data_len, 0);
 
     // Close the session
-    net.close_session(&session_id).unwrap();
+    let (net, result) = net.close_session(&session_id);
+    result.unwrap();
 
     // After close, session should not be found
     let err = net.get_session(&session_id).unwrap_err();
@@ -298,10 +288,10 @@ fn ws_connect_send_close() {
 
 #[test]
 fn session_list_and_get() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
     let target = "ws.example.com/test";
-    let session_id = net.create_session(SessionType::Ws, target, Scheme::Mock);
+    let (net, session_id) = net.create_session(SessionType::Ws, target, Scheme::Mock);
 
     let list = net.list_sessions();
     assert_eq!(list.len(), 1);
@@ -319,19 +309,17 @@ fn session_list_and_get() {
 
 #[test]
 fn metrics_track_activity() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    net.register_mock(
+    let (net, _) = net.register_mock(
         None,
         "mock://m/*",
         mock_response(200, "ok"),
         None,
     );
 
-    net.mock_http_request("mock://m/1", None, None, None)
-        .unwrap();
-    net.mock_http_request("mock://m/2", None, None, None)
-        .unwrap();
+    let (net, _) = net.mock_http_request("mock://m/1", None, None, None);
+    let (net, _) = net.mock_http_request("mock://m/2", None, None, None);
 
     let m = net.metrics();
     assert_eq!(m.total_requests, 2);
@@ -340,10 +328,10 @@ fn metrics_track_activity() {
 
 #[test]
 fn metrics_track_errors() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
     // Request with no matching mock
-    let _ = net.mock_http_request("mock://no-match", None, None, None);
+    let (net, _) = net.mock_http_request("mock://no-match", None, None, None);
 
     let m = net.metrics();
     assert_eq!(m.total_requests, 1);
@@ -356,9 +344,8 @@ fn metrics_track_errors() {
 
 #[test]
 fn sandbox_blocks_unallowed_host() {
-    let mut net = VirtualNetwork::new();
     // Default sandbox has empty allowlist = block all
-    net.initialize(None, None);
+    let net = VirtualNetwork::new().initialize(None, None);
 
     let err = net
         .validate_net_request("evil.com", 80, "http")
@@ -369,7 +356,6 @@ fn sandbox_blocks_unallowed_host() {
 
 #[test]
 fn sandbox_allows_configured_host() {
-    let mut net = VirtualNetwork::new();
     let sandbox = SandboxInit {
         allowed_hosts: vec!["api.example.com".into()],
         allowed_ports: vec![],
@@ -378,7 +364,7 @@ fn sandbox_allows_configured_host() {
         max_response_bytes: 10 * 1024 * 1024,
         max_connections: 50,
     };
-    net.initialize(Some(sandbox), None);
+    let net = VirtualNetwork::new().initialize(Some(sandbox), None);
     assert!(net
         .validate_net_request("api.example.com", 443, "https")
         .is_ok());
@@ -386,7 +372,6 @@ fn sandbox_allows_configured_host() {
 
 #[test]
 fn sandbox_blocks_disallowed_port() {
-    let mut net = VirtualNetwork::new();
     let sandbox = SandboxInit {
         allowed_hosts: vec!["example.com".into()],
         allowed_ports: vec![(80, 80), (443, 443)],
@@ -395,7 +380,7 @@ fn sandbox_blocks_disallowed_port() {
         max_response_bytes: 10 * 1024 * 1024,
         max_connections: 50,
     };
-    net.initialize(Some(sandbox), None);
+    let net = VirtualNetwork::new().initialize(Some(sandbox), None);
 
     assert!(net.validate_net_request("example.com", 80, "http").is_ok());
     assert!(net.validate_net_request("example.com", 443, "https").is_ok());
@@ -408,7 +393,6 @@ fn sandbox_blocks_disallowed_port() {
 
 #[test]
 fn sandbox_blocks_disallowed_protocol() {
-    let mut net = VirtualNetwork::new();
     let sandbox = SandboxInit {
         allowed_hosts: vec!["example.com".into()],
         allowed_ports: vec![],
@@ -417,7 +401,7 @@ fn sandbox_blocks_disallowed_protocol() {
         max_response_bytes: 10 * 1024 * 1024,
         max_connections: 50,
     };
-    net.initialize(Some(sandbox), None);
+    let net = VirtualNetwork::new().initialize(Some(sandbox), None);
 
     assert!(net
         .validate_net_request("example.com", 443, "https")
@@ -435,12 +419,12 @@ fn sandbox_blocks_disallowed_protocol() {
 
 #[test]
 fn tcp_connect_and_send() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
     // Create a TCP session (same as JSON-RPC server does for mock:// TCP)
     let target = "db.example.com:5432";
     net.check_connection_limit().unwrap();
-    let session_id = net.create_session(SessionType::Tcp, target, Scheme::Mock);
+    let (net, session_id) = net.create_session(SessionType::Tcp, target, Scheme::Mock);
 
     // Verify session
     let info = net.get_session(&session_id).unwrap();
@@ -450,11 +434,12 @@ fn tcp_connect_and_send() {
     // Simulate sending data
     let data = "SELECT 1";
     let bytes_written = data.len() as u64;
-    net.record_session_activity(&session_id, bytes_written, 0);
+    let net = net.record_session_activity(&session_id, bytes_written, 0);
     assert!(bytes_written > 0);
 
     // Close
-    net.close_session(&session_id).unwrap();
+    let (net, result) = net.close_session(&session_id);
+    result.unwrap();
 
     // After close, session should not be found
     let err = net.get_session(&session_id).unwrap_err();
@@ -467,10 +452,10 @@ fn tcp_connect_and_send() {
 
 #[test]
 fn udp_send_with_mock() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
     // Register a mock for UDP
-    net.register_mock(
+    let (net, _) = net.register_mock(
         Some("udp".into()),
         "mock://dns-server:53",
         mock_response(200, "udp-response-data"),
@@ -478,11 +463,11 @@ fn udp_send_with_mock() {
     );
 
     // Simulate UDP send (same as the JSON-RPC server: construct mock URL and find match)
-    net.increment_requests();
+    let net = net.increment_requests();
     let mock_url = "mock://dns-server:53";
-    let response = net.mock_store_find_match(mock_url, Some("udp"));
-    assert!(response.is_some());
-    let response = response.unwrap();
+    let (_, found) = net.mock_store_find_match(mock_url, Some("udp"));
+    assert!(found.is_some());
+    let response = found.unwrap();
     assert_eq!(response.body, "udp-response-data");
 }
 
@@ -492,10 +477,10 @@ fn udp_send_with_mock() {
 
 #[test]
 fn dns_resolve_with_mock() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
     // Register a mock for DNS resolution
-    net.register_mock(
+    let (net, _) = net.register_mock(
         Some("dns".into()),
         "mock://dns/example.com",
         mock_response(200, "[\"1.2.3.4\", \"5.6.7.8\"]"),
@@ -504,9 +489,9 @@ fn dns_resolve_with_mock() {
 
     // Simulate resolve (same as the JSON-RPC server: construct mock URL and find match)
     let mock_url = "mock://dns/example.com";
-    let response = net.mock_store_find_match(mock_url, Some("dns"));
-    assert!(response.is_some());
-    let response = response.unwrap();
+    let (_, found) = net.mock_store_find_match(mock_url, Some("dns"));
+    assert!(found.is_some());
+    let response = found.unwrap();
     let addresses: Vec<String> = serde_json::from_str(&response.body).unwrap();
     assert_eq!(addresses.len(), 2);
     assert_eq!(addresses[0], "1.2.3.4");
@@ -519,7 +504,6 @@ fn dns_resolve_with_mock() {
 
 #[test]
 fn connection_limit_enforced() {
-    let mut net = VirtualNetwork::new();
     let sandbox = SandboxInit {
         allowed_hosts: vec!["*".into()],
         allowed_ports: vec![],
@@ -528,10 +512,10 @@ fn connection_limit_enforced() {
         max_response_bytes: 10 * 1024 * 1024,
         max_connections: 1,
     };
-    net.initialize(Some(sandbox), None);
+    let net = VirtualNetwork::new().initialize(Some(sandbox), None);
 
     // Create one session to fill the limit
-    net.create_session(SessionType::Tcp, "a.com:80", Scheme::Net);
+    let (net, _) = net.create_session(SessionType::Tcp, "a.com:80", Scheme::Net);
 
     // Second connection attempt should fail
     let err = net.check_connection_limit().unwrap_err();
@@ -545,8 +529,9 @@ fn connection_limit_enforced() {
 
 #[test]
 fn unregister_nonexistent_mock_returns_error() {
-    let mut net = new_initialized();
-    let err = net.unregister_mock("nonexistent-id").unwrap_err();
+    let net = new_initialized();
+    let (_, result) = net.unregister_mock("nonexistent-id");
+    let err = result.unwrap_err();
     assert!(matches!(err, SandboxError::VnetMockNotFound(_)));
     assert_eq!(err.code(), "SANDBOX_VNET_MOCK_NOT_FOUND");
 }
@@ -557,8 +542,9 @@ fn unregister_nonexistent_mock_returns_error() {
 
 #[test]
 fn close_nonexistent_session_returns_error() {
-    let mut net = new_initialized();
-    let err = net.close_session("nonexistent-id").unwrap_err();
+    let net = new_initialized();
+    let (_, result) = net.close_session("nonexistent-id");
+    let err = result.unwrap_err();
     assert!(matches!(err, SandboxError::VnetSessionNotFound(_)));
     assert_eq!(err.code(), "SANDBOX_VNET_SESSION_NOT_FOUND");
 }
@@ -580,17 +566,16 @@ fn get_nonexistent_session_returns_error() {
 
 #[test]
 fn bytes_total_tracked() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    net.register_mock(
+    let (net, _) = net.register_mock(
         None,
         "mock://bytes/*",
         mock_response(200, "12345"),
         None,
     );
 
-    net.mock_http_request("mock://bytes/test", None, None, None)
-        .unwrap();
+    let (net, _) = net.mock_http_request("mock://bytes/test", None, None, None);
 
     let m = net.metrics();
     assert_eq!(m.bytes_total, 5); // "12345" is 5 bytes
@@ -602,17 +587,17 @@ fn bytes_total_tracked() {
 
 #[test]
 fn active_sessions_in_metrics() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
     assert_eq!(net.metrics().active_sessions, 0);
 
-    let s1 = net.create_session(SessionType::Ws, "a.com:443", Scheme::Mock);
+    let (net, s1) = net.create_session(SessionType::Ws, "a.com:443", Scheme::Mock);
     assert_eq!(net.metrics().active_sessions, 1);
 
-    let _s2 = net.create_session(SessionType::Tcp, "b.com:80", Scheme::Net);
+    let (net, _s2) = net.create_session(SessionType::Tcp, "b.com:80", Scheme::Net);
     assert_eq!(net.metrics().active_sessions, 2);
 
-    net.close_session(&s1).unwrap();
+    let (net, _) = net.close_session(&s1);
     assert_eq!(net.metrics().active_sessions, 1);
 }
 
@@ -622,9 +607,9 @@ fn active_sessions_in_metrics() {
 
 #[test]
 fn mock_method_filtering() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    net.register_mock(
+    let (net, _) = net.register_mock(
         Some("POST".into()),
         "mock://api/users",
         mock_response(201, "created"),
@@ -632,15 +617,13 @@ fn mock_method_filtering() {
     );
 
     // POST should match
-    let resp = net
-        .mock_http_request("mock://api/users", Some("POST"), None, None)
-        .unwrap();
+    let (net, result) = net.mock_http_request("mock://api/users", Some("POST"), None, None);
+    let resp = result.unwrap();
     assert_eq!(resp.status, 201);
 
     // GET should not match
-    let err = net
-        .mock_http_request("mock://api/users", Some("GET"), None, None)
-        .unwrap_err();
+    let (_, result) = net.mock_http_request("mock://api/users", Some("GET"), None, None);
+    let err = result.unwrap_err();
     assert!(matches!(err, SandboxError::VnetNoMockMatch(_)));
 }
 
@@ -650,23 +633,21 @@ fn mock_method_filtering() {
 
 #[test]
 fn mock_none_method_matches_any() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    net.register_mock(
+    let (net, _) = net.register_mock(
         None,
         "mock://api/anything",
         mock_response(200, "any"),
         None,
     );
 
-    let resp_get = net
-        .mock_http_request("mock://api/anything", Some("GET"), None, None)
-        .unwrap();
+    let (net, result) = net.mock_http_request("mock://api/anything", Some("GET"), None, None);
+    let resp_get = result.unwrap();
     assert_eq!(resp_get.status, 200);
 
-    let resp_post = net
-        .mock_http_request("mock://api/anything", Some("POST"), None, None)
-        .unwrap();
+    let (_, result) = net.mock_http_request("mock://api/anything", Some("POST"), None, None);
+    let resp_post = result.unwrap();
     assert_eq!(resp_post.status, 200);
 }
 
@@ -676,7 +657,6 @@ fn mock_none_method_matches_any() {
 
 #[test]
 fn default_timeout_and_max_response_bytes() {
-    let mut net = VirtualNetwork::new();
     let sandbox = SandboxInit {
         allowed_hosts: vec!["*".into()],
         allowed_ports: vec![],
@@ -685,7 +665,7 @@ fn default_timeout_and_max_response_bytes() {
         max_response_bytes: 1024,
         max_connections: 10,
     };
-    net.initialize(Some(sandbox), None);
+    let net = VirtualNetwork::new().initialize(Some(sandbox), None);
 
     assert_eq!(net.default_timeout(), 5000);
     assert_eq!(net.max_response_bytes(), 1024);
@@ -697,24 +677,23 @@ fn default_timeout_and_max_response_bytes() {
 
 #[test]
 fn first_mock_match_wins() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    net.register_mock(
+    let (net, _) = net.register_mock(
         None,
         "mock://api/*",
         mock_response(200, "first"),
         None,
     );
-    net.register_mock(
+    let (net, _) = net.register_mock(
         None,
         "mock://api/*",
         mock_response(404, "second"),
         None,
     );
 
-    let resp = net
-        .mock_http_request("mock://api/test", None, None, None)
-        .unwrap();
+    let (_, result) = net.mock_http_request("mock://api/test", None, None, None);
+    let resp = result.unwrap();
     assert_eq!(resp.status, 200);
     assert_eq!(resp.body, "first");
 }
@@ -749,19 +728,17 @@ fn check_connection_limit_before_init_returns_error() {
 
 #[test]
 fn mock_history_records_method() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    net.register_mock(
+    let (net, _) = net.register_mock(
         None,
         "mock://api/*",
         mock_response(200, "ok"),
         None,
     );
 
-    net.mock_http_request("mock://api/one", Some("GET"), None, None)
-        .unwrap();
-    net.mock_http_request("mock://api/two", Some("POST"), None, None)
-        .unwrap();
+    let (net, _) = net.mock_http_request("mock://api/one", Some("GET"), None, None);
+    let (net, _) = net.mock_http_request("mock://api/two", Some("POST"), None, None);
 
     let history = net.mock_history();
     assert_eq!(history.len(), 2);
@@ -777,12 +754,12 @@ fn mock_history_records_method() {
 
 #[test]
 fn session_bytes_tracking() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    let session_id = net.create_session(SessionType::Tcp, "db:5432", Scheme::Mock);
+    let (net, session_id) = net.create_session(SessionType::Tcp, "db:5432", Scheme::Mock);
 
-    net.record_session_activity(&session_id, 100, 200);
-    net.record_session_activity(&session_id, 50, 75);
+    let net = net.record_session_activity(&session_id, 100, 200);
+    let net = net.record_session_activity(&session_id, 50, 75);
 
     let info = net.get_session(&session_id).unwrap();
     assert_eq!(info.bytes_sent, 150);
@@ -829,20 +806,19 @@ fn default_creates_uninitialized() {
 
 #[test]
 fn mock_clear_also_clears_history() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    net.register_mock(
+    let (net, _) = net.register_mock(
         None,
         "mock://h/*",
         mock_response(200, "ok"),
         None,
     );
 
-    net.mock_http_request("mock://h/1", None, None, None)
-        .unwrap();
+    let (net, _) = net.mock_http_request("mock://h/1", None, None, None);
     assert_eq!(net.mock_history().len(), 1);
 
-    net.clear_mocks();
+    let net = net.clear_mocks();
     assert!(net.mock_history().is_empty());
 }
 
@@ -852,8 +828,7 @@ fn mock_clear_also_clears_history() {
 
 #[tokio::test]
 async fn net_http_request_without_backend_returns_error() {
-    let mut net = VirtualNetwork::new();
-    net.initialize(None, None); // No backend
+    let mut net = VirtualNetwork::new().initialize(None, None); // No backend
 
     let err = net
         .net_http_request("http://example.com", "GET", &HashMap::new(), None, None)
@@ -868,10 +843,10 @@ async fn net_http_request_without_backend_returns_error() {
 
 #[test]
 fn multiple_session_types() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    let ws_id = net.create_session(SessionType::Ws, "ws.com:443", Scheme::Mock);
-    let tcp_id = net.create_session(SessionType::Tcp, "db.com:5432", Scheme::Net);
+    let (net, ws_id) = net.create_session(SessionType::Ws, "ws.com:443", Scheme::Mock);
+    let (net, tcp_id) = net.create_session(SessionType::Tcp, "db.com:5432", Scheme::Net);
 
     let list = net.list_sessions();
     assert_eq!(list.len(), 2);
@@ -891,9 +866,9 @@ fn multiple_session_types() {
 
 #[test]
 fn consumed_mock_not_listed() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    net.register_mock(
+    let (net, _) = net.register_mock(
         None,
         "mock://consumed",
         mock_response(200, "ok"),
@@ -903,8 +878,7 @@ fn consumed_mock_not_listed() {
     assert_eq!(net.list_mocks().len(), 1);
 
     // Consume the mock
-    net.mock_http_request("mock://consumed", None, None, None)
-        .unwrap();
+    let (net, _) = net.mock_http_request("mock://consumed", None, None, None);
 
     // Consumed mock should not appear in list
     assert!(net.list_mocks().is_empty());
@@ -916,9 +890,9 @@ fn consumed_mock_not_listed() {
 
 #[test]
 fn mock_list_returns_metadata() {
-    let mut net = new_initialized();
+    let net = new_initialized();
 
-    net.register_mock(
+    let (net, _) = net.register_mock(
         Some("GET".into()),
         "mock://api/items",
         mock_response(200, "items"),

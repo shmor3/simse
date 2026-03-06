@@ -282,10 +282,11 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 				Screen::Settings => {
 					// Check if current field is a boolean — space toggles
 					if c == ' ' {
-						let action = app.settings_state.toggle();
+						let (state, action) = std::mem::take(&mut app.settings_state).toggle();
+						app.settings_state = state;
 						handle_settings_action(&mut app, action);
 					} else {
-						app.settings_state.type_char(c);
+						app.settings_state = std::mem::take(&mut app.settings_state).type_char(c);
 					}
 					return app;
 				}
@@ -311,7 +312,8 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		AppMessage::Submit => {
 			match &app.screen {
 				Screen::Settings => {
-					let action = app.settings_state.enter();
+					let (state, action) = std::mem::take(&mut app.settings_state).enter();
+					app.settings_state = state;
 					handle_settings_action(&mut app, action);
 					return app;
 				}
@@ -376,7 +378,7 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		AppMessage::Backspace => {
 			match &app.screen {
 				Screen::Settings => {
-					app.settings_state.backspace();
+					app.settings_state = std::mem::take(&mut app.settings_state).backspace();
 					return app;
 				}
 				Screen::Librarians => { app.librarian_state.backspace(); return app; }
@@ -387,7 +389,7 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::Delete => {
-			if app.screen == Screen::Settings { app.settings_state.delete(); return app; }
+			if app.screen == Screen::Settings { app.settings_state = std::mem::take(&mut app.settings_state).delete(); return app; }
 			app.input = input::delete(&app.input);
 			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
@@ -396,11 +398,11 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.autocomplete.update_matches(&app.input.value, &app.commands);
 		}
 		AppMessage::CursorLeft => {
-			if app.screen == Screen::Settings { app.settings_state.cursor_left(); return app; }
+			if app.screen == Screen::Settings { app.settings_state = std::mem::take(&mut app.settings_state).cursor_left(); return app; }
 			app.input = input::move_left(&app.input, false);
 		}
 		AppMessage::CursorRight => {
-			if app.screen == Screen::Settings { app.settings_state.cursor_right(); return app; }
+			if app.screen == Screen::Settings { app.settings_state = std::mem::take(&mut app.settings_state).cursor_right(); return app; }
 			app.input = input::move_right(&app.input, false);
 		}
 		AppMessage::WordLeft => {
@@ -410,11 +412,11 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.input = input::move_word_right(&app.input, false);
 		}
 		AppMessage::Home => {
-			if app.screen == Screen::Settings { app.settings_state.cursor_home(); return app; }
+			if app.screen == Screen::Settings { app.settings_state = std::mem::take(&mut app.settings_state).cursor_home(); return app; }
 			app.input = input::move_home(&app.input, false);
 		}
 		AppMessage::End => {
-			if app.screen == Screen::Settings { app.settings_state.cursor_end(); return app; }
+			if app.screen == Screen::Settings { app.settings_state = std::mem::take(&mut app.settings_state).cursor_end(); return app; }
 			app.input = input::move_end(&app.input, false);
 		}
 		AppMessage::SelectLeft => {
@@ -434,7 +436,7 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		}
 		AppMessage::HistoryUp => {
 			match &app.screen {
-				Screen::Settings => { app.settings_state.move_up(); return app; }
+				Screen::Settings => { app.settings_state = std::mem::take(&mut app.settings_state).move_up(); return app; }
 				Screen::Librarians => { app.librarian_state.move_up(); return app; }
 				Screen::Setup { .. } => { app.setup_state.move_up(); return app; }
 				_ => {}
@@ -469,7 +471,7 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		AppMessage::HistoryDown => {
 			match &app.screen {
 				Screen::Settings => {
-					app.settings_state.move_down();
+					app.settings_state = std::mem::take(&mut app.settings_state).move_down();
 					return app;
 				}
 				Screen::Librarians => { app.librarian_state.move_down(); return app; }
@@ -525,7 +527,8 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			} else {
 				match &app.screen {
 					Screen::Settings => {
-						let action = app.settings_state.back();
+						let (state, action) = std::mem::take(&mut app.settings_state).back();
+						app.settings_state = state;
 						handle_settings_action(&mut app, action);
 					}
 					Screen::Librarians => {
@@ -700,13 +703,13 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 
 		// ── Settings ────────────────────────────────
 		AppMessage::SettingsFileLoaded(data) => {
-			app.settings_state.file_loaded(data);
+			app.settings_state = std::mem::take(&mut app.settings_state).file_loaded(data);
 		}
 		AppMessage::SettingsFieldSaved { key, value } => {
-			app.settings_state.field_saved(&key, &value);
+			app.settings_state = std::mem::take(&mut app.settings_state).field_saved(&key, &value);
 		}
 		AppMessage::SettingsError(msg) => {
-			app.settings_state.set_error(msg);
+			app.settings_state = std::mem::take(&mut app.settings_state).set_error(msg);
 		}
 
 		// ── Timer ───────────────────────────────────

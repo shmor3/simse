@@ -160,17 +160,35 @@ impl SessionManager {
 		})
 	}
 
-	/// Execute a closure with a mutable reference to a session.
+	/// Execute a read-only closure with an immutable reference to a session.
 	///
-	/// Automatically updates `updated_at` after the closure runs.
 	/// Returns `None` if the session does not exist.
 	pub fn with_session<F, R>(&self, id: &str, f: F) -> Option<R>
 	where
-		F: FnOnce(&mut Session) -> R,
+		F: FnOnce(&Session) -> R,
+	{
+		let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+		inner.sessions.get(id).map(|session| f(session))
+	}
+
+	/// Execute a state transition on a session's conversation using owned-return.
+	///
+	/// The closure receives the owned `Conversation` and must return it
+	/// (possibly transformed) along with an arbitrary result value `R`.
+	/// Automatically updates `updated_at` after the transition.
+	/// Returns `None` if the session does not exist.
+	pub fn with_state_transition<F, R>(&self, id: &str, f: F) -> Option<R>
+	where
+		F: FnOnce(Conversation) -> (Conversation, R),
 	{
 		let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
 		inner.sessions.get_mut(id).map(|session| {
-			let result = f(session);
+			let conv = std::mem::replace(
+				&mut session.conversation,
+				Conversation::new(None),
+			);
+			let (new_conv, result) = f(conv);
+			session.conversation = new_conv;
 			session.updated_at = now_millis();
 			result
 		})
@@ -230,8 +248,7 @@ impl SessionManager {
 		let new_id = generate_id();
 		let now = now_millis();
 
-		let mut new_conversation = Conversation::new(None);
-		new_conversation.from_json(&json);
+		let new_conversation = Conversation::new(None).from_json(&json);
 
 		let forked = Session {
 			id: new_id.clone(),

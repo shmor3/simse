@@ -7,6 +7,7 @@
 //! or text generation so the lock is never held across `.await` points.
 
 use std::collections::{HashMap, HashSet};
+use std::mem;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -236,7 +237,8 @@ impl Library {
 
 		{
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			store.initialize(storage_path)?;
+			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			*store = taken.initialize(storage_path)?;
 		}
 
 		{
@@ -251,7 +253,8 @@ impl Library {
 	pub fn dispose(&self) -> Result<(), SimseError> {
 		{
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			store.dispose()?;
+			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			*store = taken.dispose()?;
 		}
 
 		{
@@ -292,7 +295,10 @@ impl Library {
 
 		let id = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			store.add(text.to_string(), embedding, metadata)?
+			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let (new_store, id) = taken.add(text.to_string(), embedding, metadata)?;
+			*store = new_store;
+			id
 		};
 
 		self.publish(
@@ -373,7 +379,10 @@ impl Library {
 
 		let ids = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			store.add_batch(store_entries)?
+			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let (new_store, ids) = taken.add_batch(store_entries)?;
+			*store = new_store;
+			ids
 		};
 
 		Ok(ids)
@@ -400,11 +409,14 @@ impl Library {
 
 		let results = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			store.search(
+			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let (new_store, results) = taken.search(
 				&embedding,
 				max_results.unwrap_or(self.config.max_results),
 				threshold.unwrap_or(self.config.similarity_threshold),
-			)?
+			)?;
+			*store = new_store;
+			results
 		};
 
 		self.publish(
@@ -465,19 +477,20 @@ impl Library {
 		let mut resolved = options.clone();
 
 		// Auto-embed text query if no embedding provided
-		if resolved.query_embedding.is_none() {
-			if let Some(ref text_opts) = resolved.text {
+		if resolved.query_embedding.is_none()
+			&& let Some(ref text_opts) = resolved.text {
 				let trimmed = text_opts.query.trim();
-				if !trimmed.is_empty() {
-					if let Ok(emb) = self.get_embedding(trimmed).await {
+				if !trimmed.is_empty()
+					&& let Ok(emb) = self.get_embedding(trimmed).await {
 						resolved.query_embedding = Some(emb);
 					}
-				}
 			}
-		}
 
 		let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-		Ok(store.advanced_search(&resolved)?)
+		let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+		let (new_store, results) = taken.advanced_search(&resolved)?;
+		*store = new_store;
+		Ok(results)
 	}
 
 	/// Parse a DSL query string and run an advanced search.
@@ -515,21 +528,23 @@ impl Library {
 		// Auto-embed text query
 		if let Some(ref ts) = parsed.text_search {
 			let trimmed = ts.query.trim();
-			if !trimmed.is_empty() {
-				if let Ok(emb) = self.get_embedding(trimmed).await {
+			if !trimmed.is_empty()
+				&& let Ok(emb) = self.get_embedding(trimmed).await {
 					search_options.query_embedding = Some(emb);
 				}
-			}
 		}
 
 		let mut results = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			store.advanced_search(&search_options)?
+			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let (new_store, results) = taken.advanced_search(&search_options)?;
+			*store = new_store;
+			results
 		};
 
 		// Apply topic filter post-hoc
-		if let Some(ref topics) = parsed.topic_filter {
-			if !topics.is_empty() {
+		if let Some(ref topics) = parsed.topic_filter
+			&& !topics.is_empty() {
 				let topic_ids: HashSet<String> = {
 					let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
 					store
@@ -540,7 +555,6 @@ impl Library {
 				};
 				results.retain(|r| topic_ids.contains(&r.volume.id));
 			}
-		}
 
 		Ok(results)
 	}
@@ -554,7 +568,10 @@ impl Library {
 		self.ensure_initialized()?;
 
 		let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-		Ok(store.get_by_id(id))
+		let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+		let (new_store, vol) = taken.get_by_id(id);
+		*store = new_store;
+		Ok(vol)
 	}
 
 	/// Return all volumes.
@@ -698,7 +715,10 @@ impl Library {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
 			let mut vols = Vec::new();
 			for id in &options.ids {
-				let vol = store.get_by_id(id).ok_or_else(|| {
+				let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+				let (new_store, vol) = taken.get_by_id(id);
+				*store = new_store;
+				let vol = vol.ok_or_else(|| {
 					SimseError::library(
 						LibraryErrorCode::NotFound,
 						format!("Volume \"{}\" not found for compendium", id),
@@ -739,17 +759,22 @@ impl Library {
 
 		let compendium_id = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			store.add(
+			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let (new_store, id) = taken.add(
 				compendium_text.clone(),
 				compendium_embedding,
 				compendium_metadata,
-			)?
+			)?;
+			*store = new_store;
+			id
 		};
 
 		// Optionally delete originals
 		if options.delete_originals {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			store.delete_batch(&options.ids);
+			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let (new_store, _count) = taken.delete_batch(&options.ids);
+			*store = new_store;
 		}
 
 		self.publish(
@@ -791,7 +816,8 @@ impl Library {
 		self.ensure_initialized()?;
 
 		let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-		store.record_feedback(entry_id, relevant);
+		let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+		*store = taken.record_feedback(entry_id, relevant);
 		Ok(())
 	}
 
@@ -805,7 +831,10 @@ impl Library {
 
 		let deleted = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			store.delete(id)
+			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let (new_store, deleted) = taken.delete(id);
+			*store = new_store;
+			deleted
 		};
 
 		if deleted {
@@ -823,7 +852,10 @@ impl Library {
 		self.ensure_initialized()?;
 
 		let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-		Ok(store.delete_batch(ids))
+		let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+		let (new_store, count) = taken.delete_batch(ids);
+		*store = new_store;
+		Ok(count)
 	}
 
 	/// Remove all volumes and reset all indexes.
@@ -832,7 +864,8 @@ impl Library {
 
 		{
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			store.clear();
+			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			*store = taken.clear();
 		}
 
 		{

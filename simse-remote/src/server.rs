@@ -1,3 +1,19 @@
+// ---------------------------------------------------------------------------
+// RemoteServer — JSON-RPC dispatcher (functional programming patterns)
+// ---------------------------------------------------------------------------
+//
+// Routes incoming JSON-RPC 2.0 requests (NDJSON over stdin) to auth/tunnel
+// handlers. Uses immutable state with owned-return transitions:
+//
+//   - `with_state`: read-only access to state (no mutation)
+//   - `with_state_transition`: takes owned state via Option::take(), runs
+//     handler, returns updated state
+//
+// State (`RemoteServerState`) holds the AuthClient and is managed via
+// owned-return transitions. The TunnelClient uses Arc<Mutex<>> internally
+// and is kept as an I/O handle in the server (not in the state struct).
+// ---------------------------------------------------------------------------
+
 use std::io::{self, BufRead};
 
 use crate::auth::AuthClient;
@@ -6,10 +22,49 @@ use crate::protocol::*;
 use crate::tunnel::TunnelClient;
 use crate::transport::NdjsonTransport;
 
+// ---------------------------------------------------------------------------
+// State — immutable with owned-return transitions
+// ---------------------------------------------------------------------------
+
+/// Pure server state managed via owned-return transitions.
+///
+/// Contains the `AuthClient` which holds authentication state.
+/// The `TunnelClient` is excluded because it uses internal `Arc<Mutex<>>`
+/// for async I/O and is not pure state.
+#[derive(Clone)]
+pub struct RemoteServerState {
+    pub auth: AuthClient,
+}
+
+impl RemoteServerState {
+    pub fn new() -> Self {
+        Self {
+            auth: AuthClient::new(),
+        }
+    }
+}
+
+impl Default for RemoteServerState {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Server
+// ---------------------------------------------------------------------------
+
 /// Remote JSON-RPC server — dispatches incoming requests.
+///
+/// State is held in an `Option<RemoteServerState>` and accessed via:
+/// - `with_state`: read-only access (borrows the state)
+/// - `with_state_transition`: owned access (takes state, returns new state)
+///
+/// The `TunnelClient` is an I/O handle with internal `Arc<Mutex<>>` and
+/// stays outside of the pure state struct.
 pub struct RemoteServer {
     transport: NdjsonTransport,
-    auth: AuthClient,
+    state: Option<RemoteServerState>,
     tunnel: TunnelClient,
 }
 
@@ -17,10 +72,35 @@ impl RemoteServer {
     pub fn new(transport: NdjsonTransport) -> Self {
         Self {
             transport,
-            auth: AuthClient::new(),
+            state: Some(RemoteServerState::new()),
             tunnel: TunnelClient::new(),
         }
     }
+
+    // ── State access helpers ─────────────────────────────────────────
+
+    /// Read-only access to state. Calls `f` with a reference to the
+    /// current state.
+    fn with_state<T>(&self, f: impl FnOnce(&RemoteServerState) -> T) -> T {
+        f(self.state.as_ref().expect("state invariant: always Some"))
+    }
+
+    /// Mutating access via owned-return pattern. Takes the state out of
+    /// the `Option`, passes ownership to `f`, and stores the returned state.
+    ///
+    /// `f` receives owned state and must return the (possibly modified)
+    /// state.
+    async fn with_state_transition<F, Fut>(&mut self, f: F)
+    where
+        F: FnOnce(RemoteServerState, NdjsonTransport) -> Fut,
+        Fut: std::future::Future<Output = RemoteServerState>,
+    {
+        let state = self.state.take().expect("state invariant: always Some");
+        let new_state = f(state, self.transport.clone()).await;
+        self.state = Some(new_state);
+    }
+
+    // ── Main loop ────────────────────────────────────────────────────
 
     /// Main loop: read JSON-RPC messages from stdin, dispatch to handlers.
     pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
@@ -47,17 +127,57 @@ impl RemoteServer {
         Ok(())
     }
 
-    // ── Dispatch ──
+    // ── Dispatch ─────────────────────────────────────────────────────
 
     async fn dispatch(&mut self, req: JsonRpcRequest) {
-        let result = match req.method.as_str() {
-            "auth/login" => self.handle_login(req.params).await,
-            "auth/logout" => self.handle_logout(req.params),
-            "auth/status" => self.handle_auth_status(req.params),
-            "tunnel/connect" => self.handle_tunnel_connect(req.params).await,
-            "tunnel/disconnect" => self.handle_tunnel_disconnect(req.params).await,
-            "tunnel/status" => self.handle_tunnel_status(req.params).await,
-            "remote/health" => self.handle_health(req.params).await,
+        match req.method.as_str() {
+            // -- State transitions (owned-return via with_state_transition) --
+            "auth/login" => {
+                let tunnel = &self.tunnel;
+                let _ = tunnel; // used only for type clarity
+                self.with_state_transition(|state, transport| {
+                    handle_login(state, transport, req)
+                })
+                .await;
+            }
+            "auth/logout" => {
+                self.with_state_transition(|state, transport| async move {
+                    handle_logout(state, &transport, req)
+                })
+                .await;
+            }
+
+            // -- Read-only handlers (with_state) --
+            "auth/status" => {
+                let transport = self.transport.clone();
+                self.with_state(|state| handle_auth_status(state, &transport, req));
+            }
+
+            // -- Tunnel handlers (async I/O, read state for auth check) --
+            "tunnel/connect" => {
+                let transport = self.transport.clone();
+                let auth_state = self.with_state(|s| s.auth.state().cloned());
+                // PERF: async I/O — WebSocket connection
+                handle_tunnel_connect(&self.tunnel, auth_state, &transport, req).await;
+            }
+            "tunnel/disconnect" => {
+                let transport = self.transport.clone();
+                // PERF: async I/O — WebSocket close
+                handle_tunnel_disconnect(&self.tunnel, &transport, req).await;
+            }
+            "tunnel/status" => {
+                let transport = self.transport.clone();
+                // PERF: async I/O — reads tunnel state behind Arc<Mutex<>>
+                handle_tunnel_status(&self.tunnel, &transport, req).await;
+            }
+
+            // -- Health (read-only, async for tunnel state) --
+            "remote/health" => {
+                let transport = self.transport.clone();
+                let authenticated = self.with_state(|s| s.auth.is_authenticated());
+                handle_health(&self.tunnel, authenticated, &transport, req).await;
+            }
+
             _ => {
                 self.transport.write_error(
                     req.id,
@@ -65,138 +185,259 @@ impl RemoteServer {
                     format!("Unknown method: {}", req.method),
                     None,
                 );
-                return;
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn write_result(
+    transport: &NdjsonTransport,
+    id: u64,
+    result: Result<serde_json::Value, RemoteError>,
+) {
+    match result {
+        Ok(value) => transport.write_response(id, value),
+        Err(e) => transport.write_error(
+            id,
+            REMOTE_ERROR,
+            e.to_string(),
+            Some(e.to_json_rpc_error()),
+        ),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Auth handlers — state transitions (owned state)
+// ---------------------------------------------------------------------------
+
+async fn handle_login(
+    state: RemoteServerState,
+    transport: NdjsonTransport,
+    req: JsonRpcRequest,
+) -> RemoteServerState {
+    let p: LoginParams = match parse_params(req.params) {
+        Ok(p) => p,
+        Err(e) => {
+            write_result(&transport, req.id, Err(e));
+            return state;
+        }
+    };
+
+    let api_url = p.api_url.as_deref().unwrap_or("https://api.simse.dev");
+
+    if let Some(api_key) = p.api_key {
+        // PERF: async I/O — HTTP request to auth service
+        match state.auth.login_api_key(api_url, &api_key).await {
+            Ok((auth, auth_state)) => {
+                transport.write_response(
+                    req.id,
+                    serde_json::to_value(LoginResult {
+                        user_id: auth_state.user_id,
+                        session_token: auth_state.session_token,
+                        team_id: auth_state.team_id,
+                        role: auth_state.role,
+                    })
+                    .unwrap_or_default(),
+                );
+                RemoteServerState { auth }
+            }
+            Err((auth, e)) => {
+                write_result(&transport, req.id, Err(e));
+                RemoteServerState { auth }
+            }
+        }
+    } else {
+        let email = match p.email {
+            Some(e) => e,
+            None => {
+                write_result(
+                    &transport,
+                    req.id,
+                    Err(RemoteError::InvalidParams(
+                        "email or apiKey required".into(),
+                    )),
+                );
+                return state;
+            }
+        };
+        let password = match p.password {
+            Some(p) => p,
+            None => {
+                write_result(
+                    &transport,
+                    req.id,
+                    Err(RemoteError::InvalidParams("password required".into())),
+                );
+                return state;
             }
         };
 
-        self.write_result(req.id, result);
-    }
-
-    fn write_result(&self, id: u64, result: Result<serde_json::Value, RemoteError>) {
-        match result {
-            Ok(value) => self.transport.write_response(id, value),
-            Err(e) => self.transport.write_error(
-                id,
-                REMOTE_ERROR,
-                e.to_string(),
-                Some(e.to_json_rpc_error()),
-            ),
+        // PERF: async I/O — HTTP request to auth service
+        match state.auth.login_password(api_url, &email, &password).await {
+            Ok((auth, auth_state)) => {
+                transport.write_response(
+                    req.id,
+                    serde_json::to_value(LoginResult {
+                        user_id: auth_state.user_id,
+                        session_token: auth_state.session_token,
+                        team_id: auth_state.team_id,
+                        role: auth_state.role,
+                    })
+                    .unwrap_or_default(),
+                );
+                RemoteServerState { auth }
+            }
+            Err((auth, e)) => {
+                write_result(&transport, req.id, Err(e));
+                RemoteServerState { auth }
+            }
         }
     }
+}
 
-    // ── Auth handlers ──
+fn handle_logout(
+    state: RemoteServerState,
+    transport: &NdjsonTransport,
+    req: JsonRpcRequest,
+) -> RemoteServerState {
+    let auth = state.auth.logout();
+    transport.write_response(req.id, serde_json::json!({ "ok": true }));
+    RemoteServerState { auth }
+}
 
-    async fn handle_login(
-        &mut self,
-        params: serde_json::Value,
-    ) -> Result<serde_json::Value, RemoteError> {
-        let p: LoginParams = parse_params(params)?;
+// ---------------------------------------------------------------------------
+// Auth handlers — read-only (with_state)
+// ---------------------------------------------------------------------------
 
-        let api_url = p.api_url.as_deref().unwrap_or("https://api.simse.dev");
+fn handle_auth_status(
+    state: &RemoteServerState,
+    transport: &NdjsonTransport,
+    req: JsonRpcRequest,
+) {
+    let auth_state = state.auth.state();
+    let result = serde_json::to_value(AuthStatusResult {
+        authenticated: auth_state.is_some(),
+        user_id: auth_state.map(|s| s.user_id.clone()),
+        team_id: auth_state.and_then(|s| s.team_id.clone()),
+        role: auth_state.and_then(|s| s.role.clone()),
+        api_url: auth_state.map(|s| s.api_url.clone()),
+    });
+    write_result(transport, req.id, result.map_err(RemoteError::Json));
+}
 
-        let state = if let Some(api_key) = p.api_key {
-            self.auth.login_api_key(api_url, &api_key).await?
-        } else {
-            let email = p.email.ok_or_else(|| {
-                RemoteError::InvalidParams("email or apiKey required".into())
-            })?;
-            let password = p.password.ok_or_else(|| {
-                RemoteError::InvalidParams("password required".into())
-            })?;
-            self.auth.login_password(api_url, &email, &password).await?
-        };
+// ---------------------------------------------------------------------------
+// Tunnel handlers — async I/O (operate on TunnelClient references)
+// ---------------------------------------------------------------------------
 
-        Ok(serde_json::to_value(LoginResult {
-            user_id: state.user_id,
-            session_token: state.session_token,
-            team_id: state.team_id,
-            role: state.role,
-        })?)
+async fn handle_tunnel_connect(
+    tunnel: &TunnelClient,
+    auth_state: Option<crate::auth::AuthState>,
+    transport: &NdjsonTransport,
+    req: JsonRpcRequest,
+) {
+    let auth_state = match auth_state {
+        Some(s) => s,
+        None => {
+            write_result(transport, req.id, Err(RemoteError::NotAuthenticated));
+            return;
+        }
+    };
+
+    let p: TunnelConnectParams = match parse_params(req.params) {
+        Ok(p) => p,
+        Err(e) => {
+            write_result(transport, req.id, Err(e));
+            return;
+        }
+    };
+
+    let relay_url = p
+        .relay_url
+        .as_deref()
+        .unwrap_or("wss://relay.simse.dev");
+
+    // PERF: async I/O — WebSocket connection to relay
+    match tunnel.connect(relay_url, &auth_state.session_token).await {
+        Ok(tunnel_id) => {
+            write_result(
+                transport,
+                req.id,
+                serde_json::to_value(TunnelConnectResult {
+                    tunnel_id,
+                    relay_url: relay_url.to_string(),
+                })
+                .map_err(RemoteError::Json),
+            );
+        }
+        Err(e) => {
+            write_result(transport, req.id, Err(e));
+        }
     }
+}
 
-    fn handle_logout(
-        &mut self,
-        _params: serde_json::Value,
-    ) -> Result<serde_json::Value, RemoteError> {
-        self.auth.logout();
-        Ok(serde_json::json!({ "ok": true }))
+async fn handle_tunnel_disconnect(
+    tunnel: &TunnelClient,
+    transport: &NdjsonTransport,
+    req: JsonRpcRequest,
+) {
+    // PERF: async I/O — WebSocket close
+    match tunnel.disconnect().await {
+        Ok(()) => {
+            transport.write_response(req.id, serde_json::json!({ "ok": true }));
+        }
+        Err(e) => {
+            write_result(transport, req.id, Err(e));
+        }
     }
+}
 
-    fn handle_auth_status(
-        &self,
-        _params: serde_json::Value,
-    ) -> Result<serde_json::Value, RemoteError> {
-        let state = self.auth.state();
-        Ok(serde_json::to_value(AuthStatusResult {
-            authenticated: state.is_some(),
-            user_id: state.map(|s| s.user_id.clone()),
-            team_id: state.and_then(|s| s.team_id.clone()),
-            role: state.and_then(|s| s.role.clone()),
-            api_url: state.map(|s| s.api_url.clone()),
-        })?)
-    }
+async fn handle_tunnel_status(
+    tunnel: &TunnelClient,
+    transport: &NdjsonTransport,
+    req: JsonRpcRequest,
+) {
+    // PERF: async I/O — reads tunnel state behind Arc<Mutex<>>
+    let state = tunnel.get_state().await;
+    let uptime_ms = state
+        .connected_at
+        .map(|t| t.elapsed().as_millis() as u64);
 
-    // ── Tunnel handlers ──
-
-    async fn handle_tunnel_connect(
-        &mut self,
-        params: serde_json::Value,
-    ) -> Result<serde_json::Value, RemoteError> {
-        let auth_state = self.auth.require_auth()?;
-        let p: TunnelConnectParams = parse_params(params)?;
-
-        let relay_url = p
-            .relay_url
-            .as_deref()
-            .unwrap_or("wss://relay.simse.dev");
-
-        let tunnel_id = self
-            .tunnel
-            .connect(relay_url, &auth_state.session_token)
-            .await?;
-
-        Ok(serde_json::to_value(TunnelConnectResult {
-            tunnel_id,
-            relay_url: relay_url.to_string(),
-        })?)
-    }
-
-    async fn handle_tunnel_disconnect(
-        &mut self,
-        _params: serde_json::Value,
-    ) -> Result<serde_json::Value, RemoteError> {
-        self.tunnel.disconnect().await?;
-        Ok(serde_json::json!({ "ok": true }))
-    }
-
-    async fn handle_tunnel_status(
-        &self,
-        _params: serde_json::Value,
-    ) -> Result<serde_json::Value, RemoteError> {
-        let state = self.tunnel.get_state().await;
-        let uptime_ms = state
-            .connected_at
-            .map(|t| t.elapsed().as_millis() as u64);
-
-        Ok(serde_json::to_value(TunnelStatusResult {
+    write_result(
+        transport,
+        req.id,
+        serde_json::to_value(TunnelStatusResult {
             connected: state.connected,
             tunnel_id: state.tunnel_id,
             relay_url: state.relay_url,
             uptime_ms,
             reconnect_count: state.reconnect_count,
-        })?)
-    }
+        })
+        .map_err(RemoteError::Json),
+    );
+}
 
-    // ── Health ──
+// ---------------------------------------------------------------------------
+// Health handler
+// ---------------------------------------------------------------------------
 
-    async fn handle_health(
-        &self,
-        _params: serde_json::Value,
-    ) -> Result<serde_json::Value, RemoteError> {
-        Ok(serde_json::to_value(HealthResult {
+async fn handle_health(
+    tunnel: &TunnelClient,
+    authenticated: bool,
+    transport: &NdjsonTransport,
+    req: JsonRpcRequest,
+) {
+    write_result(
+        transport,
+        req.id,
+        serde_json::to_value(HealthResult {
             ok: true,
-            authenticated: self.auth.is_authenticated(),
-            tunnel_connected: self.tunnel.is_connected(),
-        })?)
-    }
+            authenticated,
+            tunnel_connected: tunnel.is_connected(),
+        })
+        .map_err(RemoteError::Json),
+    );
 }

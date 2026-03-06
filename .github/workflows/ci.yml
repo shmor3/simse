@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, staging, production]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+
+      - name: Install dependencies
+        run: moon run :setup
+
+      - name: Run checks
+        run: moon ci :lint :format-check :test
+
+  deploy:
+    name: Deploy
+    needs: check
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/staging' || github.ref == 'refs/heads/production')
+    runs-on: ubuntu-latest
+    environment: ${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: moonrepo/setup-toolchain@v0
+        with:
+          auto-install: true
+
+      - name: Install dependencies
+        run: moon run :setup
+
+      - name: Set deploy environment
+        id: env
+        run: echo "name=${{ github.ref == 'refs/heads/production' && 'production' || 'staging' }}" >> "$GITHUB_OUTPUT"
+
+      # Workers
+      - name: Deploy simse-api
+        working-directory: simse-api
+        run: bunx wrangler deploy --env ${{ steps.env.outputs.name }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy simse-auth
+        working-directory: simse-auth
+        run: bunx wrangler deploy --env ${{ steps.env.outputs.name }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy simse-payments
+        working-directory: simse-payments
+        run: bunx wrangler deploy --env ${{ steps.env.outputs.name }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy simse-cdn
+        working-directory: simse-cdn
+        run: bunx wrangler deploy --env ${{ steps.env.outputs.name }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy simse-relay
+        working-directory: simse-relay
+        run: bunx wrangler deploy --env ${{ steps.env.outputs.name }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Deploy simse-mailer
+        working-directory: simse-mailer
+        run: bunx wrangler deploy --env ${{ steps.env.outputs.name }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Pages
+      - name: Build simse-cloud
+        working-directory: simse-cloud
+        run: bun run build
+
+      - name: Deploy simse-cloud
+        working-directory: simse-cloud
+        run: bunx wrangler pages deploy ./build/client --project-name simse-cloud --branch ${{ steps.env.outputs.name }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Build simse-landing
+        working-directory: simse-landing
+        run: bun run build
+
+      - name: Deploy simse-landing
+        working-directory: simse-landing
+        run: bunx wrangler pages deploy ./build/client --project-name simse-landing --branch ${{ steps.env.outputs.name }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

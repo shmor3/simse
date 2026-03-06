@@ -20,3 +20,32 @@ binding = "COMMS_QUEUE"
 [analytics_engine]
 dataset = "simse-analytics"
 binding = "ANALYTICS"
+
+# --- Environments ---
+
+[env.staging]
+name = "simse-auth-staging"
+workers_dev = true
+routes = []
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "simse-auth-db-staging"
+database_id = "PLACEHOLDER_STAGING_AUTH_DB_ID"
+
+[[env.staging.queues.producers]]
+queue = "simse-auth-comms-staging"
+binding = "COMMS_QUEUE"
+
+[env.production]
+name = "simse-auth"
+routes = [{ pattern = "auth.simse.dev", custom_domain = true }]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "simse-auth-db"
+database_id = "PLACEHOLDER_FILL_AFTER_CREATION"
+
+[[env.production.queues.producers]]
+queue = "simse-auth-comms"
+binding = "COMMS_QUEUE"

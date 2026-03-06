@@ -17,3 +17,22 @@ database_id = "cb43715c-8536-4334-9386-64dd8855a96e"
 [analytics_engine]
 dataset = "simse-analytics"
 binding = "ANALYTICS"
+
+# --- Environments ---
+
+[env.staging]
+name = "simse-payments-staging"
+workers_dev = true
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "simse-payments-db-staging"
+database_id = "PLACEHOLDER_STAGING_PAYMENTS_DB_ID"
+
+[env.production]
+name = "simse-payments"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "simse-payments-db"
+database_id = "cb43715c-8536-4334-9386-64dd8855a96e"

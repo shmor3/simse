@@ -13,3 +13,18 @@ routes = [{ pattern = "app.simse.dev", custom_domain = true }]
 [analytics_engine]
 dataset = "simse-analytics"
 binding = "ANALYTICS"
+
+# --- Environments ---
+
+[env.staging]
+name = "simse-cloud-staging"
+
+[env.staging.vars]
+APP_URL = "https://simse-cloud-staging.pages.dev"
+
+[env.production]
+name = "simse-cloud"
+routes = [{ pattern = "app.simse.dev", custom_domain = true }]
+
+[env.production.vars]
+APP_URL = "https://app.simse.dev"

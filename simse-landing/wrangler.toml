@@ -18,3 +18,30 @@ binding = "COMMS_QUEUE"
 [analytics_engine]
 dataset = "simse-analytics"
 binding = "ANALYTICS"
+
+# --- Environments ---
+
+[env.staging]
+name = "simse-landing-staging"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "simse-waitlist-staging"
+database_id = "PLACEHOLDER_STAGING_WAITLIST_DB_ID"
+
+[[env.staging.queues.producers]]
+queue = "simse-landing-comms-staging"
+binding = "COMMS_QUEUE"
+
+[env.production]
+name = "simse-landing"
+routes = [{ pattern = "simse.dev", custom_domain = true }]
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "simse_waitlist"
+database_id = "e5659e77-878c-440c-bbf6-dd74a324938b"
+
+[[env.production.queues.producers]]
+queue = "simse-landing-comms"
+binding = "COMMS_QUEUE"

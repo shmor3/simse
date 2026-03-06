@@ -5,5 +5,5 @@ projects:
 vcs:
   hooks:
     pre-commit:
-      - 'moon run :lint :format-check :test --affected --status=staged'
+      - 'export PATH="$HOME/.proto/shims:$HOME/.proto/bin:$PATH" && moon run :lint :format-check :test --affected --status=staged'
   sync: true

@@ -23,3 +23,47 @@ queue = "simse-landing-comms"
 [analytics_engine]
 dataset = "simse-analytics"
 binding = "ANALYTICS"
+
+# --- Environments ---
+
+[env.staging]
+name = "simse-mailer-staging"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "simse-mailer-db-staging"
+database_id = "PLACEHOLDER_STAGING_MAILER_DB_ID"
+
+[[env.staging.secrets_store.bindings]]
+binding = "SECRETS"
+store_id = "PLACEHOLDER_STAGING_STORE_ID"
+
+[[env.staging.queues.consumers]]
+queue = "simse-auth-comms-staging"
+
+[[env.staging.queues.consumers]]
+queue = "simse-api-comms-staging"
+
+[[env.staging.queues.consumers]]
+queue = "simse-landing-comms-staging"
+
+[env.production]
+name = "simse-mailer"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "simse-mailer-db"
+database_id = "PLACEHOLDER_FILL_AFTER_CREATION"
+
+[[env.production.secrets_store.bindings]]
+binding = "SECRETS"
+store_id = "PLACEHOLDER_REPLACE_WITH_STORE_ID"
+
+[[env.production.queues.consumers]]
+queue = "simse-auth-comms"
+
+[[env.production.queues.consumers]]
+queue = "simse-api-comms"
+
+[[env.production.queues.consumers]]
+queue = "simse-landing-comms"

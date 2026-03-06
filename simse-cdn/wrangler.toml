@@ -17,3 +17,30 @@ id = "PLACEHOLDER_REPLACE_WITH_KV_ID"
 [analytics_engine]
 dataset = "simse-analytics"
 binding = "ANALYTICS"
+
+# --- Environments ---
+
+[env.staging]
+name = "simse-cdn-staging"
+workers_dev = true
+routes = []
+
+[[env.staging.r2_buckets]]
+binding = "CDN_BUCKET"
+bucket_name = "simse-cdn-staging"
+
+[[env.staging.kv_namespaces]]
+binding = "VERSION_STORE"
+id = "PLACEHOLDER_STAGING_KV_ID"
+
+[env.production]
+name = "simse-cdn"
+routes = [{ pattern = "cdn.simse.dev", custom_domain = true }]
+
+[[env.production.r2_buckets]]
+binding = "CDN_BUCKET"
+bucket_name = "simse-cdn"
+
+[[env.production.kv_namespaces]]
+binding = "VERSION_STORE"
+id = "PLACEHOLDER_REPLACE_WITH_KV_ID"

@@ -20,3 +20,20 @@ binding = "ANALYTICS"
 # Fallback vars (overridden by Secrets Store in production)
 [vars]
 AUTH_API_URL = "https://auth.test.internal"
+
+# --- Environments ---
+
+[env.staging]
+name = "simse-relay-staging"
+workers_dev = true
+routes = []
+
+[env.staging.vars]
+AUTH_API_URL = "https://auth.test.internal"
+
+[env.production]
+name = "simse-relay"
+routes = [{ pattern = "relay.simse.dev", custom_domain = true }]
+
+[env.production.vars]
+AUTH_API_URL = "https://auth.simse.dev"

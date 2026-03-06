@@ -29,6 +29,24 @@ jobs:
       - name: Run checks
         run: moon ci :lint :format-check :test
 
+  promote:
+    name: Promote
+    needs: check
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Promote main -> staging
+        if: github.ref == 'refs/heads/main'
+        run: git push origin HEAD:staging
+
+      - name: Promote staging -> production
+        if: github.ref == 'refs/heads/staging'
+        run: git push origin HEAD:production
+
   deploy:
     name: Deploy
     needs: check

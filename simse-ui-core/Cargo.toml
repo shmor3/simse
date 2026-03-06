@@ -10,3 +10,4 @@ simse-core = { path = "../simse-core" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }
+async-trait = "0.1"

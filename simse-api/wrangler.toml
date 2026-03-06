@@ -17,3 +17,7 @@ binding = "COMMS_QUEUE"
 [[secrets_store.bindings]]
 binding = "SECRETS"
 store_id = "PLACEHOLDER_REPLACE_WITH_STORE_ID"
+
+[analytics_engine]
+dataset = "simse-analytics"
+binding = "ANALYTICS"

@@ -1,6 +1,7 @@
 export interface Env {
 	COMMS_QUEUE: Queue;
 	SECRETS: SecretsStoreNamespace;
+	ANALYTICS: AnalyticsEngineDataset;
 }
 
 export interface ApiSecrets {

@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Rename simse-cloud to simse-app, create a formal design system in simse-brand, and redesign the dashboard with an icon rail + contextual nav panel + Claude-web-style chat interface.
+**Goal:** Rename simse-app to simse-app, create a formal design system in simse-brand, and redesign the dashboard with an icon rail + contextual nav panel + Claude-web-style chat interface.
 
 **Architecture:** Three-column layout (IconRail 56px + NavPanel 220px + Main Content). Design tokens live in simse-brand as CSS custom properties, consumed by simse-app via Tailwind's @theme. Chat interface uses bottom-pinned input with markdown message bubbles. Settings gains Devices and Remotes tabs.
 
@@ -22,7 +22,7 @@
 
 **Step 1: Create tokens.css**
 
-Source of truth for all design tokens as CSS custom properties. Values come from `simse-brand/guidelines/brand-guide.md` and existing usage in `simse-cloud/app/styles/app.css`.
+Source of truth for all design tokens as CSS custom properties. Values come from `simse-brand/guidelines/brand-guide.md` and existing usage in `simse-app/app/styles/app.css`.
 
 ```css
 :root {
@@ -178,14 +178,14 @@ git commit -m "feat(brand): add design system tokens and component specs"
 
 ---
 
-### Task 2: Rename simse-cloud to simse-app
+### Task 2: Rename simse-app to simse-app
 
 **Files:**
-- Rename: `simse-cloud/` → `simse-app/`
+- Rename: `simse-app/` → `simse-app/`
 - Modify: `simse-app/package.json` — name field
 - Modify: `simse-app/wrangler.toml` — name field, env names
 - Modify: `simse-app/moon.yml` — no changes needed (just language/tags)
-- Modify: `CLAUDE.md` — all references to simse-cloud
+- Modify: `CLAUDE.md` — all references to simse-app
 - Modify: `.github/workflows/ci.yml` — deploy paths
 - Modify: `deployment/setup.sh` — references
 - Modify: `.github/dependabot.yml` — directory path
@@ -193,23 +193,23 @@ git commit -m "feat(brand): add design system tokens and component specs"
 **Step 1: Rename directory**
 
 ```bash
-mv simse-cloud simse-app
+mv simse-app simse-app
 ```
 
 **Step 2: Update simse-app/package.json**
 
-Change `"name": "simse-cloud"` to `"name": "simse-app"`.
+Change `"name": "simse-app"` to `"name": "simse-app"`.
 
 **Step 3: Update simse-app/wrangler.toml**
 
-- Top-level `name = "simse-cloud"` → `name = "simse-app"`
+- Top-level `name = "simse-app"` → `name = "simse-app"`
 - `[env.staging]` name → `"simse-app-staging"`
 - `[env.production]` name → `"simse-app"`
 - `APP_URL` values stay the same (app.simse.dev)
 
 **Step 4: Update CLAUDE.md**
 
-Replace all occurrences of `simse-cloud` with `simse-app`. This appears in:
+Replace all occurrences of `simse-app` with `simse-app`. This appears in:
 - Repository layout tree
 - TypeScript services description
 - CDN Worker section references
@@ -218,17 +218,17 @@ Replace all occurrences of `simse-cloud` with `simse-app`. This appears in:
 
 **Step 5: Update .github/workflows/ci.yml**
 
-In the deploy job, find the simse-cloud Pages deploy step and change:
-- `working-directory: simse-cloud` → `working-directory: simse-app`
+In the deploy job, find the simse-app Pages deploy step and change:
+- `working-directory: simse-app` → `working-directory: simse-app`
 - Any references in deploy commands
 
 **Step 6: Update deployment/setup.sh**
 
-Replace `simse-cloud` references with `simse-app`.
+Replace `simse-app` references with `simse-app`.
 
 **Step 7: Update .github/dependabot.yml**
 
-Change `directory: "/simse-cloud"` to `directory: "/simse-app"`.
+Change `directory: "/simse-app"` to `directory: "/simse-app"`.
 
 **Step 8: Verify**
 
@@ -240,7 +240,7 @@ cd /workspaces/simse/simse-app && bun run typecheck && bun run lint
 
 ```bash
 git add -A
-git commit -m "refactor: rename simse-cloud to simse-app"
+git commit -m "refactor: rename simse-app to simse-app"
 ```
 
 ---

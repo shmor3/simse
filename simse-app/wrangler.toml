@@ -1,4 +1,4 @@
-name = "simse-cloud"
+name = "simse-app"
 compatibility_date = "2025-04-01"
 pages_build_output_dir = "./build/client"
 
@@ -17,13 +17,13 @@ binding = "ANALYTICS"
 # --- Environments ---
 
 [env.staging]
-name = "simse-cloud-staging"
+name = "simse-app-staging"
 
 [env.staging.vars]
-APP_URL = "https://simse-cloud-staging.pages.dev"
+APP_URL = "https://simse-app-staging.pages.dev"
 
 [env.production]
-name = "simse-cloud"
+name = "simse-app"
 routes = [{ pattern = "app.simse.dev", custom_domain = true }]
 
 [env.production.vars]

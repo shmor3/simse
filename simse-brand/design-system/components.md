@@ -1,6 +1,6 @@
 # Component Specifications
 
-UI components from `simse-cloud/app/components/ui/`. Each component follows the simse design tokens and brand guidelines.
+UI components from `simse-app/app/components/ui/`. Each component follows the simse design tokens and brand guidelines.
 
 ---
 

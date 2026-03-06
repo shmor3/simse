@@ -5,7 +5,7 @@
 
 ## Summary
 
-Rename simse-cloud to simse-app, create a formal design system in simse-brand, and redesign the dashboard with a Discord/VS Code-style icon rail layout, Claude-web-style chat interface, ACP backend switcher, and new settings pages for devices and remotes.
+Rename simse-app to simse-app, create a formal design system in simse-brand, and redesign the dashboard with a Discord/VS Code-style icon rail layout, Claude-web-style chat interface, ACP backend switcher, and new settings pages for devices and remotes.
 
 ## Layout Architecture
 
@@ -106,7 +106,7 @@ simse-app's `app.css` imports tokens and maps to Tailwind `@theme`. Tokens file 
 
 ## Rename
 
-- Directory: `simse-cloud/` -> `simse-app/`
+- Directory: `simse-app/` -> `simse-app/`
 - Update: `moon.yml`, `package.json` name, `wrangler.toml`, CLAUDE.md, CI workflows, deployment scripts
 
 ## Route Structure

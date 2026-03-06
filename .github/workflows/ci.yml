@@ -111,13 +111,13 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       # Pages
-      - name: Build simse-cloud
-        working-directory: simse-cloud
+      - name: Build simse-app
+        working-directory: simse-app
         run: bun run build
 
-      - name: Deploy simse-cloud
-        working-directory: simse-cloud
-        run: bunx wrangler pages deploy ./build/client --project-name simse-cloud --branch ${{ steps.env.outputs.name }}
+      - name: Deploy simse-app
+        working-directory: simse-app
+        run: bunx wrangler pages deploy ./build/client --project-name simse-app --branch ${{ steps.env.outputs.name }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

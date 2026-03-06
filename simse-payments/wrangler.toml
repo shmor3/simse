@@ -13,3 +13,7 @@ database_id = "cb43715c-8536-4334-9386-64dd8855a96e"
 # API_SECRET
 # MAILER_API_URL
 # MAILER_API_SECRET
+
+[analytics_engine]
+dataset = "simse-analytics"
+binding = "ANALYTICS"

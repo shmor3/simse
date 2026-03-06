@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { analyticsMiddleware } from './middleware/analytics';
 import { authMiddleware } from './middleware/auth';
 import checkout from './routes/checkout';
 import credits from './routes/credits';
@@ -10,6 +11,7 @@ import type { Env } from './types';
 
 const app = new Hono<{ Bindings: Env }>();
 
+app.use('*', analyticsMiddleware);
 app.get('/health', (c) => c.json({ ok: true }));
 
 // Webhooks — no auth (Stripe signature verification instead)

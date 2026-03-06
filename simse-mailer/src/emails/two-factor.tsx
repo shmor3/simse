@@ -10,8 +10,8 @@ import {
 	Tailwind,
 	Text,
 } from '@react-email/components';
-import { emailTailwindConfig } from './tailwind-config';
 import SimseEmailLogo from './simse-logo';
+import { emailTailwindConfig } from './tailwind-config';
 
 interface TwoFactorEmailProps {
 	code: string;

@@ -38,8 +38,9 @@ cd simse-cdn && npm run lint       # CDN worker lint
 cd simse-relay && npm run lint     # Relay worker lint
 
 # TypeScript tests
-cd simse-cdn && npm run test   # CDN worker tests (Vitest + @cloudflare/vitest-pool-workers)
-cd simse-relay && npm run test # Relay worker tests (Vitest + @cloudflare/vitest-pool-workers)
+cd simse-cdn && npm run test    # CDN worker tests (Vitest + @cloudflare/vitest-pool-workers)
+cd simse-mailer && npm run test # Mailer tests (Vitest + @cloudflare/vitest-pool-workers)
+cd simse-relay && npm run test  # Relay worker tests (Vitest + @cloudflare/vitest-pool-workers)
 ```
 
 ## Architecture

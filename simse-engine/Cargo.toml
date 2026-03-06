@@ -28,7 +28,7 @@ embed-weights = []
 [dependencies]
 # Candle ML framework
 candle-core = "0.8"
-candle-nn = "0.8"
+candle-nn = "0.9"
 candle-transformers = "0.9"
 
 # HuggingFace model hub

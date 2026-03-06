@@ -23,6 +23,8 @@ export default [
 		route('dashboard/usage', './routes/dashboard.usage.tsx'),
 		route('dashboard/notifications', './routes/dashboard.notifications.tsx'),
 		route('dashboard/account', './routes/dashboard.account.tsx'),
+		route('dashboard/chat', './routes/dashboard.chat.tsx'),
+		route('dashboard/chat/:remoteId', './routes/dashboard.chat.$remoteId.tsx'),
 		layout('./routes/dashboard.settings.tsx', [
 			route('dashboard/settings', './routes/dashboard.settings._index.tsx'),
 			route(
@@ -41,6 +43,14 @@ export default [
 			route(
 				'dashboard/settings/team/invite',
 				'./routes/dashboard.settings.team.invite.tsx',
+			),
+			route(
+				'dashboard/settings/devices',
+				'./routes/dashboard.settings.devices.tsx',
+			),
+			route(
+				'dashboard/settings/remotes',
+				'./routes/dashboard.settings.remotes.tsx',
 			),
 		]),
 	]),

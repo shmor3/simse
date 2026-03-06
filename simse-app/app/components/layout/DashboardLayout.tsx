@@ -60,7 +60,9 @@ export default function DashboardLayout({
 
 	const activeRemote = remotes.find((r) => r.id === activeRemoteId);
 	const context: 'home' | 'remote' = activeRemoteId ? 'remote' : 'home';
-	const contextName = activeRemoteId ? (activeRemote?.name ?? 'Remote') : 'simse';
+	const contextName = activeRemoteId
+		? (activeRemote?.name ?? 'Remote')
+		: 'simse';
 
 	return (
 		<div className="flex h-screen bg-[#0a0a0b]">
@@ -89,9 +91,7 @@ export default function DashboardLayout({
 			<div
 				className={clsx(
 					'fixed inset-y-0 left-0 z-50 w-55 transform transition-transform duration-200 ease-out md:static md:z-auto',
-					mobileOpen
-						? 'translate-x-0'
-						: '-translate-x-full md:translate-x-0',
+					mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
 				)}
 			>
 				<NavPanel

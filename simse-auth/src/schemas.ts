@@ -60,3 +60,11 @@ export const deleteAccountSchema = z.object({
 export const createApiKeySchema = z.object({
 	name: z.string().min(1).max(64),
 });
+
+export const refreshSchema = z.object({
+	refreshToken: z.string().startsWith('rt_'),
+});
+
+export const revokeSchema = z.object({
+	refreshToken: z.string().startsWith('rt_'),
+});

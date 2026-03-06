@@ -21,6 +21,10 @@ binding = "COMMS_QUEUE"
 dataset = "simse-analytics"
 binding = "ANALYTICS"
 
+[[secrets_store.bindings]]
+binding = "SECRETS"
+store_id = "PLACEHOLDER_REPLACE_WITH_STORE_ID"
+
 # --- Environments ---
 
 [env.staging]

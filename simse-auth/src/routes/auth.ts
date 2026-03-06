@@ -1,13 +1,16 @@
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import { sendEmail } from '../lib/comms';
 import { generateId } from '../lib/db';
+import { signJwt } from '../lib/jwt';
 import { hashPassword, needsRehash, verifyPassword } from '../lib/password';
 import { checkRateLimit } from '../lib/rate-limit';
 import {
-	createSession,
-	deleteAllUserSessions,
-	deleteSession,
-} from '../lib/session';
+	createRefreshToken,
+	revokeAllUserTokens,
+	revokeFamily,
+	rotateRefreshToken,
+} from '../lib/refresh-token';
+import { deleteAllUserSessions, deleteSession } from '../lib/session';
 import {
 	createToken,
 	generateCode,
@@ -17,12 +20,19 @@ import {
 import {
 	loginSchema,
 	newPasswordSchema,
+	refreshSchema,
 	registerSchema,
 	resetPasswordSchema,
+	revokeSchema,
 	twoFactorSchema,
 	verifyEmailSchema,
 } from '../schemas';
 import type { AuthContext, Env } from '../types';
+
+type AuthHonoContext = Context<{
+	Bindings: Env;
+	Variables: { auth: AuthContext };
+}>;
 
 const RATE_LIMIT_ERROR = {
 	error: {
@@ -35,6 +45,62 @@ const auth = new Hono<{
 	Bindings: Env;
 	Variables: { auth: AuthContext };
 }>();
+
+// Helper: get JWT secret or return 500
+async function getJwtSecret(c: AuthHonoContext): Promise<string | null> {
+	const secret = await c.env.SECRETS.get('JWT_SECRET');
+	if (!secret) {
+		return null;
+	}
+	return secret;
+}
+
+// Helper: get team info for a user
+async function getTeamInfo(db: D1Database, userId: string) {
+	return db
+		.prepare(
+			'SELECT t.id, tm.role FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? LIMIT 1',
+		)
+		.bind(userId)
+		.first<{ id: string; role: string }>();
+}
+
+// Helper: issue JWT + refresh token pair
+async function issueTokenPair(
+	c: AuthHonoContext,
+	db: D1Database,
+	userId: string,
+	familyId?: string,
+) {
+	const jwtSecret = await getJwtSecret(c);
+	if (!jwtSecret) {
+		return { error: true as const };
+	}
+
+	const teamRow = await getTeamInfo(db, userId);
+	const sid = familyId ?? generateId();
+	const { token: accessToken, expiresIn } = await signJwt(
+		{
+			sub: userId,
+			tid: teamRow?.id ?? null,
+			role: teamRow?.role ?? null,
+			sid,
+		},
+		jwtSecret,
+	);
+	const { token: refreshToken } = await createRefreshToken(
+		db,
+		userId,
+		familyId,
+	);
+
+	return {
+		error: false as const,
+		accessToken,
+		refreshToken,
+		expiresIn,
+	};
+}
 
 // POST /auth/register
 auth.post('/register', async (c) => {
@@ -112,7 +178,18 @@ auth.post('/register', async (c) => {
 			.bind(tokenId, userId, 'email_verify', verifyCode, tokenExpires),
 	]);
 
-	const token = await createSession(db, userId);
+	const tokens = await issueTokenPair(c, db, userId);
+	if (tokens.error) {
+		return c.json(
+			{
+				error: {
+					code: 'MISCONFIGURED',
+					message: 'Service misconfigured',
+				},
+			},
+			500,
+		);
+	}
 
 	await sendEmail(c.env.COMMS_QUEUE, 'verify-email', normalizedEmail, {
 		code: verifyCode,
@@ -121,7 +198,9 @@ auth.post('/register', async (c) => {
 	return c.json(
 		{
 			data: {
-				token,
+				accessToken: tokens.accessToken,
+				refreshToken: tokens.refreshToken,
+				expiresIn: tokens.expiresIn,
 				user: { id: userId, email: normalizedEmail, name },
 			},
 		},
@@ -194,8 +273,27 @@ auth.post('/login', async (c) => {
 		return c.json({ data: { requires2fa: true, pendingToken: id } });
 	}
 
-	const token = await createSession(db, user.id);
-	return c.json({ data: { token, user: { id: user.id } } });
+	const tokens = await issueTokenPair(c, db, user.id);
+	if (tokens.error) {
+		return c.json(
+			{
+				error: {
+					code: 'MISCONFIGURED',
+					message: 'Service misconfigured',
+				},
+			},
+			500,
+		);
+	}
+
+	return c.json({
+		data: {
+			accessToken: tokens.accessToken,
+			refreshToken: tokens.refreshToken,
+			expiresIn: tokens.expiresIn,
+			user: { id: user.id },
+		},
+	});
 });
 
 // POST /auth/2fa
@@ -248,16 +346,61 @@ auth.post('/2fa', async (c) => {
 	await markTokenUsed(db, pendingToken);
 	await markTokenUsed(db, codeToken.id);
 
-	const token = await createSession(db, pending.user_id);
-	return c.json({ data: { token, user: { id: pending.user_id } } });
+	const tokens = await issueTokenPair(c, db, pending.user_id);
+	if (tokens.error) {
+		return c.json(
+			{
+				error: {
+					code: 'MISCONFIGURED',
+					message: 'Service misconfigured',
+				},
+			},
+			500,
+		);
+	}
+
+	return c.json({
+		data: {
+			accessToken: tokens.accessToken,
+			refreshToken: tokens.refreshToken,
+			expiresIn: tokens.expiresIn,
+			user: { id: pending.user_id },
+		},
+	});
 });
 
 // POST /auth/logout (requires auth — called via gateway with X-User-Id)
 auth.post('/logout', async (c) => {
 	const sessionId = c.req.header('X-Session-Id');
+	const db = c.env.DB;
+
 	if (sessionId) {
-		await deleteSession(c.env.DB, sessionId);
+		await deleteSession(db, sessionId);
 	}
+
+	// Also revoke refresh token if provided
+	try {
+		const body = await c.req.json<{ refreshToken?: string }>();
+		if (body.refreshToken?.startsWith('rt_')) {
+			const encoder = new TextEncoder();
+			const data = encoder.encode(body.refreshToken);
+			const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+			const hashArray = new Uint8Array(hashBuffer);
+			const tokenHash = btoa(String.fromCharCode(...hashArray));
+
+			const row = await db
+				.prepare('SELECT family_id FROM refresh_tokens WHERE token_hash = ?')
+				.bind(tokenHash)
+				.first<{ family_id: string }>();
+
+			if (row) {
+				await revokeFamily(db, row.family_id);
+			}
+		}
+	} catch {
+		// Body parsing may fail if no body sent — that's ok
+	}
+
 	return c.json({ data: { ok: true } });
 });
 
@@ -293,7 +436,9 @@ auth.post('/reset-password', async (c) => {
 
 	if (user) {
 		const { code } = await createToken(db, user.id, 'password_reset', 60);
-		await sendEmail(c.env.COMMS_QUEUE, 'reset-password', user.email, { code });
+		await sendEmail(c.env.COMMS_QUEUE, 'reset-password', user.email, {
+			code,
+		});
 	}
 
 	// Always return same response to prevent enumeration
@@ -348,8 +493,9 @@ auth.post('/new-password', async (c) => {
 		.run();
 	await markTokenUsed(db, token.id);
 
-	// Invalidate all existing sessions after password reset
+	// Invalidate all existing sessions and refresh tokens after password reset
 	await deleteAllUserSessions(db, token.userId);
+	await revokeAllUserTokens(db, token.userId);
 
 	return c.json({ data: { ok: true } });
 });
@@ -385,7 +531,12 @@ auth.post('/verify-email', async (c) => {
 	const token = await validateToken(db, parsed.data.code, 'email_verify');
 	if (!token) {
 		return c.json(
-			{ error: { code: 'INVALID_TOKEN', message: 'Invalid or expired code' } },
+			{
+				error: {
+					code: 'INVALID_TOKEN',
+					message: 'Invalid or expired code',
+				},
+			},
 			400,
 		);
 	}
@@ -399,7 +550,106 @@ auth.post('/verify-email', async (c) => {
 	return c.json({ data: { ok: true } });
 });
 
-// POST /auth/validate — called by simse-api gateway
+// POST /auth/refresh — rotate refresh token, issue new JWT
+auth.post('/refresh', async (c) => {
+	const body = await c.req.json();
+	const parsed = refreshSchema.safeParse(body);
+	if (!parsed.success) {
+		return c.json(
+			{
+				error: {
+					code: 'VALIDATION_ERROR',
+					message: parsed.error.issues[0].message,
+				},
+			},
+			400,
+		);
+	}
+
+	const db = c.env.DB;
+	const result = await rotateRefreshToken(db, parsed.data.refreshToken);
+
+	if (!result.ok) {
+		return c.json(
+			{
+				error: {
+					code: result.code,
+					message:
+						result.code === 'TOKEN_REUSED'
+							? 'Token reuse detected, session revoked'
+							: 'Invalid refresh token',
+				},
+			},
+			401,
+		);
+	}
+
+	const jwtSecret = await getJwtSecret(c);
+	if (!jwtSecret) {
+		return c.json(
+			{
+				error: {
+					code: 'MISCONFIGURED',
+					message: 'Service misconfigured',
+				},
+			},
+			500,
+		);
+	}
+
+	const teamRow = await getTeamInfo(db, result.userId);
+	const { token: accessToken, expiresIn } = await signJwt(
+		{
+			sub: result.userId,
+			tid: teamRow?.id ?? null,
+			role: teamRow?.role ?? null,
+			sid: result.familyId,
+		},
+		jwtSecret,
+	);
+
+	return c.json({
+		data: { accessToken, refreshToken: result.newToken, expiresIn },
+	});
+});
+
+// POST /auth/revoke — revoke a refresh token family (explicit logout)
+auth.post('/revoke', async (c) => {
+	const body = await c.req.json();
+	const parsed = revokeSchema.safeParse(body);
+	if (!parsed.success) {
+		return c.json(
+			{
+				error: {
+					code: 'VALIDATION_ERROR',
+					message: parsed.error.issues[0].message,
+				},
+			},
+			400,
+		);
+	}
+
+	const encoder = new TextEncoder();
+	const data = encoder.encode(parsed.data.refreshToken);
+	const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+	const hashArray = new Uint8Array(hashBuffer);
+	const tokenHash = btoa(String.fromCharCode(...hashArray));
+
+	const db = c.env.DB;
+	const row = await db
+		.prepare('SELECT family_id FROM refresh_tokens WHERE token_hash = ?')
+		.bind(tokenHash)
+		.first<{ family_id: string }>();
+
+	if (row) {
+		await revokeFamily(db, row.family_id);
+	}
+
+	// Always return ok (don't leak whether token existed)
+	return c.json({ data: { ok: true } });
+});
+
+// POST /auth/validate — called by simse-api gateway (for API keys and legacy session tokens)
 auth.post('/validate', async (c) => {
 	const body = await c.req.json<{ token: string }>();
 	if (!body.token) {
@@ -453,6 +703,30 @@ auth.post('/validate', async (c) => {
 				.bind(keyHash)
 				.run();
 		}
+	} else if (rawToken.includes('.')) {
+		// JWT access token validation (backwards compat via validate endpoint)
+		const jwtSecret = await getJwtSecret(c);
+		if (jwtSecret) {
+			const { verifyJwt } = await import('../lib/jwt');
+			const payload = await verifyJwt(rawToken, jwtSecret);
+			if (payload && payload.exp > Math.floor(Date.now() / 1000)) {
+				userId = payload.sub;
+				sessionId = payload.sid;
+				const teamFromJwt = payload.tid
+					? { id: payload.tid, role: payload.role }
+					: null;
+				if (teamFromJwt) {
+					return c.json({
+						data: {
+							userId,
+							sessionId,
+							teamId: teamFromJwt.id,
+							role: teamFromJwt.role,
+						},
+					});
+				}
+			}
+		}
 	}
 
 	if (!userId) {
@@ -462,7 +736,6 @@ auth.post('/validate', async (c) => {
 		);
 	}
 
-	// Get team info for RBAC
 	const team = await db
 		.prepare(
 			'SELECT t.id, tm.role FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? LIMIT 1',

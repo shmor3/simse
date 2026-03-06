@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 
 use crate::autocomplete::{render_inline_completions, CommandAutocompleteState};
 use crate::onboarding::OnboardingState;
+use crate::spinner::ThinkingSpinner;
 
 /// Maximum height (in rows) for the inline completions area.
 const MAX_VISIBLE_COMPLETIONS: u16 = 8;
@@ -108,6 +109,8 @@ pub struct App {
 	pub setup_state: SetupSelectorState,
 	/// Onboarding state — tracks whether first-run setup is needed.
 	pub onboarding: OnboardingState,
+	/// Thinking spinner — visible during the entire generation lifecycle.
+	pub spinner: Option<ThinkingSpinner>,
 }
 
 impl App {
@@ -154,6 +157,7 @@ impl App {
 			librarian_state: LibrarianExplorerState::new(Vec::new()),
 			setup_state: SetupSelectorState::new(),
 			onboarding: OnboardingState::default(),
+			spinner: None,
 		}
 	}
 }
@@ -237,6 +241,9 @@ pub enum AppMessage {
 		is_error: bool,
 	},
 	RefreshContext(CommandContext),
+
+	// Timer
+	Tick,
 
 	// Resize
 	Resize {
@@ -585,11 +592,14 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		AppMessage::StreamStart => {
 			app.loop_status = LoopStatus::Streaming;
 			app.stream_text.clear();
+			let server = app.server_name.clone().unwrap_or_default();
+			app.spinner = Some(ThinkingSpinner::new(server));
 		}
 		AppMessage::StreamDelta(delta) => {
 			app.stream_text.push_str(&delta);
 		}
 		AppMessage::StreamEnd { text } => {
+			app.spinner = None;
 			app.output.push(OutputItem::Message {
 				role: "assistant".into(),
 				text,
@@ -621,9 +631,13 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		}
 		AppMessage::TokenUsage { prompt, completion } => {
 			app.total_tokens += prompt + completion;
+			if let Some(ref mut spinner) = app.spinner {
+				spinner.set_token_count(app.total_tokens);
+			}
 		}
 		AppMessage::LoopComplete => {
 			app.loop_status = LoopStatus::Idle;
+			app.spinner = None;
 			// Move any remaining active tool calls to output.
 			for tc in app.active_tool_calls.drain(..) {
 				app.output.push(OutputItem::ToolCall(tc));
@@ -632,6 +646,7 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 		AppMessage::LoopError(message) => {
 			app.output.push(OutputItem::Error { message });
 			app.loop_status = LoopStatus::Idle;
+			app.spinner = None;
 		}
 
 		// ── Permission ──────────────────────────────
@@ -672,6 +687,13 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			app.data_dir = ctx.data_dir;
 			app.work_dir = ctx.work_dir;
 			app.config_values = ctx.config_values;
+		}
+
+		// ── Timer ───────────────────────────────────
+		AppMessage::Tick => {
+			if let Some(ref mut spinner) = app.spinner {
+				spinner.tick();
+			}
 		}
 
 		// ── Resize ──────────────────────────────────
@@ -950,6 +972,11 @@ fn render_chat_area(app: &App, frame: &mut Frame, area: Rect) {
 			tc.clone(),
 		));
 		lines.extend(tc_lines);
+	}
+
+	// Show thinking spinner during generation.
+	if let Some(ref spinner) = app.spinner {
+		lines.push(spinner.to_line());
 	}
 
 	// Calculate scroll: offset 0 = pinned to bottom (latest content visible).

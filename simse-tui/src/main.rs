@@ -43,18 +43,24 @@ use cli_args::parse_cli_args;
 fn create_loop_callbacks(
 	tx: mpsc::UnboundedSender<AppMessage>,
 ) -> simse_core::agentic_loop::LoopCallbacks {
-	let tx1 = tx.clone();
-	let tx2 = tx.clone();
-	let tx3 = tx.clone();
+	let tx_start = tx.clone();
+	let tx_delta = tx.clone();
+	let tx_error = tx.clone();
+	let tx_usage = tx.clone();
 	simse_core::agentic_loop::LoopCallbacks {
 		on_stream_start: Some(Box::new(move || {
-			let _ = tx1.send(AppMessage::StreamStart);
+			let _ = tx_start.send(AppMessage::StreamStart);
 		})),
 		on_stream_delta: Some(Box::new(move |delta: &str| {
-			let _ = tx2.send(AppMessage::StreamDelta(delta.to_string()));
+			let _ = tx_delta.send(AppMessage::StreamDelta(delta.to_string()));
 		})),
 		on_error: Some(Box::new(move |error: &simse_core::SimseError| {
-			let _ = tx3.send(AppMessage::LoopError(error.to_string()));
+			let _ = tx_error.send(AppMessage::LoopError(error.to_string()));
+		})),
+		on_usage_update: Some(Box::new(move |usage: &simse_core::agentic_loop::TokenUsage| {
+			let prompt = usage.prompt_tokens.unwrap_or(0);
+			let completion = usage.completion_tokens.unwrap_or(0);
+			let _ = tx_usage.send(AppMessage::TokenUsage { prompt, completion });
 		})),
 		..Default::default()
 	}
@@ -101,6 +107,11 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 	loop {
 		terminal.draw(|frame| view(&app, frame))?;
 
+		// Only arm the tick future when the spinner is active, so the select
+		// doesn't wake unnecessarily and interfere with the event loop.
+		let tick_duration = std::time::Duration::from_millis(120);
+		let spinner_active = app.spinner.is_some();
+
 		tokio::select! {
 			Some(Ok(event)) = reader.next() => {
 				if let Some(msg) = map_event(event) {
@@ -117,6 +128,9 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 			}
 			Some(msg) = msg_rx.recv() => {
 				app = update(app, msg);
+			}
+			_ = tokio::time::sleep(tick_duration), if spinner_active => {
+				app = update(app, AppMessage::Tick);
 			}
 		}
 

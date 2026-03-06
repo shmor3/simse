@@ -1,9 +1,9 @@
 //! Top-level context holding shared infrastructure for a simse application.
 //!
 //! `CoreContext` is the wiring struct that ties together the event bus, logger,
-//! config, task list, hook system, session manager, and optionally the library
-//! and VFS. Library and VFS are `Option` because they require engine binaries
-//! (Rust subprocesses) that cannot be spawned during simple construction.
+//! config, task list, hook system, session manager, and optionally the library.
+//! Library is `Option` because it requires an engine binary (Rust subprocess)
+//! that cannot be spawned during simple construction.
 
 use crate::config::AppConfig;
 use crate::events::EventBus;
@@ -14,24 +14,22 @@ use crate::server::session::SessionManager;
 use crate::tasks::TaskList;
 use crate::tools::registry::ToolRegistry;
 use crate::tools::types::ToolRegistryOptions;
-use crate::vfs::VirtualFs;
 
 /// Top-level application context tying together shared infrastructure.
 ///
 /// Holds references to the event bus, logger, config, task list, hook system,
-/// session manager, and optionally the library and VFS.
+/// session manager, and optionally the library.
 ///
 /// # Construction
 ///
 /// Use [`CoreContext::new`] with an [`AppConfig`] for defaults, then optionally
-/// attach a library or VFS via the builder methods.
+/// attach a library via the builder methods.
 ///
 /// ```rust,no_run
 /// use simse_core::{AppConfig, CoreContext};
 ///
 /// let ctx = CoreContext::new(AppConfig::default());
 /// assert!(ctx.library.is_none());
-/// assert!(ctx.vfs.is_none());
 /// ```
 pub struct CoreContext {
 	pub config: AppConfig,
@@ -42,7 +40,6 @@ pub struct CoreContext {
 	pub session_manager: SessionManager,
 	pub tool_registry: ToolRegistry,
 	pub library: Option<Library>,
-	pub vfs: Option<VirtualFs>,
 }
 
 impl CoreContext {
@@ -54,7 +51,7 @@ impl CoreContext {
 	/// - Hook system: empty
 	/// - Session manager: empty
 	/// - Tool registry: default options (50,000 char output limit)
-	/// - Library and VFS: `None` (attach later via builder methods)
+	/// - Library: `None` (attach later via builder method)
 	pub fn new(config: AppConfig) -> Self {
 		Self {
 			config,
@@ -65,19 +62,12 @@ impl CoreContext {
 			session_manager: SessionManager::new(),
 			tool_registry: ToolRegistry::new(ToolRegistryOptions::default()),
 			library: None,
-			vfs: None,
 		}
 	}
 
 	/// Attach a library to the context.
 	pub fn with_library(mut self, library: Library) -> Self {
 		self.library = Some(library);
-		self
-	}
-
-	/// Attach a virtual filesystem to the context.
-	pub fn with_vfs(mut self, vfs: VirtualFs) -> Self {
-		self.vfs = Some(vfs);
 		self
 	}
 }

@@ -1,5 +1,5 @@
 // simse-core: Pure Rust orchestration library for simse
-// Links simse-acp, simse-mcp, simse-adaptive, simse-vfs as library dependencies
+// Links simse-acp, simse-mcp, simse-adaptive as library dependencies
 
 pub mod agent;
 pub mod agentic_loop;
@@ -20,7 +20,6 @@ pub mod server;
 pub mod tasks;
 pub mod tools;
 pub mod utils;
-pub mod vfs;
 
 // Re-export engine crates for consumers
 pub use simse_acp_engine as acp;

@@ -6,7 +6,7 @@
 //! Defines trait abstractions (`SubagentLoopRunner`, `DelegateRunner`) so that
 //! the actual agentic loop and ACP client implementations can be plugged in
 //! later. This follows the same pattern used in `builtin.rs` with
-//! `LibraryStore` and `VfsStore` traits.
+//! `LibraryStore` trait.
 
 use std::collections::HashMap;
 use std::sync::Arc;

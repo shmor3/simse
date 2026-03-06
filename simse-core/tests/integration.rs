@@ -20,7 +20,6 @@ fn core_context_creation_with_defaults() {
 	let ctx = CoreContext::new(config);
 
 	assert!(ctx.library.is_none());
-	assert!(ctx.vfs.is_none());
 }
 
 #[test]
@@ -52,19 +51,6 @@ fn core_context_task_list_is_empty() {
 }
 
 #[test]
-fn core_context_with_vfs_builder() {
-	use simse_core::vfs::VirtualFs;
-	use simse_vfs_engine::path::VfsLimits;
-
-	let ctx = CoreContext::new(AppConfig::default());
-	assert!(ctx.vfs.is_none());
-
-	let vfs = VirtualFs::new(VfsLimits::default(), 50);
-	let ctx = ctx.with_vfs(vfs);
-	assert!(ctx.vfs.is_some());
-}
-
-#[test]
 fn submodules_are_accessible() {
 	// Verify all public modules are accessible via qualified paths
 	let _ = std::any::type_name::<simse_core::error::SimseError>();
@@ -76,5 +62,4 @@ fn submodules_are_accessible() {
 	let _ = std::any::type_name::<simse_core::hooks::HookSystem>();
 	let _ = std::any::type_name::<simse_core::server::session::SessionManager>();
 	let _ = std::any::type_name::<simse_core::library::Library>();
-	let _ = std::any::type_name::<simse_core::vfs::VirtualFs>();
 }

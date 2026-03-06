@@ -2,7 +2,7 @@
 //!
 //! Ports `src/config/schema.ts` + `src/config/settings.ts` (~1,160 lines).
 //!
-//! - `AppConfig` struct with nested `AcpConfig`, `McpConfig`, `LibraryConfig`, `VfsConfig`,
+//! - `AppConfig` struct with nested `AcpConfig`, `McpConfig`, `LibraryConfig`,
 //!   `ToolsConfig`, `LoopConfig`, `PromptsConfig`, chain types
 //! - All derive `Serialize, Deserialize, Clone, Debug, Default`
 //! - `define_config(raw, opts)` validates and resolves a JSON value into `AppConfig`
@@ -170,17 +170,6 @@ pub struct LibraryConfig {
 }
 
 // ---------------------------------------------------------------------------
-// VFS config
-// ---------------------------------------------------------------------------
-
-/// Virtual filesystem configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
-#[serde(rename_all = "camelCase", default)]
-pub struct VfsConfig {
-	// Placeholder for VFS configuration — populated in later tasks
-}
-
-// ---------------------------------------------------------------------------
 // Tools config
 // ---------------------------------------------------------------------------
 
@@ -314,7 +303,6 @@ pub struct AppConfig {
 	pub acp: AcpConfig,
 	pub mcp: McpConfig,
 	pub library: LibraryConfig,
-	pub vfs: VfsConfig,
 	pub tools: ToolsConfig,
 	#[serde(rename = "loop")]
 	pub loop_config: LoopConfig,

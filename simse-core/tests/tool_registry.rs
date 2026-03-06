@@ -830,7 +830,6 @@ fn test_tool_category_display() {
 	assert_eq!(ToolCategory::Search.to_string(), "search");
 	assert_eq!(ToolCategory::Execute.to_string(), "execute");
 	assert_eq!(ToolCategory::Library.to_string(), "library");
-	assert_eq!(ToolCategory::Vfs.to_string(), "vfs");
 	assert_eq!(ToolCategory::Task.to_string(), "task");
 	assert_eq!(ToolCategory::Subagent.to_string(), "subagent");
 	assert_eq!(ToolCategory::Other.to_string(), "other");

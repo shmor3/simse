@@ -1,13 +1,10 @@
-//! Built-in tool registration for library, VFS, and task tools.
+//! Built-in tool registration for library and task tools.
 //!
-//! Ports `src/ai/tools/builtin-tools.ts` (~508 lines of TS) to Rust.
+//! Defines trait abstractions (`LibraryStore`) so that handlers are testable
+//! with mocks. Task tools use `Arc<Mutex<TaskList>>` directly.
 //!
-//! Defines trait abstractions (`LibraryStore`, `VfsStore`) so that handlers
-//! are testable with mocks. Task tools use `Arc<Mutex<TaskList>>` directly.
-//!
-//! Three registration functions add tool handlers to a `ToolRegistry`:
+//! Two registration functions add tool handlers to a `ToolRegistry`:
 //! - `register_library_tools` — search, shelve, withdraw, catalog, compact
-//! - `register_vfs_tools` — read, write, list, tree
 //! - `register_task_tools` — create, get, update, delete, list
 
 use std::collections::HashMap;
@@ -63,26 +60,6 @@ pub struct CompendiumResult {
 	pub source_ids: Vec<String>,
 }
 
-/// Result of reading a file from the VFS.
-#[derive(Debug, Clone)]
-pub struct FileReadResult {
-	/// The file text content (empty for binary).
-	pub text: String,
-	/// Content type: "text" or "binary".
-	pub content_type: String,
-	/// File size in bytes.
-	pub size: usize,
-}
-
-/// A directory entry from the VFS.
-#[derive(Debug, Clone)]
-pub struct DirEntry {
-	/// Entry name (file or directory name).
-	pub name: String,
-	/// Entry type: "directory" or "file".
-	pub entry_type: String,
-}
-
 // ---------------------------------------------------------------------------
 // Trait abstractions
 // ---------------------------------------------------------------------------
@@ -117,26 +94,6 @@ pub trait LibraryStore: Send + Sync {
 		&self,
 		ids: &[String],
 	) -> Result<CompendiumResult, SimseError>;
-}
-
-/// Abstraction over the virtual filesystem for VFS tool handlers.
-#[async_trait]
-pub trait VfsStore: Send + Sync {
-	/// Read a file by path.
-	async fn read_file(&self, path: &str) -> Result<FileReadResult, SimseError>;
-
-	/// Write a file, returning the number of bytes written.
-	async fn write_file(
-		&self,
-		path: &str,
-		content: &str,
-	) -> Result<usize, SimseError>;
-
-	/// List directory entries at the given path.
-	async fn readdir(&self, path: &str) -> Result<Vec<DirEntry>, SimseError>;
-
-	/// Get a tree view of the filesystem at the given path.
-	async fn tree(&self, path: &str) -> Result<String, SimseError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -436,215 +393,6 @@ pub fn register_library_tools(
 					result.compendium_id,
 					result.source_ids.len()
 				))
-			})
-		});
-
-		registry.register(definition, handler);
-	}
-}
-
-// ---------------------------------------------------------------------------
-// VFS tool registration
-// ---------------------------------------------------------------------------
-
-/// Register VFS tools: read, write, list, tree.
-pub fn register_vfs_tools(
-	registry: &mut ToolRegistry,
-	vfs: Arc<dyn VfsStore>,
-) {
-	// 1. vfs_read
-	{
-		let mut parameters = HashMap::new();
-		parameters.insert(
-			"path".to_string(),
-			param(
-				"string",
-				"VFS path using vfs:// scheme (e.g. vfs:///hello.js)",
-				true,
-			),
-		);
-
-		let definition = ToolDefinition {
-			name: "vfs_read".to_string(),
-			description: "Read a file from the virtual filesystem sandbox."
-				.to_string(),
-			parameters,
-			category: ToolCategory::Vfs,
-			annotations: Some(ToolAnnotations {
-				read_only: Some(true),
-				..Default::default()
-			}),
-			timeout_ms: None,
-			max_output_chars: None,
-		};
-
-		let vfs = Arc::clone(&vfs);
-		let handler: ToolHandler = Arc::new(move |args: Value| {
-			let vfs = Arc::clone(&vfs);
-			Box::pin(async move {
-				let path = args
-					.get("path")
-					.and_then(|v| v.as_str())
-					.unwrap_or("vfs:///");
-
-				let result = vfs.read_file(path).await?;
-				if result.content_type == "binary" {
-					Ok(format!("[Binary file: {} bytes]", result.size))
-				} else {
-					Ok(result.text)
-				}
-			})
-		});
-
-		registry.register(definition, handler);
-	}
-
-	// 2. vfs_write
-	{
-		let mut parameters = HashMap::new();
-		parameters.insert(
-			"path".to_string(),
-			param(
-				"string",
-				"VFS path using vfs:// scheme (e.g. vfs:///hello.js)",
-				true,
-			),
-		);
-		parameters.insert(
-			"content".to_string(),
-			param("string", "The file content to write", true),
-		);
-
-		let definition = ToolDefinition {
-			name: "vfs_write".to_string(),
-			description: "Write a file to the virtual filesystem sandbox."
-				.to_string(),
-			parameters,
-			category: ToolCategory::Vfs,
-			annotations: None,
-			timeout_ms: None,
-			max_output_chars: None,
-		};
-
-		let vfs = Arc::clone(&vfs);
-		let handler: ToolHandler = Arc::new(move |args: Value| {
-			let vfs = Arc::clone(&vfs);
-			Box::pin(async move {
-				let path = args
-					.get("path")
-					.and_then(|v| v.as_str())
-					.unwrap_or("vfs:///");
-				let content = args
-					.get("content")
-					.and_then(|v| v.as_str())
-					.unwrap_or("");
-
-				let bytes_written = vfs.write_file(path, content).await?;
-				Ok(format!("Wrote {} bytes to {}", bytes_written, path))
-			})
-		});
-
-		registry.register(definition, handler);
-	}
-
-	// 3. vfs_list
-	{
-		let mut parameters = HashMap::new();
-		parameters.insert(
-			"path".to_string(),
-			param(
-				"string",
-				"VFS path using vfs:// scheme (e.g. vfs:///hello.js)",
-				false,
-			),
-		);
-
-		let definition = ToolDefinition {
-			name: "vfs_list".to_string(),
-			description:
-				"List files and directories in the virtual filesystem sandbox."
-					.to_string(),
-			parameters,
-			category: ToolCategory::Vfs,
-			annotations: Some(ToolAnnotations {
-				read_only: Some(true),
-				..Default::default()
-			}),
-			timeout_ms: None,
-			max_output_chars: None,
-		};
-
-		let vfs = Arc::clone(&vfs);
-		let handler: ToolHandler = Arc::new(move |args: Value| {
-			let vfs = Arc::clone(&vfs);
-			Box::pin(async move {
-				let path = args
-					.get("path")
-					.and_then(|v| v.as_str())
-					.unwrap_or("vfs:///");
-
-				let entries = vfs.readdir(path).await?;
-
-				if entries.is_empty() {
-					return Ok("Directory is empty.".to_string());
-				}
-
-				let lines: Vec<String> = entries
-					.iter()
-					.map(|e| {
-						let prefix = if e.entry_type == "directory" {
-							"d"
-						} else {
-							"f"
-						};
-						format!("{} {}", prefix, e.name)
-					})
-					.collect();
-
-				Ok(lines.join("\n"))
-			})
-		});
-
-		registry.register(definition, handler);
-	}
-
-	// 4. vfs_tree
-	{
-		let mut parameters = HashMap::new();
-		parameters.insert(
-			"path".to_string(),
-			param(
-				"string",
-				"VFS path using vfs:// scheme (e.g. vfs:///hello.js)",
-				false,
-			),
-		);
-
-		let definition = ToolDefinition {
-			name: "vfs_tree".to_string(),
-			description:
-				"Show a tree view of the virtual filesystem sandbox."
-					.to_string(),
-			parameters,
-			category: ToolCategory::Vfs,
-			annotations: Some(ToolAnnotations {
-				read_only: Some(true),
-				..Default::default()
-			}),
-			timeout_ms: None,
-			max_output_chars: None,
-		};
-
-		let vfs = Arc::clone(&vfs);
-		let handler: ToolHandler = Arc::new(move |args: Value| {
-			let vfs = Arc::clone(&vfs);
-			Box::pin(async move {
-				let path = args
-					.get("path")
-					.and_then(|v| v.as_str())
-					.unwrap_or("vfs:///");
-
-				vfs.tree(path).await
 			})
 		});
 

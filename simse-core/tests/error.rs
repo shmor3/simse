@@ -63,16 +63,10 @@ fn all_error_code_strings_are_unique() {
 		ToolErrorCode::PermissionDenied.as_str(),
 		ToolErrorCode::Timeout.as_str(),
 		ToolErrorCode::ParseError.as_str(),
-		// VfsErrorCode
-		VfsErrorCode::InvalidPath.as_str(),
-		VfsErrorCode::NotFound.as_str(),
-		VfsErrorCode::AlreadyExists.as_str(),
-		VfsErrorCode::LimitExceeded.as_str(),
 		// Passthrough codes
 		"ACP_ERROR",
 		"MCP_ENGINE_ERROR",
 		"ADAPTIVE_ERROR",
-		"VFS_ENGINE_ERROR",
 		"IO_ERROR",
 		"OTHER_ERROR",
 	];
@@ -160,12 +154,6 @@ fn display_task_error() {
 fn display_tool_error() {
 	let err = SimseError::tool(ToolErrorCode::ExecutionFailed, "crashed");
 	assert_eq!(err.to_string(), "tool error: crashed");
-}
-
-#[test]
-fn display_vfs_error() {
-	let err = SimseError::vfs(VfsErrorCode::NotFound, "/missing");
-	assert_eq!(err.to_string(), "VFS error: /missing");
 }
 
 #[test]
@@ -398,26 +386,6 @@ fn code_tool_variants() {
 }
 
 #[test]
-fn code_vfs_variants() {
-	assert_eq!(
-		SimseError::vfs(VfsErrorCode::InvalidPath, "x").code(),
-		"VFS_INVALID_PATH"
-	);
-	assert_eq!(
-		SimseError::vfs(VfsErrorCode::NotFound, "x").code(),
-		"VFS_NOT_FOUND"
-	);
-	assert_eq!(
-		SimseError::vfs(VfsErrorCode::AlreadyExists, "x").code(),
-		"VFS_ALREADY_EXISTS"
-	);
-	assert_eq!(
-		SimseError::vfs(VfsErrorCode::LimitExceeded, "x").code(),
-		"VFS_LIMIT_EXCEEDED"
-	);
-}
-
-#[test]
 fn code_io_variant() {
 	let io_err = std::io::Error::new(std::io::ErrorKind::Other, "fail");
 	let err: SimseError = io_err.into();
@@ -467,19 +435,6 @@ fn from_adaptive_error() {
 	assert!(
 		err.to_string().contains("empty text"),
 		"expected 'empty text' in: {}",
-		err
-	);
-}
-
-#[test]
-fn from_vfs_error() {
-	let vfs_err =
-		simse_vfs_engine::error::VfsError::NotFound("/missing".into());
-	let err: SimseError = vfs_err.into();
-	assert_eq!(err.code(), "VFS_ENGINE_ERROR");
-	assert!(
-		err.to_string().contains("/missing"),
-		"expected '/missing' in: {}",
 		err
 	);
 }
@@ -588,7 +543,6 @@ fn error_code_display() {
 	assert_eq!(format!("{}", ResilienceErrorCode::CircuitOpen), "RESILIENCE_CIRCUIT_OPEN");
 	assert_eq!(format!("{}", TaskErrorCode::NotFound), "TASK_NOT_FOUND");
 	assert_eq!(format!("{}", ToolErrorCode::NotFound), "TOOL_NOT_FOUND");
-	assert_eq!(format!("{}", VfsErrorCode::InvalidPath), "VFS_INVALID_PATH");
 }
 
 // ---------------------------------------------------------------------------

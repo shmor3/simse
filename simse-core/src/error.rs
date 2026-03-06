@@ -2,7 +2,7 @@
 //!
 //! Replaces 13 separate TypeScript error files with a single `SimseError` enum
 //! that covers all domains: config, provider, chain, template, MCP, library,
-//! loop, resilience, task, tool, VFS, plus passthrough variants for each engine
+//! loop, resilience, task, tool, plus passthrough variants for each engine
 //! crate error.
 
 use std::fmt;
@@ -281,32 +281,6 @@ impl fmt::Display for ToolErrorCode {
 	}
 }
 
-/// Error codes for virtual filesystem errors.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum VfsErrorCode {
-	InvalidPath,
-	NotFound,
-	AlreadyExists,
-	LimitExceeded,
-}
-
-impl VfsErrorCode {
-	pub fn as_str(&self) -> &str {
-		match self {
-			Self::InvalidPath => "VFS_INVALID_PATH",
-			Self::NotFound => "VFS_NOT_FOUND",
-			Self::AlreadyExists => "VFS_ALREADY_EXISTS",
-			Self::LimitExceeded => "VFS_LIMIT_EXCEEDED",
-		}
-	}
-}
-
-impl fmt::Display for VfsErrorCode {
-	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-		f.write_str(self.as_str())
-	}
-}
-
 // ---------------------------------------------------------------------------
 // Unified SimseError
 // ---------------------------------------------------------------------------
@@ -378,12 +352,6 @@ pub enum SimseError {
 		message: String,
 	},
 
-	#[error("VFS error: {message}")]
-	Vfs {
-		code: VfsErrorCode,
-		message: String,
-	},
-
 	// Passthrough from engine crates
 	#[error(transparent)]
 	Acp(#[from] simse_acp_engine::error::AcpError),
@@ -393,9 +361,6 @@ pub enum SimseError {
 
 	#[error(transparent)]
 	Adaptive(#[from] simse_adaptive_engine::error::AdaptiveError),
-
-	#[error(transparent)]
-	VfsEngine(#[from] simse_vfs_engine::error::VfsError),
 
 	#[error("IO error: {0}")]
 	Io(#[from] std::io::Error),
@@ -423,11 +388,9 @@ impl SimseError {
 			Self::Resilience { code, .. } => code.as_str(),
 			Self::Task { code, .. } => code.as_str(),
 			Self::Tool { code, .. } => code.as_str(),
-			Self::Vfs { code, .. } => code.as_str(),
 			Self::Acp(_) => "ACP_ERROR",
 			Self::McpEngine(_) => "MCP_ENGINE_ERROR",
 			Self::Adaptive(_) => "ADAPTIVE_ERROR",
-			Self::VfsEngine(_) => "VFS_ENGINE_ERROR",
 			Self::Io(_) => "IO_ERROR",
 			Self::Other(_) => "OTHER_ERROR",
 		}
@@ -536,13 +499,6 @@ impl SimseError {
 
 	pub fn tool(code: ToolErrorCode, message: impl Into<String>) -> Self {
 		Self::Tool {
-			code,
-			message: message.into(),
-		}
-	}
-
-	pub fn vfs(code: VfsErrorCode, message: impl Into<String>) -> Self {
-		Self::Vfs {
 			code,
 			message: message.into(),
 		}

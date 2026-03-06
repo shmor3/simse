@@ -25,7 +25,6 @@ pub enum ToolCategory {
 	Search,
 	Execute,
 	Library,
-	Vfs,
 	Task,
 	Subagent,
 	#[default]
@@ -40,7 +39,6 @@ impl fmt::Display for ToolCategory {
 			Self::Search => "search",
 			Self::Execute => "execute",
 			Self::Library => "library",
-			Self::Vfs => "vfs",
 			Self::Task => "task",
 			Self::Subagent => "subagent",
 			Self::Other => "other",

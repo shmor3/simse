@@ -1,4 +1,4 @@
-//! Tests for the built-in library, VFS, and task tool registration.
+//! Tests for the built-in library and task tool registration.
 
 use std::sync::{Arc, Mutex};
 
@@ -7,8 +7,8 @@ use async_trait::async_trait;
 use simse_core::error::SimseError;
 use simse_core::tasks::{TaskList, TaskListOptions};
 use simse_core::tools::builtin::{
-	CompendiumResult, DirEntry, FileReadResult, LibraryStore, SearchResult, TopicInfo, VfsStore,
-	VolumeInfo, register_library_tools, register_task_tools, register_vfs_tools,
+	CompendiumResult, LibraryStore, SearchResult, TopicInfo,
+	VolumeInfo, register_library_tools, register_task_tools,
 };
 use simse_core::tools::{ToolCallRequest, ToolRegistry, ToolRegistryOptions};
 
@@ -106,63 +106,7 @@ impl LibraryStore for MockLibraryStore {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Mock VfsStore
-// ---------------------------------------------------------------------------
 
-struct MockVfsStore {
-	read_result: FileReadResult,
-	write_bytes: usize,
-	dir_entries: Vec<DirEntry>,
-	tree_output: String,
-}
-
-impl Default for MockVfsStore {
-	fn default() -> Self {
-		Self {
-			read_result: FileReadResult {
-				text: "Hello, world!".to_string(),
-				content_type: "text".to_string(),
-				size: 13,
-			},
-			write_bytes: 42,
-			dir_entries: vec![
-				DirEntry {
-					name: "src".to_string(),
-					entry_type: "directory".to_string(),
-				},
-				DirEntry {
-					name: "README.md".to_string(),
-					entry_type: "file".to_string(),
-				},
-				DirEntry {
-					name: "Cargo.toml".to_string(),
-					entry_type: "file".to_string(),
-				},
-			],
-			tree_output: "vfs:///\n  src/\n    main.rs\n  README.md".to_string(),
-		}
-	}
-}
-
-#[async_trait]
-impl VfsStore for MockVfsStore {
-	async fn read_file(&self, _path: &str) -> Result<FileReadResult, SimseError> {
-		Ok(self.read_result.clone())
-	}
-
-	async fn write_file(&self, _path: &str, _content: &str) -> Result<usize, SimseError> {
-		Ok(self.write_bytes)
-	}
-
-	async fn readdir(&self, _path: &str) -> Result<Vec<DirEntry>, SimseError> {
-		Ok(self.dir_entries.clone())
-	}
-
-	async fn tree(&self, _path: &str) -> Result<String, SimseError> {
-		Ok(self.tree_output.clone())
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -403,138 +347,6 @@ async fn test_library_compact_insufficient_volumes() {
 		.output
 		.contains("has fewer than 2 volumes"));
 	assert!(result.output.contains("nothing to compact"));
-}
-
-// ===========================================================================
-// VFS tool tests
-// ===========================================================================
-
-// ---------------------------------------------------------------------------
-// 11. vfs_read text file
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_vfs_read_text_file() {
-	let mut registry = make_registry();
-	let vfs: Arc<dyn VfsStore> = Arc::new(MockVfsStore::default());
-	register_vfs_tools(&mut registry, vfs);
-
-	let call = make_call(
-		"vfs_read",
-		serde_json::json!({"path": "vfs:///hello.txt"}),
-	);
-	let result = registry.execute(&call).await;
-
-	assert!(!result.is_error);
-	assert_eq!(result.output, "Hello, world!");
-}
-
-// ---------------------------------------------------------------------------
-// 12. vfs_read binary file
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_vfs_read_binary_file() {
-	let mut registry = make_registry();
-	let vfs: Arc<dyn VfsStore> = Arc::new(MockVfsStore {
-		read_result: FileReadResult {
-			text: String::new(),
-			content_type: "binary".to_string(),
-			size: 1024,
-		},
-		..Default::default()
-	});
-	register_vfs_tools(&mut registry, vfs);
-
-	let call = make_call(
-		"vfs_read",
-		serde_json::json!({"path": "vfs:///image.png"}),
-	);
-	let result = registry.execute(&call).await;
-
-	assert!(!result.is_error);
-	assert_eq!(result.output, "[Binary file: 1024 bytes]");
-}
-
-// ---------------------------------------------------------------------------
-// 13. vfs_write returns byte count
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_vfs_write_returns_byte_count() {
-	let mut registry = make_registry();
-	let vfs: Arc<dyn VfsStore> = Arc::new(MockVfsStore {
-		write_bytes: 128,
-		..Default::default()
-	});
-	register_vfs_tools(&mut registry, vfs);
-
-	let call = make_call(
-		"vfs_write",
-		serde_json::json!({"path": "vfs:///output.txt", "content": "test data"}),
-	);
-	let result = registry.execute(&call).await;
-
-	assert!(!result.is_error);
-	assert_eq!(result.output, "Wrote 128 bytes to vfs:///output.txt");
-}
-
-// ---------------------------------------------------------------------------
-// 14. vfs_list directory entries
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_vfs_list_directory_entries() {
-	let mut registry = make_registry();
-	let vfs: Arc<dyn VfsStore> = Arc::new(MockVfsStore::default());
-	register_vfs_tools(&mut registry, vfs);
-
-	let call = make_call("vfs_list", serde_json::json!({"path": "vfs:///"}));
-	let result = registry.execute(&call).await;
-
-	assert!(!result.is_error);
-	assert!(result.output.contains("d src"));
-	assert!(result.output.contains("f README.md"));
-	assert!(result.output.contains("f Cargo.toml"));
-}
-
-// ---------------------------------------------------------------------------
-// 15. vfs_list empty directory
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_vfs_list_empty_directory() {
-	let mut registry = make_registry();
-	let vfs: Arc<dyn VfsStore> = Arc::new(MockVfsStore {
-		dir_entries: vec![],
-		..Default::default()
-	});
-	register_vfs_tools(&mut registry, vfs);
-
-	let call = make_call("vfs_list", serde_json::json!({}));
-	let result = registry.execute(&call).await;
-
-	assert!(!result.is_error);
-	assert_eq!(result.output, "Directory is empty.");
-}
-
-// ---------------------------------------------------------------------------
-// 16. vfs_tree output
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn test_vfs_tree_output() {
-	let mut registry = make_registry();
-	let vfs: Arc<dyn VfsStore> = Arc::new(MockVfsStore::default());
-	register_vfs_tools(&mut registry, vfs);
-
-	let call = make_call("vfs_tree", serde_json::json!({}));
-	let result = registry.execute(&call).await;
-
-	assert!(!result.is_error);
-	assert!(result.output.contains("vfs:///"));
-	assert!(result.output.contains("src/"));
-	assert!(result.output.contains("main.rs"));
 }
 
 // ===========================================================================
@@ -934,24 +746,7 @@ fn test_library_tools_registered() {
 }
 
 // ---------------------------------------------------------------------------
-// 30. All VFS tools registered
-// ---------------------------------------------------------------------------
-
-#[test]
-fn test_vfs_tools_registered() {
-	let mut registry = make_registry();
-	let vfs: Arc<dyn VfsStore> = Arc::new(MockVfsStore::default());
-	register_vfs_tools(&mut registry, vfs);
-
-	assert!(registry.is_registered("vfs_read"));
-	assert!(registry.is_registered("vfs_write"));
-	assert!(registry.is_registered("vfs_list"));
-	assert!(registry.is_registered("vfs_tree"));
-	assert_eq!(registry.tool_count(), 4);
-}
-
-// ---------------------------------------------------------------------------
-// 31. All task tools registered
+// 30. All task tools registered
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -979,9 +774,6 @@ fn test_tool_categories() {
 	let store: Arc<dyn LibraryStore> = Arc::new(MockLibraryStore::default());
 	register_library_tools(&mut registry, store);
 
-	let vfs: Arc<dyn VfsStore> = Arc::new(MockVfsStore::default());
-	register_vfs_tools(&mut registry, vfs);
-
 	let tl = make_task_list();
 	register_task_tools(&mut registry, tl);
 
@@ -995,16 +787,6 @@ fn test_tool_categories() {
 	assert_eq!(
 		registry.get_tool_definition("library_shelve").unwrap().category,
 		ToolCategory::Library
-	);
-
-	// VFS tools
-	assert_eq!(
-		registry.get_tool_definition("vfs_read").unwrap().category,
-		ToolCategory::Vfs
-	);
-	assert_eq!(
-		registry.get_tool_definition("vfs_write").unwrap().category,
-		ToolCategory::Vfs
 	);
 
 	// Task tools
@@ -1029,9 +811,6 @@ fn test_tool_annotations() {
 	let store: Arc<dyn LibraryStore> = Arc::new(MockLibraryStore::default());
 	register_library_tools(&mut registry, store);
 
-	let vfs: Arc<dyn VfsStore> = Arc::new(MockVfsStore::default());
-	register_vfs_tools(&mut registry, vfs);
-
 	let tl = make_task_list();
 	register_task_tools(&mut registry, tl);
 
@@ -1039,12 +818,6 @@ fn test_tool_annotations() {
 	let search_def = registry.get_tool_definition("library_search").unwrap();
 	assert_eq!(
 		search_def.annotations.as_ref().unwrap().read_only,
-		Some(true)
-	);
-
-	let vfs_read_def = registry.get_tool_definition("vfs_read").unwrap();
-	assert_eq!(
-		vfs_read_def.annotations.as_ref().unwrap().read_only,
 		Some(true)
 	);
 
@@ -1101,12 +874,9 @@ fn test_all_tools_registered_together() {
 	let store: Arc<dyn LibraryStore> = Arc::new(MockLibraryStore::default());
 	register_library_tools(&mut registry, store);
 
-	let vfs: Arc<dyn VfsStore> = Arc::new(MockVfsStore::default());
-	register_vfs_tools(&mut registry, vfs);
-
 	let tl = make_task_list();
 	register_task_tools(&mut registry, tl);
 
-	// 5 library + 4 VFS + 5 task = 14 total
-	assert_eq!(registry.tool_count(), 14);
+	// 5 library + 5 task = 10 total
+	assert_eq!(registry.tool_count(), 10);
 }

@@ -2275,7 +2275,6 @@ dependencies = [
  "simse-acp-engine",
  "simse-adaptive-engine",
  "simse-mcp-engine",
- "simse-vfs-engine",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -2337,22 +2336,6 @@ dependencies = [
  "serde",
  "serde_json",
  "simse-core",
-]
-
-[[package]]
-name = "simse-vfs-engine"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "regex",
- "serde",
- "serde_json",
- "sha2",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

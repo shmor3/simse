@@ -1,0 +1,22 @@
+name = "simse-relay"
+compatibility_date = "2025-04-01"
+main = "src/index.ts"
+
+workers_dev = true
+
+routes = [{ pattern = "relay.simse.dev", custom_domain = true }]
+
+[durable_objects]
+bindings = [{ name = "TUNNEL_SESSION", class_name = "TunnelSession" }]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["TunnelSession"]
+
+[analytics_engine]
+dataset = "simse-analytics"
+binding = "ANALYTICS"
+
+# Fallback vars (overridden by Secrets Store in production)
+[vars]
+AUTH_API_URL = "https://auth.test.internal"

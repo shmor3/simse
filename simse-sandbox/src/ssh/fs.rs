@@ -1,15 +1,13 @@
 use std::sync::Arc;
 
-use async_trait::async_trait;
 use base64::Engine;
 use russh_sftp::client::SftpSession;
 use russh_sftp::protocol::StatusCode;
 
-use simse_vfs_engine::backend::FsBackend;
-use simse_vfs_engine::diff::DiffOutput;
-use simse_vfs_engine::disk::{DiskSearchMode, DiskSearchOptions, DiskSearchResult};
-use simse_vfs_engine::error::VfsError;
-use simse_vfs_engine::protocol::{
+use crate::error::SandboxError;
+use crate::vfs_diff::DiffOutput;
+use crate::vfs_disk::{DiskSearchMode, DiskSearchOptions, DiskSearchResult};
+use crate::vfs_types::{
     DirEntry, HistoryEntry, ReadFileResult, SearchResult, StatResult,
 };
 
@@ -24,7 +22,7 @@ const EXEC_TIMEOUT_MS: u64 = 30_000;
 /// Maximum output bytes from exec commands (10 MB).
 const EXEC_MAX_BYTES: usize = 10 * 1024 * 1024;
 
-// ── SshFsBackend ────────────────────────────────────────────────────────────
+// ── SshFs ───────────────────────────────────────────────────────────────────
 
 /// Remote filesystem backend operating over SSH.
 ///
@@ -32,13 +30,13 @@ const EXEC_MAX_BYTES: usize = 10 * 1024 * 1024;
 /// and exec channels are used for operations that SFTP cannot handle
 /// (glob, search, tree, du). All paths are scoped under `root` on the
 /// remote machine.
-pub struct SshFsBackend {
+pub struct SshFs {
     pool: Arc<SshPool>,
     root: String,
 }
 
-impl SshFsBackend {
-    /// Create a new `SshFsBackend` with the given pool and remote root directory.
+impl SshFs {
+    /// Create a new `SshFs` with the given pool and remote root directory.
     pub fn new(pool: Arc<SshPool>, root: String) -> Self {
         // Ensure root ends with '/' for clean path joining
         let root = if root.ends_with('/') {
@@ -62,36 +60,34 @@ impl SshFsBackend {
         }
     }
 
-    /// Get an SFTP session from the pool, mapping errors to VfsError.
-    async fn sftp(&self) -> Result<SftpSession, VfsError> {
+    /// Get an SFTP session from the pool, mapping errors to SandboxError.
+    async fn sftp(&self) -> Result<SftpSession, SandboxError> {
         self.pool
             .get_sftp_session()
             .await
-            .map_err(|e| VfsError::Io(std::io::Error::other(e.to_string())))
+            .map_err(|e| SandboxError::VfsIo(e.to_string()))
     }
 
     /// Execute a remote command and return stdout.
-    async fn run_remote_cmd(&self, command: &str) -> Result<String, VfsError> {
+    async fn run_remote_cmd(&self, command: &str) -> Result<String, SandboxError> {
         let mut channel = self.pool.get_exec_channel().await.map_err(|e| {
-            VfsError::Io(std::io::Error::other(e.to_string()))
+            SandboxError::VfsIo(e.to_string())
         })?;
 
         channel.exec(true, command.as_bytes()).await.map_err(|e| {
-            VfsError::Io(std::io::Error::other(e.to_string()))
+            SandboxError::VfsIo(e.to_string())
         })?;
 
         let output = read_channel_output(&mut channel, EXEC_TIMEOUT_MS, EXEC_MAX_BYTES)
             .await
             .map_err(|e| {
-                VfsError::Io(std::io::Error::other(e.to_string()))
+                SandboxError::VfsIo(e.to_string())
             })?;
 
         if output.exit_code.unwrap_or(1) != 0 {
             let stderr = output.stderr.trim().to_string();
             if !stderr.is_empty() {
-                return Err(VfsError::Io(std::io::Error::other(
-                    stderr,
-                )));
+                return Err(SandboxError::VfsIo(stderr));
             }
         }
 
@@ -99,7 +95,7 @@ impl SshFsBackend {
     }
 
     /// Create parent directories for a given remote path via SFTP.
-    async fn ensure_parent_dirs(&self, sftp: &SftpSession, remote_path: &str) -> Result<(), VfsError> {
+    async fn ensure_parent_dirs(&self, sftp: &SftpSession, remote_path: &str) -> Result<(), SandboxError> {
         if let Some(parent) = remote_path.rsplit_once('/').map(|(p, _)| p) {
             if !parent.is_empty() {
                 self.mkdir_recursive(sftp, parent).await?;
@@ -115,7 +111,7 @@ impl SshFsBackend {
         &'a self,
         sftp: &'a SftpSession,
         path: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), VfsError>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), SandboxError>> + Send + 'a>> {
         Box::pin(async move {
             // Check if directory already exists
             match sftp.metadata(path.to_string()).await {
@@ -139,9 +135,9 @@ impl SshFsBackend {
                     // May already exist after recursive creation
                     match sftp.metadata(path.to_string()).await {
                         Ok(attrs) if attrs.is_dir() => Ok(()),
-                        _ => Err(VfsError::Io(std::io::Error::other(
+                        _ => Err(SandboxError::VfsIo(
                             format!("failed to create directory: {path}"),
-                        ))),
+                        )),
                     }
                 }
                 Err(e) => Err(sftp_err(e)),
@@ -156,7 +152,7 @@ impl SshFsBackend {
         &'a self,
         sftp: &'a SftpSession,
         path: &'a str,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), VfsError>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), SandboxError>> + Send + 'a>> {
         Box::pin(async move {
             let entries = sftp.read_dir(path.to_string()).await.map_err(sftp_err)?;
 
@@ -184,7 +180,7 @@ impl SshFsBackend {
         base: &'a str,
         prefix: &'a str,
         out: &'a mut Vec<DirEntry>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), VfsError>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), SandboxError>> + Send + 'a>> {
         Box::pin(async move {
             let entries = sftp.read_dir(base.to_string()).await.map_err(sftp_err)?;
 
@@ -213,53 +209,10 @@ impl SshFsBackend {
             Ok(())
         })
     }
-}
 
-/// Convert an SFTP error into a VfsError.
-fn sftp_err(e: russh_sftp::client::error::Error) -> VfsError {
-    match &e {
-        russh_sftp::client::error::Error::Status(status) => match status.status_code {
-            StatusCode::NoSuchFile => VfsError::NotFound(status.error_message.clone()),
-            StatusCode::PermissionDenied => {
-                VfsError::PermissionDenied(status.error_message.clone())
-            }
-            _ => VfsError::Io(std::io::Error::other(
-                e.to_string(),
-            )),
-        },
-        _ => VfsError::Io(std::io::Error::other(
-            e.to_string(),
-        )),
-    }
-}
-
-/// Detect whether raw bytes are likely text (UTF-8) or binary.
-///
-/// Returns `("text", true)` if valid UTF-8, `("binary", false)` otherwise.
-fn detect_content_type(data: &[u8]) -> (&'static str, bool) {
-    // Check for null bytes (strong binary indicator)
-    if data.contains(&0) {
-        return ("binary", false);
-    }
-    // Try UTF-8 decoding
-    match std::str::from_utf8(data) {
-        Ok(_) => ("text", true),
-        Err(_) => ("binary", false),
-    }
-}
-
-/// Shell-escape a string for safe use in remote commands.
-fn shell_escape(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
-}
-
-// ── FsBackend impl ─────────────────────────────────────────────────────────
-
-#[async_trait]
-impl FsBackend for SshFsBackend {
     // ── File operations ─────────────────────────────────────────────────
 
-    async fn read_file(&self, path: &str) -> Result<ReadFileResult, VfsError> {
+    pub async fn read_file(&self, path: &str) -> Result<ReadFileResult, SandboxError> {
         let remote = self.resolve(path);
         let sftp = self.sftp().await?;
 
@@ -285,13 +238,13 @@ impl FsBackend for SshFsBackend {
         }
     }
 
-    async fn write_file(
+    pub async fn write_file(
         &self,
         path: &str,
         content: &str,
         _content_type: Option<&str>,
         create_parents: bool,
-    ) -> Result<(), VfsError> {
+    ) -> Result<(), SandboxError> {
         let remote = self.resolve(path);
         let sftp = self.sftp().await?;
 
@@ -307,17 +260,17 @@ impl FsBackend for SshFsBackend {
 
         use tokio::io::AsyncWriteExt;
         file.write_all(content.as_bytes()).await.map_err(|e| {
-            VfsError::Io(std::io::Error::other(e.to_string()))
+            SandboxError::VfsIo(e.to_string())
         })?;
 
         file.shutdown().await.map_err(|e| {
-            VfsError::Io(std::io::Error::other(e.to_string()))
+            SandboxError::VfsIo(e.to_string())
         })?;
 
         Ok(())
     }
 
-    async fn append_file(&self, path: &str, content: &str) -> Result<(), VfsError> {
+    pub async fn append_file(&self, path: &str, content: &str) -> Result<(), SandboxError> {
         let remote = self.resolve(path);
         let sftp = self.sftp().await?;
 
@@ -339,17 +292,17 @@ impl FsBackend for SshFsBackend {
 
         use tokio::io::AsyncWriteExt;
         file.write_all(&combined).await.map_err(|e| {
-            VfsError::Io(std::io::Error::other(e.to_string()))
+            SandboxError::VfsIo(e.to_string())
         })?;
 
         file.shutdown().await.map_err(|e| {
-            VfsError::Io(std::io::Error::other(e.to_string()))
+            SandboxError::VfsIo(e.to_string())
         })?;
 
         Ok(())
     }
 
-    async fn delete_file(&self, path: &str) -> Result<(), VfsError> {
+    pub async fn delete_file(&self, path: &str) -> Result<(), SandboxError> {
         let remote = self.resolve(path);
         let sftp = self.sftp().await?;
         sftp.remove_file(remote).await.map_err(sftp_err)
@@ -357,7 +310,7 @@ impl FsBackend for SshFsBackend {
 
     // ── Directory operations ────────────────────────────────────────────
 
-    async fn mkdir(&self, path: &str, recursive: bool) -> Result<(), VfsError> {
+    pub async fn mkdir(&self, path: &str, recursive: bool) -> Result<(), SandboxError> {
         let remote = self.resolve(path);
         let sftp = self.sftp().await?;
 
@@ -368,7 +321,7 @@ impl FsBackend for SshFsBackend {
         }
     }
 
-    async fn readdir(&self, path: &str, recursive: bool) -> Result<Vec<DirEntry>, VfsError> {
+    pub async fn readdir(&self, path: &str, recursive: bool) -> Result<Vec<DirEntry>, SandboxError> {
         let remote = self.resolve(path);
         let sftp = self.sftp().await?;
 
@@ -397,7 +350,7 @@ impl FsBackend for SshFsBackend {
         }
     }
 
-    async fn rmdir(&self, path: &str, recursive: bool) -> Result<(), VfsError> {
+    pub async fn rmdir(&self, path: &str, recursive: bool) -> Result<(), SandboxError> {
         let remote = self.resolve(path);
         let sftp = self.sftp().await?;
 
@@ -410,7 +363,7 @@ impl FsBackend for SshFsBackend {
 
     // ── Metadata ────────────────────────────────────────────────────────
 
-    async fn stat(&self, path: &str) -> Result<StatResult, VfsError> {
+    pub async fn stat(&self, path: &str) -> Result<StatResult, SandboxError> {
         let remote = self.resolve(path);
         let sftp = self.sftp().await?;
 
@@ -431,7 +384,7 @@ impl FsBackend for SshFsBackend {
         })
     }
 
-    async fn exists(&self, path: &str) -> Result<bool, VfsError> {
+    pub async fn exists(&self, path: &str) -> Result<bool, SandboxError> {
         let remote = self.resolve(path);
         let sftp = self.sftp().await?;
 
@@ -443,20 +396,20 @@ impl FsBackend for SshFsBackend {
 
     // ── File management ─────────────────────────────────────────────────
 
-    async fn rename(&self, old_path: &str, new_path: &str) -> Result<(), VfsError> {
+    pub async fn rename(&self, old_path: &str, new_path: &str) -> Result<(), SandboxError> {
         let old_remote = self.resolve(old_path);
         let new_remote = self.resolve(new_path);
         let sftp = self.sftp().await?;
         sftp.rename(old_remote, new_remote).await.map_err(sftp_err)
     }
 
-    async fn copy(
+    pub async fn copy(
         &self,
         src: &str,
         dest: &str,
         _overwrite: bool,
         _recursive: bool,
-    ) -> Result<(), VfsError> {
+    ) -> Result<(), SandboxError> {
         let src_remote = self.resolve(src);
         let dest_remote = self.resolve(dest);
         let sftp = self.sftp().await?;
@@ -468,11 +421,11 @@ impl FsBackend for SshFsBackend {
 
         use tokio::io::AsyncWriteExt;
         file.write_all(&data).await.map_err(|e| {
-            VfsError::Io(std::io::Error::other(e.to_string()))
+            SandboxError::VfsIo(e.to_string())
         })?;
 
         file.shutdown().await.map_err(|e| {
-            VfsError::Io(std::io::Error::other(e.to_string()))
+            SandboxError::VfsIo(e.to_string())
         })?;
 
         Ok(())
@@ -480,7 +433,7 @@ impl FsBackend for SshFsBackend {
 
     // ── Search & traversal (exec-based) ─────────────────────────────────
 
-    async fn glob(&self, patterns: &[String]) -> Result<Vec<String>, VfsError> {
+    pub async fn glob(&self, patterns: &[String]) -> Result<Vec<String>, SandboxError> {
         if patterns.is_empty() {
             return Ok(Vec::new());
         }
@@ -513,7 +466,7 @@ impl FsBackend for SshFsBackend {
         Ok(results)
     }
 
-    async fn tree(&self, path: &str) -> Result<String, VfsError> {
+    pub async fn tree(&self, path: &str) -> Result<String, SandboxError> {
         let remote = self.resolve(path);
         let escaped = shell_escape(&remote);
 
@@ -525,7 +478,7 @@ impl FsBackend for SshFsBackend {
         self.run_remote_cmd(&cmd).await
     }
 
-    async fn du(&self, path: &str) -> Result<u64, VfsError> {
+    pub async fn du(&self, path: &str) -> Result<u64, SandboxError> {
         let remote = self.resolve(path);
         let escaped = shell_escape(&remote);
 
@@ -534,19 +487,18 @@ impl FsBackend for SshFsBackend {
 
         let size_str = stdout.trim();
         size_str.parse::<u64>().map_err(|e| {
-            VfsError::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
+            SandboxError::VfsIo(
                 format!("failed to parse du output '{size_str}': {e}"),
-            ))
+            )
         })
     }
 
-    async fn search(
+    pub async fn search(
         &self,
         path: &str,
         query: &str,
         opts: &DiskSearchOptions,
-    ) -> Result<DiskSearchResult, VfsError> {
+    ) -> Result<DiskSearchResult, SandboxError> {
         let remote = self.resolve(path);
         let escaped_path = shell_escape(&remote);
         let escaped_query = shell_escape(query);
@@ -627,38 +579,72 @@ impl FsBackend for SshFsBackend {
 
     // ── History & versioning (unsupported over SSH) ─────────────────────
 
-    async fn history(&self, _path: &str) -> Result<Vec<HistoryEntry>, VfsError> {
-        Err(VfsError::InvalidOperation(
+    pub async fn history(&self, _path: &str) -> Result<Vec<HistoryEntry>, SandboxError> {
+        Err(SandboxError::VfsInvalidOperation(
             "History not supported over SSH".to_string(),
         ))
     }
 
-    async fn diff(
+    pub async fn diff(
         &self,
         _old_path: &str,
         _new_path: &str,
         _context: usize,
-    ) -> Result<DiffOutput, VfsError> {
-        Err(VfsError::InvalidOperation(
+    ) -> Result<DiffOutput, SandboxError> {
+        Err(SandboxError::VfsInvalidOperation(
             "Diff not supported over SSH".to_string(),
         ))
     }
 
-    async fn diff_versions(
+    pub async fn diff_versions(
         &self,
         _path: &str,
         _old_version: usize,
         _new_version: Option<usize>,
         _context: usize,
-    ) -> Result<DiffOutput, VfsError> {
-        Err(VfsError::InvalidOperation(
+    ) -> Result<DiffOutput, SandboxError> {
+        Err(SandboxError::VfsInvalidOperation(
             "Diff versions not supported over SSH".to_string(),
         ))
     }
 
-    async fn checkout(&self, _path: &str, _version: usize) -> Result<(), VfsError> {
-        Err(VfsError::InvalidOperation(
+    pub async fn checkout(&self, _path: &str, _version: usize) -> Result<(), SandboxError> {
+        Err(SandboxError::VfsInvalidOperation(
             "Checkout not supported over SSH".to_string(),
         ))
     }
+}
+
+/// Convert an SFTP error into a SandboxError.
+fn sftp_err(e: russh_sftp::client::error::Error) -> SandboxError {
+    match &e {
+        russh_sftp::client::error::Error::Status(status) => match status.status_code {
+            StatusCode::NoSuchFile => SandboxError::VfsNotFound(status.error_message.clone()),
+            StatusCode::PermissionDenied => {
+                SandboxError::VfsPermissionDenied(status.error_message.clone())
+            }
+            _ => SandboxError::VfsIo(e.to_string()),
+        },
+        _ => SandboxError::VfsIo(e.to_string()),
+    }
+}
+
+/// Detect whether raw bytes are likely text (UTF-8) or binary.
+///
+/// Returns `("text", true)` if valid UTF-8, `("binary", false)` otherwise.
+fn detect_content_type(data: &[u8]) -> (&'static str, bool) {
+    // Check for null bytes (strong binary indicator)
+    if data.contains(&0) {
+        return ("binary", false);
+    }
+    // Try UTF-8 decoding
+    match std::str::from_utf8(data) {
+        Ok(_) => ("text", true),
+        Err(_) => ("binary", false),
+    }
+}
+
+/// Shell-escape a string for safe use in remote commands.
+fn shell_escape(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }

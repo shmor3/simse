@@ -2,15 +2,15 @@ use std::collections::HashMap;
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use simse_vfs_engine::diff::DiffOutput;
-use simse_vfs_engine::disk::{DiskSearchMode, DiskSearchOptions, DiskSearchResult};
-use simse_vfs_engine::vfs::{
+use crate::vfs_diff::DiffOutput;
+use crate::vfs_disk::{DiskSearchMode, DiskSearchOptions, DiskSearchResult};
+use crate::vfs_store::{
     DiffResultOutput, SearchOpts, SearchOutput, SnapshotData as VfsSnapshotData,
     SnapshotDir as VfsSnapshotDir, SnapshotFile as VfsSnapshotFile,
     TransactionOp as VfsTransactionOp, VfsEvent,
 };
-use simse_vnet_engine::mock_store::MockResponse;
-use simse_vnet_engine::session::{Scheme as VnetScheme, SessionType as VnetSessionType};
+use crate::vnet_mock_store::MockResponse;
+use crate::vnet_session::{Scheme as VnetScheme, SessionType as VnetSessionType};
 
 use crate::config::BackendConfig;
 use crate::error::SandboxError;
@@ -646,7 +646,7 @@ impl SandboxServer {
         };
 
         let vfs_config = p.vfs.map(|v| {
-            let mut limits = simse_vfs_engine::path::VfsLimits::default();
+            let mut limits = crate::vfs_path::VfsLimits::default();
             if let Some(val) = v.max_file_size {
                 limits.max_file_size = val;
             }
@@ -1930,10 +1930,8 @@ impl SandboxServer {
                 "status": "connected"
             }))
         } else if url.starts_with("net://") {
-            Err(SandboxError::Vnet(
-                simse_vnet_engine::error::VnetError::ConnectionFailed(
-                    "net:// WebSocket not yet implemented".to_string(),
-                ),
+            Err(SandboxError::VnetConnectionFailed(
+                "net:// WebSocket not yet implemented".to_string(),
             ))
         } else {
             Err(SandboxError::InvalidParams(format!(
@@ -2044,9 +2042,7 @@ impl SandboxServer {
                     "ttl": response.delay_ms,
                 }))
             }
-            None => Err(SandboxError::Vnet(
-                simse_vnet_engine::error::VnetError::DnsResolutionFailed(p.hostname),
-            )),
+            None => Err(SandboxError::VnetDnsResolutionFailed(p.hostname)),
         }
     }
 
@@ -2215,7 +2211,7 @@ fn convert_diff_output_from_raw(
 
 // ── VSH helper ──────────────────────────────────────────────────────────────
 
-fn vsh_session_to_json(session: &simse_vsh_engine::shell::ShellSession) -> serde_json::Value {
+fn vsh_session_to_json(session: &crate::vsh_shell::ShellSession) -> serde_json::Value {
     serde_json::json!({
         "id": session.id,
         "name": session.name,

@@ -2,29 +2,245 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 
-use async_trait::async_trait;
-use simse_vnet_engine::backend::NetBackend;
-use simse_vnet_engine::error::VnetError;
-use simse_vnet_engine::protocol::HttpResponseResult;
+use crate::error::SandboxError;
+use crate::vnet_types::HttpResponseResult;
 
 use super::channel::read_channel_output;
 use super::pool::SshPool;
 
-// ── SshNetBackend ──────────────────────────────────────────────────────────
+// ── SshNet ──────────────────────────────────────────────────────────────────
 
 /// Remote network backend that executes operations via SSH.
 ///
 /// HTTP requests are performed by running `curl` over an exec channel.
 /// DNS resolution uses `getent hosts` on the remote machine.
 /// WS, TCP, and UDP are not yet implemented over SSH.
-pub struct SshNetBackend {
+pub struct SshNet {
     pool: Arc<SshPool>,
 }
 
-impl SshNetBackend {
-    /// Create a new `SshNetBackend` backed by the given SSH connection pool.
+impl SshNet {
+    /// Create a new `SshNet` backed by the given SSH connection pool.
     pub fn new(pool: Arc<SshPool>) -> Self {
         Self { pool }
+    }
+
+    // ── HTTP ────────────────────────────────────────────────────────────
+
+    pub async fn http_request(
+        &self,
+        url: &str,
+        method: &str,
+        headers: &HashMap<String, String>,
+        body: Option<&str>,
+        timeout_ms: u64,
+        max_response_bytes: u64,
+    ) -> Result<HttpResponseResult, SandboxError> {
+        let start = Instant::now();
+
+        // Build curl command
+        let timeout_secs = timeout_ms.div_ceil(1000); // ceil division
+        let mut cmd = format!(
+            "curl -s -S -i -X {} --max-time {} --max-filesize {}",
+            shell_escape(method),
+            timeout_secs,
+            max_response_bytes,
+        );
+
+        // Add headers
+        for (key, value) in headers {
+            let header_str = format!("{key}: {value}");
+            cmd.push_str(&format!(" -H {}", shell_escape(&header_str)));
+        }
+
+        // Add body
+        if let Some(body_str) = body {
+            cmd.push_str(&format!(" -d {}", shell_escape(body_str)));
+        }
+
+        // Add URL (last)
+        cmd.push_str(&format!(" {}", shell_escape(url)));
+
+        // Execute over SSH
+        let mut channel = self.pool.get_exec_channel().await.map_err(|e| {
+            SandboxError::VnetConnectionFailed(format!("SSH exec channel: {e}"))
+        })?;
+
+        channel.exec(true, cmd.as_bytes()).await.map_err(|e| {
+            SandboxError::VnetConnectionFailed(format!("SSH exec: {e}"))
+        })?;
+
+        let output =
+            read_channel_output(&mut channel, timeout_ms + 5000, max_response_bytes as usize)
+                .await
+                .map_err(|e| {
+                    if e.to_string().contains("timed out") {
+                        SandboxError::VnetTimeout(format!(
+                            "HTTP request timed out after {timeout_ms}ms"
+                        ))
+                    } else {
+                        SandboxError::VnetConnectionFailed(format!("SSH read: {e}"))
+                    }
+                })?;
+
+        // Check for curl errors (non-zero exit)
+        if output.exit_code.is_some_and(|c| c != 0) {
+            let stderr = output.stderr.trim();
+            let msg = if stderr.is_empty() {
+                format!("curl exited with code {}", output.exit_code.unwrap_or(1))
+            } else {
+                stderr.to_string()
+            };
+
+            // curl exit code 28 = timeout
+            if output.exit_code == Some(28) {
+                return Err(SandboxError::VnetTimeout(format!(
+                    "HTTP request timed out after {timeout_ms}ms"
+                )));
+            }
+            // curl exit code 63 = max filesize exceeded
+            if output.exit_code == Some(63) {
+                return Err(SandboxError::VnetResponseTooLarge(format!(
+                    "response exceeds limit {max_response_bytes}"
+                )));
+            }
+
+            return Err(SandboxError::VnetConnectionFailed(format!(
+                "curl failed: {msg}"
+            )));
+        }
+
+        // Parse response
+        let (status, resp_headers, body_str) = parse_curl_output(&output.stdout)?;
+
+        let content_type = resp_headers
+            .get("content-type")
+            .cloned()
+            .unwrap_or_default();
+
+        let body_type = if content_type.contains("json") {
+            "json".to_string()
+        } else {
+            "text".to_string()
+        };
+
+        let bytes_received = body_str.len() as u64;
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        Ok(HttpResponseResult {
+            status,
+            headers: resp_headers,
+            body: body_str,
+            body_type,
+            duration_ms,
+            bytes_received,
+        })
+    }
+
+    // ── WebSocket (stub) ────────────────────────────────────────────────
+
+    pub async fn ws_connect(
+        &self,
+        _url: &str,
+        _headers: &HashMap<String, String>,
+    ) -> Result<String, SandboxError> {
+        Err(SandboxError::VnetConnectionFailed(
+            "WebSocket over SSH not yet implemented".to_string(),
+        ))
+    }
+
+    pub async fn ws_send(&self, _session_id: &str, _data: &str) -> Result<(), SandboxError> {
+        Err(SandboxError::VnetConnectionFailed(
+            "WebSocket over SSH not yet implemented".to_string(),
+        ))
+    }
+
+    pub async fn ws_close(&self, _session_id: &str) -> Result<(), SandboxError> {
+        Err(SandboxError::VnetConnectionFailed(
+            "WebSocket over SSH not yet implemented".to_string(),
+        ))
+    }
+
+    // ── TCP (stub) ──────────────────────────────────────────────────────
+
+    pub async fn tcp_connect(&self, _host: &str, _port: u16) -> Result<String, SandboxError> {
+        Err(SandboxError::VnetConnectionFailed(
+            "TCP over SSH not yet implemented".to_string(),
+        ))
+    }
+
+    pub async fn tcp_send(&self, _session_id: &str, _data: &str) -> Result<(), SandboxError> {
+        Err(SandboxError::VnetConnectionFailed(
+            "TCP over SSH not yet implemented".to_string(),
+        ))
+    }
+
+    pub async fn tcp_close(&self, _session_id: &str) -> Result<(), SandboxError> {
+        Err(SandboxError::VnetConnectionFailed(
+            "TCP over SSH not yet implemented".to_string(),
+        ))
+    }
+
+    // ── UDP (stub) ──────────────────────────────────────────────────────
+
+    pub async fn udp_send(
+        &self,
+        _host: &str,
+        _port: u16,
+        _data: &str,
+        _timeout_ms: u64,
+    ) -> Result<Option<String>, SandboxError> {
+        Err(SandboxError::VnetConnectionFailed(
+            "UDP over SSH not yet implemented".to_string(),
+        ))
+    }
+
+    // ── DNS ─────────────────────────────────────────────────────────────
+
+    pub async fn resolve(&self, hostname: &str) -> Result<Vec<String>, SandboxError> {
+        let cmd = format!("getent hosts {}", shell_escape(hostname));
+
+        let mut channel = self.pool.get_exec_channel().await.map_err(|e| {
+            SandboxError::VnetConnectionFailed(format!("SSH exec channel: {e}"))
+        })?;
+
+        channel.exec(true, cmd.as_bytes()).await.map_err(|e| {
+            SandboxError::VnetConnectionFailed(format!("SSH exec: {e}"))
+        })?;
+
+        let output = read_channel_output(&mut channel, 10_000, 64 * 1024)
+            .await
+            .map_err(|e| {
+                SandboxError::VnetDnsResolutionFailed(format!("{hostname}: {e}"))
+            })?;
+
+        // Non-zero exit means resolution failed
+        if output.exit_code.is_some_and(|c| c != 0) {
+            return Err(SandboxError::VnetDnsResolutionFailed(format!(
+                "no addresses found for {hostname}"
+            )));
+        }
+
+        // Parse getent output: each line is "IP_ADDRESS hostname [aliases...]"
+        let mut ips = Vec::new();
+        for line in output.stdout.lines() {
+            let line = line.trim();
+            if line.is_empty() {
+                continue;
+            }
+            // First whitespace-delimited token is the IP address
+            if let Some(ip) = line.split_whitespace().next() {
+                ips.push(ip.to_string());
+            }
+        }
+
+        if ips.is_empty() {
+            return Err(SandboxError::VnetDnsResolutionFailed(format!(
+                "no addresses found for {hostname}"
+            )));
+        }
+
+        Ok(ips)
     }
 }
 
@@ -49,7 +265,7 @@ fn shell_escape(value: &str) -> String {
 /// header blocks — we use the last one.
 fn parse_curl_output(
     raw: &str,
-) -> Result<(u16, HashMap<String, String>, String), VnetError> {
+) -> Result<(u16, HashMap<String, String>, String), SandboxError> {
     // Split into header section and body at the first \r\n\r\n boundary.
     // curl -i uses CRLF line endings in the header block.
     // Find the last header/body boundary (in case of redirects producing
@@ -84,227 +300,6 @@ fn parse_curl_output(
     }
 
     Ok((status, headers, body.to_string()))
-}
-
-#[async_trait]
-impl NetBackend for SshNetBackend {
-    // ── HTTP ────────────────────────────────────────────────────────────
-
-    async fn http_request(
-        &self,
-        url: &str,
-        method: &str,
-        headers: &HashMap<String, String>,
-        body: Option<&str>,
-        timeout_ms: u64,
-        max_response_bytes: u64,
-    ) -> Result<HttpResponseResult, VnetError> {
-        let start = Instant::now();
-
-        // Build curl command
-        let timeout_secs = timeout_ms.div_ceil(1000); // ceil division
-        let mut cmd = format!(
-            "curl -s -S -i -X {} --max-time {} --max-filesize {}",
-            shell_escape(method),
-            timeout_secs,
-            max_response_bytes,
-        );
-
-        // Add headers
-        for (key, value) in headers {
-            let header_str = format!("{key}: {value}");
-            cmd.push_str(&format!(" -H {}", shell_escape(&header_str)));
-        }
-
-        // Add body
-        if let Some(body_str) = body {
-            cmd.push_str(&format!(" -d {}", shell_escape(body_str)));
-        }
-
-        // Add URL (last)
-        cmd.push_str(&format!(" {}", shell_escape(url)));
-
-        // Execute over SSH
-        let mut channel = self.pool.get_exec_channel().await.map_err(|e| {
-            VnetError::ConnectionFailed(format!("SSH exec channel: {e}"))
-        })?;
-
-        channel.exec(true, cmd.as_bytes()).await.map_err(|e| {
-            VnetError::ConnectionFailed(format!("SSH exec: {e}"))
-        })?;
-
-        let output =
-            read_channel_output(&mut channel, timeout_ms + 5000, max_response_bytes as usize)
-                .await
-                .map_err(|e| {
-                    if e.to_string().contains("timed out") {
-                        VnetError::Timeout(format!(
-                            "HTTP request timed out after {timeout_ms}ms"
-                        ))
-                    } else {
-                        VnetError::ConnectionFailed(format!("SSH read: {e}"))
-                    }
-                })?;
-
-        // Check for curl errors (non-zero exit)
-        if output.exit_code.is_some_and(|c| c != 0) {
-            let stderr = output.stderr.trim();
-            let msg = if stderr.is_empty() {
-                format!("curl exited with code {}", output.exit_code.unwrap_or(1))
-            } else {
-                stderr.to_string()
-            };
-
-            // curl exit code 28 = timeout
-            if output.exit_code == Some(28) {
-                return Err(VnetError::Timeout(format!(
-                    "HTTP request timed out after {timeout_ms}ms"
-                )));
-            }
-            // curl exit code 63 = max filesize exceeded
-            if output.exit_code == Some(63) {
-                return Err(VnetError::ResponseTooLarge(format!(
-                    "response exceeds limit {max_response_bytes}"
-                )));
-            }
-
-            return Err(VnetError::ConnectionFailed(format!(
-                "curl failed: {msg}"
-            )));
-        }
-
-        // Parse response
-        let (status, resp_headers, body_str) = parse_curl_output(&output.stdout)?;
-
-        let content_type = resp_headers
-            .get("content-type")
-            .cloned()
-            .unwrap_or_default();
-
-        let body_type = if content_type.contains("json") {
-            "json".to_string()
-        } else {
-            "text".to_string()
-        };
-
-        let bytes_received = body_str.len() as u64;
-        let duration_ms = start.elapsed().as_millis() as u64;
-
-        Ok(HttpResponseResult {
-            status,
-            headers: resp_headers,
-            body: body_str,
-            body_type,
-            duration_ms,
-            bytes_received,
-        })
-    }
-
-    // ── WebSocket (stub) ────────────────────────────────────────────────
-
-    async fn ws_connect(
-        &self,
-        _url: &str,
-        _headers: &HashMap<String, String>,
-    ) -> Result<String, VnetError> {
-        Err(VnetError::ConnectionFailed(
-            "WebSocket over SSH not yet implemented".to_string(),
-        ))
-    }
-
-    async fn ws_send(&self, _session_id: &str, _data: &str) -> Result<(), VnetError> {
-        Err(VnetError::ConnectionFailed(
-            "WebSocket over SSH not yet implemented".to_string(),
-        ))
-    }
-
-    async fn ws_close(&self, _session_id: &str) -> Result<(), VnetError> {
-        Err(VnetError::ConnectionFailed(
-            "WebSocket over SSH not yet implemented".to_string(),
-        ))
-    }
-
-    // ── TCP (stub) ──────────────────────────────────────────────────────
-
-    async fn tcp_connect(&self, _host: &str, _port: u16) -> Result<String, VnetError> {
-        Err(VnetError::ConnectionFailed(
-            "TCP over SSH not yet implemented".to_string(),
-        ))
-    }
-
-    async fn tcp_send(&self, _session_id: &str, _data: &str) -> Result<(), VnetError> {
-        Err(VnetError::ConnectionFailed(
-            "TCP over SSH not yet implemented".to_string(),
-        ))
-    }
-
-    async fn tcp_close(&self, _session_id: &str) -> Result<(), VnetError> {
-        Err(VnetError::ConnectionFailed(
-            "TCP over SSH not yet implemented".to_string(),
-        ))
-    }
-
-    // ── UDP (stub) ──────────────────────────────────────────────────────
-
-    async fn udp_send(
-        &self,
-        _host: &str,
-        _port: u16,
-        _data: &str,
-        _timeout_ms: u64,
-    ) -> Result<Option<String>, VnetError> {
-        Err(VnetError::ConnectionFailed(
-            "UDP over SSH not yet implemented".to_string(),
-        ))
-    }
-
-    // ── DNS ─────────────────────────────────────────────────────────────
-
-    async fn resolve(&self, hostname: &str) -> Result<Vec<String>, VnetError> {
-        let cmd = format!("getent hosts {}", shell_escape(hostname));
-
-        let mut channel = self.pool.get_exec_channel().await.map_err(|e| {
-            VnetError::ConnectionFailed(format!("SSH exec channel: {e}"))
-        })?;
-
-        channel.exec(true, cmd.as_bytes()).await.map_err(|e| {
-            VnetError::ConnectionFailed(format!("SSH exec: {e}"))
-        })?;
-
-        let output = read_channel_output(&mut channel, 10_000, 64 * 1024)
-            .await
-            .map_err(|e| {
-                VnetError::DnsResolutionFailed(format!("{hostname}: {e}"))
-            })?;
-
-        // Non-zero exit means resolution failed
-        if output.exit_code.is_some_and(|c| c != 0) {
-            return Err(VnetError::DnsResolutionFailed(format!(
-                "no addresses found for {hostname}"
-            )));
-        }
-
-        // Parse getent output: each line is "IP_ADDRESS hostname [aliases...]"
-        let mut ips = Vec::new();
-        for line in output.stdout.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-            // First whitespace-delimited token is the IP address
-            if let Some(ip) = line.split_whitespace().next() {
-                ips.push(ip.to_string());
-            }
-        }
-
-        if ips.is_empty() {
-            return Err(VnetError::DnsResolutionFailed(format!(
-                "no addresses found for {hostname}"
-            )));
-        }
-
-        Ok(ips)
-    }
 }
 
 #[cfg(test)]

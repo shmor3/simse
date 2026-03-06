@@ -3,11 +3,8 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
 
-use async_trait::async_trait;
-
-use simse_vsh_engine::backend::ShellBackend;
-use simse_vsh_engine::error::VshError;
-use simse_vsh_engine::executor::ExecResult;
+use crate::error::SandboxError;
+use crate::vsh_executor::ExecResult;
 
 use super::channel::read_channel_output;
 use super::pool::SshPool;
@@ -18,14 +15,86 @@ use super::pool::SshPool;
 /// a remote command string that sets the working directory, exports
 /// environment variables, and runs the command through the specified
 /// shell.
-pub struct SshShellBackend {
+pub struct SshShell {
 	pool: Arc<SshPool>,
 }
 
-impl SshShellBackend {
+impl SshShell {
 	/// Create a new SSH shell backend wrapping the given pool.
 	pub fn new(pool: Arc<SshPool>) -> Self {
 		Self { pool }
+	}
+
+	pub async fn execute_command(
+		&self,
+		command: &str,
+		cwd: &Path,
+		env: &HashMap<String, String>,
+		shell: &str,
+		timeout_ms: u64,
+		max_output_bytes: usize,
+		stdin_input: Option<&str>,
+	) -> Result<ExecResult, SandboxError> {
+		let start = Instant::now();
+
+		// 1. Open exec channel
+		let mut channel = self
+			.pool
+			.get_exec_channel()
+			.await
+			.map_err(|e| SandboxError::VshExecutionFailed(format!("open SSH channel: {e}")))?;
+
+		// 2. Build remote command string
+		let full_command = build_remote_command(command, cwd, env, shell);
+
+		// 3. Execute the command on the remote host
+		channel
+			.exec(true, full_command.as_bytes())
+			.await
+			.map_err(|e| SandboxError::VshExecutionFailed(format!("SSH exec: {e}")))?;
+
+		// 4. If stdin_input is provided, write it to the channel then signal EOF
+		if let Some(input) = stdin_input {
+			channel
+				.data(input.as_bytes())
+				.await
+				.map_err(|e| SandboxError::VshExecutionFailed(format!("write stdin: {e}")))?;
+			channel
+				.eof()
+				.await
+				.map_err(|e| SandboxError::VshExecutionFailed(format!("send eof: {e}")))?;
+		}
+
+		// 5. Read output
+		let output = read_channel_output(&mut channel, timeout_ms, max_output_bytes)
+			.await
+			.map_err(|e| match e {
+				SandboxError::Timeout(msg) => SandboxError::VshTimeout(msg),
+				other => SandboxError::VshExecutionFailed(other.to_string()),
+			})?;
+
+		let duration_ms = start.elapsed().as_millis() as u64;
+
+		// 6. Convert ExecOutput to ExecResult
+		Ok(ExecResult {
+			stdout: output.stdout,
+			stderr: output.stderr,
+			exit_code: output.exit_code.map(|c| c as i32).unwrap_or(-1),
+			duration_ms,
+		})
+	}
+
+	pub async fn execute_git(
+		&self,
+		args: &[String],
+		cwd: &Path,
+		env: &HashMap<String, String>,
+		timeout_ms: u64,
+		max_output_bytes: usize,
+	) -> Result<ExecResult, SandboxError> {
+		let git_command = format!("git {}", args.join(" "));
+		self.execute_command(&git_command, cwd, env, "sh", timeout_ms, max_output_bytes, None)
+			.await
 	}
 }
 
@@ -74,86 +143,6 @@ fn build_remote_command(
 	parts.push(format!("{} -c {}", shell, shell_escape(command)));
 
 	parts.join(" && ")
-}
-
-/// Convert a `SandboxError` (from channel helpers) into a `VshError`.
-fn sandbox_to_vsh(e: crate::error::SandboxError) -> VshError {
-	match e {
-		crate::error::SandboxError::Timeout(msg) => VshError::Timeout(msg),
-		other => VshError::ExecutionFailed(other.to_string()),
-	}
-}
-
-#[async_trait]
-impl ShellBackend for SshShellBackend {
-	async fn execute_command(
-		&self,
-		command: &str,
-		cwd: &Path,
-		env: &HashMap<String, String>,
-		shell: &str,
-		timeout_ms: u64,
-		max_output_bytes: usize,
-		stdin_input: Option<&str>,
-	) -> Result<ExecResult, VshError> {
-		let start = Instant::now();
-
-		// 1. Open exec channel
-		let mut channel = self
-			.pool
-			.get_exec_channel()
-			.await
-			.map_err(|e| VshError::ExecutionFailed(format!("open SSH channel: {e}")))?;
-
-		// 2. Build remote command string
-		let full_command = build_remote_command(command, cwd, env, shell);
-
-		// 3. Execute the command on the remote host
-		channel
-			.exec(true, full_command.as_bytes())
-			.await
-			.map_err(|e| VshError::ExecutionFailed(format!("SSH exec: {e}")))?;
-
-		// 4. If stdin_input is provided, write it to the channel then signal EOF
-		if let Some(input) = stdin_input {
-			channel
-				.data(input.as_bytes())
-				.await
-				.map_err(|e| VshError::ExecutionFailed(format!("write stdin: {e}")))?;
-			channel
-				.eof()
-				.await
-				.map_err(|e| VshError::ExecutionFailed(format!("send eof: {e}")))?;
-		}
-
-		// 5. Read output
-		let output = read_channel_output(&mut channel, timeout_ms, max_output_bytes)
-			.await
-			.map_err(sandbox_to_vsh)?;
-
-		let duration_ms = start.elapsed().as_millis() as u64;
-
-		// 6. Convert ExecOutput to ExecResult
-		Ok(ExecResult {
-			stdout: output.stdout,
-			stderr: output.stderr,
-			exit_code: output.exit_code.map(|c| c as i32).unwrap_or(-1),
-			duration_ms,
-		})
-	}
-
-	async fn execute_git(
-		&self,
-		args: &[String],
-		cwd: &Path,
-		env: &HashMap<String, String>,
-		timeout_ms: u64,
-		max_output_bytes: usize,
-	) -> Result<ExecResult, VshError> {
-		let git_command = format!("git {}", args.join(" "));
-		self.execute_command(&git_command, cwd, env, "sh", timeout_ms, max_output_bytes, None)
-			.await
-	}
 }
 
 #[cfg(test)]

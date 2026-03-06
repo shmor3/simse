@@ -244,6 +244,40 @@ fn summarize_json_schema() -> ConfigFileSchema {
 	}
 }
 
+fn mcp_json_schema() -> ConfigFileSchema {
+	ConfigFileSchema {
+		filename: "mcp.json".to_string(),
+		description: "MCP server configuration".to_string(),
+		fields: vec![
+			field(
+				"servers",
+				"Servers",
+				"MCP server entries (array)",
+				FieldType::Text,
+				serde_json::json!([]),
+				"mcp",
+			),
+		],
+	}
+}
+
+fn prompts_json_schema() -> ConfigFileSchema {
+	ConfigFileSchema {
+		filename: "prompts.json".to_string(),
+		description: "Named prompt templates and chain definitions".to_string(),
+		fields: vec![
+			field(
+				"prompts",
+				"Prompts",
+				"Named prompt entries (object)",
+				FieldType::Text,
+				serde_json::json!({}),
+				"prompts",
+			),
+		],
+	}
+}
+
 fn settings_json_schema() -> ConfigFileSchema {
 	ConfigFileSchema {
 		filename: "settings.json".to_string(),
@@ -305,15 +339,17 @@ fn settings_json_schema() -> ConfigFileSchema {
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Returns schemas for all 6 config files.
+/// Returns schemas for all 8 config files.
 pub fn all_config_schemas() -> Vec<ConfigFileSchema> {
 	vec![
 		config_json_schema(),
 		acp_json_schema(),
+		mcp_json_schema(),
 		embed_json_schema(),
 		memory_json_schema(),
 		summarize_json_schema(),
 		settings_json_schema(),
+		prompts_json_schema(),
 	]
 }
 
@@ -325,7 +361,9 @@ pub fn get_config_schema(filename: &str) -> Option<ConfigFileSchema> {
 		"embed.json" => Some(embed_json_schema()),
 		"memory.json" => Some(memory_json_schema()),
 		"summarize.json" => Some(summarize_json_schema()),
+		"mcp.json" => Some(mcp_json_schema()),
 		"settings.json" => Some(settings_json_schema()),
+		"prompts.json" => Some(prompts_json_schema()),
 		_ => None,
 	}
 }
@@ -341,14 +379,16 @@ mod tests {
 	#[test]
 	fn all_config_schemas_present() {
 		let schemas = all_config_schemas();
-		assert_eq!(schemas.len(), 6);
+		assert_eq!(schemas.len(), 8);
 		let filenames: Vec<_> = schemas.iter().map(|s| s.filename.as_str()).collect();
 		assert!(filenames.contains(&"config.json"));
 		assert!(filenames.contains(&"acp.json"));
+		assert!(filenames.contains(&"mcp.json"));
 		assert!(filenames.contains(&"embed.json"));
 		assert!(filenames.contains(&"memory.json"));
 		assert!(filenames.contains(&"summarize.json"));
 		assert!(filenames.contains(&"settings.json"));
+		assert!(filenames.contains(&"prompts.json"));
 	}
 
 	#[test]

@@ -800,6 +800,13 @@ impl TuiRuntime {
 					"Conversation compacted ({msg_count} messages → 1 summary)."
 				))
 			}
+			// Placeholder stubs — full implementation in Task 8.
+			BridgeAction::LoadConfigFile { .. } => {
+				todo!("Task 8: implement LoadConfigFile dispatch via ConfigStorage")
+			}
+			BridgeAction::SaveConfigField { .. } => {
+				todo!("Task 8: implement SaveConfigField dispatch via ConfigStorage")
+			}
 		}
 	}
 

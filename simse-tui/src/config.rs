@@ -20,7 +20,9 @@
 //!
 //! Precedence: CLI flags > workspace settings > global config > defaults.
 
+use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use simse_ui_core::config::storage::{ConfigError, ConfigResult, ConfigScope, ConfigStorage};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -749,6 +751,121 @@ pub fn load_config(options: &ConfigOptions) -> LoadedConfig {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// FileConfigStorage
+// ---------------------------------------------------------------------------
+
+/// File-backed [`ConfigStorage`] implementation.
+///
+/// Uses two root directories:
+/// - **Global** scope: `data_dir` (e.g. `~/.config/simse`)
+/// - **Project** scope: `work_dir/.simse/`
+///
+/// Writes are atomic: data is written to a `.tmp` file first, then renamed.
+pub struct FileConfigStorage {
+	data_dir: PathBuf,
+	work_dir: PathBuf,
+}
+
+impl FileConfigStorage {
+	/// Create a new `FileConfigStorage`.
+	///
+	/// - `data_dir`: root directory for global config files.
+	/// - `work_dir`: project working directory (project-scope files live in
+	///   `work_dir/.simse/`).
+	pub fn new(data_dir: PathBuf, work_dir: PathBuf) -> Self {
+		Self { data_dir, work_dir }
+	}
+
+	/// Return the directory for the given scope.
+	pub fn dir_for_scope(&self, scope: ConfigScope) -> PathBuf {
+		match scope {
+			ConfigScope::Global => self.data_dir.clone(),
+			ConfigScope::Project => self.work_dir.join(".simse"),
+		}
+	}
+}
+
+#[async_trait]
+impl ConfigStorage for FileConfigStorage {
+	async fn load_file(&self, filename: &str, scope: ConfigScope) -> ConfigResult<serde_json::Value> {
+		let path = self.dir_for_scope(scope).join(filename);
+		let content = tokio::fs::read_to_string(&path).await.map_err(|e| {
+			if e.kind() == std::io::ErrorKind::NotFound {
+				ConfigError::NotFound {
+					filename: filename.to_string(),
+				}
+			} else {
+				ConfigError::IoError(e.to_string())
+			}
+		})?;
+		serde_json::from_str(&content).map_err(|e| ConfigError::ParseError {
+			filename: filename.to_string(),
+			detail: e.to_string(),
+		})
+	}
+
+	async fn save_file(
+		&self,
+		filename: &str,
+		scope: ConfigScope,
+		data: &serde_json::Value,
+	) -> ConfigResult<()> {
+		let dir = self.dir_for_scope(scope);
+		tokio::fs::create_dir_all(&dir)
+			.await
+			.map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+		let path = dir.join(filename);
+		let tmp_path = dir.join(format!("{filename}.tmp"));
+
+		let json = serde_json::to_string_pretty(data).map_err(|e| ConfigError::IoError(e.to_string()))?;
+		tokio::fs::write(&tmp_path, json.as_bytes())
+			.await
+			.map_err(|e| ConfigError::IoError(e.to_string()))?;
+		tokio::fs::rename(&tmp_path, &path)
+			.await
+			.map_err(|e| ConfigError::IoError(e.to_string()))?;
+
+		Ok(())
+	}
+
+	async fn file_exists(&self, filename: &str, scope: ConfigScope) -> bool {
+		let path = self.dir_for_scope(scope).join(filename);
+		tokio::fs::metadata(&path).await.is_ok()
+	}
+
+	async fn delete_file(&self, filename: &str, scope: ConfigScope) -> ConfigResult<()> {
+		let path = self.dir_for_scope(scope).join(filename);
+		tokio::fs::remove_file(&path).await.map_err(|e| {
+			if e.kind() == std::io::ErrorKind::NotFound {
+				ConfigError::NotFound {
+					filename: filename.to_string(),
+				}
+			} else {
+				ConfigError::IoError(e.to_string())
+			}
+		})
+	}
+
+	async fn delete_all(&self, scope: ConfigScope) -> ConfigResult<()> {
+		let dir = self.dir_for_scope(scope);
+		if tokio::fs::metadata(&dir).await.is_ok() {
+			tokio::fs::remove_dir_all(&dir)
+				.await
+				.map_err(|e| ConfigError::IoError(e.to_string()))?;
+		}
+		Ok(())
+	}
+
+	async fn ensure_dir(&self, scope: ConfigScope) -> ConfigResult<()> {
+		let dir = self.dir_for_scope(scope);
+		tokio::fs::create_dir_all(&dir)
+			.await
+			.map_err(|e| ConfigError::IoError(e.to_string()))
+	}
+}
+
 // ===========================================================================
 // Tests
 // ===========================================================================
@@ -1235,5 +1352,149 @@ mod tests {
 		assert_eq!(prompt.description.as_deref(), Some("Summarize text"));
 		assert_eq!(prompt.steps.len(), 1);
 		assert_eq!(prompt.steps[0].template, "Summarize: {input}");
+	}
+}
+
+#[cfg(test)]
+mod file_config_storage_tests {
+	use super::*;
+	use serde_json::json;
+	use tempfile::TempDir;
+
+	fn make_storage(dir: &TempDir) -> FileConfigStorage {
+		FileConfigStorage::new(
+			dir.path().join("global"),
+			dir.path().join("project"),
+		)
+	}
+
+	#[tokio::test]
+	async fn save_and_load() {
+		let dir = TempDir::new().unwrap();
+		let storage = make_storage(&dir);
+
+		let data = json!({"host": "localhost", "port": 8080});
+		storage
+			.save_file("config.json", ConfigScope::Global, &data)
+			.await
+			.unwrap();
+
+		let loaded = storage
+			.load_file("config.json", ConfigScope::Global)
+			.await
+			.unwrap();
+		assert_eq!(loaded, data);
+	}
+
+	#[tokio::test]
+	async fn load_missing_returns_not_found() {
+		let dir = TempDir::new().unwrap();
+		let storage = make_storage(&dir);
+
+		let result = storage
+			.load_file("nonexistent.json", ConfigScope::Global)
+			.await;
+		match result {
+			Err(ConfigError::NotFound { filename }) => {
+				assert_eq!(filename, "nonexistent.json");
+			}
+			other => panic!("expected NotFound, got {other:?}"),
+		}
+	}
+
+	#[tokio::test]
+	async fn file_exists_check() {
+		let dir = TempDir::new().unwrap();
+		let storage = make_storage(&dir);
+
+		assert!(!storage.file_exists("config.json", ConfigScope::Global).await);
+
+		storage
+			.save_file("config.json", ConfigScope::Global, &json!({}))
+			.await
+			.unwrap();
+
+		assert!(storage.file_exists("config.json", ConfigScope::Global).await);
+	}
+
+	#[tokio::test]
+	async fn delete_file_works() {
+		let dir = TempDir::new().unwrap();
+		let storage = make_storage(&dir);
+
+		storage
+			.save_file("tmp.json", ConfigScope::Global, &json!({"x": 1}))
+			.await
+			.unwrap();
+		assert!(storage.file_exists("tmp.json", ConfigScope::Global).await);
+
+		storage
+			.delete_file("tmp.json", ConfigScope::Global)
+			.await
+			.unwrap();
+		assert!(!storage.file_exists("tmp.json", ConfigScope::Global).await);
+
+		// Deleting again should return NotFound.
+		let result = storage
+			.delete_file("tmp.json", ConfigScope::Global)
+			.await;
+		assert!(matches!(result, Err(ConfigError::NotFound { .. })));
+	}
+
+	#[tokio::test]
+	async fn delete_all_works() {
+		let dir = TempDir::new().unwrap();
+		let storage = make_storage(&dir);
+
+		storage
+			.save_file("a.json", ConfigScope::Global, &json!({}))
+			.await
+			.unwrap();
+		storage
+			.save_file("b.json", ConfigScope::Global, &json!({}))
+			.await
+			.unwrap();
+
+		storage.delete_all(ConfigScope::Global).await.unwrap();
+
+		assert!(!storage.file_exists("a.json", ConfigScope::Global).await);
+		assert!(!storage.file_exists("b.json", ConfigScope::Global).await);
+
+		// delete_all on already-removed dir should succeed.
+		storage.delete_all(ConfigScope::Global).await.unwrap();
+	}
+
+	#[tokio::test]
+	async fn ensure_dir_creates_directory() {
+		let dir = TempDir::new().unwrap();
+		let storage = make_storage(&dir);
+
+		let global_dir = storage.dir_for_scope(ConfigScope::Global);
+		assert!(!global_dir.exists());
+
+		storage.ensure_dir(ConfigScope::Global).await.unwrap();
+		assert!(global_dir.exists());
+		assert!(global_dir.is_dir());
+	}
+
+	#[tokio::test]
+	async fn project_scope_uses_simse_subdir() {
+		let dir = TempDir::new().unwrap();
+		let storage = make_storage(&dir);
+
+		storage
+			.save_file("settings.json", ConfigScope::Project, &json!({"theme": "dark"}))
+			.await
+			.unwrap();
+
+		// File should live in <work_dir>/.simse/settings.json.
+		let expected_path = dir.path().join("project").join(".simse").join("settings.json");
+		assert!(expected_path.exists());
+
+		let loaded = storage
+			.load_file("settings.json", ConfigScope::Project)
+			.await
+			.unwrap();
+		assert_eq!(loaded, json!({"theme": "dark"}));
 	}
 }

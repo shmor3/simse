@@ -1,3 +1,9 @@
 projects:
   - 'simse-*'
   - '!simse-code'
+
+vcs:
+  hooks:
+    pre-commit:
+      - 'moon run :lint :format-check :test --affected --status=staged'
+  sync: true

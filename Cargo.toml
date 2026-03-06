@@ -14,6 +14,7 @@ exclude = [
     "simse-vnet",
     "simse-engine",
     "simse-sandbox",
+    "simse-remote",
 ]
 
 [workspace.package]

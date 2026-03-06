@@ -15,6 +15,7 @@ bun run build:tui            # cd simse-tui && cargo build --release
 bun run build:vsh-engine     # cd simse-vsh && cargo build --release
 bun run build:vnet-engine    # cd simse-vnet && cargo build --release
 bun run build:sandbox-engine # cd simse-sandbox && cargo build --release
+bun run build:remote-engine  # cd simse-remote && cargo build --release
 
 # Rust tests
 cd simse-adaptive && cargo test # Rust adaptive engine tests
@@ -26,6 +27,7 @@ cd simse-vnet && cargo test    # Rust vnet engine tests
 cd simse-core && cargo test    # Rust core orchestration tests
 cd simse-ui-core && cargo test # Rust UI core tests
 cd simse-sandbox && cargo test # Rust sandbox engine tests
+cd simse-remote && cargo test  # Rust remote engine tests
 cd simse-tui && cargo test     # Rust TUI tests (unit + integration)
 
 # TypeScript lint (all TS services use Biome)
@@ -33,9 +35,11 @@ cd simse-api && npm run lint       # API gateway lint
 cd simse-auth && npm run lint      # Auth service lint
 cd simse-payments && npm run lint  # Payments service lint
 cd simse-cdn && npm run lint       # CDN worker lint
+cd simse-relay && npm run lint     # Relay worker lint
 
 # TypeScript tests
 cd simse-cdn && npm run test   # CDN worker tests (Vitest + @cloudflare/vitest-pool-workers)
+cd simse-relay && npm run test # Relay worker tests (Vitest + @cloudflare/vitest-pool-workers)
 ```
 
 ## Architecture
@@ -57,7 +61,9 @@ simse-vnet/                 # Pure Rust crate — virtual network engine (JSON-R
 simse-sandbox/              # Pure Rust crate — unified sandbox engine (JSON-RPC over stdio)
 simse-ui-core/              # Pure Rust crate — platform-agnostic UI logic (no I/O)
 simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Architecture)
+simse-remote/               # Pure Rust crate — remote access engine (JSON-RPC over stdio)
 simse-engine/               # Pure Rust crate — core engine
+simse-relay/                # TypeScript — Relay worker (WebSocket tunnel, Cloudflare Worker + Durable Objects)
 simse-cdn/                  # TypeScript — CDN worker (R2 + KV, Cloudflare Worker)
 simse-cloud/                # TypeScript — SaaS web app (React Router + Cloudflare Pages)
 simse-api/                  # TypeScript — API gateway (Cloudflare Worker, proxies to backend services)
@@ -111,6 +117,14 @@ simse-core/
 | `tool/` | `register`, `unregister`, `list`, `execute`, `batchExecute`, `parse`, `formatSystemPrompt`, `metrics`, `result` |
 | `chain/` | `run`, `runNamed`, `stepResult` |
 | `loop/` | `run`, `cancel` |
+
+### simse-remote JSON-RPC Methods
+
+| Domain | Methods |
+|--------|---------|
+| `auth/` | `login`, `logout`, `status` |
+| `tunnel/` | `connect`, `disconnect`, `status` |
+| `remote/` | `health` |
 
 ### Other Rust Crates
 
@@ -203,6 +217,19 @@ simse-sandbox/              # Pure Rust crate — unified sandbox engine
   tests/
     integration.rs          # 10 integration tests (local backend)
     ssh_integration.rs      # SSH integration tests (feature-gated)
+
+simse-remote/              # Pure Rust crate — remote access engine
+  src/
+    error.rs               # RemoteError enum with REMOTE_ code prefixes
+    protocol.rs            # JSON-RPC request/response types (7 methods)
+    transport.rs           # NdjsonTransport for JSON-RPC over stdio
+    auth.rs                # Auth client (login/logout, token validation via simse-api)
+    tunnel.rs              # WebSocket tunnel client (connect, reconnect, multiplex)
+    router.rs              # Local router (forward relayed requests to simse-core)
+    heartbeat.rs           # Backoff config, keepalive ping interval
+    server.rs              # RemoteServer: 7-method JSON-RPC dispatch
+  tests/
+    integration.rs         # 8 integration tests (JSON-RPC over stdio)
 ```
 
 ### TUI Crates (CLI Application)
@@ -312,6 +339,16 @@ simse-payments/             # Payments service — Stripe subscriptions, credits
       mailer.ts             # Email trigger helpers
     middleware/
       auth.ts               # Service-to-service auth (X-User-Id)
+
+simse-relay/                # Relay service — WebSocket tunnel (Durable Objects)
+  src/
+    index.ts                # Hono app entry, health + analytics + secrets middleware
+    types.ts                # Env interface (DurableObjectNamespace, SecretsStore, AnalyticsEngine)
+    tunnel.ts               # Durable Object: TunnelSession (WebSocket pair management)
+    routes/
+      ws.ts                 # WebSocket upgrade handlers (/ws/tunnel, /ws/client)
+      tunnels.ts            # REST endpoint for listing active tunnels
+  wrangler.toml             # Durable Object + Analytics Engine bindings
 ```
 
 ### Key Patterns

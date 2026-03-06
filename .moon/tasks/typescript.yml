@@ -2,6 +2,8 @@ inheritedBy:
   toolchains: ['bun', 'javascript', 'typescript']
 
 tasks:
+  lint:
+    command: 'biome check .'
   setup:
     command: 'bun install'
   build:

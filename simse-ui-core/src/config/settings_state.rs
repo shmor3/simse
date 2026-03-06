@@ -5,6 +5,9 @@
 //! - Level 1: FieldList — fields/entries for selected file
 //! - Level 2: Editing — single field value editing
 //! - Level 3: ArrayEntry — fields within an array entry (servers, prompts)
+//!
+//! All mutating methods use owned-return (`self -> Self` or `self -> (Self, T)`)
+//! for functional-style state transitions.
 
 use std::time::Instant;
 
@@ -127,8 +130,8 @@ impl SettingsFormState {
 
 	// ── Navigation ──────────────────────────────
 
-	/// Move selection up within the current level.
-	pub fn move_up(&mut self) {
+	/// Move selection up within the current level. Returns the updated state.
+	pub fn move_up(mut self) -> Self {
 		match self.level {
 			SettingsLevel::FileList => {
 				if self.selected_file > 0 {
@@ -141,13 +144,14 @@ impl SettingsFormState {
 				}
 			}
 		}
+		self
 	}
 
-	/// Move selection down within the current level.
-	pub fn move_down(&mut self) {
+	/// Move selection down within the current level. Returns the updated state.
+	pub fn move_down(mut self) -> Self {
 		let count = self.current_item_count();
 		if count == 0 {
-			return;
+			return self;
 		}
 		match self.level {
 			SettingsLevel::FileList => {
@@ -161,6 +165,7 @@ impl SettingsFormState {
 				}
 			}
 		}
+		self
 	}
 
 	/// Returns the number of items in the current level.
@@ -172,18 +177,18 @@ impl SettingsFormState {
 		}
 	}
 
-	/// Enter: go deeper or confirm edit.
-	pub fn enter(&mut self) -> SettingsAction {
+	/// Enter: go deeper or confirm edit. Returns `(updated_self, action)`.
+	pub fn enter(mut self) -> (Self, SettingsAction) {
 		self.error = None;
 		match self.level {
 			SettingsLevel::FileList => {
 				let (filename, _, scope) = CONFIG_FILES[self.selected_file];
 				self.level = SettingsLevel::FieldList;
 				self.selected_field = 0;
-				SettingsAction::LoadFile {
+				(self, SettingsAction::LoadFile {
 					filename: filename.to_string(),
 					scope,
-				}
+				})
 			}
 			SettingsLevel::FieldList => {
 				// Populate the edit buffer with the current value.
@@ -192,64 +197,67 @@ impl SettingsFormState {
 				self.cursor = self.edit_value.len();
 				self.select_index = self.current_select_index();
 				self.level = SettingsLevel::Editing;
-				SettingsAction::None
+				(self, SettingsAction::None)
 			}
 			SettingsLevel::Editing => {
 				// Confirm edit → save.
-				self.save_current_field()
+				let action = self.save_current_field();
+				(self, action)
 			}
 			SettingsLevel::ArrayEntry => {
 				// TODO: array entry editing
-				SettingsAction::None
+				(self, SettingsAction::None)
 			}
 		}
 	}
 
-	/// Back: go up one level or dismiss.
-	pub fn back(&mut self) -> SettingsAction {
+	/// Back: go up one level or dismiss. Returns `(updated_self, action)`.
+	pub fn back(mut self) -> (Self, SettingsAction) {
 		self.error = None;
 		match self.level {
 			SettingsLevel::ArrayEntry => {
 				self.level = SettingsLevel::FieldList;
 				self.edit_value.clear();
-				SettingsAction::None
+				(self, SettingsAction::None)
 			}
 			SettingsLevel::Editing => {
 				self.level = SettingsLevel::FieldList;
 				self.edit_value.clear();
-				SettingsAction::None
+				(self, SettingsAction::None)
 			}
 			SettingsLevel::FieldList => {
 				self.level = SettingsLevel::FileList;
 				self.config_data = serde_json::Value::Null;
-				SettingsAction::None
+				(self, SettingsAction::None)
 			}
-			SettingsLevel::FileList => SettingsAction::Dismiss,
+			SettingsLevel::FileList => (self, SettingsAction::Dismiss),
 		}
 	}
 
-	/// Toggle a boolean value (at Editing level).
-	pub fn toggle(&mut self) -> SettingsAction {
+	/// Toggle a boolean value (at Editing level). Returns `(updated_self, action)`.
+	pub fn toggle(mut self) -> (Self, SettingsAction) {
 		if self.level != SettingsLevel::Editing {
-			return SettingsAction::None;
+			return (self, SettingsAction::None);
 		}
 		match self.edit_value.as_str() {
 			"true" => {
 				self.edit_value = "false".to_string();
-				self.save_current_field()
+				let action = self.save_current_field();
+				(self, action)
 			}
 			"false" => {
 				self.edit_value = "true".to_string();
-				self.save_current_field()
+				let action = self.save_current_field();
+				(self, action)
 			}
-			_ => SettingsAction::None,
+			_ => (self, SettingsAction::None),
 		}
 	}
 
-	/// Cycle a Select field to the next option.
-	pub fn cycle_select(&mut self) -> SettingsAction {
+	/// Cycle a Select field to the next option. Returns `(updated_self, action)`.
+	pub fn cycle_select(mut self) -> (Self, SettingsAction) {
 		if self.level != SettingsLevel::Editing {
-			return SettingsAction::None;
+			return (self, SettingsAction::None);
 		}
 		if let Some(schema) = self.current_file_schema()
 			&& let Some(field_schema) = schema.fields.get(self.selected_field)
@@ -257,21 +265,23 @@ impl SettingsFormState {
 					&& !options.is_empty() {
 						self.select_index = (self.select_index + 1) % options.len();
 						self.edit_value = options[self.select_index].clone();
-						return self.save_current_field();
+						let action = self.save_current_field();
+						return (self, action);
 					}
-		SettingsAction::None
+		(self, SettingsAction::None)
 	}
 
-	/// Type a character into the edit buffer.
-	pub fn type_char(&mut self, c: char) {
+	/// Type a character into the edit buffer. Returns the updated state.
+	pub fn type_char(mut self, c: char) -> Self {
 		if self.level == SettingsLevel::Editing {
 			self.edit_value.insert(self.cursor, c);
 			self.cursor += c.len_utf8();
 		}
+		self
 	}
 
-	/// Delete the character before the cursor.
-	pub fn backspace(&mut self) {
+	/// Delete the character before the cursor. Returns the updated state.
+	pub fn backspace(mut self) -> Self {
 		if self.level == SettingsLevel::Editing && self.cursor > 0 {
 			// Find the previous char boundary.
 			let prev = self.edit_value[..self.cursor]
@@ -282,17 +292,19 @@ impl SettingsFormState {
 			self.edit_value.remove(prev);
 			self.cursor = prev;
 		}
+		self
 	}
 
-	/// Delete the character after the cursor.
-	pub fn delete(&mut self) {
+	/// Delete the character after the cursor. Returns the updated state.
+	pub fn delete(mut self) -> Self {
 		if self.level == SettingsLevel::Editing && self.cursor < self.edit_value.len() {
 			self.edit_value.remove(self.cursor);
 		}
+		self
 	}
 
-	/// Move cursor left.
-	pub fn cursor_left(&mut self) {
+	/// Move cursor left. Returns the updated state.
+	pub fn cursor_left(mut self) -> Self {
 		if self.cursor > 0 {
 			let prev = self.edit_value[..self.cursor]
 				.char_indices()
@@ -301,10 +313,11 @@ impl SettingsFormState {
 				.unwrap_or(0);
 			self.cursor = prev;
 		}
+		self
 	}
 
-	/// Move cursor right.
-	pub fn cursor_right(&mut self) {
+	/// Move cursor right. Returns the updated state.
+	pub fn cursor_right(mut self) -> Self {
 		if self.cursor < self.edit_value.len() {
 			let next = self.edit_value[self.cursor..]
 				.char_indices()
@@ -313,28 +326,32 @@ impl SettingsFormState {
 				.unwrap_or(self.edit_value.len());
 			self.cursor = next;
 		}
+		self
 	}
 
-	/// Move cursor to start.
-	pub fn cursor_home(&mut self) {
+	/// Move cursor to start. Returns the updated state.
+	pub fn cursor_home(mut self) -> Self {
 		self.cursor = 0;
+		self
 	}
 
-	/// Move cursor to end.
-	pub fn cursor_end(&mut self) {
+	/// Move cursor to end. Returns the updated state.
+	pub fn cursor_end(mut self) -> Self {
 		self.cursor = self.edit_value.len();
+		self
 	}
 
 	// ── Callbacks from host ────────────────────
 
-	/// Called by the host after a file is loaded.
-	pub fn file_loaded(&mut self, data: serde_json::Value) {
+	/// Called by the host after a file is loaded. Returns the updated state.
+	pub fn file_loaded(mut self, data: serde_json::Value) -> Self {
 		self.config_data = data;
 		self.selected_field = 0;
+		self
 	}
 
-	/// Called by the host after a field is saved.
-	pub fn field_saved(&mut self, key: &str, value: &serde_json::Value) {
+	/// Called by the host after a field is saved. Returns the updated state.
+	pub fn field_saved(mut self, key: &str, value: &serde_json::Value) -> Self {
 		// Update in-memory config data.
 		if let Some(obj) = self.config_data.as_object_mut() {
 			obj.insert(key.to_string(), value.clone());
@@ -343,11 +360,13 @@ impl SettingsFormState {
 		// Go back to field list after saving.
 		self.level = SettingsLevel::FieldList;
 		self.edit_value.clear();
+		self
 	}
 
-	/// Called by the host when an error occurs.
-	pub fn set_error(&mut self, message: String) {
+	/// Called by the host when an error occurs. Returns the updated state.
+	pub fn set_error(mut self, message: String) -> Self {
 		self.error = Some(message);
+		self
 	}
 
 	// ── Query methods ──────────────────────────
@@ -564,15 +583,15 @@ mod tests {
 	// ── Navigation ──────────────────────────────
 	#[test]
 	fn move_up_clamps_at_zero() {
-		let mut s = SettingsFormState::new();
-		s.move_up();
+		let s = SettingsFormState::new();
+		let s = s.move_up();
 		assert_eq!(s.selected_file, 0);
 	}
 
 	#[test]
 	fn move_down_increments() {
-		let mut s = SettingsFormState::new();
-		s.move_down();
+		let s = SettingsFormState::new();
+		let s = s.move_down();
 		assert_eq!(s.selected_file, 1);
 	}
 
@@ -580,7 +599,7 @@ mod tests {
 	fn move_down_clamps_at_max() {
 		let mut s = SettingsFormState::new();
 		for _ in 0..20 {
-			s.move_down();
+			s = s.move_down();
 		}
 		assert_eq!(s.selected_file, CONFIG_FILES.len() - 1);
 	}
@@ -590,7 +609,7 @@ mod tests {
 		let mut s = SettingsFormState::new();
 		s.level = SettingsLevel::FieldList;
 		s.selected_field = 3;
-		s.move_up();
+		let s = s.move_up();
 		assert_eq!(s.selected_field, 2);
 	}
 
@@ -599,7 +618,7 @@ mod tests {
 	fn enter_at_file_list_returns_load_file() {
 		let mut s = SettingsFormState::new();
 		s.selected_file = 0; // config.json
-		let action = s.enter();
+		let (s, action) = s.enter();
 		assert_eq!(s.level, SettingsLevel::FieldList);
 		assert!(matches!(action, SettingsAction::LoadFile { filename, scope }
 			if filename == "config.json" && scope == ConfigScope::Global));
@@ -610,7 +629,7 @@ mod tests {
 		let mut s = SettingsFormState::new();
 		s.level = SettingsLevel::FieldList;
 		s.config_data = serde_json::json!({"logLevel": "warn"});
-		let action = s.enter();
+		let (s, action) = s.enter();
 		assert_eq!(s.level, SettingsLevel::Editing);
 		assert_eq!(action, SettingsAction::None);
 	}
@@ -622,7 +641,7 @@ mod tests {
 		s.level = SettingsLevel::Editing;
 		s.selected_field = 0; // logLevel
 		s.edit_value = "debug".to_string();
-		let action = s.enter();
+		let (_, action) = s.enter();
 		assert!(matches!(action, SettingsAction::SaveField { key, .. } if key == "logLevel"));
 	}
 
@@ -631,7 +650,7 @@ mod tests {
 		let mut s = SettingsFormState::new();
 		s.level = SettingsLevel::Editing;
 		s.edit_value = "some value".to_string();
-		let action = s.back();
+		let (s, action) = s.back();
 		assert_eq!(s.level, SettingsLevel::FieldList);
 		assert!(s.edit_value.is_empty());
 		assert_eq!(action, SettingsAction::None);
@@ -641,7 +660,7 @@ mod tests {
 	fn back_from_field_list_goes_to_file_list() {
 		let mut s = SettingsFormState::new();
 		s.level = SettingsLevel::FieldList;
-		let action = s.back();
+		let (s, action) = s.back();
 		assert_eq!(s.level, SettingsLevel::FileList);
 		assert_eq!(action, SettingsAction::None);
 	}
@@ -651,14 +670,14 @@ mod tests {
 		let mut s = SettingsFormState::new();
 		s.level = SettingsLevel::FieldList;
 		s.config_data = serde_json::json!({"key": "value"});
-		s.back();
+		let (s, _) = s.back();
 		assert_eq!(s.config_data, serde_json::Value::Null);
 	}
 
 	#[test]
 	fn back_from_file_list_returns_dismiss() {
-		let mut s = SettingsFormState::new();
-		let action = s.back();
+		let s = SettingsFormState::new();
+		let (_, action) = s.back();
 		assert_eq!(action, SettingsAction::Dismiss);
 	}
 
@@ -667,19 +686,19 @@ mod tests {
 	fn type_char_and_backspace() {
 		let mut s = SettingsFormState::new();
 		s.level = SettingsLevel::Editing;
-		s.type_char('h');
-		s.type_char('i');
+		let s = s.type_char('h');
+		let s = s.type_char('i');
 		assert_eq!(s.edit_value, "hi");
 		assert_eq!(s.cursor, 2);
-		s.backspace();
+		let s = s.backspace();
 		assert_eq!(s.edit_value, "h");
 		assert_eq!(s.cursor, 1);
 	}
 
 	#[test]
 	fn type_char_ignored_outside_editing() {
-		let mut s = SettingsFormState::new();
-		s.type_char('x');
+		let s = SettingsFormState::new();
+		let s = s.type_char('x');
 		assert!(s.edit_value.is_empty());
 	}
 
@@ -689,13 +708,13 @@ mod tests {
 		s.level = SettingsLevel::Editing;
 		s.edit_value = "hello".to_string();
 		s.cursor = 5;
-		s.cursor_left();
+		let s = s.cursor_left();
 		assert_eq!(s.cursor, 4);
-		s.cursor_home();
+		let s = s.cursor_home();
 		assert_eq!(s.cursor, 0);
-		s.cursor_right();
+		let s = s.cursor_right();
 		assert_eq!(s.cursor, 1);
-		s.cursor_end();
+		let s = s.cursor_end();
 		assert_eq!(s.cursor, 5);
 	}
 
@@ -705,7 +724,7 @@ mod tests {
 		s.level = SettingsLevel::Editing;
 		s.edit_value = "abc".to_string();
 		s.cursor = 1;
-		s.delete();
+		let s = s.delete();
 		assert_eq!(s.edit_value, "ac");
 		assert_eq!(s.cursor, 1);
 	}
@@ -718,7 +737,7 @@ mod tests {
 		s.level = SettingsLevel::Editing;
 		s.selected_field = 0; // enabled (Boolean)
 		s.edit_value = "true".to_string();
-		let action = s.toggle();
+		let (s, action) = s.toggle();
 		assert_eq!(s.edit_value, "false");
 		assert!(matches!(action, SettingsAction::SaveField { .. }));
 	}
@@ -728,7 +747,7 @@ mod tests {
 		let mut s = SettingsFormState::new();
 		s.level = SettingsLevel::Editing;
 		s.edit_value = "hello".to_string();
-		let action = s.toggle();
+		let (_, action) = s.toggle();
 		assert_eq!(action, SettingsAction::None);
 	}
 
@@ -738,7 +757,7 @@ mod tests {
 		let mut s = SettingsFormState::new();
 		s.level = SettingsLevel::FieldList;
 		let data = serde_json::json!({"host": "localhost"});
-		s.file_loaded(data.clone());
+		let s = s.file_loaded(data.clone());
 		assert_eq!(s.config_data, data);
 		assert_eq!(s.selected_field, 0);
 	}
@@ -749,7 +768,7 @@ mod tests {
 		s.level = SettingsLevel::Editing;
 		s.config_data = serde_json::json!({"host": "old"});
 		s.edit_value = "new".to_string();
-		s.field_saved("host", &serde_json::json!("new"));
+		let s = s.field_saved("host", &serde_json::json!("new"));
 		assert_eq!(s.config_data["host"], serde_json::json!("new"));
 		assert_eq!(s.level, SettingsLevel::FieldList);
 		assert!(s.edit_value.is_empty());
@@ -759,19 +778,21 @@ mod tests {
 	// ── Query methods ───────────────────────────
 	#[test]
 	fn selected_file_name_and_label() {
-		let mut s = SettingsFormState::new();
+		let s = SettingsFormState::new();
 		assert_eq!(s.selected_file_name(), "config.json");
 		assert_eq!(s.selected_file_label(), "General");
-		s.selected_file = 3;
+		// Navigate down to embed.json (index 3)
+		let s = s.move_down().move_down().move_down();
 		assert_eq!(s.selected_file_name(), "embed.json");
 		assert_eq!(s.selected_file_label(), "Embedding");
 	}
 
 	#[test]
 	fn selected_file_scope() {
-		let mut s = SettingsFormState::new();
+		let s = SettingsFormState::new();
 		assert_eq!(s.selected_file_scope(), ConfigScope::Global);
-		s.selected_file = 6; // settings.json
+		// Navigate down to settings.json (index 6)
+		let s = s.move_down().move_down().move_down().move_down().move_down().move_down();
 		assert_eq!(s.selected_file_scope(), ConfigScope::Project);
 	}
 
@@ -814,44 +835,44 @@ mod tests {
 
 		// Navigate to memory.json (index 4).
 		for _ in 0..4 {
-			s.move_down();
+			s = s.move_down();
 		}
 		assert_eq!(s.selected_file_name(), "memory.json");
 
 		// Enter → LoadFile action.
-		let action = s.enter();
+		let (s, action) = s.enter();
 		assert!(matches!(action, SettingsAction::LoadFile { filename, .. } if filename == "memory.json"));
 		assert_eq!(s.level, SettingsLevel::FieldList);
 
 		// Simulate host loading file.
-		s.file_loaded(serde_json::json!({
+		let s = s.file_loaded(serde_json::json!({
 			"enabled": true,
 			"similarityThreshold": 0.7,
 			"maxResults": 10
 		}));
 
 		// Enter field → Editing.
-		let action = s.enter();
+		let (s, action) = s.enter();
 		assert_eq!(s.level, SettingsLevel::Editing);
 		assert_eq!(action, SettingsAction::None);
 
 		// Toggle boolean.
 		assert_eq!(s.edit_value, "true");
-		let action = s.toggle();
+		let (s, action) = s.toggle();
 		assert_eq!(s.edit_value, "false");
 		assert!(matches!(action, SettingsAction::SaveField { .. }));
 
 		// Simulate host saving.
-		s.field_saved("enabled", &serde_json::json!(false));
+		let s = s.field_saved("enabled", &serde_json::json!(false));
 		assert_eq!(s.level, SettingsLevel::FieldList);
 		assert!(s.is_saved_visible());
 
 		// Back to file list.
-		s.back();
+		let (s, _) = s.back();
 		assert_eq!(s.level, SettingsLevel::FileList);
 
 		// Back again = dismiss.
-		let action = s.back();
+		let (_, action) = s.back();
 		assert_eq!(action, SettingsAction::Dismiss);
 	}
 }

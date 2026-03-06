@@ -373,16 +373,14 @@ fn validate_range(
 	if constraints.integer && value.fract() != 0.0 {
 		return issue(path, format!("{label} must be an integer"));
 	}
-	if let Some(min) = constraints.min {
-		if value < min {
+	if let Some(min) = constraints.min
+		&& value < min {
 			return issue(path, format!("{label} must be at least {min}"));
 		}
-	}
-	if let Some(max) = constraints.max {
-		if value > max {
+	if let Some(max) = constraints.max
+		&& value > max {
 			return issue(path, format!("{label} must be at most {max}"));
 		}
-	}
 	Vec::new()
 }
 
@@ -464,8 +462,8 @@ fn validate_acp_config(value: &AcpConfig, path: &str) -> Vec<ValidationIssue> {
 	}
 
 	// Cross-validate: defaultServer must reference a configured server name
-	if let Some(ref default_server) = value.default_server {
-		if !default_server.is_empty() {
+	if let Some(ref default_server) = value.default_server
+		&& !default_server.is_empty() {
 			let server_names: HashSet<&str> = value.servers.iter().map(|s| s.name.as_str()).collect();
 			if !server_names.contains(default_server.as_str()) {
 				let names: Vec<&str> = value.servers.iter().map(|s| s.name.as_str()).collect();
@@ -479,7 +477,6 @@ fn validate_acp_config(value: &AcpConfig, path: &str) -> Vec<ValidationIssue> {
 				));
 			}
 		}
-	}
 
 	issues
 }
@@ -565,14 +562,13 @@ fn validate_mcp_server_config(value: &McpServerConfig, path: &str) -> Vec<Valida
 		));
 	}
 
-	if let Some(ref version) = value.version {
-		if !SEMVER_RE.is_match(version) {
+	if let Some(ref version) = value.version
+		&& !SEMVER_RE.is_match(version) {
 			issues.extend(issue(
 				format!("{path}.version"),
 				"MCP server version must be semver (e.g. 1.0.0)",
 			));
 		}
-	}
 
 	issues
 }
@@ -927,11 +923,10 @@ pub fn define_config(
 
 	if !issues.is_empty() {
 		if lenient {
-			if let Some(opts) = options {
-				if let Some(on_warn) = opts.on_warn {
+			if let Some(opts) = options
+				&& let Some(on_warn) = opts.on_warn {
 					on_warn(issues.clone());
 				}
-			}
 
 			// In lenient mode, reset invalid fields to defaults
 			let invalid_paths: HashSet<String> = issues.iter().map(|i| i.path.clone()).collect();

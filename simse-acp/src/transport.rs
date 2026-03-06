@@ -4,6 +4,7 @@ use serde::Serialize;
 
 use crate::protocol::{JsonRpcNotification, JsonRpcResponse};
 
+#[derive(Clone)]
 pub struct NdjsonTransport;
 
 impl Default for NdjsonTransport {

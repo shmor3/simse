@@ -62,43 +62,38 @@ fn to_agent_step(step: &ChainStepConfig) -> AgentStepConfig {
 
 /// Fire a callback, swallowing any errors (matches TS behavior of try/catch).
 async fn fire_step_start(callbacks: &Option<ChainCallbacks>, info: StepStartInfo) {
-	if let Some(ref cb) = callbacks {
-		if let Some(ref handler) = cb.on_step_start {
+	if let Some(cb) = callbacks
+		&& let Some(handler) = &cb.on_step_start {
 			handler(info).await;
 		}
-	}
 }
 
 async fn fire_step_complete(callbacks: &Option<ChainCallbacks>, result: StepResult) {
-	if let Some(ref cb) = callbacks {
-		if let Some(ref handler) = cb.on_step_complete {
+	if let Some(cb) = callbacks
+		&& let Some(handler) = &cb.on_step_complete {
 			handler(result).await;
 		}
-	}
 }
 
 async fn fire_step_error(callbacks: &Option<ChainCallbacks>, info: StepErrorInfo) {
-	if let Some(ref cb) = callbacks {
-		if let Some(ref handler) = cb.on_step_error {
+	if let Some(cb) = callbacks
+		&& let Some(handler) = &cb.on_step_error {
 			handler(info).await;
 		}
-	}
 }
 
 async fn fire_chain_complete(callbacks: &Option<ChainCallbacks>, results: Vec<StepResult>) {
-	if let Some(ref cb) = callbacks {
-		if let Some(ref handler) = cb.on_chain_complete {
+	if let Some(cb) = callbacks
+		&& let Some(handler) = &cb.on_chain_complete {
 			handler(results).await;
 		}
-	}
 }
 
 async fn fire_chain_error(callbacks: &Option<ChainCallbacks>, info: ChainErrorInfo) {
-	if let Some(ref cb) = callbacks {
-		if let Some(ref handler) = cb.on_chain_error {
+	if let Some(cb) = callbacks
+		&& let Some(handler) = &cb.on_chain_error {
 			handler(info).await;
 		}
-	}
 }
 
 // ---------------------------------------------------------------------------

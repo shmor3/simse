@@ -403,13 +403,15 @@ async fn test_task_get_found() {
 	// Create a task first
 	{
 		let mut list = tl.lock().unwrap();
-		list.create(simse_core::tasks::TaskCreateInput {
+		let taken = std::mem::replace(&mut *list, TaskList::new(None));
+		let (new_list, _) = taken.create(simse_core::tasks::TaskCreateInput {
 			subject: "Test task".to_string(),
 			description: "A test task".to_string(),
 			active_form: None,
 			owner: None,
 			metadata: None,
 		});
+		*list = new_list;
 	}
 
 	let call = make_call("task_get", serde_json::json!({"id": "1"}));
@@ -451,13 +453,15 @@ async fn test_task_update_status_change() {
 	// Create a task
 	{
 		let mut list = tl.lock().unwrap();
-		list.create(simse_core::tasks::TaskCreateInput {
+		let taken = std::mem::replace(&mut *list, TaskList::new(None));
+		let (new_list, _) = taken.create(simse_core::tasks::TaskCreateInput {
 			subject: "Do work".to_string(),
 			description: "Work description".to_string(),
 			active_form: None,
 			owner: None,
 			metadata: None,
 		});
+		*list = new_list;
 	}
 
 	let call = make_call(
@@ -489,13 +493,15 @@ async fn test_task_update_subject_change() {
 	// Create a task
 	{
 		let mut list = tl.lock().unwrap();
-		list.create(simse_core::tasks::TaskCreateInput {
+		let taken = std::mem::replace(&mut *list, TaskList::new(None));
+		let (new_list, _) = taken.create(simse_core::tasks::TaskCreateInput {
 			subject: "Old subject".to_string(),
 			description: "Desc".to_string(),
 			active_form: None,
 			owner: None,
 			metadata: None,
 		});
+		*list = new_list;
 	}
 
 	let call = make_call(
@@ -541,13 +547,15 @@ async fn test_task_delete_found() {
 	// Create a task
 	{
 		let mut list = tl.lock().unwrap();
-		list.create(simse_core::tasks::TaskCreateInput {
+		let taken = std::mem::replace(&mut *list, TaskList::new(None));
+		let (new_list, _) = taken.create(simse_core::tasks::TaskCreateInput {
 			subject: "To delete".to_string(),
 			description: "Will be deleted".to_string(),
 			active_form: None,
 			owner: None,
 			metadata: None,
 		});
+		*list = new_list;
 	}
 
 	let call = make_call("task_delete", serde_json::json!({"id": "1"}));
@@ -591,20 +599,22 @@ async fn test_task_list_formatted_output() {
 	// Create multiple tasks
 	{
 		let mut list = tl.lock().unwrap();
-		list.create(simse_core::tasks::TaskCreateInput {
+		let taken = std::mem::replace(&mut *list, TaskList::new(None));
+		let (new_list, _) = taken.create(simse_core::tasks::TaskCreateInput {
 			subject: "First task".to_string(),
 			description: "Desc 1".to_string(),
 			active_form: None,
 			owner: None,
 			metadata: None,
 		});
-		list.create(simse_core::tasks::TaskCreateInput {
+		let (new_list, _) = new_list.create(simse_core::tasks::TaskCreateInput {
 			subject: "Second task".to_string(),
 			description: "Desc 2".to_string(),
 			active_form: None,
 			owner: None,
 			metadata: None,
 		});
+		*list = new_list;
 	}
 
 	let call = make_call("task_list", serde_json::json!({}));
@@ -646,14 +656,15 @@ async fn test_task_list_with_dependencies() {
 	// Create tasks with dependencies
 	{
 		let mut list = tl.lock().unwrap();
-		list.create(simse_core::tasks::TaskCreateInput {
+		let taken = std::mem::replace(&mut *list, TaskList::new(None));
+		let (new_list, _) = taken.create(simse_core::tasks::TaskCreateInput {
 			subject: "Base task".to_string(),
 			description: "Desc".to_string(),
 			active_form: None,
 			owner: None,
 			metadata: None,
 		});
-		list.create(simse_core::tasks::TaskCreateInput {
+		let (new_list, _) = new_list.create(simse_core::tasks::TaskCreateInput {
 			subject: "Dependent task".to_string(),
 			description: "Desc".to_string(),
 			active_form: None,
@@ -661,7 +672,7 @@ async fn test_task_list_with_dependencies() {
 			metadata: None,
 		});
 		// Make task 2 blocked by task 1
-		list.update(
+		let (new_list, _) = new_list.update(
 			"2",
 			simse_core::tasks::TaskUpdateInput {
 				add_blocked_by: Some(vec!["1".to_string()]),
@@ -669,6 +680,7 @@ async fn test_task_list_with_dependencies() {
 			},
 		)
 		.unwrap();
+		*list = new_list;
 	}
 
 	let call = make_call("task_list", serde_json::json!({}));
@@ -692,15 +704,19 @@ async fn test_task_update_with_add_blocks() {
 	// Create 3 tasks
 	{
 		let mut list = tl.lock().unwrap();
+		let taken = std::mem::replace(&mut *list, TaskList::new(None));
+		let mut new_list = taken;
 		for i in 1..=3 {
-			list.create(simse_core::tasks::TaskCreateInput {
+			let (nl, _) = new_list.create(simse_core::tasks::TaskCreateInput {
 				subject: format!("Task {}", i),
 				description: "Desc".to_string(),
 				active_form: None,
 				owner: None,
 				metadata: None,
 			});
+			new_list = nl;
 		}
+		*list = new_list;
 	}
 
 	// Task 1 blocks tasks 2 and 3

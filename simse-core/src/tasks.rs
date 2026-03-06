@@ -9,6 +9,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use im::HashMap as ImHashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{SimseError, TaskErrorCode};
@@ -87,9 +88,12 @@ pub struct TaskListOptions {
 // ---------------------------------------------------------------------------
 
 /// Task list with dependency tracking, cycle detection, and auto-incrementing IDs.
-#[derive(Debug)]
+///
+/// Uses `im::HashMap` for persistent (structural sharing) task storage,
+/// enabling cheap cloning and functional-style state transitions.
+#[derive(Debug, Clone)]
 pub struct TaskList {
-	tasks: HashMap<String, TaskItem>,
+	tasks: ImHashMap<String, TaskItem>,
 	next_id: u64,
 	max_tasks: usize,
 }
@@ -107,7 +111,7 @@ impl TaskList {
 	pub fn new(options: Option<TaskListOptions>) -> Self {
 		let opts = options.unwrap_or_default();
 		Self {
-			tasks: HashMap::new(),
+			tasks: ImHashMap::new(),
 			next_id: 1,
 			max_tasks: opts.max_tasks.unwrap_or(100),
 		}
@@ -118,16 +122,16 @@ impl TaskList {
 	/// Create a new task. Panics if the task limit is exceeded.
 	///
 	/// For fallible creation, use [`create_checked`].
-	pub fn create(&mut self, input: TaskCreateInput) -> TaskItem {
+	pub fn create(self, input: TaskCreateInput) -> (Self, TaskItem) {
 		self.create_checked(input)
 			.expect("task limit reached; use create_checked for fallible creation")
 	}
 
 	/// Create a new task, returning an error if the task limit is exceeded.
 	pub fn create_checked(
-		&mut self,
+		mut self,
 		input: TaskCreateInput,
-	) -> Result<TaskItem, SimseError> {
+	) -> Result<(Self, TaskItem), SimseError> {
 		if self.tasks.len() >= self.max_tasks {
 			return Err(SimseError::task(
 				TaskErrorCode::LimitReached,
@@ -156,8 +160,8 @@ impl TaskList {
 			updated_at: now,
 		};
 
-		self.tasks.insert(id, task.clone());
-		Ok(task)
+		self.tasks = self.tasks.update(id, task.clone());
+		Ok((self, task))
 	}
 
 	// -- Read --------------------------------------------------------------
@@ -211,15 +215,15 @@ impl TaskList {
 
 	// -- Update ------------------------------------------------------------
 
-	/// Update a task by ID. Returns `Ok(None)` if the task does not exist.
+	/// Update a task by ID. Returns `Ok((self, None))` if the task does not exist.
 	/// Returns `Err` if a circular dependency would be created.
 	pub fn update(
-		&mut self,
+		mut self,
 		id: &str,
 		input: TaskUpdateInput,
-	) -> Result<Option<TaskItem>, SimseError> {
+	) -> Result<(Self, Option<TaskItem>), SimseError> {
 		if !self.tasks.contains_key(id) {
-			return Ok(None);
+			return Ok((self, None));
 		}
 
 		// Process add_blocks
@@ -248,16 +252,19 @@ impl TaskList {
 				}
 
 				// Add reciprocal: id.blocks += target_id, target.blocked_by += id
-				if let Some(task) = self.tasks.get_mut(id) {
+				self = self.update_task(id, |mut task| {
 					task.blocks.push(target_id.clone());
 					task.updated_at = now_millis();
-				}
-				if let Some(target) = self.tasks.get_mut(target_id) {
-					if !target.blocked_by.contains(&id.to_string()) {
-						target.blocked_by.push(id.to_string());
-						target.updated_at = now_millis();
+					task
+				});
+				let id_str = id.to_string();
+				self = self.update_task(target_id, |mut task| {
+					if !task.blocked_by.contains(&id_str) {
+						task.blocked_by.push(id_str.clone());
+						task.updated_at = now_millis();
 					}
-				}
+					task
+				});
 			}
 		}
 
@@ -287,16 +294,19 @@ impl TaskList {
 				}
 
 				// Add reciprocal: id.blocked_by += dep_id, dep.blocks += id
-				if let Some(task) = self.tasks.get_mut(id) {
+				self = self.update_task(id, |mut task| {
 					task.blocked_by.push(dep_id.clone());
 					task.updated_at = now_millis();
-				}
-				if let Some(dep) = self.tasks.get_mut(dep_id) {
-					if !dep.blocks.contains(&id.to_string()) {
-						dep.blocks.push(id.to_string());
-						dep.updated_at = now_millis();
+					task
+				});
+				let id_str = id.to_string();
+				self = self.update_task(dep_id, |mut task| {
+					if !task.blocks.contains(&id_str) {
+						task.blocks.push(id_str.clone());
+						task.updated_at = now_millis();
 					}
-				}
+					task
+				});
 			}
 		}
 
@@ -313,40 +323,42 @@ impl TaskList {
 				.get(id)
 				.map_or_else(Vec::new, |t| t.blocks.clone());
 
+			let id_str = id.to_string();
 			for blocked_id in &blocks {
-				if let Some(blocked) = self.tasks.get_mut(blocked_id) {
-					blocked.blocked_by.retain(|b| b != id);
-					blocked.updated_at = now_millis();
-				}
+				self = self.update_task(blocked_id, |mut task| {
+					task.blocked_by.retain(|b| b != &id_str);
+					task.updated_at = now_millis();
+					task
+				});
 			}
 		}
 
 		// Apply field updates
-		if let Some(task) = self.tasks.get_mut(id) {
-			if let Some(status) = input.status {
-				task.status = status;
+		self = self.update_task(id, |mut task| {
+			if let Some(ref status) = input.status {
+				task.status = status.clone();
 			}
-			if let Some(subject) = input.subject {
-				task.subject = subject;
+			if let Some(ref subject) = input.subject {
+				task.subject = subject.clone();
 			}
-			if let Some(description) = input.description {
-				task.description = description;
+			if let Some(ref description) = input.description {
+				task.description = description.clone();
 			}
-			if let Some(active_form) = input.active_form {
-				task.active_form = Some(active_form);
+			if let Some(ref active_form) = input.active_form {
+				task.active_form = Some(active_form.clone());
 			}
-			if let Some(owner) = input.owner {
-				task.owner = Some(owner);
+			if let Some(ref owner) = input.owner {
+				task.owner = Some(owner.clone());
 			}
 
 			// Metadata merge with null filtering
-			if let Some(new_meta) = input.metadata {
+			if let Some(ref new_meta) = input.metadata {
 				let mut merged = task.metadata.take().unwrap_or_default();
 				for (key, value) in new_meta {
 					if value.is_null() {
-						merged.remove(&key);
+						merged.remove(key);
 					} else {
-						merged.insert(key, value);
+						merged.insert(key.clone(), value.clone());
 					}
 				}
 				if merged.is_empty() {
@@ -357,52 +369,70 @@ impl TaskList {
 			}
 
 			task.updated_at = now_millis();
-		}
+			task
+		});
 
-		Ok(Some(self.tasks.get(id).cloned().expect("task exists")))
+		let result = self.tasks.get(id).cloned();
+		Ok((self, result))
 	}
 
 	// -- Delete ------------------------------------------------------------
 
-	/// Delete a task by ID. Returns `true` if the task was found and removed.
+	/// Delete a task by ID. Returns `(self, true)` if the task was found and removed.
 	///
 	/// Cleans up all dependency references from other tasks.
-	pub fn delete(&mut self, id: &str) -> bool {
-		if self.tasks.remove(id).is_none() {
-			return false;
+	pub fn delete(mut self, id: &str) -> (Self, bool) {
+		if !self.tasks.contains_key(id) {
+			return (self, false);
 		}
+		self.tasks = self.tasks.without(id);
 
 		let id_str = id.to_string();
 		let now = now_millis();
 
 		// Remove from other tasks' blocks and blocked_by
-		for task in self.tasks.values_mut() {
-			let mut changed = false;
-			if task.blocks.contains(&id_str) {
-				task.blocks.retain(|b| b != &id_str);
-				changed = true;
-			}
-			if task.blocked_by.contains(&id_str) {
-				task.blocked_by.retain(|b| b != &id_str);
-				changed = true;
-			}
-			if changed {
-				task.updated_at = now;
-			}
+		let keys: Vec<String> = self.tasks.keys().cloned().collect();
+		for key in keys {
+			self = self.update_task(&key, |mut task| {
+				let mut changed = false;
+				if task.blocks.contains(&id_str) {
+					task.blocks.retain(|b| b != &id_str);
+					changed = true;
+				}
+				if task.blocked_by.contains(&id_str) {
+					task.blocked_by.retain(|b| b != &id_str);
+					changed = true;
+				}
+				if changed {
+					task.updated_at = now;
+				}
+				task
+			});
 		}
 
-		true
+		(self, true)
 	}
 
 	// -- Clear -------------------------------------------------------------
 
-	/// Remove all tasks and reset the ID counter.
-	pub fn clear(&mut self) {
-		self.tasks.clear();
+	/// Remove all tasks and reset the ID counter. Returns the updated task list.
+	pub fn clear(mut self) -> Self {
+		self.tasks = ImHashMap::new();
 		self.next_id = 1;
+		self
 	}
 
 	// -- Internal ----------------------------------------------------------
+
+	/// Apply a transformation function to a task by ID. If the task exists,
+	/// the function receives the current value and returns the updated value.
+	fn update_task(mut self, id: &str, f: impl FnOnce(TaskItem) -> TaskItem) -> Self {
+		if let Some(task) = self.tasks.get(id) {
+			let updated = f(task.clone());
+			self.tasks = self.tasks.update(id.to_string(), updated);
+		}
+		self
+	}
 
 	/// BFS cycle detection: checks if adding "blocker_id blocks blocked_id"
 	/// would create a cycle. A cycle exists if `blocked_id` can already

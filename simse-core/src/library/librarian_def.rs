@@ -135,11 +135,10 @@ pub fn validate_definition(input: &LibrarianDefinition) -> ValidationResult {
 	}
 
 	// acp (optional)
-	if let Some(ref acp) = input.acp {
-		if acp.command.is_empty() {
+	if let Some(ref acp) = input.acp
+		&& acp.command.is_empty() {
 			errors.push("acp.command must be a non-empty string".to_string());
 		}
-	}
 
 	ValidationResult {
 		valid: errors.is_empty(),
@@ -267,15 +266,12 @@ pub async fn load_all_definitions(
 
 	while let Ok(Some(entry)) = entries.next_entry().await {
 		let path = entry.path();
-		if path.extension().is_some_and(|ext| ext == "json") {
-			if let Ok(raw) = tokio::fs::read_to_string(&path).await {
-				if let Ok(parsed) = serde_json::from_str::<LibrarianDefinition>(&raw) {
-					if validate_definition(&parsed).valid {
+		if path.extension().is_some_and(|ext| ext == "json")
+			&& let Ok(raw) = tokio::fs::read_to_string(&path).await
+				&& let Ok(parsed) = serde_json::from_str::<LibrarianDefinition>(&raw)
+					&& validate_definition(&parsed).valid {
 						definitions.push(parsed);
 					}
-				}
-			}
-		}
 	}
 
 	definitions

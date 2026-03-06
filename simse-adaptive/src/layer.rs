@@ -16,6 +16,8 @@ use crate::pcn_config::Activation;
 /// - `bias` = b(l)
 /// - `preactivations` = a(l) = W * x_above + b (before activation)
 /// - `x_hat(l) = f(a(l))` = prediction of this layer's values
+// PERF: All fields are inner-loop numeric computation arrays; kept as Vec<f64>
+// for cache-friendly iteration in predict/update/error hot paths.
 #[derive(Debug, Clone)]
 pub struct PcnLayer {
     /// Dimensionality of this layer (number of value/error nodes).

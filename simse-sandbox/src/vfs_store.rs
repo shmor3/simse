@@ -2,7 +2,6 @@
 // In-memory VFS core
 // ---------------------------------------------------------------------------
 
-use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use base64::Engine as _;
@@ -221,9 +220,10 @@ pub enum TransactionOp {
 // VirtualFs
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct VirtualFs {
-	nodes: HashMap<String, InternalNode>,
-	history: HashMap<String, Vec<HistoryEntryInternal>>,
+	nodes: im::HashMap<String, InternalNode>,
+	history: im::HashMap<String, Vec<HistoryEntryInternal>>,
 	limits: VfsLimits,
 	max_history_per_file: usize,
 	total_size: u64,
@@ -237,8 +237,7 @@ impl VirtualFs {
 
 	pub fn new(limits: VfsLimits, max_history: usize) -> Self {
 		let now = Self::now();
-		let mut nodes = HashMap::new();
-		nodes.insert(
+		let nodes = im::HashMap::unit(
 			VFS_ROOT.to_string(),
 			InternalNode {
 				node_type: NodeType::Directory,
@@ -253,7 +252,7 @@ impl VirtualFs {
 
 		Self {
 			nodes,
-			history: HashMap::new(),
+			history: im::HashMap::new(),
 			limits,
 			max_history_per_file: max_history,
 			total_size: 0,
@@ -347,7 +346,7 @@ impl VirtualFs {
 		Ok(())
 	}
 
-	fn create_parents(&mut self, path: &str) {
+	fn create_parents(mut self, path: &str) -> Self {
 		let ancestors = ancestor_paths(path);
 		let ts = Self::now();
 		for ancestor in &ancestors {
@@ -356,9 +355,9 @@ impl VirtualFs {
 				// (the TS version calls assertNodeLimit which can throw, but
 				// createParents is always called in contexts that already validated).
 				if self.nodes.len() >= self.limits.max_node_count {
-					return;
+					return self;
 				}
-				self.nodes.insert(
+				self.nodes = self.nodes.update(
 					ancestor.clone(),
 					InternalNode {
 						node_type: NodeType::Directory,
@@ -373,6 +372,7 @@ impl VirtualFs {
 				self.dir_count += 1;
 			}
 		}
+		self
 	}
 
 	fn get_direct_children(&self, dir_path: &str) -> Vec<String> {
@@ -421,23 +421,27 @@ impl VirtualFs {
 		result
 	}
 
-	fn update_parent_modified_at(&mut self, path: &str, ts: u64) {
+	fn update_parent_modified_at(mut self, path: &str, ts: u64) -> Self {
 		if let Some(parent) = parent_path(path) {
-			if let Some(parent_node) = self.nodes.get_mut(&parent) {
-				parent_node.modified_at = ts;
+			if let Some(parent_node) = self.nodes.get(&parent) {
+				let mut updated = parent_node.clone();
+				updated.modified_at = ts;
+				self.nodes = self.nodes.update(parent, updated);
 			}
 		}
+		self
 	}
 
-	fn record_history(&mut self, path: &str, node: &InternalNode) {
+	fn record_history(mut self, path: &str, node: &InternalNode) -> Self {
 		if node.node_type != NodeType::File {
-			return;
+			return self;
 		}
 
-		let entries = self
+		let mut entries = self
 			.history
-			.entry(path.to_string())
-			.or_default();
+			.get(path)
+			.cloned()
+			.unwrap_or_default();
 
 		let version = entries.len() + 1;
 		let entry = HistoryEntryInternal {
@@ -457,6 +461,9 @@ impl VirtualFs {
 			let drain_count = entries.len() - max;
 			entries.drain(0..drain_count);
 		}
+
+		self.history = self.history.update(path.to_string(), entries);
+		self
 	}
 
 	fn get_node(&self, path: &str) -> Result<&InternalNode, SandboxError> {
@@ -494,12 +501,12 @@ impl VirtualFs {
 	}
 
 	pub fn write_file(
-		&mut self,
+		mut self,
 		path: &str,
 		content: &str,
 		content_type: Option<&str>,
 		create_parents: bool,
-	) -> Result<(), SandboxError> {
+	) -> Result<Self, SandboxError> {
 		let normalized = self.assert_valid_path(path)?;
 		if normalized == VFS_ROOT {
 			return Err(SandboxError::VfsInvalidOperation(
@@ -541,7 +548,7 @@ impl VirtualFs {
 		}
 
 		if create_parents {
-			self.create_parents(&normalized);
+			self = self.create_parents(&normalized);
 		} else {
 			self.ensure_parent_exists(&normalized)?;
 		}
@@ -551,7 +558,7 @@ impl VirtualFs {
 			self.file_count += 1;
 		} else if let Some(ref ex) = existing {
 			if ex.node_type == NodeType::File {
-				self.record_history(&normalized, ex);
+				self = self.record_history(&normalized, ex);
 			}
 		}
 
@@ -564,7 +571,7 @@ impl VirtualFs {
 
 		let created_at = existing.as_ref().map_or(ts, |n| n.created_at);
 
-		self.nodes.insert(
+		self.nodes = self.nodes.update(
 			normalized.clone(),
 			InternalNode {
 				node_type: NodeType::File,
@@ -579,7 +586,7 @@ impl VirtualFs {
 
 		let is_new_file = existing.is_none();
 		self.total_size = (self.total_size as i64 + size_delta) as u64;
-		self.update_parent_modified_at(&normalized, ts);
+		self = self.update_parent_modified_at(&normalized, ts);
 
 		self.pending_events.push(VfsEvent::Write {
 			path: normalized,
@@ -588,10 +595,10 @@ impl VirtualFs {
 			is_new: is_new_file,
 		});
 
-		Ok(())
+		Ok(self)
 	}
 
-	pub fn append_file(&mut self, path: &str, content: &str) -> Result<(), SandboxError> {
+	pub fn append_file(mut self, path: &str, content: &str) -> Result<Self, SandboxError> {
 		let normalized = self.assert_valid_path(path)?;
 		let node = self.assert_node_exists(&normalized)?.clone();
 		Self::assert_is_file(&normalized, &node)?;
@@ -603,7 +610,7 @@ impl VirtualFs {
 			)));
 		}
 
-		self.record_history(&normalized, &node);
+		self = self.record_history(&normalized, &node);
 
 		let current_text = node.text.clone().unwrap_or_default();
 		let new_text = format!("{}{}", current_text, content);
@@ -616,7 +623,7 @@ impl VirtualFs {
 		}
 
 		let ts = Self::now();
-		self.nodes.insert(
+		self.nodes = self.nodes.update(
 			normalized.clone(),
 			InternalNode {
 				node_type: NodeType::File,
@@ -637,39 +644,39 @@ impl VirtualFs {
 			is_new: false,
 		});
 
-		Ok(())
+		Ok(self)
 	}
 
-	pub fn delete_file(&mut self, path: &str) -> Result<bool, SandboxError> {
+	pub fn delete_file(mut self, path: &str) -> Result<(Self, bool), SandboxError> {
 		let normalized = self.assert_valid_path(path)?;
 		let node = match self.nodes.get(&normalized) {
 			Some(n) => n.clone(),
-			None => return Ok(false),
+			None => return Ok((self, false)),
 		};
 		Self::assert_is_file(&normalized, &node)?;
 
 		self.total_size -= node.size;
 		self.file_count -= 1;
-		self.nodes.remove(&normalized);
-		self.history.remove(&normalized);
+		self.nodes = self.nodes.without(&normalized);
+		self.history = self.history.without(&normalized);
 
 		self.pending_events
 			.push(VfsEvent::Delete { path: normalized });
 
-		Ok(true)
+		Ok((self, true))
 	}
 
 	// -- Directory operations ---------------------------------------------
 
-	pub fn mkdir(&mut self, path: &str, recursive: bool) -> Result<(), SandboxError> {
+	pub fn mkdir(mut self, path: &str, recursive: bool) -> Result<Self, SandboxError> {
 		let normalized = self.assert_valid_path(path)?;
 		if normalized == VFS_ROOT {
-			return Ok(());
+			return Ok(self);
 		}
 
 		if let Some(existing) = self.nodes.get(&normalized) {
 			if existing.node_type == NodeType::Directory {
-				return Ok(());
+				return Ok(self);
 			}
 			return Err(SandboxError::VfsNotADirectory(format!(
 				"Path exists and is not a directory: {}",
@@ -678,14 +685,14 @@ impl VirtualFs {
 		}
 
 		if recursive {
-			self.create_parents(&normalized);
+			self = self.create_parents(&normalized);
 		} else {
 			self.ensure_parent_exists(&normalized)?;
 		}
 
 		self.assert_node_limit()?;
 		let ts = Self::now();
-		self.nodes.insert(
+		self.nodes = self.nodes.update(
 			normalized.clone(),
 			InternalNode {
 				node_type: NodeType::Directory,
@@ -702,7 +709,7 @@ impl VirtualFs {
 		self.pending_events
 			.push(VfsEvent::Mkdir { path: normalized });
 
-		Ok(())
+		Ok(self)
 	}
 
 	pub fn readdir(
@@ -745,7 +752,7 @@ impl VirtualFs {
 		Ok(entries)
 	}
 
-	pub fn rmdir(&mut self, path: &str, recursive: bool) -> Result<bool, SandboxError> {
+	pub fn rmdir(mut self, path: &str, recursive: bool) -> Result<(Self, bool), SandboxError> {
 		let normalized = self.assert_valid_path(path)?;
 		if normalized == VFS_ROOT {
 			return Err(SandboxError::VfsInvalidOperation(
@@ -755,7 +762,7 @@ impl VirtualFs {
 
 		let node = match self.nodes.get(&normalized) {
 			Some(n) => n.clone(),
-			None => return Ok(false),
+			None => return Ok((self, false)),
 		};
 		Self::assert_is_directory(&normalized, &node)?;
 
@@ -776,24 +783,24 @@ impl VirtualFs {
 						NodeType::File => {
 							self.total_size -= desc_node.size;
 							self.file_count -= 1;
-							self.history.remove(desc);
+							self.history = self.history.without(desc);
 						}
 						NodeType::Directory => {
 							self.dir_count -= 1;
 						}
 					}
 				}
-				self.nodes.remove(desc);
+				self.nodes = self.nodes.without(desc);
 			}
 		}
 
 		self.dir_count -= 1;
-		self.nodes.remove(&normalized);
+		self.nodes = self.nodes.without(&normalized);
 
 		self.pending_events
 			.push(VfsEvent::Delete { path: normalized });
 
-		Ok(true)
+		Ok((self, true))
 	}
 
 	// -- Navigation -------------------------------------------------------
@@ -818,7 +825,7 @@ impl VirtualFs {
 		Ok(self.nodes.contains_key(&normalized))
 	}
 
-	pub fn rename(&mut self, old_path: &str, new_path: &str) -> Result<(), SandboxError> {
+	pub fn rename(mut self, old_path: &str, new_path: &str) -> Result<Self, SandboxError> {
 		let normalized_old = self.assert_valid_path(old_path)?;
 		let normalized_new = self.assert_valid_path(new_path)?;
 
@@ -829,7 +836,7 @@ impl VirtualFs {
 		}
 
 		if normalized_old == normalized_new {
-			return Ok(());
+			return Ok(self);
 		}
 
 		let node = self.assert_node_exists(&normalized_old)?.clone();
@@ -859,12 +866,15 @@ impl VirtualFs {
 				let desc_node = self.get_node(desc)?.clone();
 				let new_desc_path =
 					format!("{}{}", normalized_new, &desc[normalized_old.len()..]);
-				self.nodes.insert(new_desc_path.clone(), desc_node);
-				self.nodes.remove(desc);
 
 				// Transfer history
-				if let Some(hist) = self.history.remove(desc) {
-					self.history.insert(new_desc_path, hist);
+				let hist = self.history.get(desc).cloned();
+				self.nodes = self.nodes.without(desc);
+				self.history = self.history.without(desc);
+
+				self.nodes = self.nodes.update(new_desc_path.clone(), desc_node);
+				if let Some(h) = hist {
+					self.history = self.history.update(new_desc_path, h);
 				}
 			}
 		}
@@ -872,12 +882,14 @@ impl VirtualFs {
 		let ts = Self::now();
 		let mut moved_node = node;
 		moved_node.modified_at = ts;
-		self.nodes.insert(normalized_new.clone(), moved_node);
-		self.nodes.remove(&normalized_old);
+		self.nodes = self.nodes.update(normalized_new.clone(), moved_node);
+		self.nodes = self.nodes.without(&normalized_old);
 
 		// Transfer history for the node itself
-		if let Some(hist) = self.history.remove(&normalized_old) {
-			self.history.insert(normalized_new.clone(), hist);
+		let hist = self.history.get(&normalized_old).cloned();
+		self.history = self.history.without(&normalized_old);
+		if let Some(h) = hist {
+			self.history = self.history.update(normalized_new.clone(), h);
 		}
 
 		self.pending_events.push(VfsEvent::Rename {
@@ -885,16 +897,16 @@ impl VirtualFs {
 			new_path: normalized_new,
 		});
 
-		Ok(())
+		Ok(self)
 	}
 
 	pub fn copy(
-		&mut self,
+		mut self,
 		src: &str,
 		dest: &str,
 		overwrite: bool,
 		recursive: bool,
-	) -> Result<(), SandboxError> {
+	) -> Result<Self, SandboxError> {
 		let normalized_src = self.assert_valid_path(src)?;
 		let normalized_dest = self.assert_valid_path(dest)?;
 
@@ -913,11 +925,11 @@ impl VirtualFs {
 		if src_node.node_type == NodeType::File {
 			if src_node.content_type == ContentType::Text {
 				let text = src_node.text.clone().unwrap_or_default();
-				self.write_file(&normalized_dest, &text, Some("text"), false)?;
+				self = self.write_file(&normalized_dest, &text, Some("text"), false)?;
 			} else {
 				let data = src_node.data.clone().unwrap_or_default();
 				let b64 = BASE64.encode(&data);
-				self.write_file(&normalized_dest, &b64, Some("binary"), false)?;
+				self = self.write_file(&normalized_dest, &b64, Some("binary"), false)?;
 			}
 		} else {
 			if !recursive {
@@ -931,14 +943,16 @@ impl VirtualFs {
 			if dest_exists && overwrite {
 				if let Some(dest_node) = self.nodes.get(&normalized_dest).cloned() {
 					if dest_node.node_type == NodeType::Directory {
-						self.rmdir(&normalized_dest, true)?;
+						let (s, _) = self.rmdir(&normalized_dest, true)?;
+						self = s;
 					} else {
-						self.delete_file(&normalized_dest)?;
+						let (s, _) = self.delete_file(&normalized_dest)?;
+						self = s;
 					}
 				}
 			}
 
-			self.mkdir(&normalized_dest, false)?;
+			self = self.mkdir(&normalized_dest, false)?;
 			let descendants = self.get_descendants(&normalized_src);
 			for desc in &descendants {
 				let desc_node = self.get_node(desc)?.clone();
@@ -946,19 +960,19 @@ impl VirtualFs {
 					format!("{}{}", normalized_dest, &desc[normalized_src.len()..]);
 
 				if desc_node.node_type == NodeType::Directory {
-					self.mkdir(&new_desc_path, false)?;
+					self = self.mkdir(&new_desc_path, false)?;
 				} else if desc_node.content_type == ContentType::Text {
 					let text = desc_node.text.clone().unwrap_or_default();
-					self.write_file(&new_desc_path, &text, Some("text"), false)?;
+					self = self.write_file(&new_desc_path, &text, Some("text"), false)?;
 				} else {
 					let data = desc_node.data.clone().unwrap_or_default();
 					let b64 = BASE64.encode(&data);
-					self.write_file(&new_desc_path, &b64, Some("binary"), false)?;
+					self = self.write_file(&new_desc_path, &b64, Some("binary"), false)?;
 				}
 			}
 		}
 
-		Ok(())
+		Ok(self)
 	}
 
 	// -- Query operations -------------------------------------------------
@@ -1264,7 +1278,7 @@ impl VirtualFs {
 		})
 	}
 
-	pub fn checkout(&mut self, path: &str, version: usize) -> Result<(), SandboxError> {
+	pub fn checkout(mut self, path: &str, version: usize) -> Result<Self, SandboxError> {
 		let normalized = self.assert_valid_path(path)?;
 		let node = self.assert_node_exists(&normalized)?.clone();
 		Self::assert_is_file(&normalized, &node)?;
@@ -1273,7 +1287,7 @@ impl VirtualFs {
 		let current_version = hist_len + 1;
 
 		if version == current_version {
-			return Ok(()); // Already at this version
+			return Ok(self); // Already at this version
 		}
 
 		let entries = self.history.get(&normalized).ok_or_else(|| {
@@ -1293,13 +1307,13 @@ impl VirtualFs {
 		let entry = entries[version - 1].clone();
 
 		// Record current state as history before reverting
-		self.record_history(&normalized, &node);
+		self = self.record_history(&normalized, &node);
 
 		let ts = Self::now();
 		if entry.content_type == ContentType::Binary {
 			let binary = entry.data.clone().unwrap_or_default();
 			let size_delta = binary.len() as i64 - node.size as i64;
-			self.nodes.insert(
+			self.nodes = self.nodes.update(
 				normalized.clone(),
 				InternalNode {
 					node_type: NodeType::File,
@@ -1316,7 +1330,7 @@ impl VirtualFs {
 			let text = entry.text.clone().unwrap_or_default();
 			let new_size = text.len() as u64;
 			let size_delta = new_size as i64 - node.size as i64;
-			self.nodes.insert(
+			self.nodes = self.nodes.update(
 				normalized,
 				InternalNode {
 					node_type: NodeType::File,
@@ -1331,7 +1345,7 @@ impl VirtualFs {
 			self.total_size = (self.total_size as i64 + size_delta) as u64;
 		}
 
-		Ok(())
+		Ok(self)
 	}
 
 	// -- Helpers for diff -------------------------------------------------
@@ -1392,7 +1406,7 @@ impl VirtualFs {
 		SnapshotData { files, directories }
 	}
 
-	pub fn restore(&mut self, snap: SnapshotData) -> Result<(), SandboxError> {
+	pub fn restore(mut self, snap: SnapshotData) -> Result<Self, SandboxError> {
 		// Validate all entries against limits before committing
 		let mut total_size: u64 = 0;
 		let mut total_nodes: usize = 1; // root
@@ -1488,7 +1502,7 @@ impl VirtualFs {
 		}
 
 		// Validation passed — commit
-		self.do_clear();
+		self = self.do_clear();
 
 		for dir in &sorted_dirs {
 			let normalized = normalize_path(&dir.path).map_err(|_| {
@@ -1497,7 +1511,7 @@ impl VirtualFs {
 					dir.path
 				))
 			})?;
-			self.nodes.insert(
+			self.nodes = self.nodes.update(
 				normalized,
 				InternalNode {
 					node_type: NodeType::Directory,
@@ -1523,7 +1537,7 @@ impl VirtualFs {
 				if let Some(ref b64) = file.base64 {
 					let binary = BASE64.decode(b64).unwrap_or_default();
 					let sz = binary.len() as u64;
-					self.nodes.insert(
+					self.nodes = self.nodes.update(
 						normalized,
 						InternalNode {
 							node_type: NodeType::File,
@@ -1537,7 +1551,7 @@ impl VirtualFs {
 					);
 					self.total_size += sz;
 				} else {
-					self.nodes.insert(
+					self.nodes = self.nodes.update(
 						normalized,
 						InternalNode {
 							node_type: NodeType::File,
@@ -1553,7 +1567,7 @@ impl VirtualFs {
 			} else {
 				let text = file.text.clone().unwrap_or_default();
 				let sz = text.len() as u64;
-				self.nodes.insert(
+				self.nodes = self.nodes.update(
 					normalized,
 					InternalNode {
 						node_type: NodeType::File,
@@ -1570,23 +1584,23 @@ impl VirtualFs {
 			self.file_count += 1;
 		}
 
-		Ok(())
+		Ok(self)
 	}
 
-	pub fn clear(&mut self) {
-		self.do_clear();
+	pub fn clear(self) -> Self {
+		self.do_clear()
 	}
 
-	fn do_clear(&mut self) {
-		self.nodes.clear();
-		self.history.clear();
+	fn do_clear(mut self) -> Self {
+		self.nodes = im::HashMap::new();
+		self.history = im::HashMap::new();
 		self.total_size = 0;
 		self.file_count = 0;
 		self.dir_count = 0;
 
 		// Re-init root
 		let now = Self::now();
-		self.nodes.insert(
+		self.nodes = self.nodes.update(
 			VFS_ROOT.to_string(),
 			InternalNode {
 				node_type: NodeType::Directory,
@@ -1599,40 +1613,59 @@ impl VirtualFs {
 			},
 		);
 		self.dir_count = 1;
+		self
 	}
 
 	// -- Transaction ------------------------------------------------------
 
-	pub fn transaction(&mut self, ops: Vec<TransactionOp>) -> Result<(), SandboxError> {
+	pub fn transaction(self, ops: Vec<TransactionOp>) -> Result<Self, (Self, SandboxError)> {
 		let snap = self.snapshot();
-		for op in &ops {
+		let limits = self.limits.clone();
+		let max_history = self.max_history_per_file;
+		let mut s = self;
+		for op in ops {
 			let result = match op {
 				TransactionOp::WriteFile { path, content } => {
-					self.write_file(path, content, None, false)
+					s.write_file(&path, &content, None, false)
 				}
-				TransactionOp::DeleteFile { path } => self.delete_file(path).map(|_| ()),
-				TransactionOp::Mkdir { path } => self.mkdir(path, true),
-				TransactionOp::Rmdir { path } => self.rmdir(path, true).map(|_| ()),
+				TransactionOp::DeleteFile { path } => {
+					s.delete_file(&path).map(|(vfs, _)| vfs)
+				}
+				TransactionOp::Mkdir { path } => s.mkdir(&path, true),
+				TransactionOp::Rmdir { path } => {
+					s.rmdir(&path, true).map(|(vfs, _)| vfs)
+				}
 				TransactionOp::Rename { old_path, new_path } => {
-					self.rename(old_path, new_path)
+					s.rename(&old_path, &new_path)
 				}
 				TransactionOp::Copy { src, dest } => {
-					self.copy(src, dest, false, false)
+					s.copy(&src, &dest, false, false)
 				}
 			};
-			if let Err(e) = result {
-				// Rollback
-				let _ = self.restore(snap);
-				return Err(e);
+			match result {
+				Ok(new_s) => s = new_s,
+				Err(e) => {
+					// Rollback: rebuild from snapshot since s was consumed by
+					// the failed operation
+					let fresh = Self::new(limits, max_history);
+					match fresh.restore(snap) {
+						Ok(restored) => return Err((restored, e)),
+						Err(_) => {
+							// If restore also fails, return a fresh empty VFS
+							return Err((Self::new(VfsLimits::default(), max_history), e));
+						}
+					}
+				}
 			}
 		}
-		Ok(())
+		Ok(s)
 	}
 
 	// -- Events & Metrics -------------------------------------------------
 
-	pub fn drain_events(&mut self) -> Vec<VfsEvent> {
-		std::mem::take(&mut self.pending_events)
+	pub fn drain_events(mut self) -> (Self, Vec<VfsEvent>) {
+		let events = std::mem::take(&mut self.pending_events);
+		(self, events)
 	}
 
 	pub fn metrics(&self) -> MetricsResult {
@@ -1673,8 +1706,9 @@ mod tests {
 
 	#[test]
 	fn write_and_read_text_file() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///hello.txt", "hello world", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///hello.txt", "hello world", None, false)
 			.unwrap();
 		let r = vfs.read_file("vfs:///hello.txt").unwrap();
 		assert_eq!(r.content_type, "text");
@@ -1684,10 +1718,11 @@ mod tests {
 
 	#[test]
 	fn write_and_read_binary_file() {
-		let mut vfs = new_vfs();
+		let vfs = new_vfs();
 		let data = vec![0u8, 1, 2, 255];
 		let b64 = BASE64.encode(&data);
-		vfs.write_file("vfs:///bin.dat", &b64, Some("binary"), false)
+		let vfs = vfs
+			.write_file("vfs:///bin.dat", &b64, Some("binary"), false)
 			.unwrap();
 		let r = vfs.read_file("vfs:///bin.dat").unwrap();
 		assert_eq!(r.content_type, "binary");
@@ -1697,8 +1732,9 @@ mod tests {
 
 	#[test]
 	fn write_creates_parents() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///a/b/c.txt", "nested", None, true)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///a/b/c.txt", "nested", None, true)
 			.unwrap();
 		assert!(vfs.exists("vfs:///a").unwrap());
 		assert!(vfs.exists("vfs:///a/b").unwrap());
@@ -1708,7 +1744,7 @@ mod tests {
 
 	#[test]
 	fn write_without_parent_fails() {
-		let mut vfs = new_vfs();
+		let vfs = new_vfs();
 		let err = vfs
 			.write_file("vfs:///noparent/file.txt", "x", None, false)
 			.unwrap_err();
@@ -1717,9 +1753,12 @@ mod tests {
 
 	#[test]
 	fn overwrite_existing_file() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "old", None, false).unwrap();
-		vfs.write_file("vfs:///f.txt", "new content", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "old", None, false)
+			.unwrap();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "new content", None, false)
 			.unwrap();
 		let r = vfs.read_file("vfs:///f.txt").unwrap();
 		assert_eq!(r.text.unwrap(), "new content");
@@ -1727,7 +1766,7 @@ mod tests {
 
 	#[test]
 	fn cannot_write_to_root() {
-		let mut vfs = new_vfs();
+		let vfs = new_vfs();
 		let err = vfs
 			.write_file("vfs:///", "data", None, false)
 			.unwrap_err();
@@ -1736,8 +1775,8 @@ mod tests {
 
 	#[test]
 	fn cannot_overwrite_directory_with_file() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///dir", false).unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///dir", false).unwrap();
 		let err = vfs
 			.write_file("vfs:///dir", "data", None, false)
 			.unwrap_err();
@@ -1748,19 +1787,21 @@ mod tests {
 
 	#[test]
 	fn append_to_text_file() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///a.txt", "hello", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///a.txt", "hello", None, false)
 			.unwrap();
-		vfs.append_file("vfs:///a.txt", " world").unwrap();
+		let vfs = vfs.append_file("vfs:///a.txt", " world").unwrap();
 		let r = vfs.read_file("vfs:///a.txt").unwrap();
 		assert_eq!(r.text.unwrap(), "hello world");
 	}
 
 	#[test]
 	fn append_to_binary_fails() {
-		let mut vfs = new_vfs();
+		let vfs = new_vfs();
 		let b64 = BASE64.encode(&[1, 2, 3]);
-		vfs.write_file("vfs:///b.dat", &b64, Some("binary"), false)
+		let vfs = vfs
+			.write_file("vfs:///b.dat", &b64, Some("binary"), false)
 			.unwrap();
 		let err = vfs.append_file("vfs:///b.dat", "x").unwrap_err();
 		assert!(matches!(err, SandboxError::VfsInvalidOperation(_)));
@@ -1770,33 +1811,36 @@ mod tests {
 
 	#[test]
 	fn delete_existing_file() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "data", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "data", None, false)
 			.unwrap();
-		assert!(vfs.delete_file("vfs:///f.txt").unwrap());
+		let (vfs, deleted) = vfs.delete_file("vfs:///f.txt").unwrap();
+		assert!(deleted);
 		assert!(!vfs.exists("vfs:///f.txt").unwrap());
 	}
 
 	#[test]
 	fn delete_nonexistent_returns_false() {
-		let mut vfs = new_vfs();
-		assert!(!vfs.delete_file("vfs:///nope.txt").unwrap());
+		let vfs = new_vfs();
+		let (_vfs, deleted) = vfs.delete_file("vfs:///nope.txt").unwrap();
+		assert!(!deleted);
 	}
 
 	// -- mkdir --
 
 	#[test]
 	fn mkdir_creates_directory() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///mydir", false).unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///mydir", false).unwrap();
 		let s = vfs.stat("vfs:///mydir").unwrap();
 		assert_eq!(s.node_type, "directory");
 	}
 
 	#[test]
 	fn mkdir_recursive() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///a/b/c", true).unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///a/b/c", true).unwrap();
 		assert!(vfs.exists("vfs:///a").unwrap());
 		assert!(vfs.exists("vfs:///a/b").unwrap());
 		assert!(vfs.exists("vfs:///a/b/c").unwrap());
@@ -1804,15 +1848,17 @@ mod tests {
 
 	#[test]
 	fn mkdir_idempotent() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///dir", false).unwrap();
-		vfs.mkdir("vfs:///dir", false).unwrap(); // no error
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///dir", false).unwrap();
+		let _vfs = vfs.mkdir("vfs:///dir", false).unwrap(); // no error
 	}
 
 	#[test]
 	fn mkdir_on_file_fails() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "x", None, false).unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "x", None, false)
+			.unwrap();
 		let err = vfs.mkdir("vfs:///f.txt", false).unwrap_err();
 		assert!(matches!(err, SandboxError::VfsNotADirectory(_)));
 	}
@@ -1821,19 +1867,24 @@ mod tests {
 
 	#[test]
 	fn readdir_lists_children() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///a.txt", "a", None, false).unwrap();
-		vfs.write_file("vfs:///b.txt", "b", None, false).unwrap();
-		vfs.mkdir("vfs:///sub", false).unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///a.txt", "a", None, false)
+			.unwrap();
+		let vfs = vfs
+			.write_file("vfs:///b.txt", "b", None, false)
+			.unwrap();
+		let vfs = vfs.mkdir("vfs:///sub", false).unwrap();
 		let entries = vfs.readdir("vfs:///", false).unwrap();
 		assert_eq!(entries.len(), 3);
 	}
 
 	#[test]
 	fn readdir_recursive() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///sub", false).unwrap();
-		vfs.write_file("vfs:///sub/f.txt", "x", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///sub", false).unwrap();
+		let vfs = vfs
+			.write_file("vfs:///sub/f.txt", "x", None, false)
 			.unwrap();
 		let entries = vfs.readdir("vfs:///", true).unwrap();
 		assert!(entries.len() >= 2); // sub, sub/f.txt
@@ -1843,17 +1894,19 @@ mod tests {
 
 	#[test]
 	fn rmdir_empty() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///dir", false).unwrap();
-		assert!(vfs.rmdir("vfs:///dir", false).unwrap());
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///dir", false).unwrap();
+		let (vfs, deleted) = vfs.rmdir("vfs:///dir", false).unwrap();
+		assert!(deleted);
 		assert!(!vfs.exists("vfs:///dir").unwrap());
 	}
 
 	#[test]
 	fn rmdir_nonempty_fails() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///dir", false).unwrap();
-		vfs.write_file("vfs:///dir/f.txt", "x", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///dir", false).unwrap();
+		let vfs = vfs
+			.write_file("vfs:///dir/f.txt", "x", None, false)
 			.unwrap();
 		let err = vfs.rmdir("vfs:///dir", false).unwrap_err();
 		assert!(matches!(err, SandboxError::VfsNotEmpty(_)));
@@ -1861,18 +1914,20 @@ mod tests {
 
 	#[test]
 	fn rmdir_recursive() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///dir", false).unwrap();
-		vfs.write_file("vfs:///dir/f.txt", "x", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///dir", false).unwrap();
+		let vfs = vfs
+			.write_file("vfs:///dir/f.txt", "x", None, false)
 			.unwrap();
-		assert!(vfs.rmdir("vfs:///dir", true).unwrap());
+		let (vfs, deleted) = vfs.rmdir("vfs:///dir", true).unwrap();
+		assert!(deleted);
 		assert!(!vfs.exists("vfs:///dir").unwrap());
 		assert!(!vfs.exists("vfs:///dir/f.txt").unwrap());
 	}
 
 	#[test]
 	fn rmdir_root_fails() {
-		let mut vfs = new_vfs();
+		let vfs = new_vfs();
 		let err = vfs.rmdir("vfs:///", false).unwrap_err();
 		assert!(matches!(err, SandboxError::VfsInvalidOperation(_)));
 	}
@@ -1881,8 +1936,9 @@ mod tests {
 
 	#[test]
 	fn stat_file() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "hello", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "hello", None, false)
 			.unwrap();
 		let s = vfs.stat("vfs:///f.txt").unwrap();
 		assert_eq!(s.node_type, "file");
@@ -1900,10 +1956,12 @@ mod tests {
 
 	#[test]
 	fn exists_works() {
-		let mut vfs = new_vfs();
+		let vfs = new_vfs();
 		assert!(vfs.exists("vfs:///").unwrap());
 		assert!(!vfs.exists("vfs:///nope").unwrap());
-		vfs.write_file("vfs:///f.txt", "x", None, false).unwrap();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "x", None, false)
+			.unwrap();
 		assert!(vfs.exists("vfs:///f.txt").unwrap());
 	}
 
@@ -1911,10 +1969,11 @@ mod tests {
 
 	#[test]
 	fn rename_file() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///old.txt", "data", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///old.txt", "data", None, false)
 			.unwrap();
-		vfs.rename("vfs:///old.txt", "vfs:///new.txt").unwrap();
+		let vfs = vfs.rename("vfs:///old.txt", "vfs:///new.txt").unwrap();
 		assert!(!vfs.exists("vfs:///old.txt").unwrap());
 		let r = vfs.read_file("vfs:///new.txt").unwrap();
 		assert_eq!(r.text.unwrap(), "data");
@@ -1922,11 +1981,12 @@ mod tests {
 
 	#[test]
 	fn rename_directory_with_descendants() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///src", false).unwrap();
-		vfs.write_file("vfs:///src/a.txt", "a", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///src", false).unwrap();
+		let vfs = vfs
+			.write_file("vfs:///src/a.txt", "a", None, false)
 			.unwrap();
-		vfs.rename("vfs:///src", "vfs:///dst").unwrap();
+		let vfs = vfs.rename("vfs:///src", "vfs:///dst").unwrap();
 		assert!(!vfs.exists("vfs:///src").unwrap());
 		assert!(vfs.exists("vfs:///dst").unwrap());
 		assert!(vfs.exists("vfs:///dst/a.txt").unwrap());
@@ -1934,27 +1994,32 @@ mod tests {
 
 	#[test]
 	fn rename_same_path_noop() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "data", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "data", None, false)
 			.unwrap();
-		vfs.rename("vfs:///f.txt", "vfs:///f.txt").unwrap();
+		let vfs = vfs.rename("vfs:///f.txt", "vfs:///f.txt").unwrap();
 		assert!(vfs.exists("vfs:///f.txt").unwrap());
 	}
 
 	#[test]
 	fn rename_to_existing_fails() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///a.txt", "a", None, false).unwrap();
-		vfs.write_file("vfs:///b.txt", "b", None, false).unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///a.txt", "a", None, false)
+			.unwrap();
+		let vfs = vfs
+			.write_file("vfs:///b.txt", "b", None, false)
+			.unwrap();
 		let err = vfs.rename("vfs:///a.txt", "vfs:///b.txt").unwrap_err();
 		assert!(matches!(err, SandboxError::VfsAlreadyExists(_)));
 	}
 
 	#[test]
 	fn rename_into_descendant_fails() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///dir", false).unwrap();
-		vfs.mkdir("vfs:///dir/sub", false).unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///dir", false).unwrap();
+		let vfs = vfs.mkdir("vfs:///dir/sub", false).unwrap();
 		let err = vfs
 			.rename("vfs:///dir", "vfs:///dir/sub/new")
 			.unwrap_err();
@@ -1965,10 +2030,12 @@ mod tests {
 
 	#[test]
 	fn copy_file() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///src.txt", "data", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///src.txt", "data", None, false)
 			.unwrap();
-		vfs.copy("vfs:///src.txt", "vfs:///dst.txt", false, false)
+		let vfs = vfs
+			.copy("vfs:///src.txt", "vfs:///dst.txt", false, false)
 			.unwrap();
 		let r = vfs.read_file("vfs:///dst.txt").unwrap();
 		assert_eq!(r.text.unwrap(), "data");
@@ -1976,11 +2043,14 @@ mod tests {
 
 	#[test]
 	fn copy_directory_recursive() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///src", false).unwrap();
-		vfs.write_file("vfs:///src/a.txt", "a", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///src", false).unwrap();
+		let vfs = vfs
+			.write_file("vfs:///src/a.txt", "a", None, false)
 			.unwrap();
-		vfs.copy("vfs:///src", "vfs:///dst", false, true).unwrap();
+		let vfs = vfs
+			.copy("vfs:///src", "vfs:///dst", false, true)
+			.unwrap();
 		assert!(vfs.exists("vfs:///dst").unwrap());
 		let r = vfs.read_file("vfs:///dst/a.txt").unwrap();
 		assert_eq!(r.text.unwrap(), "a");
@@ -1988,8 +2058,8 @@ mod tests {
 
 	#[test]
 	fn copy_dir_without_recursive_fails() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///src", false).unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///src", false).unwrap();
 		let err = vfs
 			.copy("vfs:///src", "vfs:///dst", false, false)
 			.unwrap_err();
@@ -2000,19 +2070,29 @@ mod tests {
 
 	#[test]
 	fn glob_positive_pattern() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///a.txt", "a", None, false).unwrap();
-		vfs.write_file("vfs:///b.rs", "b", None, false).unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///a.txt", "a", None, false)
+			.unwrap();
+		let vfs = vfs
+			.write_file("vfs:///b.rs", "b", None, false)
+			.unwrap();
 		let results = vfs.glob(vec!["vfs:///*.txt".to_string()]);
 		assert_eq!(results, vec!["vfs:///a.txt"]);
 	}
 
 	#[test]
 	fn glob_negation_pattern() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///a.txt", "a", None, false).unwrap();
-		vfs.write_file("vfs:///b.txt", "b", None, false).unwrap();
-		vfs.write_file("vfs:///c.rs", "c", None, false).unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///a.txt", "a", None, false)
+			.unwrap();
+		let vfs = vfs
+			.write_file("vfs:///b.txt", "b", None, false)
+			.unwrap();
+		let vfs = vfs
+			.write_file("vfs:///c.rs", "c", None, false)
+			.unwrap();
 		let results = vfs.glob(vec!["!vfs:///*.rs".to_string()]);
 		assert!(results.contains(&"vfs:///a.txt".to_string()));
 		assert!(results.contains(&"vfs:///b.txt".to_string()));
@@ -2023,10 +2103,13 @@ mod tests {
 
 	#[test]
 	fn tree_basic() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///a.txt", "a", None, false).unwrap();
-		vfs.mkdir("vfs:///dir", false).unwrap();
-		vfs.write_file("vfs:///dir/b.txt", "bb", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///a.txt", "a", None, false)
+			.unwrap();
+		let vfs = vfs.mkdir("vfs:///dir", false).unwrap();
+		let vfs = vfs
+			.write_file("vfs:///dir/b.txt", "bb", None, false)
 			.unwrap();
 		let t = vfs.tree(None).unwrap();
 		assert!(t.contains("a.txt"));
@@ -2038,19 +2121,22 @@ mod tests {
 
 	#[test]
 	fn du_file() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "hello", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "hello", None, false)
 			.unwrap();
 		assert_eq!(vfs.du("vfs:///f.txt").unwrap(), 5);
 	}
 
 	#[test]
 	fn du_directory() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///d", false).unwrap();
-		vfs.write_file("vfs:///d/a.txt", "aaa", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///d", false).unwrap();
+		let vfs = vfs
+			.write_file("vfs:///d/a.txt", "aaa", None, false)
 			.unwrap();
-		vfs.write_file("vfs:///d/b.txt", "bb", None, false)
+		let vfs = vfs
+			.write_file("vfs:///d/b.txt", "bb", None, false)
 			.unwrap();
 		assert_eq!(vfs.du("vfs:///d").unwrap(), 5);
 	}
@@ -2059,8 +2145,9 @@ mod tests {
 
 	#[test]
 	fn search_substring() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "hello world\nfoo bar\nhello again", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "hello world\nfoo bar\nhello again", None, false)
 			.unwrap();
 		let result = vfs
 			.search(
@@ -2079,8 +2166,9 @@ mod tests {
 
 	#[test]
 	fn search_count_only() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "aaa\nbbb\naaa", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "aaa\nbbb\naaa", None, false)
 			.unwrap();
 		let result = vfs
 			.search(
@@ -2101,10 +2189,16 @@ mod tests {
 
 	#[test]
 	fn history_records_versions() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "v1", None, false).unwrap();
-		vfs.write_file("vfs:///f.txt", "v2", None, false).unwrap();
-		vfs.write_file("vfs:///f.txt", "v3", None, false).unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "v1", None, false)
+			.unwrap();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "v2", None, false)
+			.unwrap();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "v3", None, false)
+			.unwrap();
 		let h = vfs.history("vfs:///f.txt").unwrap();
 		// v1 and v2 are in history (v3 is current)
 		assert_eq!(h.len(), 2);
@@ -2116,10 +2210,14 @@ mod tests {
 
 	#[test]
 	fn checkout_restores_version() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "v1", None, false).unwrap();
-		vfs.write_file("vfs:///f.txt", "v2", None, false).unwrap();
-		vfs.checkout("vfs:///f.txt", 1).unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "v1", None, false)
+			.unwrap();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "v2", None, false)
+			.unwrap();
+		let vfs = vfs.checkout("vfs:///f.txt", 1).unwrap();
 		let r = vfs.read_file("vfs:///f.txt").unwrap();
 		assert_eq!(r.text.unwrap(), "v1");
 	}
@@ -2128,10 +2226,12 @@ mod tests {
 
 	#[test]
 	fn diff_two_files() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///a.txt", "hello\nworld", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///a.txt", "hello\nworld", None, false)
 			.unwrap();
-		vfs.write_file("vfs:///b.txt", "hello\nearth", None, false)
+		let vfs = vfs
+			.write_file("vfs:///b.txt", "hello\nearth", None, false)
 			.unwrap();
 		let d = vfs.diff("vfs:///a.txt", "vfs:///b.txt", 3).unwrap();
 		assert_eq!(d.additions, 1);
@@ -2142,10 +2242,12 @@ mod tests {
 
 	#[test]
 	fn diff_versions_works() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "line1\nline2", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "line1\nline2", None, false)
 			.unwrap();
-		vfs.write_file("vfs:///f.txt", "line1\nline2\nline3", None, false)
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "line1\nline2\nline3", None, false)
 			.unwrap();
 		let d = vfs.diff_versions("vfs:///f.txt", 1, None, 3).unwrap();
 		assert_eq!(d.additions, 1);
@@ -2156,16 +2258,17 @@ mod tests {
 
 	#[test]
 	fn snapshot_and_restore() {
-		let mut vfs = new_vfs();
-		vfs.mkdir("vfs:///dir", false).unwrap();
-		vfs.write_file("vfs:///dir/f.txt", "data", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs.mkdir("vfs:///dir", false).unwrap();
+		let vfs = vfs
+			.write_file("vfs:///dir/f.txt", "data", None, false)
 			.unwrap();
 
 		let snap = vfs.snapshot();
-		vfs.clear();
+		let vfs = vfs.clear();
 		assert!(!vfs.exists("vfs:///dir").unwrap());
 
-		vfs.restore(snap).unwrap();
+		let vfs = vfs.restore(snap).unwrap();
 		assert!(vfs.exists("vfs:///dir").unwrap());
 		let r = vfs.read_file("vfs:///dir/f.txt").unwrap();
 		assert_eq!(r.text.unwrap(), "data");
@@ -2175,9 +2278,11 @@ mod tests {
 
 	#[test]
 	fn clear_resets_to_root() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "x", None, false).unwrap();
-		vfs.clear();
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "x", None, false)
+			.unwrap();
+		let vfs = vfs.clear();
 		assert!(!vfs.exists("vfs:///f.txt").unwrap());
 		assert!(vfs.exists("vfs:///").unwrap());
 		let m = vfs.metrics();
@@ -2189,27 +2294,29 @@ mod tests {
 
 	#[test]
 	fn transaction_commits_on_success() {
-		let mut vfs = new_vfs();
-		vfs.transaction(vec![
-			TransactionOp::Mkdir {
-				path: "vfs:///dir".to_string(),
-			},
-			TransactionOp::WriteFile {
-				path: "vfs:///dir/f.txt".to_string(),
-				content: "hello".to_string(),
-			},
-		])
-		.unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs
+			.transaction(vec![
+				TransactionOp::Mkdir {
+					path: "vfs:///dir".to_string(),
+				},
+				TransactionOp::WriteFile {
+					path: "vfs:///dir/f.txt".to_string(),
+					content: "hello".to_string(),
+				},
+			])
+			.unwrap();
 		assert!(vfs.exists("vfs:///dir/f.txt").unwrap());
 	}
 
 	#[test]
 	fn transaction_rolls_back_on_error() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///existing.txt", "keep me", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///existing.txt", "keep me", None, false)
 			.unwrap();
 
-		let err = vfs.transaction(vec![
+		let result = vfs.transaction(vec![
 			TransactionOp::WriteFile {
 				path: "vfs:///new.txt".to_string(),
 				content: "new data".to_string(),
@@ -2221,7 +2328,7 @@ mod tests {
 			},
 		]);
 
-		assert!(err.is_err());
+		let (vfs, _err) = result.unwrap_err();
 		// new.txt should not exist after rollback
 		assert!(!vfs.exists("vfs:///new.txt").unwrap());
 		// existing.txt should still be there
@@ -2233,19 +2340,22 @@ mod tests {
 
 	#[test]
 	fn events_are_emitted() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///f.txt", "x", None, false).unwrap();
-		vfs.mkdir("vfs:///dir", false).unwrap();
-		vfs.delete_file("vfs:///f.txt").unwrap();
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///f.txt", "x", None, false)
+			.unwrap();
+		let vfs = vfs.mkdir("vfs:///dir", false).unwrap();
+		let (vfs, deleted) = vfs.delete_file("vfs:///f.txt").unwrap();
+		assert!(deleted);
 
-		let events = vfs.drain_events();
+		let (vfs, events) = vfs.drain_events();
 		assert_eq!(events.len(), 3);
 		assert!(matches!(&events[0], VfsEvent::Write { .. }));
 		assert!(matches!(&events[1], VfsEvent::Mkdir { .. }));
 		assert!(matches!(&events[2], VfsEvent::Delete { .. }));
 
 		// Second drain should be empty
-		let events2 = vfs.drain_events();
+		let (_vfs, events2) = vfs.drain_events();
 		assert!(events2.is_empty());
 	}
 
@@ -2253,11 +2363,13 @@ mod tests {
 
 	#[test]
 	fn metrics_track_sizes() {
-		let mut vfs = new_vfs();
-		vfs.write_file("vfs:///a.txt", "aaa", None, false)
+		let vfs = new_vfs();
+		let vfs = vfs
+			.write_file("vfs:///a.txt", "aaa", None, false)
 			.unwrap();
-		vfs.mkdir("vfs:///dir", false).unwrap();
-		vfs.write_file("vfs:///dir/b.txt", "bb", None, false)
+		let vfs = vfs.mkdir("vfs:///dir", false).unwrap();
+		let vfs = vfs
+			.write_file("vfs:///dir/b.txt", "bb", None, false)
 			.unwrap();
 
 		let m = vfs.metrics();
@@ -2275,7 +2387,7 @@ mod tests {
 			max_file_size: 10,
 			..VfsLimits::default()
 		};
-		let mut vfs = VirtualFs::new(limits, 50);
+		let vfs = VirtualFs::new(limits, 50);
 		let err = vfs
 			.write_file("vfs:///big.txt", "12345678901", None, false)
 			.unwrap_err();
@@ -2288,8 +2400,9 @@ mod tests {
 			max_total_size: 10,
 			..VfsLimits::default()
 		};
-		let mut vfs = VirtualFs::new(limits, 50);
-		vfs.write_file("vfs:///a.txt", "12345", None, false)
+		let vfs = VirtualFs::new(limits, 50);
+		let vfs = vfs
+			.write_file("vfs:///a.txt", "12345", None, false)
 			.unwrap();
 		let err = vfs
 			.write_file("vfs:///b.txt", "123456", None, false)
@@ -2303,9 +2416,13 @@ mod tests {
 			max_node_count: 3, // root + 2 nodes max
 			..VfsLimits::default()
 		};
-		let mut vfs = VirtualFs::new(limits, 50);
-		vfs.write_file("vfs:///a.txt", "a", None, false).unwrap();
-		vfs.write_file("vfs:///b.txt", "b", None, false).unwrap();
+		let vfs = VirtualFs::new(limits, 50);
+		let vfs = vfs
+			.write_file("vfs:///a.txt", "a", None, false)
+			.unwrap();
+		let vfs = vfs
+			.write_file("vfs:///b.txt", "b", None, false)
+			.unwrap();
 		let err = vfs
 			.write_file("vfs:///c.txt", "c", None, false)
 			.unwrap_err();

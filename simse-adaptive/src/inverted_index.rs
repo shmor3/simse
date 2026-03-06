@@ -6,7 +6,7 @@
 // supports Okapi BM25 ranking for full-text search queries.
 // ---------------------------------------------------------------------------
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::text_search::tokenize;
 
@@ -28,13 +28,14 @@ pub struct BM25Result {
 /// An in-memory inverted index that maps terms to the set of document IDs
 /// containing them, together with per-document term frequencies and lengths
 /// needed for BM25 scoring.
+#[derive(Clone)]
 pub struct InvertedIndex {
 	/// term -> set of entry IDs
-	index: HashMap<String, HashSet<String>>,
+	index: im::HashMap<String, im::HashSet<String>>,
 	/// entry ID -> token count (document length)
-	doc_lengths: HashMap<String, usize>,
+	doc_lengths: im::HashMap<String, usize>,
 	/// term -> (entry ID -> frequency)
-	term_freqs: HashMap<String, HashMap<String, usize>>,
+	term_freqs: im::HashMap<String, im::HashMap<String, usize>>,
 	/// sum of all document lengths
 	total_doc_length: usize,
 }
@@ -43,9 +44,9 @@ impl InvertedIndex {
 	/// Create an empty inverted index.
 	pub fn new() -> Self {
 		Self {
-			index: HashMap::new(),
-			doc_lengths: HashMap::new(),
-			term_freqs: HashMap::new(),
+			index: im::HashMap::new(),
+			doc_lengths: im::HashMap::new(),
+			term_freqs: im::HashMap::new(),
 			total_doc_length: 0,
 		}
 	}
@@ -54,38 +55,36 @@ impl InvertedIndex {
 	///
 	/// Tokenizes `text`, updates postings lists, document lengths, and
 	/// per-term frequencies.
-	pub fn add_entry(&mut self, id: &str, text: &str) {
+	pub fn add_entry(mut self, id: &str, text: &str) -> Self {
 		let tokens = tokenize(text);
-		self.doc_lengths.insert(id.to_string(), tokens.len());
+		self.doc_lengths = self.doc_lengths.update(id.to_string(), tokens.len());
 		self.total_doc_length += tokens.len();
 
 		for token in &tokens {
 			// Update postings list
-			self.index
-				.entry(token.clone())
-				.or_default()
-				.insert(id.to_string());
+			let postings = self.index.get(token).cloned().unwrap_or_default();
+			let postings = postings.update(id.to_string());
+			self.index = self.index.update(token.clone(), postings);
 
 			// Update term frequency
-			let freq = self
-				.term_freqs
-				.entry(token.clone())
-				.or_default()
-				.entry(id.to_string())
-				.or_insert(0);
-			*freq += 1;
+			let freqs = self.term_freqs.get(token).cloned().unwrap_or_default();
+			let count = freqs.get(id).copied().unwrap_or(0);
+			let freqs = freqs.update(id.to_string(), count + 1);
+			self.term_freqs = self.term_freqs.update(token.clone(), freqs);
 		}
+		self
 	}
 
 	/// Remove an entry from the index by ID and its original text.
 	///
 	/// Deduplicate tokens before cleaning so each term is processed once.
-	pub fn remove_entry(&mut self, id: &str, text: &str) {
+	pub fn remove_entry(mut self, id: &str, text: &str) -> Self {
 		let tokens = tokenize(text);
 
 		// Subtract document length
-		if let Some(dl) = self.doc_lengths.remove(id) {
+		if let Some(&dl) = self.doc_lengths.get(id) {
 			self.total_doc_length -= dl;
+			self.doc_lengths = self.doc_lengths.without(id);
 		}
 
 		// Deduplicate tokens so we only clean each term once
@@ -93,21 +92,26 @@ impl InvertedIndex {
 
 		for token in unique_tokens {
 			// Clean postings list
-			if let Some(postings) = self.index.get_mut(token) {
-				postings.remove(id);
+			if let Some(postings) = self.index.get(token).cloned() {
+				let postings = postings.without(id);
 				if postings.is_empty() {
-					self.index.remove(token);
+					self.index = self.index.without(token);
+				} else {
+					self.index = self.index.update(token.clone(), postings);
 				}
 			}
 
 			// Clean term frequencies
-			if let Some(freqs) = self.term_freqs.get_mut(token) {
-				freqs.remove(id);
+			if let Some(freqs) = self.term_freqs.get(token).cloned() {
+				let freqs = freqs.without(id);
 				if freqs.is_empty() {
-					self.term_freqs.remove(token);
+					self.term_freqs = self.term_freqs.without(token);
+				} else {
+					self.term_freqs = self.term_freqs.update(token.clone(), freqs);
 				}
 			}
 		}
+		self
 	}
 
 	/// Get all entry IDs that contain the given term (lowercased).
@@ -140,7 +144,8 @@ impl InvertedIndex {
 		}
 
 		let avgdl = self.total_doc_length as f64 / n as f64;
-		let mut scores: HashMap<String, f64> = HashMap::new();
+		// PERF: use std HashMap for hot-path scoring accumulation
+		let mut scores: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
 
 		for token in &query_tokens {
 			let postings = match self.index.get(token) {
@@ -176,11 +181,12 @@ impl InvertedIndex {
 	}
 
 	/// Remove all entries and reset internal state.
-	pub fn clear(&mut self) {
-		self.index.clear();
-		self.doc_lengths.clear();
-		self.term_freqs.clear();
+	pub fn clear(mut self) -> Self {
+		self.index = im::HashMap::new();
+		self.doc_lengths = im::HashMap::new();
+		self.term_freqs = im::HashMap::new();
 		self.total_doc_length = 0;
+		self
 	}
 
 	/// Number of indexed documents.
@@ -214,9 +220,9 @@ mod tests {
 
 	#[test]
 	fn add_and_get_entries() {
-		let mut idx = InvertedIndex::new();
-		idx.add_entry("doc1", "hello world");
-		idx.add_entry("doc2", "hello rust");
+		let idx = InvertedIndex::new();
+		let idx = idx.add_entry("doc1", "hello world");
+		let idx = idx.add_entry("doc2", "hello rust");
 		let entries = idx.get_entries("hello");
 		assert_eq!(entries.len(), 2);
 		assert!(entries.contains(&"doc1".to_string()));
@@ -225,10 +231,10 @@ mod tests {
 
 	#[test]
 	fn bm25_basic_ranking() {
-		let mut idx = InvertedIndex::new();
-		idx.add_entry("doc1", "the quick brown fox");
-		idx.add_entry("doc2", "the quick brown fox jumps over the lazy dog");
-		idx.add_entry("doc3", "hello world");
+		let idx = InvertedIndex::new();
+		let idx = idx.add_entry("doc1", "the quick brown fox");
+		let idx = idx.add_entry("doc2", "the quick brown fox jumps over the lazy dog");
+		let idx = idx.add_entry("doc3", "hello world");
 		let results = idx.bm25_search("quick brown fox", 1.2, 0.75);
 		assert!(results.len() >= 2);
 		// doc1 and doc2 should score, doc3 should not
@@ -240,11 +246,11 @@ mod tests {
 
 	#[test]
 	fn remove_entry() {
-		let mut idx = InvertedIndex::new();
-		idx.add_entry("doc1", "hello world");
-		idx.add_entry("doc2", "hello rust");
+		let idx = InvertedIndex::new();
+		let idx = idx.add_entry("doc1", "hello world");
+		let idx = idx.add_entry("doc2", "hello rust");
 		assert_eq!(idx.document_count(), 2);
-		idx.remove_entry("doc1", "hello world");
+		let idx = idx.remove_entry("doc1", "hello world");
 		assert_eq!(idx.document_count(), 1);
 		let entries = idx.get_entries("world");
 		assert!(entries.is_empty());
@@ -252,17 +258,17 @@ mod tests {
 
 	#[test]
 	fn clear_resets() {
-		let mut idx = InvertedIndex::new();
-		idx.add_entry("doc1", "hello");
-		idx.clear();
+		let idx = InvertedIndex::new();
+		let idx = idx.add_entry("doc1", "hello");
+		let idx = idx.clear();
 		assert_eq!(idx.document_count(), 0);
 		assert_eq!(idx.average_document_length(), 0.0);
 	}
 
 	#[test]
 	fn empty_query_returns_empty() {
-		let mut idx = InvertedIndex::new();
-		idx.add_entry("doc1", "hello");
+		let idx = InvertedIndex::new();
+		let idx = idx.add_entry("doc1", "hello");
 		let results = idx.bm25_search("", 1.2, 0.75);
 		assert!(results.is_empty());
 	}
@@ -276,19 +282,19 @@ mod tests {
 
 	#[test]
 	fn document_count_and_avg_length() {
-		let mut idx = InvertedIndex::new();
-		idx.add_entry("d1", "one two three");
-		idx.add_entry("d2", "four five");
+		let idx = InvertedIndex::new();
+		let idx = idx.add_entry("d1", "one two three");
+		let idx = idx.add_entry("d2", "four five");
 		assert_eq!(idx.document_count(), 2);
 		assert!((idx.average_document_length() - 2.5).abs() < 0.01);
 	}
 
 	#[test]
 	fn bm25_results_sorted_descending() {
-		let mut idx = InvertedIndex::new();
-		idx.add_entry("doc1", "rust rust rust");
-		idx.add_entry("doc2", "rust programming");
-		idx.add_entry("doc3", "hello world");
+		let idx = InvertedIndex::new();
+		let idx = idx.add_entry("doc1", "rust rust rust");
+		let idx = idx.add_entry("doc2", "rust programming");
+		let idx = idx.add_entry("doc3", "hello world");
 		let results = idx.bm25_search("rust", 1.2, 0.75);
 		for i in 1..results.len() {
 			assert!(results[i - 1].score >= results[i].score);
@@ -297,17 +303,17 @@ mod tests {
 
 	#[test]
 	fn get_entries_case_insensitive() {
-		let mut idx = InvertedIndex::new();
-		idx.add_entry("doc1", "Hello World");
+		let idx = InvertedIndex::new();
+		let idx = idx.add_entry("doc1", "Hello World");
 		let entries = idx.get_entries("HELLO");
 		assert_eq!(entries.len(), 1);
 	}
 
 	#[test]
 	fn remove_entry_cleans_term_freqs() {
-		let mut idx = InvertedIndex::new();
-		idx.add_entry("doc1", "rust rust rust");
-		idx.remove_entry("doc1", "rust rust rust");
+		let idx = InvertedIndex::new();
+		let idx = idx.add_entry("doc1", "rust rust rust");
+		let idx = idx.remove_entry("doc1", "rust rust rust");
 		assert_eq!(idx.document_count(), 0);
 		assert!(idx.get_entries("rust").is_empty());
 		// Internal term_freqs should also be cleaned
@@ -316,10 +322,10 @@ mod tests {
 
 	#[test]
 	fn bm25_higher_tf_scores_higher() {
-		let mut idx = InvertedIndex::new();
+		let idx = InvertedIndex::new();
 		// doc1 has "rust" three times, doc2 has it once, both same length padding
-		idx.add_entry("doc1", "rust rust rust foo");
-		idx.add_entry("doc2", "rust foo bar baz");
+		let idx = idx.add_entry("doc1", "rust rust rust foo");
+		let idx = idx.add_entry("doc2", "rust foo bar baz");
 		let results = idx.bm25_search("rust", 1.2, 0.75);
 		assert_eq!(results.len(), 2);
 		// doc1 should score higher due to more occurrences of "rust"

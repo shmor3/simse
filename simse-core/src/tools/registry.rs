@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use im::HashMap as ImHashMap;
+
 use regex::Regex;
 
 use async_trait::async_trait;
@@ -52,7 +54,7 @@ struct MetricsEntry {
 /// The `metrics` map uses `Mutex` so that `execute` and `batch_execute` can
 /// take `&self` while still recording call statistics.
 pub struct ToolRegistry {
-	tools: HashMap<String, RegisteredTool>,
+	tools: ImHashMap<String, RegisteredTool>,
 	metrics: Mutex<HashMap<String, MetricsEntry>>,
 	default_timeout_ms: Option<u64>,
 	default_max_output_chars: usize,
@@ -77,7 +79,7 @@ impl ToolRegistry {
 	/// Creates a new tool registry with the given options.
 	pub fn new(options: ToolRegistryOptions) -> Self {
 		Self {
-			tools: HashMap::new(),
+			tools: ImHashMap::new(),
 			metrics: Mutex::new(HashMap::new()),
 			default_timeout_ms: options.default_timeout_ms,
 			default_max_output_chars: options.max_output_chars.unwrap_or(50_000),
@@ -90,15 +92,41 @@ impl ToolRegistry {
 	// -------------------------------------------------------------------
 
 	/// Registers a tool with its handler. Overwrites any existing tool with
-	/// the same name.
-	pub fn register(&mut self, definition: ToolDefinition, handler: ToolHandler) {
-		self.tools
-			.insert(definition.name.clone(), RegisteredTool { definition, handler });
+	/// the same name. Returns the updated registry.
+	pub fn register(mut self, definition: ToolDefinition, handler: ToolHandler) -> Self {
+		self.tools = self
+			.tools
+			.update(definition.name.clone(), RegisteredTool { definition, handler });
+		self
 	}
 
-	/// Removes a tool by name. Returns `true` if the tool was found and removed.
-	pub fn unregister(&mut self, name: &str) -> bool {
-		self.tools.remove(name).is_some()
+	/// Registers a tool in-place via `&mut self`.
+	///
+	/// Convenience wrapper around the owned [`register`](Self::register) for
+	/// call sites that hold a mutable reference.
+	pub fn register_mut(&mut self, definition: ToolDefinition, handler: ToolHandler) {
+		let taken = std::mem::replace(self, Self::new(ToolRegistryOptions::default()));
+		*self = taken.register(definition, handler);
+	}
+
+	/// Removes a tool by name. Returns `(self, true)` if the tool was found and removed.
+	pub fn unregister(mut self, name: &str) -> (Self, bool) {
+		let existed = self.tools.contains_key(name);
+		if existed {
+			self.tools = self.tools.without(name);
+		}
+		(self, existed)
+	}
+
+	/// Removes a tool by name in-place via `&mut self`.
+	///
+	/// Convenience wrapper around the owned [`unregister`](Self::unregister) for
+	/// call sites that hold a mutable reference.
+	pub fn unregister_mut(&mut self, name: &str) -> bool {
+		let taken = std::mem::replace(self, Self::new(ToolRegistryOptions::default()));
+		let (new_self, existed) = taken.unregister(name);
+		*self = new_self;
+		existed
 	}
 
 	/// Returns `true` if a tool with the given name is registered.

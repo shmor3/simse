@@ -1,6 +1,6 @@
 use anyhow::Result;
 use candle_core::{Device, Tensor};
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 /// Sampling strategy for token generation.
 pub enum Sampling {

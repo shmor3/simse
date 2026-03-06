@@ -10,7 +10,7 @@ use crate::hooks::*;
 use crate::rpc_protocol::*;
 use crate::rpc_transport::NdjsonTransport;
 use crate::server::session::{SessionInfo, SessionStatus};
-use crate::tasks::{TaskCreateInput, TaskStatus, TaskUpdateInput};
+use crate::tasks::{TaskCreateInput, TaskList, TaskStatus, TaskUpdateInput};
 use crate::tools::types::{
 	ParsedResponse, ToolCallRequest, ToolCallResult, ToolDefinition, ToolHandler, ToolParameter,
 };
@@ -426,8 +426,8 @@ impl CoreRpcServer {
 			}
 		};
 
-		match ctx.session_manager.with_session(&params.session_id, |session| {
-			session.conversation.add_user(&params.content);
+		match ctx.session_manager.with_state_transition(&params.session_id, |conv| {
+			(conv.add_user(&params.content), ())
 		}) {
 			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
 			None => self.write_session_not_found(req.id, &params.session_id),
@@ -452,8 +452,8 @@ impl CoreRpcServer {
 			}
 		};
 
-		match ctx.session_manager.with_session(&params.session_id, |session| {
-			session.conversation.add_assistant(&params.content);
+		match ctx.session_manager.with_state_transition(&params.session_id, |conv| {
+			(conv.add_assistant(&params.content), ())
 		}) {
 			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
 			None => self.write_session_not_found(req.id, &params.session_id),
@@ -483,10 +483,8 @@ impl CoreRpcServer {
 			.as_deref()
 			.unwrap_or(&params.tool_call_id);
 
-		match ctx.session_manager.with_session(&params.session_id, |session| {
-			session
-				.conversation
-				.add_tool_result(&params.tool_call_id, tool_name, &params.content);
+		match ctx.session_manager.with_state_transition(&params.session_id, |conv| {
+			(conv.add_tool_result(&params.tool_call_id, tool_name, &params.content), ())
 		}) {
 			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
 			None => self.write_session_not_found(req.id, &params.session_id),
@@ -511,8 +509,8 @@ impl CoreRpcServer {
 			}
 		};
 
-		match ctx.session_manager.with_session(&params.session_id, |session| {
-			session.conversation.set_system_prompt(params.prompt.clone());
+		match ctx.session_manager.with_state_transition(&params.session_id, |conv| {
+			(conv.set_system_prompt(params.prompt.clone()), ())
 		}) {
 			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
 			None => self.write_session_not_found(req.id, &params.session_id),
@@ -538,7 +536,8 @@ impl CoreRpcServer {
 		};
 
 		match ctx.session_manager.with_session(&params.session_id, |session| {
-			let messages = serde_json::to_value(session.conversation.messages())
+			let msgs: Vec<_> = session.conversation.messages().iter().cloned().collect();
+			let messages = serde_json::to_value(&msgs)
 				.unwrap_or(serde_json::json!([]));
 			let system_prompt = session.conversation.system_prompt().map(|s| s.to_string());
 			(messages, system_prompt)
@@ -572,8 +571,8 @@ impl CoreRpcServer {
 			}
 		};
 
-		match ctx.session_manager.with_session(&params.session_id, |session| {
-			session.conversation.compact(&params.summary);
+		match ctx.session_manager.with_state_transition(&params.session_id, |conv| {
+			(conv.compact(&params.summary), ())
 		}) {
 			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
 			None => self.write_session_not_found(req.id, &params.session_id),
@@ -598,8 +597,8 @@ impl CoreRpcServer {
 			}
 		};
 
-		match ctx.session_manager.with_session(&params.session_id, |session| {
-			session.conversation.clear();
+		match ctx.session_manager.with_state_transition(&params.session_id, |conv| {
+			(conv.clear(), ())
 		}) {
 			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
 			None => self.write_session_not_found(req.id, &params.session_id),
@@ -694,8 +693,10 @@ impl CoreRpcServer {
 			metadata: params.metadata,
 		};
 
-		match ctx.task_list.create_checked(input) {
-			Ok(task) => {
+		let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+		match task_list.create_checked(input) {
+			Ok((new_list, task)) => {
+				ctx.task_list = new_list;
 				let value = serde_json::to_value(&task).expect("Task serialization");
 				self.transport.write_response(req.id, value);
 			}
@@ -828,12 +829,15 @@ impl CoreRpcServer {
 			add_blocked_by: params.add_blocked_by,
 		};
 
-		match ctx.task_list.update(&params.id, input) {
-			Ok(Some(task)) => {
+		let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+		match task_list.update(&params.id, input) {
+			Ok((new_list, Some(task))) => {
+				ctx.task_list = new_list;
 				let value = serde_json::to_value(&task).expect("Task serialization");
 				self.transport.write_response(req.id, value);
 			}
-			Ok(None) => {
+			Ok((new_list, None)) => {
+				ctx.task_list = new_list;
 				self.write_task_not_found(req.id, &params.id);
 			}
 			Err(e) => {
@@ -865,7 +869,9 @@ impl CoreRpcServer {
 			}
 		};
 
-		let deleted = ctx.task_list.delete(&params.id);
+		let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+		let (new_list, deleted) = task_list.delete(&params.id);
+		ctx.task_list = new_list;
 		self.transport
 			.write_response(req.id, serde_json::json!({ "deleted": deleted }));
 	}
@@ -1487,7 +1493,7 @@ impl CoreRpcServer {
 			})
 		});
 
-		ctx.tool_registry.register(definition, handler);
+		ctx.tool_registry.register_mut(definition, handler);
 		self.transport.write_response(req.id, serde_json::json!({}));
 	}
 
@@ -1509,7 +1515,7 @@ impl CoreRpcServer {
 			}
 		};
 
-		let removed = ctx.tool_registry.unregister(&params.name);
+		let removed = ctx.tool_registry.unregister_mut(&params.name);
 		self.transport
 			.write_response(req.id, serde_json::json!({ "removed": removed }));
 	}
@@ -2152,8 +2158,8 @@ impl CoreRpcServer {
 			}
 		};
 
-		match ctx.session_manager.with_session(&params.session_id, |session| {
-			session.conversation.from_json(&params.json);
+		match ctx.session_manager.with_state_transition(&params.session_id, |conv| {
+			(conv.from_json(&params.json), ())
 		}) {
 			Some(()) => self.transport.write_response(req.id, serde_json::json!({})),
 			None => self.write_session_not_found(req.id, &params.session_id),
@@ -2490,11 +2496,10 @@ async fn callback_agent_call(
 		"stepName": &config.name,
 		"prompt": prompt,
 	});
-	if let serde_json::Value::Object(extra_map) = extra {
-		if let serde_json::Value::Object(ref mut data_map) = notification_data {
+	if let serde_json::Value::Object(extra_map) = extra
+		&& let serde_json::Value::Object(ref mut data_map) = notification_data {
 			data_map.extend(extra_map);
 		}
-	}
 	transport.write_notification("chain/stepExecute", notification_data);
 
 	match tokio::time::timeout(std::time::Duration::from_secs(120), rx).await {

@@ -599,8 +599,10 @@ impl SandboxServer {
     // ── VFS event drain ─────────────────────────────────────────────────
 
     fn drain_vfs_events(&mut self) {
-        if let Ok(vfs) = self.sandbox.vfs_mut() {
-            for event in vfs.drain_events() {
+        if let Ok(vfs) = self.sandbox.vfs_take() {
+            let (vfs, events) = vfs.drain_events();
+            self.sandbox.vfs_set(vfs);
+            for event in events {
                 let params = match &event {
                     VfsEvent::Write {
                         path,
@@ -895,13 +897,14 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: WriteFileParams = parse_params(params)?;
-        let vfs = self.sandbox.vfs_mut()?;
-        vfs.write_file(
+        let vfs = self.sandbox.vfs_take()?;
+        let vfs = vfs.write_file(
             &p.path,
             &p.content,
             p.content_type.as_deref(),
             p.create_parents.unwrap_or(false),
         )?;
+        self.sandbox.vfs_set(vfs);
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -910,8 +913,9 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: AppendFileParams = parse_params(params)?;
-        let vfs = self.sandbox.vfs_mut()?;
-        vfs.append_file(&p.path, &p.content)?;
+        let vfs = self.sandbox.vfs_take()?;
+        let vfs = vfs.append_file(&p.path, &p.content)?;
+        self.sandbox.vfs_set(vfs);
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -920,8 +924,9 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: PathParams = parse_params(params)?;
-        let vfs = self.sandbox.vfs_mut()?;
-        let deleted = vfs.delete_file(&p.path)?;
+        let vfs = self.sandbox.vfs_take()?;
+        let (vfs, deleted) = vfs.delete_file(&p.path)?;
+        self.sandbox.vfs_set(vfs);
         Ok(serde_json::json!({ "deleted": deleted }))
     }
 
@@ -930,8 +935,9 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: MkdirParams = parse_params(params)?;
-        let vfs = self.sandbox.vfs_mut()?;
-        vfs.mkdir(&p.path, p.recursive.unwrap_or(false))?;
+        let vfs = self.sandbox.vfs_take()?;
+        let vfs = vfs.mkdir(&p.path, p.recursive.unwrap_or(false))?;
+        self.sandbox.vfs_set(vfs);
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -959,8 +965,9 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: RmdirParams = parse_params(params)?;
-        let vfs = self.sandbox.vfs_mut()?;
-        let deleted = vfs.rmdir(&p.path, p.recursive.unwrap_or(false))?;
+        let vfs = self.sandbox.vfs_take()?;
+        let (vfs, deleted) = vfs.rmdir(&p.path, p.recursive.unwrap_or(false))?;
+        self.sandbox.vfs_set(vfs);
         Ok(serde_json::json!({ "deleted": deleted }))
     }
 
@@ -995,8 +1002,9 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: RenameParams = parse_params(params)?;
-        let vfs = self.sandbox.vfs_mut()?;
-        vfs.rename(&p.old_path, &p.new_path)?;
+        let vfs = self.sandbox.vfs_take()?;
+        let vfs = vfs.rename(&p.old_path, &p.new_path)?;
+        self.sandbox.vfs_set(vfs);
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -1005,13 +1013,14 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: CopyParams = parse_params(params)?;
-        let vfs = self.sandbox.vfs_mut()?;
-        vfs.copy(
+        let vfs = self.sandbox.vfs_take()?;
+        let vfs = vfs.copy(
             &p.src,
             &p.dest,
             p.overwrite.unwrap_or(false),
             p.recursive.unwrap_or(false),
         )?;
+        self.sandbox.vfs_set(vfs);
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -1143,8 +1152,9 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: CheckoutParams = parse_params(params)?;
-        let vfs = self.sandbox.vfs_mut()?;
-        vfs.checkout(&p.path, p.version)?;
+        let vfs = self.sandbox.vfs_take()?;
+        let vfs = vfs.checkout(&p.path, p.version)?;
+        self.sandbox.vfs_set(vfs);
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -1206,14 +1216,16 @@ impl SandboxServer {
                 })
                 .collect(),
         };
-        let vfs = self.sandbox.vfs_mut()?;
-        vfs.restore(vfs_snap)?;
+        let vfs = self.sandbox.vfs_take()?;
+        let vfs = vfs.restore(vfs_snap)?;
+        self.sandbox.vfs_set(vfs);
         Ok(serde_json::json!({ "ok": true }))
     }
 
     fn vfs_clear(&mut self) -> Result<serde_json::Value, SandboxError> {
-        let vfs = self.sandbox.vfs_mut()?;
-        vfs.clear();
+        let vfs = self.sandbox.vfs_take()?;
+        let vfs = vfs.clear();
+        self.sandbox.vfs_set(vfs);
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -1238,9 +1250,17 @@ impl SandboxServer {
                 TransactionOp::Copy { src, dest } => VfsTransactionOp::Copy { src, dest },
             })
             .collect();
-        let vfs = self.sandbox.vfs_mut()?;
-        vfs.transaction(ops)?;
-        Ok(serde_json::json!({ "ok": true }))
+        let vfs = self.sandbox.vfs_take()?;
+        match vfs.transaction(ops) {
+            Ok(vfs) => {
+                self.sandbox.vfs_set(vfs);
+                Ok(serde_json::json!({ "ok": true }))
+            }
+            Err((vfs, e)) => {
+                self.sandbox.vfs_set(vfs);
+                Err(e)
+            }
+        }
     }
 
     fn vfs_metrics(&self) -> Result<serde_json::Value, SandboxError> {
@@ -1563,9 +1583,10 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: SessionCreateParams = parse_params(params)?;
-        let vsh = self.sandbox.vsh_mut()?;
-        let session = vsh.create_session(p.name, p.cwd, p.env)?;
-        Ok(serde_json::to_value(vsh_session_to_json(session))?)
+        let vsh = self.sandbox.vsh_take()?;
+        let (vsh, session) = vsh.create_session(p.name, p.cwd, p.env)?;
+        self.sandbox.vsh_set(vsh);
+        Ok(serde_json::to_value(vsh_session_to_json(&session))?)
     }
 
     fn vsh_session_get(
@@ -1601,8 +1622,9 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: SessionIdParams = parse_params(params)?;
-        let vsh = self.sandbox.vsh_mut()?;
-        let deleted = vsh.delete_session(&p.session_id)?;
+        let vsh = self.sandbox.vsh_take()?;
+        let (vsh, deleted) = vsh.delete_session(&p.session_id)?;
+        self.sandbox.vsh_set(vsh);
         Ok(serde_json::json!({ "deleted": deleted }))
     }
 
@@ -1611,16 +1633,19 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: ExecRunParams = parse_params(params)?;
-        let vsh = self.sandbox.vsh_mut()?;
-        let result = vsh
-            .exec_in_session(
-                &p.session_id,
-                &p.command,
-                p.timeout_ms,
-                p.max_output_bytes,
-                p.stdin.as_deref(),
-            )
-            .await?;
+        let req = self.sandbox.vsh()?.prepare_exec(
+            &p.session_id, &p.command, p.timeout_ms, p.max_output_bytes, p.stdin.as_deref(),
+        )?;
+        let env: std::collections::HashMap<String, String> =
+            req.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let result = self.sandbox.shell_backend()?.execute_command(
+            &req.resolved_command, &req.cwd, &env, &req.shell_cmd,
+            req.timeout_ms, req.max_output_bytes, req.stdin.as_deref(),
+        ).await;
+        let vsh = self.sandbox.vsh_take()?;
+        let vsh = vsh.record_exec(&req.session_id, &req.command, &result);
+        self.sandbox.vsh_set(vsh);
+        let result = result?;
         Ok(serde_json::json!({
             "stdout": result.stdout,
             "stderr": result.stderr,
@@ -1634,18 +1659,18 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: ExecRunRawParams = parse_params(params)?;
-        let vsh = self.sandbox.vsh_mut()?;
-        let result = vsh
-            .exec_raw(
-                &p.command,
-                p.cwd.as_deref(),
-                p.env.as_ref(),
-                p.shell.as_deref(),
-                p.timeout_ms,
-                p.max_output_bytes,
-                p.stdin.as_deref(),
-            )
-            .await?;
+        let req = self.sandbox.vsh()?.prepare_exec_raw(
+            &p.command, p.cwd.as_deref(), p.env.as_ref(), p.shell.as_deref(),
+            p.timeout_ms, p.max_output_bytes, p.stdin.as_deref(),
+        )?;
+        let result = self.sandbox.shell_backend()?.execute_command(
+            &req.command, &req.cwd, &req.env, &req.shell_cmd,
+            req.timeout_ms, req.max_output_bytes, req.stdin.as_deref(),
+        ).await;
+        let vsh = self.sandbox.vsh_take()?;
+        let vsh = vsh.record_exec_raw(&result);
+        self.sandbox.vsh_set(vsh);
+        let result = result?;
         Ok(serde_json::json!({
             "stdout": result.stdout,
             "stderr": result.stderr,
@@ -1659,15 +1684,18 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: ExecGitParams = parse_params(params)?;
-        let vsh = self.sandbox.vsh_mut()?;
-        let result = vsh
-            .exec_git_in_session(
-                &p.session_id,
-                &p.args,
-                p.timeout_ms,
-                p.max_output_bytes,
-            )
-            .await?;
+        let req = self.sandbox.vsh()?.prepare_exec_git(
+            &p.session_id, &p.args, p.timeout_ms, p.max_output_bytes,
+        )?;
+        let env: std::collections::HashMap<String, String> =
+            req.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let result = self.sandbox.shell_backend()?.execute_git(
+            &req.args, &req.cwd, &env, req.timeout_ms, req.max_output_bytes,
+        ).await;
+        let vsh = self.sandbox.vsh_take()?;
+        let vsh = vsh.record_exec(&req.session_id, &req.command_str, &result);
+        self.sandbox.vsh_set(vsh);
+        let result = result?;
         Ok(serde_json::json!({
             "stdout": result.stdout,
             "stderr": result.stderr,
@@ -1681,16 +1709,19 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: ExecScriptParams = parse_params(params)?;
-        let vsh = self.sandbox.vsh_mut()?;
-        let result = vsh
-            .exec_in_session(
-                &p.session_id,
-                &p.script,
-                p.timeout_ms,
-                p.max_output_bytes,
-                None,
-            )
-            .await?;
+        let req = self.sandbox.vsh()?.prepare_exec(
+            &p.session_id, &p.script, p.timeout_ms, p.max_output_bytes, None,
+        )?;
+        let env: std::collections::HashMap<String, String> =
+            req.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+        let result = self.sandbox.shell_backend()?.execute_command(
+            &req.resolved_command, &req.cwd, &env, &req.shell_cmd,
+            req.timeout_ms, req.max_output_bytes, req.stdin.as_deref(),
+        ).await;
+        let vsh = self.sandbox.vsh_take()?;
+        let vsh = vsh.record_exec(&req.session_id, &req.command, &result);
+        self.sandbox.vsh_set(vsh);
+        let result = result?;
         Ok(serde_json::json!({
             "stdout": result.stdout,
             "stderr": result.stderr,
@@ -1704,8 +1735,9 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: EnvSetParams = parse_params(params)?;
-        let vsh = self.sandbox.vsh_mut()?;
-        vsh.set_env(&p.session_id, &p.key, &p.value)?;
+        let vsh = self.sandbox.vsh_take()?;
+        let vsh = vsh.set_env(&p.session_id, &p.key, &p.value)?;
+        self.sandbox.vsh_set(vsh);
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -1734,8 +1766,9 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: EnvDeleteParams = parse_params(params)?;
-        let vsh = self.sandbox.vsh_mut()?;
-        let deleted = vsh.delete_env(&p.session_id, &p.key)?;
+        let vsh = self.sandbox.vsh_take()?;
+        let (vsh, deleted) = vsh.delete_env(&p.session_id, &p.key)?;
+        self.sandbox.vsh_set(vsh);
         Ok(serde_json::json!({ "deleted": deleted }))
     }
 
@@ -1744,8 +1777,9 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: ShellSetCwdParams = parse_params(params)?;
-        let vsh = self.sandbox.vsh_mut()?;
-        vsh.set_cwd(&p.session_id, &p.cwd)?;
+        let vsh = self.sandbox.vsh_take()?;
+        let vsh = vsh.set_cwd(&p.session_id, &p.cwd)?;
+        self.sandbox.vsh_set(vsh);
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -1764,8 +1798,9 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: ShellSetAliasParams = parse_params(params)?;
-        let vsh = self.sandbox.vsh_mut()?;
-        vsh.set_alias(&p.session_id, &p.name, &p.command)?;
+        let vsh = self.sandbox.vsh_take()?;
+        let vsh = vsh.set_alias(&p.session_id, &p.name, &p.command)?;
+        self.sandbox.vsh_set(vsh);
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -1881,14 +1916,16 @@ impl SandboxServer {
         let url = &p.url;
 
         if url.starts_with("mock://") {
-            let vnet = self.sandbox.vnet_mut()?;
-            let result = vnet.mock_http_request(
+            let sb = &mut self.sandbox;
+            let vnet = sb.vnet_take()?;
+            let (vnet, result) = vnet.mock_http_request(
                 url,
                 p.method.as_deref(),
                 p.headers.as_ref(),
                 p.body.as_deref(),
-            )?;
-            Ok(serde_json::to_value(result)?)
+            );
+            sb.vnet_set(vnet);
+            Ok(serde_json::to_value(result?)?)
         } else if let Some(remainder) = url.strip_prefix("net://") {
             // strip "net://"
             let real_url = if remainder.starts_with("http://") || remainder.starts_with("https://") {
@@ -1899,6 +1936,7 @@ impl SandboxServer {
 
             let method = p.method.as_deref().unwrap_or("GET");
             let headers = p.headers.unwrap_or_default();
+            // PERF: hot-path I/O -- net_http_request needs &mut self for backend
             let vnet = self.sandbox.vnet_mut()?;
             let result = vnet
                 .net_http_request(&real_url, method, &headers, p.body.as_deref(), p.timeout_ms)
@@ -1921,10 +1959,12 @@ impl SandboxServer {
 
         if url.starts_with("mock://") {
             let target = url.strip_prefix("mock://").unwrap_or(url);
-            let vnet = self.sandbox.vnet_mut()?;
+            let sb = &mut self.sandbox;
+            let vnet = sb.vnet_take()?;
             vnet.check_connection_limit()?;
-            let session_id =
+            let (vnet, session_id) =
                 vnet.create_session(VnetSessionType::Ws, target, VnetScheme::Mock);
+            sb.vnet_set(vnet);
             Ok(serde_json::json!({
                 "sessionId": session_id,
                 "status": "connected"
@@ -1946,10 +1986,12 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: WsMessageParams = parse_params(params)?;
-        let vnet = self.sandbox.vnet_mut()?;
+        let sb = &mut self.sandbox;
+        let vnet = sb.vnet_take()?;
         vnet.get_session(&p.session_id)?;
         let data_len = p.data.len() as u64;
-        vnet.record_session_activity(&p.session_id, data_len, 0);
+        let vnet = vnet.record_session_activity(&p.session_id, data_len, 0);
+        sb.vnet_set(vnet);
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -1958,8 +2000,11 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: VnetSessionIdParam = parse_params(params)?;
-        let vnet = self.sandbox.vnet_mut()?;
-        vnet.close_session(&p.session_id)?;
+        let sb = &mut self.sandbox;
+        let vnet = sb.vnet_take()?;
+        let (vnet, result) = vnet.close_session(&p.session_id);
+        sb.vnet_set(vnet);
+        result?;
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -1969,10 +2014,12 @@ impl SandboxServer {
     ) -> Result<serde_json::Value, SandboxError> {
         let p: TcpConnectParams = parse_params(params)?;
         let target = format!("{}:{}", p.host, p.port);
-        let vnet = self.sandbox.vnet_mut()?;
+        let sb = &mut self.sandbox;
+        let vnet = sb.vnet_take()?;
         vnet.check_connection_limit()?;
-        let session_id =
+        let (vnet, session_id) =
             vnet.create_session(VnetSessionType::Tcp, &target, VnetScheme::Mock);
+        sb.vnet_set(vnet);
         Ok(serde_json::json!({
             "sessionId": session_id,
             "status": "connected"
@@ -1984,10 +2031,12 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: TcpSendParams = parse_params(params)?;
-        let vnet = self.sandbox.vnet_mut()?;
+        let sb = &mut self.sandbox;
+        let vnet = sb.vnet_take()?;
         vnet.get_session(&p.session_id)?;
         let bytes_written = p.data.len() as u64;
-        vnet.record_session_activity(&p.session_id, bytes_written, 0);
+        let vnet = vnet.record_session_activity(&p.session_id, bytes_written, 0);
+        sb.vnet_set(vnet);
         Ok(serde_json::json!({ "bytesWritten": bytes_written }))
     }
 
@@ -1996,8 +2045,11 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: VnetSessionIdParam = parse_params(params)?;
-        let vnet = self.sandbox.vnet_mut()?;
-        vnet.close_session(&p.session_id)?;
+        let sb = &mut self.sandbox;
+        let vnet = sb.vnet_take()?;
+        let (vnet, result) = vnet.close_session(&p.session_id);
+        sb.vnet_set(vnet);
+        result?;
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -2007,10 +2059,13 @@ impl SandboxServer {
     ) -> Result<serde_json::Value, SandboxError> {
         let p: UdpSendParams = parse_params(params)?;
         let mock_url = format!("mock://{}:{}", p.host, p.port);
-        let vnet = self.sandbox.vnet_mut()?;
-        vnet.increment_requests();
+        let sb = &mut self.sandbox;
+        let vnet = sb.vnet_take()?;
+        let vnet = vnet.increment_requests();
 
-        match vnet.mock_store_find_match(&mock_url, Some("udp")) {
+        let (vnet, found) = vnet.mock_store_find_match(&mock_url, Some("udp"));
+        sb.vnet_set(vnet);
+        match found {
             Some(response) => {
                 let bytes_received = response.body.len() as u64;
                 Ok(serde_json::json!({
@@ -2031,9 +2086,12 @@ impl SandboxServer {
     ) -> Result<serde_json::Value, SandboxError> {
         let p: ResolveParams = parse_params(params)?;
         let mock_url = format!("mock://dns/{}", p.hostname);
-        let vnet = self.sandbox.vnet_mut()?;
+        let sb = &mut self.sandbox;
+        let vnet = sb.vnet_take()?;
 
-        match vnet.mock_store_find_match(&mock_url, Some("dns")) {
+        let (vnet, found) = vnet.mock_store_find_match(&mock_url, Some("dns"));
+        sb.vnet_set(vnet);
+        match found {
             Some(response) => {
                 let addresses: Vec<String> =
                     serde_json::from_str(&response.body).unwrap_or_default();
@@ -2063,8 +2121,10 @@ impl SandboxServer {
             body_type: p.response.body_type,
             delay_ms: p.response.delay_ms,
         };
-        let vnet = self.sandbox.vnet_mut()?;
-        let id = vnet.register_mock(p.method, &p.url_pattern, response, p.times);
+        let sb = &mut self.sandbox;
+        let vnet = sb.vnet_take()?;
+        let (vnet, id) = vnet.register_mock(p.method, &p.url_pattern, response, p.times);
+        sb.vnet_set(vnet);
         Ok(serde_json::json!({ "id": id }))
     }
 
@@ -2073,8 +2133,11 @@ impl SandboxServer {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, SandboxError> {
         let p: MockIdParam = parse_params(params)?;
-        let vnet = self.sandbox.vnet_mut()?;
-        vnet.unregister_mock(&p.id)?;
+        let sb = &mut self.sandbox;
+        let vnet = sb.vnet_take()?;
+        let (vnet, result) = vnet.unregister_mock(&p.id);
+        sb.vnet_set(vnet);
+        result?;
         Ok(serde_json::json!({ "ok": true }))
     }
 
@@ -2085,8 +2148,10 @@ impl SandboxServer {
     }
 
     fn vnet_mock_clear(&mut self) -> Result<serde_json::Value, SandboxError> {
-        let vnet = self.sandbox.vnet_mut()?;
-        vnet.clear_mocks();
+        let sb = &mut self.sandbox;
+        let vnet = sb.vnet_take()?;
+        let vnet = vnet.clear_mocks();
+        sb.vnet_set(vnet);
         Ok(serde_json::json!({ "ok": true }))
     }
 

@@ -182,11 +182,10 @@ pub fn register_delegation_tools(
 
 	for server_name in &server_names {
 		// Skip the primary server
-		if let Some(ref primary) = options.primary_server {
-			if server_name == primary {
+		if let Some(ref primary) = options.primary_server
+			&& server_name == primary {
 				continue;
 			}
-		}
 
 		let safe_name = sanitize_name(server_name);
 
@@ -243,11 +242,10 @@ pub fn register_delegation_tools(
 				};
 
 				// Fire on_start callback
-				if let Some(ref cbs) = callbacks {
-					if let Some(ref on_start) = cbs.on_start {
+				if let Some(ref cbs) = callbacks
+					&& let Some(ref on_start) = cbs.on_start {
 						on_start(&info);
 					}
-				}
 
 				match delegator
 					.generate(task, &server_name, system_prompt)
@@ -261,27 +259,25 @@ pub fn register_delegation_tools(
 						};
 
 						// Fire on_complete callback
-						if let Some(ref cbs) = callbacks {
-							if let Some(ref on_complete) = cbs.on_complete {
+						if let Some(ref cbs) = callbacks
+							&& let Some(ref on_complete) = cbs.on_complete {
 								on_complete(&id, &result);
 							}
-						}
 
 						Ok(text)
 					}
 					Err(err) => {
 						// Fire on_error callback
-						if let Some(ref cbs) = callbacks {
-							if let Some(ref on_error) = cbs.on_error {
+						if let Some(ref cbs) = callbacks
+							&& let Some(ref on_error) = cbs.on_error {
 								on_error(&id, &err);
 							}
-						}
 						Err(err)
 					}
 				}
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 }

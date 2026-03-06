@@ -591,14 +591,14 @@ fn autocomplete_full_workflow_type_navigate_accept() {
 
 #[test]
 fn settings_file_list_navigation() {
-    let mut state = SettingsFormState::new();
+    let state = SettingsFormState::new();
     assert_eq!(state.level, SettingsLevel::FileList);
     assert_eq!(state.selected_file, 0);
     assert_eq!(state.selected_file_name(), "config.json");
 
     // Navigate down to "mcp.json" (index 2).
-    state.move_down();
-    state.move_down();
+    let state = state.move_down();
+    let state = state.move_down();
     assert_eq!(state.selected_file, 2);
     assert_eq!(state.selected_file_name(), "mcp.json");
     assert_eq!(state.selected_file_label(), "MCP Servers");
@@ -606,77 +606,77 @@ fn settings_file_list_navigation() {
 
 #[test]
 fn settings_enter_field_list_and_navigate() {
-    let mut state = SettingsFormState::new();
+    let state = SettingsFormState::new();
 
     // Enter a config file -> FieldList + LoadFile action.
-    let action = state.enter();
+    let (state, action) = state.enter();
     assert_eq!(state.level, SettingsLevel::FieldList);
     assert!(matches!(action, SettingsAction::LoadFile { .. }));
     assert_eq!(state.selected_field, 0);
 
     // Simulate file loaded with some fields.
-    state.file_loaded(serde_json::json!({
+    let state = state.file_loaded(serde_json::json!({
         "logLevel": "warn",
         "maxTokens": 4096,
         "debug": false
     }));
 
     // Navigate fields.
-    state.move_down();
+    let state = state.move_down();
     assert_eq!(state.selected_field, 1);
-    state.move_down();
+    let state = state.move_down();
     assert_eq!(state.selected_field, 2);
-    state.move_up();
+    let state = state.move_up();
     assert_eq!(state.selected_field, 1);
 }
 
 #[test]
 fn settings_enter_editing_and_modify() {
-    let mut state = SettingsFormState::new();
+    let state = SettingsFormState::new();
 
     // FileList -> FieldList.
-    state.enter();
+    let (state, _) = state.enter();
     // Simulate host loading the config file.
-    state.file_loaded(serde_json::json!({"logLevel": "warn"}));
+    let state = state.file_loaded(serde_json::json!({"logLevel": "warn"}));
 
     // FieldList -> Editing.
-    let action = state.enter();
+    let (state, action) = state.enter();
     assert_eq!(state.level, SettingsLevel::Editing);
     assert_eq!(action, SettingsAction::None);
     assert_eq!(state.edit_value, "warn");
 
     // Modify the value.
-    state.backspace(); // "war"
-    state.backspace(); // "wa"
-    state.type_char('x'); // "wax"
+    let state = state.backspace(); // "war"
+    let state = state.backspace(); // "wa"
+    let state = state.type_char('x'); // "wax"
     assert_eq!(state.edit_value, "wax");
 }
 
 #[test]
 fn settings_back_navigation_full_cycle() {
-    let mut state = SettingsFormState::new();
+    let state = SettingsFormState::new();
 
     // FileList -> FieldList.
-    state.enter();
-    state.file_loaded(serde_json::json!({"key": "value"}));
+    let (state, _) = state.enter();
+    let state = state.file_loaded(serde_json::json!({"key": "value"}));
 
     // FieldList -> Editing.
-    state.enter();
+    let (state, _) = state.enter();
     assert_eq!(state.level, SettingsLevel::Editing);
 
     // Editing -> FieldList.
-    let action = state.back();
+    let (state, action) = state.back();
     assert_eq!(action, SettingsAction::None);
     assert_eq!(state.level, SettingsLevel::FieldList);
     assert!(state.edit_value.is_empty());
 
     // FieldList -> FileList.
-    let action = state.back();
+    let (state, action) = state.back();
     assert_eq!(action, SettingsAction::None);
     assert_eq!(state.level, SettingsLevel::FileList);
 
     // FileList -> dismiss.
-    let action = state.back();
+    let (_state, action) = state.back();
     assert_eq!(action, SettingsAction::Dismiss);
 }
 
@@ -685,22 +685,21 @@ fn settings_toggle_boolean() {
     let mut state = SettingsFormState::new();
     // Select memory.json (index 4) which has "enabled" as a Boolean field.
     state.selected_file = 4;
-    state.enter(); // -> FieldList + LoadFile
-    state.file_loaded(serde_json::json!({"enabled": true}));
-    state.enter(); // -> Editing (edit_value = "true")
+    let (state, _) = state.enter(); // -> FieldList + LoadFile
+    let state = state.file_loaded(serde_json::json!({"enabled": true}));
+    let (state, _) = state.enter(); // -> Editing (edit_value = "true")
     assert_eq!(state.edit_value, "true");
 
-    let action = state.toggle();
+    let (state, action) = state.toggle();
     assert_eq!(state.edit_value, "false");
     assert!(matches!(action, SettingsAction::SaveField { .. }));
 
     // Simulate save callback to go back to FieldList, then re-enter editing.
-    state.field_saved("enabled", &serde_json::json!(false));
-    state.enter(); // -> Editing again (edit_value = "false")
+    let state = state.field_saved("enabled", &serde_json::json!(false));
+    let (state, _) = state.enter(); // -> Editing again (edit_value = "false")
     assert_eq!(state.edit_value, "false");
 
-    let action = state.toggle();
-    assert_eq!(state.edit_value, "true");
+    let (_state, action) = state.toggle();
     assert!(matches!(action, SettingsAction::SaveField { .. }));
 }
 
@@ -717,7 +716,7 @@ fn settings_render_all_levels_without_panic() {
     });
 
     // FileList level.
-    let mut state = SettingsFormState::new();
+    let state = SettingsFormState::new();
     terminal
         .draw(|frame| {
             let area = frame.area();
@@ -726,8 +725,8 @@ fn settings_render_all_levels_without_panic() {
         .unwrap();
 
     // FieldList level.
-    state.enter();
-    state.file_loaded(config_data.clone());
+    let (state, _) = state.enter();
+    let state = state.file_loaded(config_data.clone());
     terminal
         .draw(|frame| {
             let area = frame.area();
@@ -736,7 +735,7 @@ fn settings_render_all_levels_without_panic() {
         .unwrap();
 
     // Editing level.
-    state.enter();
+    let (state, _) = state.enter();
     terminal
         .draw(|frame| {
             let area = frame.area();

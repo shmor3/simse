@@ -17,25 +17,13 @@ type WsSink = SplitSink<WsStream, Message>;
 type WsSource = SplitStream<WsStream>;
 
 /// Tunnel state visible to the server.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct TunnelState {
     pub connected: bool,
     pub tunnel_id: Option<String>,
     pub relay_url: Option<String>,
     pub connected_at: Option<Instant>,
     pub reconnect_count: u32,
-}
-
-impl Default for TunnelState {
-    fn default() -> Self {
-        Self {
-            connected: false,
-            tunnel_id: None,
-            relay_url: None,
-            connected_at: None,
-            reconnect_count: 0,
-        }
-    }
 }
 
 /// Manages the WebSocket tunnel to the relay.
@@ -203,7 +191,8 @@ impl TunnelClient {
                                 if cancel.load(Ordering::SeqCst) {
                                     return;
                                 }
-                                let delay = backoff.next_delay();
+                                let (new_backoff, delay) = backoff.next_delay();
+                                backoff = new_backoff;
                                 tracing::info!("Reconnecting in {:?} (attempt {})", delay, backoff.attempts());
                                 tokio::time::sleep(delay).await;
 
@@ -218,7 +207,7 @@ impl TunnelClient {
                                         s.connected = true;
                                         s.reconnect_count += 1;
                                         s.connected_at = Some(Instant::now());
-                                        backoff.reset();
+                                        backoff = backoff.reset();
                                         tracing::info!("Reconnected successfully");
                                         break;
                                     }

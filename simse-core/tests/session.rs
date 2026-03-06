@@ -104,9 +104,10 @@ fn test_fork_clones_conversation() {
 	let id = mgr.create();
 
 	// Add messages to the original session
-	mgr.with_session(&id, |session| {
-		session.conversation.add_user("hello");
-		session.conversation.add_assistant("world");
+	mgr.with_state_transition(&id, |conv| {
+		let conv = conv.add_user("hello");
+		let conv = conv.add_assistant("world");
+		(conv, ())
 	});
 
 	let forked_id = mgr.fork(&id);
@@ -140,10 +141,10 @@ fn test_fork_fresh_event_bus() {
 	let id = mgr.create();
 
 	// Subscribe to an event on the original session
-	let _unsub = mgr.with_session(&id, |session| {
-		session
+	mgr.with_session(&id, |session| {
+		let _unsub = session
 			.event_bus
-			.subscribe("test.event", |_| { /* handler */ })
+			.subscribe("test.event", |_| { /* handler */ });
 	});
 
 	let forked_id = mgr.fork(&id).unwrap();
@@ -176,8 +177,8 @@ fn test_with_session_mutate_conversation() {
 	let mgr = SessionManager::new();
 	let id = mgr.create();
 
-	mgr.with_session(&id, |session| {
-		session.conversation.add_user("test message");
+	mgr.with_state_transition(&id, |conv| {
+		(conv.add_user("test message"), ())
 	});
 
 	let info = mgr.get_info(&id).unwrap();
@@ -196,11 +197,10 @@ fn test_fork_preserves_system_prompt() {
 	let mgr = SessionManager::new();
 	let id = mgr.create();
 
-	mgr.with_session(&id, |session| {
-		session
-			.conversation
-			.set_system_prompt("you are helpful".into());
-		session.conversation.add_user("hi");
+	mgr.with_state_transition(&id, |conv| {
+		let conv = conv.set_system_prompt("you are helpful".into());
+		let conv = conv.add_user("hi");
+		(conv, ())
 	});
 
 	let forked_id = mgr.fork(&id).unwrap();
@@ -216,15 +216,15 @@ fn test_fork_independent_conversations() {
 	let mgr = SessionManager::new();
 	let id = mgr.create();
 
-	mgr.with_session(&id, |session| {
-		session.conversation.add_user("original");
+	mgr.with_state_transition(&id, |conv| {
+		(conv.add_user("original"), ())
 	});
 
 	let forked_id = mgr.fork(&id).unwrap();
 
 	// Mutate forked conversation
-	mgr.with_session(&forked_id, |session| {
-		session.conversation.add_assistant("forked reply");
+	mgr.with_state_transition(&forked_id, |conv| {
+		(conv.add_assistant("forked reply"), ())
 	});
 
 	// Original should be unchanged
@@ -245,8 +245,8 @@ fn test_delete_after_fork_does_not_affect_fork() {
 	let mgr = SessionManager::new();
 	let id = mgr.create();
 
-	mgr.with_session(&id, |session| {
-		session.conversation.add_user("hello");
+	mgr.with_state_transition(&id, |conv| {
+		(conv.add_user("hello"), ())
 	});
 
 	let forked_id = mgr.fork(&id).unwrap();

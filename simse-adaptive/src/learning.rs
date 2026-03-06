@@ -20,7 +20,7 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::cosine::cosine_similarity;
 use crate::types::{PatronProfile, QueryRecord, RequiredWeightProfile};
@@ -41,6 +41,7 @@ const TOPIC_QUERY_THRESHOLD: usize = 10;
 // ---------------------------------------------------------------------------
 
 /// Configuration for the adaptive patron learning engine.
+#[derive(Clone)]
 pub struct LearningOptions {
 	pub enabled: bool,
 	pub max_query_history: usize,
@@ -66,21 +67,25 @@ impl Default for LearningOptions {
 // ---------------------------------------------------------------------------
 
 /// Per-entry implicit feedback tracking.
+#[derive(Clone)]
 struct FeedbackEntry {
 	query_count: usize,
 	total_retrievals: usize,
 	last_query_timestamp: u64,
 	/// Sample of distinct query embeddings that found this entry (for diversity).
+	// PERF: inner Vec<f32> kept as Vec for numeric embedding data
 	query_embeddings: Vec<Vec<f32>>,
 }
 
 /// Per-entry explicit relevance feedback counts.
+#[derive(Clone)]
 struct ExplicitFeedback {
 	positive: usize,
 	negative: usize,
 }
 
 /// Per-topic mutable learning state.
+#[derive(Clone)]
 struct TopicState {
 	weights: RequiredWeightProfile,
 	interest_embedding: Option<Vec<f32>>,
@@ -199,6 +204,7 @@ fn decode_embedding(encoded: &str) -> Option<Vec<f32>> {
 
 /// Adaptive learning engine that tracks search patterns and adapts
 /// weight profiles and interest embeddings over time.
+#[derive(Clone)]
 pub struct LearningEngine {
 	enabled: bool,
 	max_query_history: usize,
@@ -206,16 +212,22 @@ pub struct LearningEngine {
 	weight_adaptation_rate: f64,
 	interest_boost_weight: f64,
 
-	// Mutable state
-	feedback: HashMap<String, FeedbackEntry>,
-	explicit_feedback: HashMap<String, ExplicitFeedback>,
+	// State stored in im collections
+	feedback: im::HashMap<String, FeedbackEntry>,
+	explicit_feedback: im::HashMap<String, ExplicitFeedback>,
 	query_history: Vec<QueryRecord>,
 	adapted_weights: RequiredWeightProfile,
 	interest_embedding: Option<Vec<f32>>,
 	total_queries: usize,
 	last_updated: u64,
-	topic_states: HashMap<String, TopicState>,
-	correlations: HashMap<String, HashMap<String, usize>>,
+	topic_states: im::HashMap<String, TopicState>,
+	correlations: im::HashMap<String, im::HashMap<String, usize>>,
+}
+
+impl Default for LearningEngine {
+	fn default() -> Self {
+		Self::new(LearningOptions::default())
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -286,7 +298,7 @@ fn compute_interest_embedding(
 /// Adapt weights based on whether recent results tended to be
 /// frequently-accessed entries. Free function to avoid borrow conflicts.
 fn adapt_weights(
-	feedback: &HashMap<String, FeedbackEntry>,
+	feedback: &im::HashMap<String, FeedbackEntry>,
 	weight_adaptation_rate: f64,
 	current_weights: &RequiredWeightProfile,
 	result_ids: &[String],
@@ -335,8 +347,8 @@ impl LearningEngine {
 			weight_adaptation_rate: options.weight_adaptation_rate,
 			interest_boost_weight: options.interest_boost_weight,
 
-			feedback: HashMap::new(),
-			explicit_feedback: HashMap::new(),
+			feedback: im::HashMap::new(),
+			explicit_feedback: im::HashMap::new(),
 			query_history: Vec::new(),
 			adapted_weights: RequiredWeightProfile {
 				vector: 0.6,
@@ -346,8 +358,8 @@ impl LearningEngine {
 			interest_embedding: None,
 			total_queries: 0,
 			last_updated: 0,
-			topic_states: HashMap::new(),
-			correlations: HashMap::new(),
+			topic_states: im::HashMap::new(),
+			correlations: im::HashMap::new(),
 		}
 	}
 
@@ -443,25 +455,27 @@ impl LearningEngine {
 
 		// Update per-entry feedback
 		for id in result_ids {
-			if let Some(existing) = self.feedback.get_mut(id) {
-				existing.total_retrievals += 1;
-				existing.last_query_timestamp = now;
+			let existing = self.feedback.get(id).cloned();
+			if let Some(mut entry) = existing {
+				entry.total_retrievals += 1;
+				entry.last_query_timestamp = now;
 
 				// Track diverse queries: only count if this query embedding
 				// is sufficiently different from previously recorded ones.
-				let is_diverse = existing.query_embeddings.is_empty()
-					|| existing.query_embeddings.iter().all(|prev| {
+				let is_diverse = entry.query_embeddings.is_empty()
+					|| entry.query_embeddings.iter().all(|prev| {
 						cosine_similarity(prev, query_embedding) < 0.9
 					});
 				if is_diverse {
-					existing.query_count += 1;
+					entry.query_count += 1;
 					// Keep a bounded sample of query embeddings for diversity tracking
-					if existing.query_embeddings.len() < 20 {
-						existing.query_embeddings.push(query_embedding.to_vec());
+					if entry.query_embeddings.len() < 20 {
+						entry.query_embeddings.push(query_embedding.to_vec());
 					}
 				}
+				self.feedback = self.feedback.update(id.clone(), entry);
 			} else {
-				self.feedback.insert(
+				self.feedback = self.feedback.update(
 					id.clone(),
 					FeedbackEntry {
 						query_count: 1,
@@ -479,17 +493,19 @@ impl LearningEngine {
 				let a = &result_ids[i];
 				let b = &result_ids[j];
 
-				let map_a = self
-					.correlations
-					.entry(a.clone())
-					.or_default();
-				*map_a.entry(b.clone()).or_insert(0) += 1;
+				let map_a = self.correlations.get(a).cloned().unwrap_or_default();
+				let count_ab = map_a.get(b).copied().unwrap_or(0) + 1;
+				self.correlations = self.correlations.update(
+					a.clone(),
+					map_a.update(b.clone(), count_ab),
+				);
 
-				let map_b = self
-					.correlations
-					.entry(b.clone())
-					.or_default();
-				*map_b.entry(a.clone()).or_insert(0) += 1;
+				let map_b = self.correlations.get(b).cloned().unwrap_or_default();
+				let count_ba = map_b.get(a).copied().unwrap_or(0) + 1;
+				self.correlations = self.correlations.update(
+					b.clone(),
+					map_b.update(a.clone(), count_ba),
+				);
 			}
 		}
 
@@ -508,10 +524,11 @@ impl LearningEngine {
 			let decay_ms = self.query_decay_ms;
 			let rate = self.weight_adaptation_rate;
 
-			let topic_state = self
+			let mut topic_state = self
 				.topic_states
-				.entry(topic.to_string())
-				.or_insert_with(|| TopicState {
+				.get(topic)
+				.cloned()
+				.unwrap_or_else(|| TopicState {
 					weights: RequiredWeightProfile {
 						vector: 0.6,
 						recency: 0.2,
@@ -547,6 +564,8 @@ impl LearningEngine {
 			// Recompute topic interest embedding using free function
 			topic_state.interest_embedding =
 				compute_interest_embedding(decay_ms, &topic_state.query_history, now);
+
+			self.topic_states = self.topic_states.update(topic.to_string(), topic_state);
 		}
 	}
 
@@ -556,10 +575,11 @@ impl LearningEngine {
 			return;
 		}
 
-		let existing = self
+		let mut existing = self
 			.explicit_feedback
-			.entry(entry_id.to_string())
-			.or_insert(ExplicitFeedback {
+			.get(entry_id)
+			.cloned()
+			.unwrap_or(ExplicitFeedback {
 				positive: 0,
 				negative: 0,
 			});
@@ -568,6 +588,7 @@ impl LearningEngine {
 		} else {
 			existing.negative += 1;
 		}
+		self.explicit_feedback = self.explicit_feedback.update(entry_id.to_string(), existing);
 		self.last_updated = now;
 	}
 
@@ -763,9 +784,9 @@ impl LearningEngine {
 	/// Restore learning state from a previously serialized snapshot.
 	pub fn restore(&mut self, state: &LearningState) {
 		// Restore feedback
-		self.feedback.clear();
+		let mut feedback = im::HashMap::new();
 		for entry in &state.feedback {
-			self.feedback.insert(
+			feedback = feedback.update(
 				entry.id.clone(),
 				FeedbackEntry {
 					query_count: entry.query_count,
@@ -775,12 +796,13 @@ impl LearningEngine {
 				},
 			);
 		}
+		self.feedback = feedback;
 
 		// Restore query history
-		self.query_history.clear();
+		let mut query_history = Vec::new();
 		for record in &state.query_history {
 			if let Some(embedding) = decode_embedding(&record.embedding) {
-				self.query_history.push(QueryRecord {
+				query_history.push(QueryRecord {
 					embedding,
 					timestamp: record.timestamp,
 					result_count: record.result_count,
@@ -788,6 +810,7 @@ impl LearningEngine {
 			}
 			// Skip corrupt records
 		}
+		self.query_history = query_history;
 
 		// Restore weights
 		self.adapted_weights = RequiredWeightProfile {
@@ -804,10 +827,10 @@ impl LearningEngine {
 			.and_then(|e| decode_embedding(e));
 
 		// Restore explicit feedback
-		self.explicit_feedback.clear();
+		let mut explicit_feedback = im::HashMap::new();
 		if let Some(ref ef) = state.explicit_feedback {
 			for entry in ef {
-				self.explicit_feedback.insert(
+				explicit_feedback = explicit_feedback.update(
 					entry.entry_id.clone(),
 					ExplicitFeedback {
 						positive: entry.positive_count,
@@ -816,9 +839,10 @@ impl LearningEngine {
 				);
 			}
 		}
+		self.explicit_feedback = explicit_feedback;
 
 		// Restore per-topic state
-		self.topic_states.clear();
+		let mut topic_states = im::HashMap::new();
 		if let Some(ref profiles) = state.topic_profiles {
 			for profile in profiles {
 				let weights = Self::normalize_weights_required(&RequiredWeightProfile {
@@ -832,7 +856,7 @@ impl LearningEngine {
 					.as_ref()
 					.and_then(|e| decode_embedding(e));
 
-				self.topic_states.insert(
+				topic_states = topic_states.update(
 					profile.topic.clone(),
 					TopicState {
 						weights,
@@ -843,18 +867,20 @@ impl LearningEngine {
 				);
 			}
 		}
+		self.topic_states = topic_states;
 
 		// Restore correlations
-		self.correlations.clear();
+		let mut correlations = im::HashMap::new();
 		if let Some(ref corrs) = state.correlations {
 			for entry in corrs {
-				let mut map = HashMap::new();
+				let mut map = im::HashMap::new();
 				for pair in &entry.correlated {
-					map.insert(pair.entry_id.clone(), pair.count);
+					map = map.update(pair.entry_id.clone(), pair.count);
 				}
-				self.correlations.insert(entry.entry_id.clone(), map);
+				correlations = correlations.update(entry.entry_id.clone(), map);
 			}
 		}
+		self.correlations = correlations;
 
 		self.total_queries = state.total_queries;
 		self.last_updated = state.last_updated;
@@ -862,8 +888,8 @@ impl LearningEngine {
 
 	/// Clear all learning state.
 	pub fn clear(&mut self) {
-		self.feedback.clear();
-		self.explicit_feedback.clear();
+		self.feedback = im::HashMap::new();
+		self.explicit_feedback = im::HashMap::new();
 		self.query_history.clear();
 		self.adapted_weights = RequiredWeightProfile {
 			vector: 0.6,
@@ -873,23 +899,45 @@ impl LearningEngine {
 		self.interest_embedding = None;
 		self.total_queries = 0;
 		self.last_updated = 0;
-		self.topic_states.clear();
-		self.correlations.clear();
+		self.topic_states = im::HashMap::new();
+		self.correlations = im::HashMap::new();
 	}
 
 	/// Remove feedback for entries that no longer exist.
 	pub fn prune_entries(&mut self, valid_ids: &HashSet<String>) {
-		self.feedback.retain(|id, _| valid_ids.contains(id));
-		self.explicit_feedback
-			.retain(|id, _| valid_ids.contains(id));
-
-		// Remove entire correlation maps for pruned entries
-		self.correlations.retain(|id, _| valid_ids.contains(id));
-
-		// Remove references to pruned entries from remaining correlation maps
-		for map in self.correlations.values_mut() {
-			map.retain(|id, _| valid_ids.contains(id));
+		// Filter feedback
+		let mut new_feedback = im::HashMap::new();
+		for (id, entry) in self.feedback.iter() {
+			if valid_ids.contains(id) {
+				new_feedback = new_feedback.update(id.clone(), entry.clone());
+			}
 		}
+		self.feedback = new_feedback;
+
+		// Filter explicit feedback
+		let mut new_explicit = im::HashMap::new();
+		for (id, entry) in self.explicit_feedback.iter() {
+			if valid_ids.contains(id) {
+				new_explicit = new_explicit.update(id.clone(), entry.clone());
+			}
+		}
+		self.explicit_feedback = new_explicit;
+
+		// Filter correlations: remove entire maps for pruned entries,
+		// then remove references to pruned entries from remaining maps
+		let mut new_correlations = im::HashMap::new();
+		for (id, map) in self.correlations.iter() {
+			if valid_ids.contains(id) {
+				let mut new_map = im::HashMap::new();
+				for (peer_id, &count) in map.iter() {
+					if valid_ids.contains(peer_id) {
+						new_map = new_map.update(peer_id.clone(), count);
+					}
+				}
+				new_correlations = new_correlations.update(id.clone(), new_map);
+			}
+		}
+		self.correlations = new_correlations;
 	}
 
 	/// Total number of queries recorded.

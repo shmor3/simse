@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use im::HashMap as ImHashMap;
+use im::Vector as ImVector;
+
 use crate::error::SandboxError;
-use crate::vsh_backend::ShellImpl;
 use crate::vsh_executor::ExecResult;
 use crate::vsh_sandbox::SandboxConfig;
 
@@ -15,14 +17,14 @@ fn now_ms() -> u64 {
 }
 
 /// A single shell session with its own state.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ShellSession {
 	pub id: String,
 	pub name: Option<String>,
 	pub cwd: PathBuf,
-	pub env: HashMap<String, String>,
-	pub aliases: HashMap<String, String>,
-	pub history: Vec<HistoryEntry>,
+	pub env: ImHashMap<String, String>,
+	pub aliases: ImHashMap<String, String>,
+	pub history: ImVector<HistoryEntry>,
 	pub created_at: u64,
 	pub last_active_at: u64,
 }
@@ -36,23 +38,84 @@ pub struct HistoryEntry {
 	pub duration_ms: u64,
 }
 
-/// The VirtualShell manages all sessions and delegates execution.
+// ── Prepare structs (pure data for I/O execution) ────────────────────────
+
+/// Prepared data for executing a command in a session.
+///
+/// Returned by [`VirtualShell::prepare_exec`] — the caller performs actual
+/// I/O with the backend, then feeds the result back via
+/// [`VirtualShell::record_exec`].
+#[derive(Debug, Clone)]
+pub struct ExecRequest {
+	pub session_id: String,
+	pub command: String,
+	pub resolved_command: String,
+	pub cwd: PathBuf,
+	pub env: ImHashMap<String, String>,
+	pub shell_cmd: String,
+	pub timeout_ms: u64,
+	pub max_output_bytes: usize,
+	pub stdin: Option<String>,
+}
+
+/// Prepared data for executing a git command in a session.
+///
+/// Returned by [`VirtualShell::prepare_exec_git`] — the caller performs
+/// actual I/O with the backend, then feeds the result back via
+/// [`VirtualShell::record_exec`].
+#[derive(Debug, Clone)]
+pub struct GitExecRequest {
+	pub session_id: String,
+	pub command_str: String,
+	pub args: Vec<String>,
+	pub cwd: PathBuf,
+	pub env: ImHashMap<String, String>,
+	pub timeout_ms: u64,
+	pub max_output_bytes: usize,
+}
+
+/// Prepared data for executing a raw (session-less) command.
+///
+/// Returned by [`VirtualShell::prepare_exec_raw`] — the caller performs
+/// actual I/O with the backend, then feeds the result back via
+/// [`VirtualShell::record_exec_raw`].
+#[derive(Debug, Clone)]
+pub struct RawExecRequest {
+	pub command: String,
+	pub cwd: PathBuf,
+	pub env: HashMap<String, String>,
+	pub shell_cmd: String,
+	pub timeout_ms: u64,
+	pub max_output_bytes: usize,
+	pub stdin: Option<String>,
+}
+
+// ── VirtualShell (pure functional core) ──────────────────────────────────
+
+/// The VirtualShell manages all sessions as pure state.
+///
+/// Methods that modify state take `self` by value and return `Self` (or
+/// `(Self, T)`), enabling functional-style state transitions with
+/// structural sharing via `im` persistent data structures.
+///
+/// I/O (command execution) is **not** performed here. Instead, `prepare_*`
+/// methods produce request structs that the caller dispatches to a backend,
+/// then feeds results back via `record_*` methods.
+#[derive(Debug, Clone)]
 pub struct VirtualShell {
-	sessions: HashMap<String, ShellSession>,
+	sessions: ImHashMap<String, ShellSession>,
 	sandbox: SandboxConfig,
-	shell: String,
-	backend: ShellImpl,
+	shell_cmd: String,
 	total_commands: u64,
 	total_errors: u64,
 }
 
 impl VirtualShell {
-	pub fn new(sandbox: SandboxConfig, shell: String, backend: ShellImpl) -> Self {
+	pub fn new(sandbox: SandboxConfig, shell_cmd: String) -> Self {
 		Self {
-			sessions: HashMap::new(),
+			sessions: ImHashMap::new(),
 			sandbox,
-			shell,
-			backend,
+			shell_cmd,
 			total_commands: 0,
 			total_errors: 0,
 		}
@@ -61,11 +124,11 @@ impl VirtualShell {
 	// -- Session CRUD ---------------------------------------------------------
 
 	pub fn create_session(
-		&mut self,
+		self,
 		name: Option<String>,
 		cwd: Option<String>,
 		env: Option<HashMap<String, String>>,
-	) -> Result<&ShellSession, SandboxError> {
+	) -> Result<(Self, ShellSession), SandboxError> {
 		if self.sessions.len() >= self.sandbox.max_sessions {
 			return Err(SandboxError::VshLimitExceeded(format!(
 				"Maximum sessions ({}) reached",
@@ -80,19 +143,25 @@ impl VirtualShell {
 		};
 
 		let now = now_ms();
+		let im_env: ImHashMap<String, String> = env
+			.unwrap_or_default()
+			.into_iter()
+			.collect();
+
 		let session = ShellSession {
 			id: id.clone(),
 			name,
 			cwd: resolved_cwd,
-			env: env.unwrap_or_default(),
-			aliases: HashMap::new(),
-			history: Vec::new(),
+			env: im_env,
+			aliases: ImHashMap::new(),
+			history: ImVector::new(),
 			created_at: now,
 			last_active_at: now,
 		};
 
-		self.sessions.insert(id.clone(), session);
-		Ok(self.sessions.get(&id).unwrap())
+		let mut new_self = self;
+		new_self.sessions = new_self.sessions.update(id, session.clone());
+		Ok((new_self, session))
 	}
 
 	pub fn get_session(&self, id: &str) -> Result<&ShellSession, SandboxError> {
@@ -105,25 +174,31 @@ impl VirtualShell {
 		self.sessions.values().collect()
 	}
 
-	pub fn delete_session(&mut self, id: &str) -> Result<bool, SandboxError> {
-		if self.sessions.remove(id).is_some() {
-			Ok(true)
-		} else {
-			Err(SandboxError::VshSessionNotFound(id.to_string()))
+	pub fn delete_session(self, id: &str) -> Result<(Self, bool), SandboxError> {
+		if !self.sessions.contains_key(id) {
+			return Err(SandboxError::VshSessionNotFound(id.to_string()));
 		}
+		let mut new_self = self;
+		new_self.sessions = new_self.sessions.without(id);
+		Ok((new_self, true))
 	}
 
-	// -- Execution ------------------------------------------------------------
+	// -- Prepare (pure — no I/O) ----------------------------------------------
 
-	pub async fn exec_in_session(
-		&mut self,
+	/// Prepare a command for execution within a session.
+	///
+	/// Validates the command against the sandbox, resolves aliases,
+	/// and returns an [`ExecRequest`] with all data needed for execution.
+	/// The caller must run the command via a backend and then call
+	/// [`record_exec`] with the result.
+	pub fn prepare_exec(
+		&self,
 		session_id: &str,
 		command: &str,
 		timeout_ms: Option<u64>,
 		max_output_bytes: Option<usize>,
 		stdin: Option<&str>,
-	) -> Result<ExecResult, SandboxError> {
-		// Validate command against sandbox
+	) -> Result<ExecRequest, SandboxError> {
 		self.sandbox.check_command(command)?;
 
 		let session = self
@@ -131,32 +206,36 @@ impl VirtualShell {
 			.get(session_id)
 			.ok_or_else(|| SandboxError::VshSessionNotFound(session_id.to_string()))?;
 
-		let cwd = session.cwd.clone();
-		let env = session.env.clone();
+		let resolved_command = self.resolve_alias(session_id, command);
 		let timeout = timeout_ms.unwrap_or(self.sandbox.default_timeout_ms);
 		let max_out = max_output_bytes.unwrap_or(self.sandbox.max_output_bytes);
-		let shell = self.shell.clone();
 
-		// Resolve aliases
-		let resolved_command = self.resolve_alias(session_id, command);
-
-		let result = self
-			.backend
-			.execute_command(&resolved_command, &cwd, &env, &shell, timeout, max_out, stdin)
-			.await;
-
-		self.record_history(session_id, command, &result);
-		result
+		Ok(ExecRequest {
+			session_id: session_id.to_string(),
+			command: command.to_string(),
+			resolved_command,
+			cwd: session.cwd.clone(),
+			env: session.env.clone(),
+			shell_cmd: self.shell_cmd.clone(),
+			timeout_ms: timeout,
+			max_output_bytes: max_out,
+			stdin: stdin.map(String::from),
+		})
 	}
 
-	pub async fn exec_git_in_session(
-		&mut self,
+	/// Prepare a git command for execution within a session.
+	///
+	/// Validates the command against blocked patterns and returns a
+	/// [`GitExecRequest`] with all data needed for execution.
+	/// The caller must run the command via a backend and then call
+	/// [`record_exec`] with the result.
+	pub fn prepare_exec_git(
+		&self,
 		session_id: &str,
 		args: &[String],
 		timeout_ms: Option<u64>,
 		max_output_bytes: Option<usize>,
-	) -> Result<ExecResult, SandboxError> {
-		// Validate git command against blocked patterns
+	) -> Result<GitExecRequest, SandboxError> {
 		let command_str = format!("git {}", args.join(" "));
 		self.sandbox.check_command(&command_str)?;
 
@@ -165,21 +244,28 @@ impl VirtualShell {
 			.get(session_id)
 			.ok_or_else(|| SandboxError::VshSessionNotFound(session_id.to_string()))?;
 
-		let cwd = session.cwd.clone();
-		let env = session.env.clone();
 		let timeout = timeout_ms.unwrap_or(self.sandbox.default_timeout_ms);
 		let max_out = max_output_bytes.unwrap_or(self.sandbox.max_output_bytes);
 
-		let result = self.backend.execute_git(args, &cwd, &env, timeout, max_out).await;
-
-		self.record_history(session_id, &command_str, &result);
-		result
+		Ok(GitExecRequest {
+			session_id: session_id.to_string(),
+			command_str,
+			args: args.to_vec(),
+			cwd: session.cwd.clone(),
+			env: session.env.clone(),
+			timeout_ms: timeout,
+			max_output_bytes: max_out,
+		})
 	}
 
-	/// Execute a command without a session (stateless).
-	#[allow(clippy::too_many_arguments)]
-	pub async fn exec_raw(
-		&mut self,
+	/// Prepare a raw (session-less) command for execution.
+	///
+	/// Validates the command and cwd against the sandbox, and returns a
+	/// [`RawExecRequest`] with all data needed for execution.
+	/// The caller must run the command via a backend and then call
+	/// [`record_exec_raw`] with the result.
+	pub fn prepare_exec_raw(
+		&self,
 		command: &str,
 		cwd: Option<&str>,
 		env: Option<&HashMap<String, String>>,
@@ -187,7 +273,7 @@ impl VirtualShell {
 		timeout_ms: Option<u64>,
 		max_output_bytes: Option<usize>,
 		stdin: Option<&str>,
-	) -> Result<ExecResult, SandboxError> {
+	) -> Result<RawExecRequest, SandboxError> {
 		self.sandbox.check_command(command)?;
 
 		let resolved_cwd = match cwd {
@@ -197,39 +283,85 @@ impl VirtualShell {
 
 		let empty_env = HashMap::new();
 		let env = env.unwrap_or(&empty_env);
-		let shell = shell.unwrap_or(&self.shell);
+		let shell_cmd = shell.unwrap_or(&self.shell_cmd);
 		let timeout = timeout_ms.unwrap_or(self.sandbox.default_timeout_ms);
 		let max_out = max_output_bytes.unwrap_or(self.sandbox.max_output_bytes);
 
-		self.total_commands += 1;
+		Ok(RawExecRequest {
+			command: command.to_string(),
+			cwd: resolved_cwd,
+			env: env.clone(),
+			shell_cmd: shell_cmd.to_string(),
+			timeout_ms: timeout,
+			max_output_bytes: max_out,
+			stdin: stdin.map(String::from),
+		})
+	}
 
-		let result = self
-			.backend
-			.execute_command(command, &resolved_cwd, env, shell, timeout, max_out, stdin)
-			.await;
+	// -- Record results (pure state update) -----------------------------------
 
-		if result.is_err() {
-			self.total_errors += 1;
+	/// Record the result of a session-bound command execution.
+	///
+	/// Updates the session's history and the global metrics counters.
+	pub fn record_exec(
+		self,
+		session_id: &str,
+		command: &str,
+		result: &Result<ExecResult, SandboxError>,
+	) -> Self {
+		let mut new_self = self;
+		new_self.total_commands += 1;
+
+		let (exit_code, duration_ms) = match result {
+			Ok(exec_result) => (exec_result.exit_code, exec_result.duration_ms),
+			Err(_) => {
+				new_self.total_errors += 1;
+				(-1, 0)
+			}
+		};
+
+		if let Some(session) = new_self.sessions.get(session_id) {
+			let mut session = session.clone();
+			session.last_active_at = now_ms();
+			session.history.push_back(HistoryEntry {
+				command: command.to_string(),
+				exit_code,
+				timestamp: now_ms(),
+				duration_ms,
+			});
+			new_self.sessions = new_self.sessions.update(session_id.to_string(), session);
 		}
 
-		result
+		new_self
+	}
+
+	/// Record the result of a raw (session-less) command execution.
+	///
+	/// Updates only the global metrics counters (no session history).
+	pub fn record_exec_raw(self, result: &Result<ExecResult, SandboxError>) -> Self {
+		let mut new_self = self;
+		new_self.total_commands += 1;
+		if result.is_err() {
+			new_self.total_errors += 1;
+		}
+		new_self
 	}
 
 	// -- Env ------------------------------------------------------------------
 
-	pub fn set_env(
-		&mut self,
-		session_id: &str,
-		key: &str,
-		value: &str,
-	) -> Result<(), SandboxError> {
+	pub fn set_env(self, session_id: &str, key: &str, value: &str) -> Result<Self, SandboxError> {
 		let session = self
 			.sessions
-			.get_mut(session_id)
+			.get(session_id)
 			.ok_or_else(|| SandboxError::VshSessionNotFound(session_id.to_string()))?;
-		session.env.insert(key.to_string(), value.to_string());
+
+		let mut session = session.clone();
+		session.env = session.env.update(key.to_string(), value.to_string());
 		session.last_active_at = now_ms();
-		Ok(())
+
+		let mut new_self = self;
+		new_self.sessions = new_self.sessions.update(session_id.to_string(), session);
+		Ok(new_self)
 	}
 
 	pub fn get_env(&self, session_id: &str, key: &str) -> Result<Option<String>, SandboxError> {
@@ -237,31 +369,47 @@ impl VirtualShell {
 		Ok(session.env.get(key).cloned())
 	}
 
-	pub fn list_env(&self, session_id: &str) -> Result<&HashMap<String, String>, SandboxError> {
+	pub fn list_env(
+		&self,
+		session_id: &str,
+	) -> Result<&ImHashMap<String, String>, SandboxError> {
 		let session = self.get_session(session_id)?;
 		Ok(&session.env)
 	}
 
-	pub fn delete_env(&mut self, session_id: &str, key: &str) -> Result<bool, SandboxError> {
+	pub fn delete_env(self, session_id: &str, key: &str) -> Result<(Self, bool), SandboxError> {
 		let session = self
 			.sessions
-			.get_mut(session_id)
+			.get(session_id)
 			.ok_or_else(|| SandboxError::VshSessionNotFound(session_id.to_string()))?;
+
+		let existed = session.env.contains_key(key);
+		let mut session = session.clone();
+		session.env = session.env.without(key);
 		session.last_active_at = now_ms();
-		Ok(session.env.remove(key).is_some())
+
+		let mut new_self = self;
+		new_self.sessions = new_self.sessions.update(session_id.to_string(), session);
+		Ok((new_self, existed))
 	}
 
 	// -- Shell state ----------------------------------------------------------
 
-	pub fn set_cwd(&mut self, session_id: &str, cwd: &str) -> Result<(), SandboxError> {
+	pub fn set_cwd(self, session_id: &str, cwd: &str) -> Result<Self, SandboxError> {
 		let validated = self.sandbox.validate_cwd(&PathBuf::from(cwd))?;
+
 		let session = self
 			.sessions
-			.get_mut(session_id)
+			.get(session_id)
 			.ok_or_else(|| SandboxError::VshSessionNotFound(session_id.to_string()))?;
+
+		let mut session = session.clone();
 		session.cwd = validated;
 		session.last_active_at = now_ms();
-		Ok(())
+
+		let mut new_self = self;
+		new_self.sessions = new_self.sessions.update(session_id.to_string(), session);
+		Ok(new_self)
 	}
 
 	pub fn get_cwd(&self, session_id: &str) -> Result<String, SandboxError> {
@@ -270,31 +418,39 @@ impl VirtualShell {
 	}
 
 	pub fn set_alias(
-		&mut self,
+		self,
 		session_id: &str,
 		name: &str,
 		command: &str,
-	) -> Result<(), SandboxError> {
+	) -> Result<Self, SandboxError> {
 		let session = self
 			.sessions
-			.get_mut(session_id)
+			.get(session_id)
 			.ok_or_else(|| SandboxError::VshSessionNotFound(session_id.to_string()))?;
-		session
+
+		let mut session = session.clone();
+		session.aliases = session
 			.aliases
-			.insert(name.to_string(), command.to_string());
+			.update(name.to_string(), command.to_string());
 		session.last_active_at = now_ms();
-		Ok(())
+
+		let mut new_self = self;
+		new_self.sessions = new_self.sessions.update(session_id.to_string(), session);
+		Ok(new_self)
 	}
 
 	pub fn get_aliases(
 		&self,
 		session_id: &str,
-	) -> Result<&HashMap<String, String>, SandboxError> {
+	) -> Result<&ImHashMap<String, String>, SandboxError> {
 		let session = self.get_session(session_id)?;
 		Ok(&session.aliases)
 	}
 
-	pub fn get_history(&self, session_id: &str) -> Result<&[HistoryEntry], SandboxError> {
+	pub fn get_history(
+		&self,
+		session_id: &str,
+	) -> Result<&ImVector<HistoryEntry>, SandboxError> {
 		let session = self.get_session(session_id)?;
 		Ok(&session.history)
 	}
@@ -314,39 +470,6 @@ impl VirtualShell {
 	}
 
 	// -- Private helpers ------------------------------------------------------
-
-	/// Record a command execution in the session's history and update metrics.
-	fn record_history(
-		&mut self,
-		session_id: &str,
-		command: &str,
-		result: &Result<ExecResult, SandboxError>,
-	) {
-		self.total_commands += 1;
-		match result {
-			Ok(exec_result) => {
-				let session = self.sessions.get_mut(session_id).unwrap();
-				session.last_active_at = now_ms();
-				session.history.push(HistoryEntry {
-					command: command.to_string(),
-					exit_code: exec_result.exit_code,
-					timestamp: now_ms(),
-					duration_ms: exec_result.duration_ms,
-				});
-			}
-			Err(_) => {
-				self.total_errors += 1;
-				let session = self.sessions.get_mut(session_id).unwrap();
-				session.last_active_at = now_ms();
-				session.history.push(HistoryEntry {
-					command: command.to_string(),
-					exit_code: -1,
-					timestamp: now_ms(),
-					duration_ms: 0,
-				});
-			}
-		}
-	}
 
 	fn resolve_alias(&self, session_id: &str, command: &str) -> String {
 		if let Some(session) = self.sessions.get(session_id) {

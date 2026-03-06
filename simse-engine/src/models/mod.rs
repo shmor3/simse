@@ -113,6 +113,11 @@ pub struct ModelConfig {
 // ── Model registry ───────────────────────────────────────────────────────
 
 /// Registry managing loaded text generation and embedding models.
+///
+/// Note: `Box<dyn TextGenerator>` and `Box<dyn Embedder>` are not `Clone`,
+/// so we use `std::collections::HashMap` rather than `im::HashMap` for these
+/// trait-object maps. Load methods use the owned-return pattern, returning
+/// `(Self, ())` to maintain functional state transitions.
 pub struct ModelRegistry {
     generators: HashMap<String, Box<dyn TextGenerator>>,
     embedders: HashMap<String, Box<dyn Embedder>>,
@@ -135,30 +140,34 @@ impl ModelRegistry {
     }
 
     /// Load a text generation model (GGUF quantized).
-    pub fn load_generator(&mut self, model_id: &str, config: &ModelConfig) -> Result<()> {
+    /// Returns the updated registry on success (owned-return pattern).
+    pub fn load_generator(mut self, model_id: &str, config: &ModelConfig) -> Result<Self> {
         tracing::info!(model_id, "Loading text generation model");
         let generator = llama::LlamaGenerator::from_hub(model_id, config, &self.device)?;
         self.generators.insert(model_id.to_string(), Box::new(generator));
-        Ok(())
+        Ok(self)
     }
 
     /// Load an embedding model.
-    pub fn load_embedder(&mut self, model_id: &str, _config: &ModelConfig) -> Result<()> {
+    /// Returns the updated registry on success (owned-return pattern).
+    pub fn load_embedder(mut self, model_id: &str, _config: &ModelConfig) -> Result<Self> {
         tracing::info!(model_id, "Loading embedding model");
         let embedder = bert::BertEmbedder::from_hub(model_id, &self.device)?;
         self.embedders.insert(model_id.to_string(), Box::new(embedder));
-        Ok(())
+        Ok(self)
     }
 
     /// Load a TEI bridge embedder.
-    pub fn load_tei_embedder(&mut self, key: &str, config: TeiConfig) -> Result<()> {
+    /// Returns the updated registry on success (owned-return pattern).
+    pub fn load_tei_embedder(mut self, key: &str, config: TeiConfig) -> Result<Self> {
         tracing::info!(key, url = %config.base_url, "Loading TEI bridge embedder");
         let embedder = TeiEmbedder::new(config);
         self.embedders.insert(key.to_string(), Box::new(embedder));
-        Ok(())
+        Ok(self)
     }
 
     /// Get a mutable reference to a text generator.
+    // PERF: returns &mut for hot-path neural network forward passes (KV cache mutation)
     pub fn get_generator(&mut self, model_id: &str) -> Option<&mut dyn TextGenerator> {
         self.generators.get_mut(model_id).map(move |g| &mut **g as &mut dyn TextGenerator)
     }
@@ -236,13 +245,13 @@ mod tests {
 
     #[test]
     fn get_embedder_bare_tei_prefix_maps_to_default() {
-        let mut registry = ModelRegistry::new(candle_core::Device::Cpu);
+        let registry = ModelRegistry::new(candle_core::Device::Cpu);
         // Load a TEI embedder with the default key
         let config = TeiConfig {
             base_url: "http://localhost:8080".to_string(),
             ..Default::default()
         };
-        registry.load_tei_embedder("tei://default", config).unwrap();
+        let registry = registry.load_tei_embedder("tei://default", config).unwrap();
 
         // "tei://" should map to "tei://default"
         assert!(registry.get_embedder("tei://").is_some());
@@ -250,12 +259,12 @@ mod tests {
 
     #[test]
     fn get_embedder_tei_prefix_with_name() {
-        let mut registry = ModelRegistry::new(candle_core::Device::Cpu);
+        let registry = ModelRegistry::new(candle_core::Device::Cpu);
         let config = TeiConfig {
             base_url: "http://localhost:9090".to_string(),
             ..Default::default()
         };
-        registry.load_tei_embedder("tei://my-model", config).unwrap();
+        let registry = registry.load_tei_embedder("tei://my-model", config).unwrap();
 
         assert!(registry.get_embedder("tei://my-model").is_some());
         assert!(registry.get_embedder("tei://other-model").is_none());
@@ -271,9 +280,9 @@ mod tests {
 
     #[test]
     fn available_models_includes_tei_embedders() {
-        let mut registry = ModelRegistry::new(candle_core::Device::Cpu);
+        let registry = ModelRegistry::new(candle_core::Device::Cpu);
         let config = TeiConfig::default();
-        registry.load_tei_embedder("tei://test", config).unwrap();
+        let registry = registry.load_tei_embedder("tei://test", config).unwrap();
 
         let models = registry.available_models();
         assert_eq!(models.len(), 1);
@@ -285,15 +294,14 @@ mod tests {
 
     #[test]
     fn load_tei_embedder_and_retrieve() {
-        let mut registry = ModelRegistry::new(candle_core::Device::Cpu);
+        let registry = ModelRegistry::new(candle_core::Device::Cpu);
         let config = TeiConfig {
             base_url: "http://gpu-server:3000".to_string(),
             timeout_secs: 60,
             normalize: true,
             truncate: false,
         };
-        let result = registry.load_tei_embedder("tei://roundtrip", config);
-        assert!(result.is_ok());
+        let registry = registry.load_tei_embedder("tei://roundtrip", config).unwrap();
 
         // Should be retrievable by exact key
         assert!(registry.get_embedder("tei://roundtrip").is_some());
@@ -305,10 +313,10 @@ mod tests {
 
     #[test]
     fn load_multiple_tei_embedders() {
-        let mut registry = ModelRegistry::new(candle_core::Device::Cpu);
+        let registry = ModelRegistry::new(candle_core::Device::Cpu);
 
-        registry.load_tei_embedder("tei://a", TeiConfig::default()).unwrap();
-        registry.load_tei_embedder("tei://b", TeiConfig::default()).unwrap();
+        let registry = registry.load_tei_embedder("tei://a", TeiConfig::default()).unwrap();
+        let registry = registry.load_tei_embedder("tei://b", TeiConfig::default()).unwrap();
 
         assert!(registry.get_embedder("tei://a").is_some());
         assert!(registry.get_embedder("tei://b").is_some());

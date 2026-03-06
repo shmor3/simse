@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use im::Vector as ImVector;
 use regex::Regex;
 
 #[derive(Debug, Clone)]
@@ -12,7 +13,7 @@ pub struct MockResponse {
     pub delay_ms: Option<u64>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct MockDefinition {
     id: String,
     method: Option<String>,
@@ -40,9 +41,12 @@ pub struct MockListItem {
     pub remaining: Option<usize>,
 }
 
+/// Mock store using persistent `im::Vector` for cheap cloning
+/// and functional-style owned-return state transitions.
+#[derive(Debug, Clone)]
 pub struct MockStore {
-    mocks: Vec<MockDefinition>,
-    hits: Vec<MockHit>,
+    mocks: ImVector<MockDefinition>,
+    hits: ImVector<MockHit>,
 }
 
 impl Default for MockStore {
@@ -54,21 +58,22 @@ impl Default for MockStore {
 impl MockStore {
     pub fn new() -> Self {
         Self {
-            mocks: Vec::new(),
-            hits: Vec::new(),
+            mocks: ImVector::new(),
+            hits: ImVector::new(),
         }
     }
 
+    /// Register a new mock definition. Owned-return: consumes self, returns `(Self, String)`.
     pub fn register(
-        &mut self,
+        mut self,
         method: Option<String>,
         url_pattern: &str,
         response: MockResponse,
         times: Option<usize>,
-    ) -> String {
+    ) -> (Self, String) {
         let id = uuid::Uuid::new_v4().to_string();
         let compiled = glob_to_regex(url_pattern);
-        self.mocks.push(MockDefinition {
+        self.mocks.push_back(MockDefinition {
             id: id.clone(),
             method,
             url_pattern: url_pattern.to_string(),
@@ -77,20 +82,28 @@ impl MockStore {
             times,
             remaining: times,
         });
-        id
+        (self, id)
     }
 
-    pub fn unregister(&mut self, id: &str) -> bool {
+    /// Unregister a mock by ID. Owned-return: consumes self, returns `(Self, bool)`.
+    pub fn unregister(self, id: &str) -> (Self, bool) {
         let len_before = self.mocks.len();
-        self.mocks.retain(|m| m.id != id);
-        self.mocks.len() < len_before
+        let mocks: ImVector<MockDefinition> = self
+            .mocks
+            .into_iter()
+            .filter(|m| m.id != id)
+            .collect();
+        let removed = mocks.len() < len_before;
+        (Self { mocks, hits: self.hits }, removed)
     }
 
+    /// Find a matching mock for the given URL/method, decrement remaining count,
+    /// and record a hit. Owned-return: consumes self, returns `(Self, Option<(String, MockResponse)>)`.
     pub fn find_match(
-        &mut self,
+        mut self,
         url: &str,
         method: Option<&str>,
-    ) -> Option<(String, MockResponse)> {
+    ) -> (Self, Option<(String, MockResponse)>) {
         let idx = self.mocks.iter().position(|m| {
             // Check remaining count
             if let Some(0) = m.remaining {
@@ -108,15 +121,23 @@ impl MockStore {
             }
             // Check URL pattern
             m.compiled.is_match(url)
-        })?;
+        });
 
-        let mock = &mut self.mocks[idx];
+        let Some(idx) = idx else {
+            return (self, None);
+        };
+
+        let mock = &self.mocks[idx];
         let id = mock.id.clone();
         let response = mock.response.clone();
 
         // Decrement remaining
-        if let Some(ref mut remaining) = mock.remaining {
-            *remaining -= 1;
+        if mock.remaining.is_some() {
+            let mut updated = mock.clone();
+            if let Some(ref mut remaining) = updated.remaining {
+                *remaining -= 1;
+            }
+            self.mocks.set(idx, updated);
         }
 
         // Record hit
@@ -124,16 +145,17 @@ impl MockStore {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        self.hits.push(MockHit {
+        self.hits.push_back(MockHit {
             mock_id: id.clone(),
             url: url.to_string(),
             method: method.map(String::from),
             timestamp: now,
         });
 
-        Some((id, response))
+        (self, Some((id, response)))
     }
 
+    /// List active mocks (those with remaining > 0 or unlimited). Read-only.
     pub fn list(&self) -> Vec<MockListItem> {
         self.mocks
             .iter()
@@ -149,12 +171,16 @@ impl MockStore {
             .collect()
     }
 
-    pub fn clear(&mut self) {
-        self.mocks.clear();
-        self.hits.clear();
+    /// Clear all mocks and history. Owned-return: consumes self, returns `Self`.
+    pub fn clear(self) -> Self {
+        Self {
+            mocks: ImVector::new(),
+            hits: ImVector::new(),
+        }
     }
 
-    pub fn history(&self) -> &[MockHit] {
+    /// Get hit history. Read-only.
+    pub fn history(&self) -> &ImVector<MockHit> {
         &self.hits
     }
 }
@@ -192,14 +218,14 @@ mod tests {
 
     #[test]
     fn register_and_match() {
-        let mut store = MockStore::new();
-        let id = store.register(
+        let store = MockStore::new();
+        let (store, id) = store.register(
             Some("GET".into()),
             "mock://api.example.com/users",
             make_response(),
             None,
         );
-        let hit = store.find_match("mock://api.example.com/users", Some("GET"));
+        let (_, hit) = store.find_match("mock://api.example.com/users", Some("GET"));
         assert!(hit.is_some());
         let (matched_id, resp) = hit.unwrap();
         assert_eq!(matched_id, id);
@@ -208,81 +234,76 @@ mod tests {
 
     #[test]
     fn glob_pattern_matching() {
-        let mut store = MockStore::new();
-        store.register(None, "mock://api.example.com/*", make_response(), None);
-        assert!(store
-            .find_match("mock://api.example.com/users", None)
-            .is_some());
-        assert!(store
-            .find_match("mock://api.example.com/posts/123", None)
-            .is_some());
-        assert!(store.find_match("mock://other.com/users", None).is_none());
+        let store = MockStore::new();
+        let (store, _) = store.register(None, "mock://api.example.com/*", make_response(), None);
+        let (store, hit) = store.find_match("mock://api.example.com/users", None);
+        assert!(hit.is_some());
+        let (store, hit) = store.find_match("mock://api.example.com/posts/123", None);
+        assert!(hit.is_some());
+        let (_, hit) = store.find_match("mock://other.com/users", None);
+        assert!(hit.is_none());
     }
 
     #[test]
     fn method_filtering() {
-        let mut store = MockStore::new();
-        store.register(
+        let store = MockStore::new();
+        let (store, _) = store.register(
             Some("POST".into()),
             "mock://api.example.com/users",
             make_response(),
             None,
         );
-        assert!(store
-            .find_match("mock://api.example.com/users", Some("POST"))
-            .is_some());
-        assert!(store
-            .find_match("mock://api.example.com/users", Some("GET"))
-            .is_none());
+        let (store, hit) = store.find_match("mock://api.example.com/users", Some("POST"));
+        assert!(hit.is_some());
+        let (_, hit) = store.find_match("mock://api.example.com/users", Some("GET"));
+        assert!(hit.is_none());
     }
 
     #[test]
     fn none_method_matches_any() {
-        let mut store = MockStore::new();
-        store.register(None, "mock://api.example.com/users", make_response(), None);
-        assert!(store
-            .find_match("mock://api.example.com/users", Some("GET"))
-            .is_some());
-        assert!(store
-            .find_match("mock://api.example.com/users", Some("POST"))
-            .is_some());
+        let store = MockStore::new();
+        let (store, _) = store.register(None, "mock://api.example.com/users", make_response(), None);
+        let (store, hit) = store.find_match("mock://api.example.com/users", Some("GET"));
+        assert!(hit.is_some());
+        let (_, hit) = store.find_match("mock://api.example.com/users", Some("POST"));
+        assert!(hit.is_some());
     }
 
     #[test]
     fn times_limit_consumes_mock() {
-        let mut store = MockStore::new();
-        store.register(None, "mock://api.example.com/once", make_response(), Some(1));
-        assert!(store
-            .find_match("mock://api.example.com/once", None)
-            .is_some());
-        assert!(store
-            .find_match("mock://api.example.com/once", None)
-            .is_none());
+        let store = MockStore::new();
+        let (store, _) = store.register(None, "mock://api.example.com/once", make_response(), Some(1));
+        let (store, hit) = store.find_match("mock://api.example.com/once", None);
+        assert!(hit.is_some());
+        let (_, hit) = store.find_match("mock://api.example.com/once", None);
+        assert!(hit.is_none());
     }
 
     #[test]
     fn unregister_removes_mock() {
-        let mut store = MockStore::new();
-        let id = store.register(None, "mock://x", make_response(), None);
-        assert!(store.unregister(&id));
-        assert!(store.find_match("mock://x", None).is_none());
+        let store = MockStore::new();
+        let (store, id) = store.register(None, "mock://x", make_response(), None);
+        let (store, removed) = store.unregister(&id);
+        assert!(removed);
+        let (_, hit) = store.find_match("mock://x", None);
+        assert!(hit.is_none());
     }
 
     #[test]
     fn clear_removes_all() {
-        let mut store = MockStore::new();
-        store.register(None, "mock://a", make_response(), None);
-        store.register(None, "mock://b", make_response(), None);
-        store.clear();
+        let store = MockStore::new();
+        let (store, _) = store.register(None, "mock://a", make_response(), None);
+        let (store, _) = store.register(None, "mock://b", make_response(), None);
+        let store = store.clear();
         assert!(store.list().is_empty());
     }
 
     #[test]
     fn history_tracks_hits() {
-        let mut store = MockStore::new();
-        store.register(None, "mock://api/*", make_response(), None);
-        store.find_match("mock://api/one", Some("GET"));
-        store.find_match("mock://api/two", Some("POST"));
+        let store = MockStore::new();
+        let (store, _) = store.register(None, "mock://api/*", make_response(), None);
+        let (store, _) = store.find_match("mock://api/one", Some("GET"));
+        let (store, _) = store.find_match("mock://api/two", Some("POST"));
         let hist = store.history();
         assert_eq!(hist.len(), 2);
         assert_eq!(hist[0].url, "mock://api/one");
@@ -291,14 +312,15 @@ mod tests {
 
     #[test]
     fn first_match_wins() {
-        let mut store = MockStore::new();
+        let store = MockStore::new();
         let mut resp1 = make_response();
         resp1.status = 200;
         let mut resp2 = make_response();
         resp2.status = 404;
-        store.register(None, "mock://api/*", resp1, None);
-        store.register(None, "mock://api/*", resp2, None);
-        let (_, resp) = store.find_match("mock://api/test", None).unwrap();
+        let (store, _) = store.register(None, "mock://api/*", resp1, None);
+        let (store, _) = store.register(None, "mock://api/*", resp2, None);
+        let (_, hit) = store.find_match("mock://api/test", None);
+        let (_, resp) = hit.unwrap();
         assert_eq!(resp.status, 200);
     }
 }

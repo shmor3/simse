@@ -263,13 +263,14 @@ impl TuiRuntime {
 		input: &str,
 		callbacks: LoopCallbacks,
 	) -> Result<String, RuntimeError> {
-		let engine = self
-			.acp_engine
-			.as_ref()
-			.ok_or(RuntimeError::NotConnected)?;
+		let engine = Arc::clone(
+			self.acp_engine
+				.as_ref()
+				.ok_or(RuntimeError::NotConnected)?,
+		);
 
 		// Add the user message to the conversation
-		self.conversation.add_user(input);
+		self.update_conversation(|c| c.add_user(input));
 
 		// Reset cancellation token for this run
 		self.cancel_token = CancellationToken::new();
@@ -301,7 +302,7 @@ impl TuiRuntime {
 			.collect();
 
 		let adapter = AcpAdapter {
-			engine: Arc::clone(engine),
+			engine: Arc::clone(&engine),
 			session_id: self.session_id.clone(),
 			server_name: self.config.default_server.clone(),
 		};
@@ -322,7 +323,11 @@ impl TuiRuntime {
 			Ok(loop_result) => {
 				// Add the final assistant response to the conversation
 				if !loop_result.final_text.is_empty() {
-					self.conversation.add_assistant(&loop_result.final_text);
+					let conv = std::mem::replace(
+						&mut self.conversation,
+						ConversationBuffer::new(ConversationOptions::default()),
+					);
+					self.conversation = conv.add_assistant(&loop_result.final_text);
 				}
 				Ok(loop_result.final_text)
 			}
@@ -388,6 +393,19 @@ impl TuiRuntime {
 	/// Get a mutable reference to the conversation buffer.
 	pub fn conversation_mut(&mut self) -> &mut ConversationBuffer {
 		&mut self.conversation
+	}
+
+	/// Apply a functional transformation to the conversation buffer.
+	///
+	/// Takes the current buffer, passes it to the closure, and stores the
+	/// result back. This avoids the borrow-and-consume conflict inherent
+	/// in owned-return methods called through `&mut self`.
+	pub fn update_conversation(&mut self, f: impl FnOnce(ConversationBuffer) -> ConversationBuffer) {
+		let conv = std::mem::replace(
+			&mut self.conversation,
+			ConversationBuffer::new(ConversationOptions::default()),
+		);
+		self.conversation = f(conv);
 	}
 
 	/// Get a reference to the tool registry.
@@ -520,14 +538,15 @@ impl TuiRuntime {
 					.get(&id)
 					.ok_or_else(|| RuntimeError::Acp(format!("Session not found: {id}")))?;
 				let messages = self.session_store.load(&id);
-				self.conversation = ConversationBuffer::new(ConversationOptions::default());
+				let mut conv = ConversationBuffer::new(ConversationOptions::default());
 				for msg in &messages {
-					match msg.role.as_str() {
-						"user" => self.conversation.add_user(&msg.content),
-						"assistant" => self.conversation.add_assistant(&msg.content),
-						_ => {}
-					}
+					conv = match msg.role.as_str() {
+						"user" => conv.add_user(&msg.content),
+						"assistant" => conv.add_assistant(&msg.content),
+						_ => conv,
+					};
 				}
+				self.conversation = conv;
 				self.session_id = Some(id.clone());
 				Ok(format!("Resumed session: {}", meta.title))
 			}
@@ -640,7 +659,11 @@ impl TuiRuntime {
 					.ok_or(RuntimeError::NotConnected)?;
 
 				let chain_input = format!("[chain:{name}] {args}");
-				self.conversation.add_user(&chain_input);
+				let conv = std::mem::replace(
+					&mut self.conversation,
+					ConversationBuffer::new(ConversationOptions::default()),
+				);
+				self.conversation = conv.add_user(&chain_input);
 
 				self.cancel_token = CancellationToken::new();
 				let options = AgenticLoopOptions {
@@ -690,7 +713,11 @@ impl TuiRuntime {
 				match result {
 					Ok(loop_result) => {
 						if !loop_result.final_text.is_empty() {
-							self.conversation.add_assistant(&loop_result.final_text);
+							let conv = std::mem::replace(
+								&mut self.conversation,
+								ConversationBuffer::new(ConversationOptions::default()),
+							);
+							self.conversation = conv.add_assistant(&loop_result.final_text);
 						}
 						Ok(loop_result.final_text)
 					}
@@ -808,8 +835,11 @@ impl TuiRuntime {
 			// ── Meta ────────────────────────────────────
 			BridgeAction::Compact => {
 				let msg_count = self.conversation.to_messages().len();
-				self.conversation
-					.compact("[User-requested compaction: conversation history summarized]");
+				let conv = std::mem::replace(
+					&mut self.conversation,
+					ConversationBuffer::new(ConversationOptions::default()),
+				);
+				self.conversation = conv.compact("[User-requested compaction: conversation history summarized]");
 				Ok(format!(
 					"Conversation compacted ({msg_count} messages → 1 summary)."
 				))
@@ -1268,7 +1298,7 @@ mod tests {
 	#[test]
 	fn event_loop_conversation_access() {
 		let mut runtime = TuiRuntime::new(test_config());
-		runtime.conversation_mut().add_user("Hello");
+		runtime.update_conversation(|c| c.add_user("Hello"));
 		let messages = runtime.conversation().to_messages();
 		assert_eq!(messages.len(), 1);
 	}
@@ -1276,7 +1306,7 @@ mod tests {
 	#[test]
 	fn event_loop_reset_conversation() {
 		let mut runtime = TuiRuntime::new(test_config());
-		runtime.conversation_mut().add_user("Hello");
+		runtime.update_conversation(|c| c.add_user("Hello"));
 		assert!(!runtime.conversation().to_messages().is_empty());
 		runtime.reset_conversation();
 		assert!(runtime.conversation().to_messages().is_empty());

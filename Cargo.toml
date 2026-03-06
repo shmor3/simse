@@ -4,6 +4,7 @@ members = [
     "simse-ui-core",
     "simse-tui",
     "simse-core",
+    "simse-resilience",
 ]
 exclude = [
     "simse-adaptive",

@@ -89,14 +89,13 @@ where
 
     for attempt in 1..=max_attempts {
         // Check cancellation before each attempt
-        if let Some(ref token) = cancel {
-            if token.is_cancelled() {
+        if let Some(ref token) = cancel
+            && token.is_cancelled() {
                 return Err(SimseError::resilience(
                     ResilienceErrorCode::RetryAborted,
                     "Retry aborted by cancellation token",
                 ));
             }
-        }
 
         match f(attempt).await {
             Ok(value) => return Ok(value),
@@ -109,11 +108,10 @@ where
                 }
 
                 // Check whether this error is retryable
-                if let (Some(ref predicate), Some(ref err)) = (&should_retry, &last_error) {
-                    if !predicate(err, attempt) {
+                if let (Some(predicate), Some(err)) = (&should_retry, &last_error)
+                    && !predicate(err, attempt) {
                         return Err(last_error.expect("checked above"));
                     }
-                }
 
                 // Calculate delay with exponential backoff and jitter
                 let exp_delay_secs =
@@ -131,7 +129,7 @@ where
                 let final_secs = (capped_secs + jitter).max(0.0);
                 let final_delay = Duration::from_secs_f64(final_secs);
 
-                if let (Some(ref cb), Some(ref err)) = (&on_retry, &last_error) {
+                if let (Some(cb), Some(err)) = (&on_retry, &last_error) {
                     cb(err, attempt + 1, final_delay);
                 }
 

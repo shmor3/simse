@@ -18,6 +18,12 @@ pub struct SandboxInit {
     pub max_connections: usize,
 }
 
+/// Pure state for the virtual network — uses `im`-backed collections
+/// (via `MockStore` and `SessionManager`) for cheap cloning and
+/// functional-style owned-return transitions.
+///
+/// The `backend` field is the I/O boundary: methods that touch it
+/// are marked with `// PERF: hot-path I/O` and keep `&mut self`.
 pub struct VirtualNetwork {
     initialized: bool,
     sandbox: NetSandboxConfig,
@@ -53,11 +59,13 @@ impl VirtualNetwork {
         self.initialized
     }
 
+    /// Initialize the network with sandbox config and optional backend.
+    /// Owned-return: consumes self, returns `Self`.
     pub fn initialize(
-        &mut self,
+        mut self,
         sandbox: Option<SandboxInit>,
         backend: Option<NetImpl>,
-    ) {
+    ) -> Self {
         if let Some(init) = sandbox {
             self.sandbox = NetSandboxConfig {
                 allowed_hosts: init.allowed_hosts.iter().map(|h| HostRule::parse(h)).collect(),
@@ -79,6 +87,7 @@ impl VirtualNetwork {
         }
         self.backend = backend;
         self.initialized = true;
+        self
     }
 
     /// Returns a reference to the backend, if one has been set.
@@ -95,33 +104,40 @@ impl VirtualNetwork {
 
     // ── Mock HTTP ──
 
+    /// Perform a mock HTTP request. Owned-return: consumes self, returns
+    /// `(Self, Result<HttpResponseResult, SandboxError>)`.
     pub fn mock_http_request(
-        &mut self,
+        mut self,
         url: &str,
         method: Option<&str>,
         _headers: Option<&HashMap<String, String>>,
         _body: Option<&str>,
-    ) -> Result<HttpResponseResult, SandboxError> {
-        self.require_init()?;
+    ) -> (Self, Result<HttpResponseResult, SandboxError>) {
+        if let Err(e) = self.require_init() {
+            return (self, Err(e));
+        }
         self.total_requests += 1;
 
-        match self.mocks.find_match(url, method) {
+        let (mocks, found) = self.mocks.find_match(url, method);
+        self.mocks = mocks;
+
+        match found {
             Some((_id, response)) => {
                 let body_len = response.body.len() as u64;
                 self.bytes_total += body_len;
 
-                Ok(HttpResponseResult {
+                (self, Ok(HttpResponseResult {
                     status: response.status,
                     headers: response.headers,
                     body: response.body,
                     body_type: response.body_type,
                     duration_ms: response.delay_ms.unwrap_or(0),
                     bytes_received: body_len,
-                })
+                }))
             }
             None => {
                 self.total_errors += 1;
-                Err(SandboxError::VnetNoMockMatch(url.to_string()))
+                (self, Err(SandboxError::VnetNoMockMatch(url.to_string())))
             }
         }
     }
@@ -132,6 +148,7 @@ impl VirtualNetwork {
     ///
     /// The caller strips `net://` from the URL and provides the real URL.
     /// This method increments metrics and delegates to the backend.
+    // PERF: hot-path I/O — requires &mut self for backend access + async
     pub async fn net_http_request(
         &mut self,
         real_url: &str,
@@ -197,24 +214,32 @@ impl VirtualNetwork {
 
     // ── Mock management ──
 
+    /// Register a new mock. Owned-return: consumes self, returns `(Self, String)`.
     pub fn register_mock(
-        &mut self,
+        mut self,
         method: Option<String>,
         url_pattern: &str,
         response: vnet_mock_store::MockResponse,
         times: Option<usize>,
-    ) -> String {
-        self.mocks.register(method, url_pattern, response, times)
+    ) -> (Self, String) {
+        let (mocks, id) = self.mocks.register(method, url_pattern, response, times);
+        self.mocks = mocks;
+        (self, id)
     }
 
-    pub fn unregister_mock(&mut self, id: &str) -> Result<(), SandboxError> {
-        if self.mocks.unregister(id) {
-            Ok(())
+    /// Unregister a mock by ID. Owned-return: consumes self, returns
+    /// `(Self, Result<(), SandboxError>)`.
+    pub fn unregister_mock(mut self, id: &str) -> (Self, Result<(), SandboxError>) {
+        let (mocks, removed) = self.mocks.unregister(id);
+        self.mocks = mocks;
+        if removed {
+            (self, Ok(()))
         } else {
-            Err(SandboxError::VnetMockNotFound(id.to_string()))
+            (self, Err(SandboxError::VnetMockNotFound(id.to_string())))
         }
     }
 
+    /// List active mocks. Read-only.
     pub fn list_mocks(&self) -> Vec<MockDefinitionInfo> {
         self.mocks
             .list()
@@ -230,10 +255,13 @@ impl VirtualNetwork {
             .collect()
     }
 
-    pub fn clear_mocks(&mut self) {
-        self.mocks.clear();
+    /// Clear all mocks. Owned-return: consumes self, returns `Self`.
+    pub fn clear_mocks(mut self) -> Self {
+        self.mocks = self.mocks.clear();
+        self
     }
 
+    /// Get mock hit history. Read-only.
     pub fn mock_history(&self) -> Vec<MockHitInfo> {
         self.mocks
             .history()
@@ -247,25 +275,33 @@ impl VirtualNetwork {
             .collect()
     }
 
+    /// Find a matching mock (consuming call). Owned-return: consumes self,
+    /// returns `(Self, Option<MockResponse>)`.
     pub fn mock_store_find_match(
-        &mut self,
+        mut self,
         url: &str,
         method: Option<&str>,
-    ) -> Option<vnet_mock_store::MockResponse> {
-        self.mocks.find_match(url, method).map(|(_, resp)| resp)
+    ) -> (Self, Option<vnet_mock_store::MockResponse>) {
+        let (mocks, found) = self.mocks.find_match(url, method);
+        self.mocks = mocks;
+        (self, found.map(|(_, resp)| resp))
     }
 
     // ── Session management ──
 
+    /// Create a new session. Owned-return: consumes self, returns `(Self, String)`.
     pub fn create_session(
-        &mut self,
+        mut self,
         session_type: SessionType,
         target: &str,
         scheme: Scheme,
-    ) -> String {
-        self.sessions.create(session_type, target, scheme)
+    ) -> (Self, String) {
+        let (sessions, id) = self.sessions.create(session_type, target, scheme);
+        self.sessions = sessions;
+        (self, id)
     }
 
+    /// Get a session by ID. Read-only.
     pub fn get_session(&self, id: &str) -> Result<SessionInfo, SandboxError> {
         let session = self
             .sessions
@@ -284,6 +320,7 @@ impl VirtualNetwork {
         })
     }
 
+    /// List all sessions. Read-only.
     pub fn list_sessions(&self) -> Vec<SessionInfo> {
         self.sessions
             .list()
@@ -301,30 +338,37 @@ impl VirtualNetwork {
             .collect()
     }
 
-    pub fn close_session(&mut self, id: &str) -> Result<(), SandboxError> {
-        if self.sessions.close(id) {
-            Ok(())
+    /// Close a session by ID. Owned-return: consumes self, returns
+    /// `(Self, Result<(), SandboxError>)`.
+    pub fn close_session(mut self, id: &str) -> (Self, Result<(), SandboxError>) {
+        let (sessions, removed) = self.sessions.close(id);
+        self.sessions = sessions;
+        if removed {
+            (self, Ok(()))
         } else {
-            Err(SandboxError::VnetSessionNotFound(id.to_string()))
+            (self, Err(SandboxError::VnetSessionNotFound(id.to_string())))
         }
     }
 
     // ── Session activity (for external callers) ──
 
     /// Record bytes sent/received on an existing session.
+    /// Owned-return: consumes self, returns `Self`.
     pub fn record_session_activity(
-        &mut self,
+        mut self,
         session_id: &str,
         bytes_sent: u64,
         bytes_received: u64,
-    ) {
-        self.sessions
-            .record_activity(session_id, bytes_sent, bytes_received);
+    ) -> Self {
+        self.sessions = self.sessions.record_activity(session_id, bytes_sent, bytes_received);
+        self
     }
 
     /// Increment the total request counter (for protocols handled externally).
-    pub fn increment_requests(&mut self) {
+    /// Owned-return: consumes self, returns `Self`.
+    pub fn increment_requests(mut self) -> Self {
         self.total_requests += 1;
+        self
     }
 
     // ── Metrics ──
@@ -346,35 +390,31 @@ mod tests {
 
     #[test]
     fn not_initialized_error() {
-        let mut net = VirtualNetwork::new();
-        let err = net
-            .mock_http_request("mock://x", Some("GET"), None, None)
-            .unwrap_err();
-        assert!(matches!(err, SandboxError::VnetNotInitialized));
+        let net = VirtualNetwork::new();
+        let (_, err) = net.mock_http_request("mock://x", Some("GET"), None, None);
+        assert!(matches!(err.unwrap_err(), SandboxError::VnetNotInitialized));
     }
 
     #[test]
     fn initialize_sets_state() {
-        let mut net = VirtualNetwork::new();
-        net.initialize(None, None);
+        let net = VirtualNetwork::new();
+        let net = net.initialize(None, None);
         assert!(net.is_initialized());
     }
 
     #[test]
     fn mock_http_request_no_match() {
-        let mut net = VirtualNetwork::new();
-        net.initialize(None, None);
-        let err = net
-            .mock_http_request("mock://api/test", Some("GET"), None, None)
-            .unwrap_err();
-        assert!(matches!(err, SandboxError::VnetNoMockMatch(_)));
+        let net = VirtualNetwork::new();
+        let net = net.initialize(None, None);
+        let (_, err) = net.mock_http_request("mock://api/test", Some("GET"), None, None);
+        assert!(matches!(err.unwrap_err(), SandboxError::VnetNoMockMatch(_)));
     }
 
     #[test]
     fn mock_http_request_success() {
-        let mut net = VirtualNetwork::new();
-        net.initialize(None, None);
-        net.register_mock(
+        let net = VirtualNetwork::new();
+        let net = net.initialize(None, None);
+        let (net, _id) = net.register_mock(
             Some("GET".into()),
             "mock://api/users",
             vnet_mock_store::MockResponse {
@@ -386,18 +426,17 @@ mod tests {
             },
             None,
         );
-        let resp = net
-            .mock_http_request("mock://api/users", Some("GET"), None, None)
-            .unwrap();
+        let (_, resp) = net.mock_http_request("mock://api/users", Some("GET"), None, None);
+        let resp = resp.unwrap();
         assert_eq!(resp.status, 200);
         assert_eq!(resp.body, "{\"users\":[]}");
     }
 
     #[test]
     fn metrics_track_requests() {
-        let mut net = VirtualNetwork::new();
-        net.initialize(None, None);
-        net.register_mock(
+        let net = VirtualNetwork::new();
+        let net = net.initialize(None, None);
+        let (net, _) = net.register_mock(
             None,
             "mock://api/*",
             vnet_mock_store::MockResponse {
@@ -409,10 +448,8 @@ mod tests {
             },
             None,
         );
-        net.mock_http_request("mock://api/a", None, None, None)
-            .unwrap();
-        net.mock_http_request("mock://api/b", None, None, None)
-            .unwrap();
+        let (net, _) = net.mock_http_request("mock://api/a", None, None, None);
+        let (net, _) = net.mock_http_request("mock://api/b", None, None, None);
         let m = net.metrics();
         assert_eq!(m.total_requests, 2);
         assert_eq!(m.total_errors, 0);
@@ -420,9 +457,9 @@ mod tests {
 
     #[test]
     fn metrics_track_errors() {
-        let mut net = VirtualNetwork::new();
-        net.initialize(None, None);
-        let _ = net.mock_http_request("mock://no-match", None, None, None);
+        let net = VirtualNetwork::new();
+        let net = net.initialize(None, None);
+        let (net, _) = net.mock_http_request("mock://no-match", None, None, None);
         let m = net.metrics();
         assert_eq!(m.total_requests, 1);
         assert_eq!(m.total_errors, 1);
@@ -430,8 +467,8 @@ mod tests {
 
     #[test]
     fn sandbox_blocks_net_request() {
-        let mut net = VirtualNetwork::new();
-        net.initialize(None, None); // empty allowlist = block all
+        let net = VirtualNetwork::new();
+        let net = net.initialize(None, None); // empty allowlist = block all
         let err = net
             .validate_net_request("evil.com", 80, "http")
             .unwrap_err();
@@ -440,7 +477,7 @@ mod tests {
 
     #[test]
     fn sandbox_allows_configured_host() {
-        let mut net = VirtualNetwork::new();
+        let net = VirtualNetwork::new();
         let sandbox = SandboxInit {
             allowed_hosts: vec!["api.example.com".into()],
             allowed_ports: vec![],
@@ -449,7 +486,7 @@ mod tests {
             max_response_bytes: 10 * 1024 * 1024,
             max_connections: 50,
         };
-        net.initialize(Some(sandbox), None);
+        let net = net.initialize(Some(sandbox), None);
         assert!(net
             .validate_net_request("api.example.com", 443, "https")
             .is_ok());
@@ -457,7 +494,7 @@ mod tests {
 
     #[test]
     fn connection_limit_enforced() {
-        let mut net = VirtualNetwork::new();
+        let net = VirtualNetwork::new();
         let sandbox = SandboxInit {
             allowed_hosts: vec!["*".into()],
             allowed_ports: vec![],
@@ -466,8 +503,8 @@ mod tests {
             max_response_bytes: 10 * 1024 * 1024,
             max_connections: 1,
         };
-        net.initialize(Some(sandbox), None);
-        net.sessions.create(
+        let net = net.initialize(Some(sandbox), None);
+        let (net, _) = net.create_session(
             crate::vnet_session::SessionType::Tcp,
             "a.com:80",
             crate::vnet_session::Scheme::Net,
@@ -478,10 +515,10 @@ mod tests {
 
     #[test]
     fn mock_register_list_unregister_clear() {
-        let mut net = VirtualNetwork::new();
-        net.initialize(None, None);
+        let net = VirtualNetwork::new();
+        let net = net.initialize(None, None);
 
-        let id = net.register_mock(
+        let (net, id) = net.register_mock(
             None,
             "mock://a",
             vnet_mock_store::MockResponse {
@@ -495,10 +532,11 @@ mod tests {
         );
 
         assert_eq!(net.list_mocks().len(), 1);
-        net.unregister_mock(&id).unwrap();
+        let (net, result) = net.unregister_mock(&id);
+        result.unwrap();
         assert!(net.list_mocks().is_empty());
 
-        net.register_mock(
+        let (net, _) = net.register_mock(
             None,
             "mock://b",
             vnet_mock_store::MockResponse {
@@ -510,7 +548,7 @@ mod tests {
             },
             None,
         );
-        net.clear_mocks();
+        let net = net.clear_mocks();
         assert!(net.list_mocks().is_empty());
     }
 }

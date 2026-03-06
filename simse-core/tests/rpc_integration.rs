@@ -12,7 +12,7 @@ use simse_core::conversation::Role;
 use simse_core::rpc_protocol::JsonRpcRequest;
 use simse_core::rpc_server::CoreRpcServer;
 use simse_core::rpc_transport::NdjsonTransport;
-use simse_core::tasks::{TaskCreateInput, TaskStatus, TaskUpdateInput};
+use simse_core::tasks::{TaskCreateInput, TaskList, TaskStatus, TaskUpdateInput};
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -183,13 +183,10 @@ fn full_lifecycle_through_core_context() {
 	assert_eq!(info.message_count, 0);
 
 	// Step 3: Set system prompt + add user message
-	ctx.session_manager.with_session(&session_id, |session| {
-		session
-			.conversation
-			.set_system_prompt("You are a helpful coding assistant.".to_string());
-		session
-			.conversation
-			.add_user("Help me write a function.");
+	ctx.session_manager.with_state_transition(&session_id, |conv| {
+		let conv = conv.set_system_prompt("You are a helpful coding assistant.".to_string());
+		let conv = conv.add_user("Help me write a function.");
+		(conv, ())
 	});
 
 	// Step 4: Get messages and verify
@@ -211,13 +208,15 @@ fn full_lifecycle_through_core_context() {
 	assert_eq!(info.message_count, 1);
 
 	// Step 5: Create task + list
-	let task = ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, task) = task_list.create(TaskCreateInput {
 		subject: "Write integration tests".to_string(),
 		description: "Cover the full RPC lifecycle".to_string(),
 		active_form: Some("Writing tests".to_string()),
 		owner: None,
 		metadata: None,
 	});
+	ctx.task_list = new_list;
 	assert_eq!(task.id, "1");
 	assert_eq!(task.status, TaskStatus::Pending);
 
@@ -258,22 +257,18 @@ fn multi_session_with_shared_tasks_and_events() {
 	let session_b = ctx.session_manager.create();
 
 	// Add messages to session A
-	ctx.session_manager.with_session(&session_a, |session| {
-		session
-			.conversation
-			.set_system_prompt("You are a Rust expert.".to_string());
-		session.conversation.add_user("How do I use lifetimes?");
-		session
-			.conversation
-			.add_assistant("Lifetimes ensure references are valid...");
+	ctx.session_manager.with_state_transition(&session_a, |conv| {
+		let conv = conv.set_system_prompt("You are a Rust expert.".to_string());
+		let conv = conv.add_user("How do I use lifetimes?");
+		let conv = conv.add_assistant("Lifetimes ensure references are valid...");
+		(conv, ())
 	});
 
 	// Add messages to session B
-	ctx.session_manager.with_session(&session_b, |session| {
-		session
-			.conversation
-			.set_system_prompt("You are a TypeScript expert.".to_string());
-		session.conversation.add_user("How do I use generics?");
+	ctx.session_manager.with_state_transition(&session_b, |conv| {
+		let conv = conv.set_system_prompt("You are a TypeScript expert.".to_string());
+		let conv = conv.add_user("How do I use generics?");
+		(conv, ())
 	});
 
 	// Verify sessions are independent
@@ -283,17 +278,20 @@ fn multi_session_with_shared_tasks_and_events() {
 	assert_eq!(info_b.message_count, 1);
 
 	// Shared task list — tasks visible across sessions
-	let task = ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, task) = task_list.create(TaskCreateInput {
 		subject: "Review code".to_string(),
 		description: "Cross-session task".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
+	ctx.task_list = new_list;
 	assert_eq!(ctx.task_list.list().len(), 1);
 
 	// Update the task
-	ctx.task_list
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list
 		.update(
 			&task.id,
 			TaskUpdateInput {
@@ -303,6 +301,7 @@ fn multi_session_with_shared_tasks_and_events() {
 			},
 		)
 		.unwrap();
+	ctx.task_list = new_list;
 
 	let updated = ctx.task_list.get(&task.id).unwrap();
 	assert_eq!(updated.status, TaskStatus::InProgress);
@@ -340,12 +339,11 @@ fn fork_session_and_diverge() {
 
 	// Create and populate original session
 	let original = ctx.session_manager.create();
-	ctx.session_manager.with_session(&original, |session| {
-		session
-			.conversation
-			.set_system_prompt("Expert assistant.".to_string());
-		session.conversation.add_user("Question 1");
-		session.conversation.add_assistant("Answer 1");
+	ctx.session_manager.with_state_transition(&original, |conv| {
+		let conv = conv.set_system_prompt("Expert assistant.".to_string());
+		let conv = conv.add_user("Question 1");
+		let conv = conv.add_assistant("Answer 1");
+		(conv, ())
 	});
 
 	// Fork
@@ -367,11 +365,10 @@ fn fork_session_and_diverge() {
 	});
 
 	// Diverge: add messages only to the forked session
-	ctx.session_manager.with_session(&forked, |session| {
-		session.conversation.add_user("Question 2");
-		session
-			.conversation
-			.add_assistant("Different answer path.");
+	ctx.session_manager.with_state_transition(&forked, |conv| {
+		let conv = conv.add_user("Question 2");
+		let conv = conv.add_assistant("Different answer path.");
+		(conv, ())
 	});
 
 	// Original unchanged
@@ -408,21 +405,22 @@ fn task_dependency_chain_with_events() {
 		});
 
 	// Create a chain: design -> implement -> test
-	ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (task_list, _) = task_list.create(TaskCreateInput {
 		subject: "Design API".to_string(),
 		description: "Design the public API surface".to_string(),
 		active_form: Some("Designing".to_string()),
 		owner: None,
 		metadata: None,
 	});
-	ctx.task_list.create(TaskCreateInput {
+	let (task_list, _) = task_list.create(TaskCreateInput {
 		subject: "Implement API".to_string(),
 		description: "Build the implementation".to_string(),
 		active_form: Some("Implementing".to_string()),
 		owner: None,
 		metadata: None,
 	});
-	ctx.task_list.create(TaskCreateInput {
+	let (task_list, _) = task_list.create(TaskCreateInput {
 		subject: "Test API".to_string(),
 		description: "Write integration tests".to_string(),
 		active_form: Some("Testing".to_string()),
@@ -431,7 +429,7 @@ fn task_dependency_chain_with_events() {
 	});
 
 	// Set up dependencies: implement blocked by design, test blocked by implement
-	ctx.task_list
+	let (task_list, _) = task_list
 		.update(
 			"2",
 			TaskUpdateInput {
@@ -441,7 +439,7 @@ fn task_dependency_chain_with_events() {
 		)
 		.unwrap();
 
-	ctx.task_list
+	let (task_list, _) = task_list
 		.update(
 			"3",
 			TaskUpdateInput {
@@ -450,6 +448,7 @@ fn task_dependency_chain_with_events() {
 			},
 		)
 		.unwrap();
+	ctx.task_list = task_list;
 
 	// Only task 1 should be available
 	let available = ctx.task_list.list_available();
@@ -457,7 +456,8 @@ fn task_dependency_chain_with_events() {
 	assert_eq!(available[0].id, "1");
 
 	// Complete task 1, publish event
-	ctx.task_list
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (task_list, _) = task_list
 		.update(
 			"1",
 			TaskUpdateInput {
@@ -466,6 +466,7 @@ fn task_dependency_chain_with_events() {
 			},
 		)
 		.unwrap();
+	ctx.task_list = task_list;
 	ctx.event_bus
 		.publish("task.completed", serde_json::json!({ "id": "1" }));
 
@@ -479,7 +480,8 @@ fn task_dependency_chain_with_events() {
 	assert!(task3.blocked_by.contains(&"2".to_string()));
 
 	// Complete task 2
-	ctx.task_list
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (task_list, _) = task_list
 		.update(
 			"2",
 			TaskUpdateInput {
@@ -488,6 +490,7 @@ fn task_dependency_chain_with_events() {
 			},
 		)
 		.unwrap();
+	ctx.task_list = task_list;
 	ctx.event_bus
 		.publish("task.completed", serde_json::json!({ "id": "2" }));
 
@@ -928,15 +931,12 @@ fn conversation_round_trip_across_sessions() {
 
 	// Build conversation in session A
 	let session_a = ctx.session_manager.create();
-	ctx.session_manager.with_session(&session_a, |session| {
-		session
-			.conversation
-			.set_system_prompt("Be helpful.".to_string());
-		session.conversation.add_user("Question");
-		session.conversation.add_assistant("Answer");
-		session
-			.conversation
-			.add_tool_result("tc_1", "search", "Found results");
+	ctx.session_manager.with_state_transition(&session_a, |conv| {
+		let conv = conv.set_system_prompt("Be helpful.".to_string());
+		let conv = conv.add_user("Question");
+		let conv = conv.add_assistant("Answer");
+		let conv = conv.add_tool_result("tc_1", "search", "Found results");
+		(conv, ())
 	});
 
 	// Export to JSON
@@ -947,8 +947,8 @@ fn conversation_round_trip_across_sessions() {
 
 	// Import into session B
 	let session_b = ctx.session_manager.create();
-	ctx.session_manager.with_session(&session_b, |session| {
-		session.conversation.from_json(&json);
+	ctx.session_manager.with_state_transition(&session_b, |conv| {
+		(conv.from_json(&json), ())
 	});
 
 	// Verify session B has the same state
@@ -1008,23 +1008,24 @@ fn agentic_workflow_simulation() {
 
 	// Create session for the agent
 	let session_id = ctx.session_manager.create();
-	ctx.session_manager.with_session(&session_id, |session| {
-		session
-			.conversation
-			.set_system_prompt("You are an autonomous coding agent.".to_string());
+	ctx.session_manager.with_state_transition(&session_id, |conv| {
+		(conv.set_system_prompt("You are an autonomous coding agent.".to_string()), ())
 	});
 
 	// Create a task
-	let task = ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, task) = task_list.create(TaskCreateInput {
 		subject: "Fix login bug".to_string(),
 		description: "Users cannot log in with OAuth".to_string(),
 		active_form: Some("Fixing login bug".to_string()),
 		owner: Some("agent".to_string()),
 		metadata: None,
 	});
+	ctx.task_list = new_list;
 
 	// Start working on the task
-	ctx.task_list
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list
 		.update(
 			&task.id,
 			TaskUpdateInput {
@@ -1033,21 +1034,17 @@ fn agentic_workflow_simulation() {
 			},
 		)
 		.unwrap();
+	ctx.task_list = new_list;
 
 	// Agent adds messages about the work
-	ctx.session_manager.with_session(&session_id, |session| {
-		session
-			.conversation
-			.add_user("Fix the login bug described in task 1.");
-		session.conversation.add_assistant(
+	ctx.session_manager.with_state_transition(&session_id, |conv| {
+		let conv = conv.add_user("Fix the login bug described in task 1.");
+		let conv = conv.add_assistant(
 			"I'll investigate the OAuth login flow and fix the bug.",
 		);
-		session
-			.conversation
-			.add_tool_result("tc_read", "read_file", "// OAuth handler code...");
-		session
-			.conversation
-			.add_assistant("Found the issue. The redirect URI is incorrect.");
+		let conv = conv.add_tool_result("tc_read", "read_file", "// OAuth handler code...");
+		let conv = conv.add_assistant("Found the issue. The redirect URI is incorrect.");
+		(conv, ())
 	});
 
 	// Verify conversation state
@@ -1057,7 +1054,8 @@ fn agentic_workflow_simulation() {
 	});
 
 	// Complete the task
-	ctx.task_list
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list
 		.update(
 			&task.id,
 			TaskUpdateInput {
@@ -1066,6 +1064,7 @@ fn agentic_workflow_simulation() {
 			},
 		)
 		.unwrap();
+	ctx.task_list = new_list;
 
 	// Publish completion event
 	ctx.event_bus.publish(

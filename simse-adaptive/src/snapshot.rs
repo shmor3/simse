@@ -246,10 +246,10 @@ mod tests {
     }
 
     fn make_vocab() -> VocabularyManager {
-        let mut vm = VocabularyManager::new(10, 20);
-        vm.register_topic("rust").unwrap();
-        vm.register_topic("python").unwrap();
-        vm.register_tag("important").unwrap();
+        let vm = VocabularyManager::new(10, 20);
+        let (vm, _) = vm.register_topic("rust").unwrap();
+        let (vm, _) = vm.register_topic("python").unwrap();
+        let (vm, _) = vm.register_tag("important").unwrap();
         vm
     }
 

@@ -53,8 +53,8 @@ async fn init_server() -> CoreRpcServer {
 fn conv_add_user_message() {
 	let (ctx, id) = ctx_with_session();
 
-	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.add_user("Hello, world!");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.add_user("Hello, world!"), ())
 	});
 
 	let info = ctx.session_manager.get_info(&id).unwrap();
@@ -72,8 +72,8 @@ fn conv_add_user_message() {
 #[test]
 fn conv_add_user_nonexistent_session() {
 	let ctx = make_ctx();
-	let result = ctx.session_manager.with_session("nonexistent", |session| {
-		session.conversation.add_user("test");
+	let result = ctx.session_manager.with_state_transition("nonexistent", |conv| {
+		(conv.add_user("test"), ())
 	});
 	assert!(result.is_none());
 }
@@ -86,8 +86,8 @@ fn conv_add_user_nonexistent_session() {
 fn conv_add_assistant_message() {
 	let (ctx, id) = ctx_with_session();
 
-	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.add_assistant("I can help with that.");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.add_assistant("I can help with that."), ())
 	});
 
 	ctx.session_manager.with_session(&id, |session| {
@@ -106,10 +106,8 @@ fn conv_add_assistant_message() {
 fn conv_add_tool_result() {
 	let (ctx, id) = ctx_with_session();
 
-	ctx.session_manager.with_session(&id, |session| {
-		session
-			.conversation
-			.add_tool_result("call_123", "search", "Found 5 results");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.add_tool_result("call_123", "search", "Found 5 results"), ())
 	});
 
 	ctx.session_manager.with_session(&id, |session| {
@@ -130,10 +128,8 @@ fn conv_add_tool_result() {
 fn conv_set_and_get_system_prompt() {
 	let (ctx, id) = ctx_with_session();
 
-	ctx.session_manager.with_session(&id, |session| {
-		session
-			.conversation
-			.set_system_prompt("You are a helpful assistant.".to_string());
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.set_system_prompt("You are a helpful assistant.".to_string()), ())
 	});
 
 	ctx.session_manager.with_session(&id, |session| {
@@ -148,11 +144,10 @@ fn conv_set_and_get_system_prompt() {
 fn conv_get_messages_excludes_system_prompt() {
 	let (ctx, id) = ctx_with_session();
 
-	ctx.session_manager.with_session(&id, |session| {
-		session
-			.conversation
-			.set_system_prompt("System prompt".to_string());
-		session.conversation.add_user("Hello");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		let conv = conv.set_system_prompt("System prompt".to_string());
+		let conv = conv.add_user("Hello");
+		(conv, ())
 	});
 
 	ctx.session_manager.with_session(&id, |session| {
@@ -173,17 +168,16 @@ fn conv_compact_replaces_messages() {
 	let (ctx, id) = ctx_with_session();
 
 	// Add several messages
-	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.add_user("msg 1");
-		session.conversation.add_assistant("msg 2");
-		session.conversation.add_user("msg 3");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		let conv = conv.add_user("msg 1");
+		let conv = conv.add_assistant("msg 2");
+		let conv = conv.add_user("msg 3");
+		(conv, ())
 	});
 
 	// Compact
-	ctx.session_manager.with_session(&id, |session| {
-		session
-			.conversation
-			.compact("Summary of the conversation so far.");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.compact("Summary of the conversation so far."), ())
 	});
 
 	ctx.session_manager.with_session(&id, |session| {
@@ -205,16 +199,15 @@ fn conv_compact_replaces_messages() {
 fn conv_clear_removes_messages_but_keeps_system_prompt() {
 	let (ctx, id) = ctx_with_session();
 
-	ctx.session_manager.with_session(&id, |session| {
-		session
-			.conversation
-			.set_system_prompt("Keep me".to_string());
-		session.conversation.add_user("Hello");
-		session.conversation.add_assistant("World");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		let conv = conv.set_system_prompt("Keep me".to_string());
+		let conv = conv.add_user("Hello");
+		let conv = conv.add_assistant("World");
+		(conv, ())
 	});
 
-	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.clear();
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.clear(), ())
 	});
 
 	ctx.session_manager.with_session(&id, |session| {
@@ -243,11 +236,10 @@ fn conv_stats_empty_conversation() {
 fn conv_stats_with_messages() {
 	let (ctx, id) = ctx_with_session();
 
-	ctx.session_manager.with_session(&id, |session| {
-		session
-			.conversation
-			.set_system_prompt("System".to_string());
-		session.conversation.add_user("Hello there, this is a test message");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		let conv = conv.set_system_prompt("System".to_string());
+		let conv = conv.add_user("Hello there, this is a test message");
+		(conv, ())
 	});
 
 	ctx.session_manager.with_session(&id, |session| {
@@ -269,8 +261,11 @@ fn conv_stats_context_usage_percent() {
 	// Since Conversation options are set at creation, we use from_json trick
 	// or just add enough messages. But context_window_tokens defaults to None
 	// so context_usage_percent returns 0.
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		let conv = conv.add_user("test");
+		(conv, ())
+	});
 	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.add_user("test");
 		// With default options, context_usage_percent is 0 (no window configured)
 		assert_eq!(session.conversation.context_usage_percent(), 0);
 	});
@@ -285,15 +280,12 @@ fn conv_json_round_trip() {
 	let (ctx, id) = ctx_with_session();
 
 	// Build up a conversation
-	ctx.session_manager.with_session(&id, |session| {
-		session
-			.conversation
-			.set_system_prompt("Be helpful".to_string());
-		session.conversation.add_user("Question 1");
-		session.conversation.add_assistant("Answer 1");
-		session
-			.conversation
-			.add_tool_result("tc_1", "search", "results");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		let conv = conv.set_system_prompt("Be helpful".to_string());
+		let conv = conv.add_user("Question 1");
+		let conv = conv.add_assistant("Answer 1");
+		let conv = conv.add_tool_result("tc_1", "search", "results");
+		(conv, ())
 	});
 
 	// Export to JSON
@@ -304,8 +296,8 @@ fn conv_json_round_trip() {
 
 	// Create a new session and import from JSON
 	let id2 = ctx.session_manager.create();
-	ctx.session_manager.with_session(&id2, |session| {
-		session.conversation.from_json(&json);
+	ctx.session_manager.with_state_transition(&id2, |conv| {
+		(conv.from_json(&json), ())
 	});
 
 	// Verify the imported session matches
@@ -331,14 +323,14 @@ fn conv_json_round_trip() {
 fn conv_from_json_invalid_json_is_noop() {
 	let (ctx, id) = ctx_with_session();
 
-	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.add_user("existing");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.add_user("existing"), ())
 	});
 
 	// Import invalid JSON — should be a no-op (Conversation::from_json logs
 	// a warning but does not panic or clear messages)
-	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.from_json("not valid json{{{");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.from_json("not valid json{{{"), ())
 	});
 
 	// The original message should remain (from_json only clears on successful parse)
@@ -358,25 +350,23 @@ fn conv_full_multi_turn_flow() {
 	let (ctx, id) = ctx_with_session();
 
 	// Set system prompt
-	ctx.session_manager.with_session(&id, |session| {
-		session
-			.conversation
-			.set_system_prompt("You are a coding assistant.".to_string());
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.set_system_prompt("You are a coding assistant.".to_string()), ())
 	});
 
 	// Turn 1
-	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.add_user("Write a function");
-		session.conversation.add_assistant("Here is the function...");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		let conv = conv.add_user("Write a function");
+		let conv = conv.add_assistant("Here is the function...");
+		(conv, ())
 	});
 
 	// Turn 2 with tool use
-	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.add_user("Run the tests");
-		session
-			.conversation
-			.add_tool_result("tc_run", "run_tests", "All 5 tests passed");
-		session.conversation.add_assistant("All tests passed!");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		let conv = conv.add_user("Run the tests");
+		let conv = conv.add_tool_result("tc_run", "run_tests", "All 5 tests passed");
+		let conv = conv.add_assistant("All tests passed!");
+		(conv, ())
 	});
 
 	let info = ctx.session_manager.get_info(&id).unwrap();
@@ -398,16 +388,16 @@ fn conv_full_multi_turn_flow() {
 		.with_session(&id, |session| session.conversation.to_json())
 		.unwrap();
 
-	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.compact("Wrote and tested a function.");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.compact("Wrote and tested a function."), ())
 	});
 
 	let info_after = ctx.session_manager.get_info(&id).unwrap();
 	assert_eq!(info_after.message_count, 1);
 
 	// Restore from saved JSON
-	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.from_json(&json_before);
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.from_json(&json_before), ())
 	});
 
 	let info_restored = ctx.session_manager.get_info(&id).unwrap();
@@ -422,10 +412,8 @@ fn conv_full_multi_turn_flow() {
 fn conv_messages_serialize_to_camel_case() {
 	let (ctx, id) = ctx_with_session();
 
-	ctx.session_manager.with_session(&id, |session| {
-		session
-			.conversation
-			.add_tool_result("tc_1", "my_tool", "output");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.add_tool_result("tc_1", "my_tool", "output"), ())
 	});
 
 	ctx.session_manager.with_session(&id, |session| {

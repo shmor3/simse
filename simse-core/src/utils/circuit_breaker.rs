@@ -178,14 +178,12 @@ impl CircuitBreaker {
     /// Returns the current circuit state with lazy Open->HalfOpen transition.
     pub fn state(&self) -> CircuitState {
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        if inner.state == CircuitState::Open {
-            if let Some(last) = inner.last_failure_time {
-                if last.elapsed() >= inner.reset_timeout {
+        if inner.state == CircuitState::Open
+            && let Some(last) = inner.last_failure_time
+                && last.elapsed() >= inner.reset_timeout {
                     inner.state = CircuitState::HalfOpen;
                     inner.half_open_attempts = 0;
                 }
-            }
-        }
         inner.state
     }
 

@@ -96,85 +96,85 @@ impl AdaptiveServer {
 		let result = match req.method.as_str() {
 			// -- Lifecycle -----------------------------------------------
 			"store/initialize" => self.handle_initialize(req.params),
-			"store/dispose" => self.with_store_mut(|s| {
-				s.dispose()?;
-				Ok(serde_json::json!({}))
+			"store/dispose" => self.with_state_transition(|s| {
+				let s = s.dispose()?;
+				Ok((s, serde_json::json!({})))
 			}),
-			"store/save" => self.with_store_mut(|s| {
-				s.save()?;
-				Ok(serde_json::json!({}))
+			"store/save" => self.with_state_transition(|s| {
+				let s = s.save()?;
+				Ok((s, serde_json::json!({})))
 			}),
 
 			// -- CRUD ----------------------------------------------------
-			"store/add" => self.with_store_mut(|s| handle_add(s, req.params)),
-			"store/addBatch" => self.with_store_mut(|s| handle_add_batch(s, req.params)),
-			"store/delete" => self.with_store_mut(|s| handle_delete(s, req.params)),
-			"store/deleteBatch" => self.with_store_mut(|s| handle_delete_batch(s, req.params)),
-			"store/clear" => self.with_store_mut(|s| {
-				s.clear();
-				Ok(serde_json::json!({}))
+			"store/add" => self.with_state_transition(|s| handle_add(s, req.params)),
+			"store/addBatch" => self.with_state_transition(|s| handle_add_batch(s, req.params)),
+			"store/delete" => self.with_state_transition(|s| handle_delete(s, req.params)),
+			"store/deleteBatch" => self.with_state_transition(|s| handle_delete_batch(s, req.params)),
+			"store/clear" => self.with_state_transition(|s| {
+				let s = s.clear();
+				Ok((s, serde_json::json!({})))
 			}),
-			"store/getById" => self.with_store_mut(|s| handle_get_by_id(s, req.params)),
-			"store/getAll" => self.with_store(|s| {
+			"store/getById" => self.with_state_transition(|s| handle_get_by_id(s, req.params)),
+			"store/getAll" => self.with_state(|s| {
 				let volumes = s.get_all();
 				Ok(serde_json::json!({ "volumes": volumes }))
 			}),
 
 			// -- Search --------------------------------------------------
-			"store/search" => self.with_store_mut(|s| handle_search(s, req.params)),
-			"store/textSearch" => self.with_store(|s| handle_text_search(s, req.params)),
+			"store/search" => self.with_state_transition(|s| handle_search(s, req.params)),
+			"store/textSearch" => self.with_state(|s| handle_text_search(s, req.params)),
 			"store/advancedSearch" => {
-				self.with_store_mut(|s| handle_advanced_search(s, req.params))
+				self.with_state_transition(|s| handle_advanced_search(s, req.params))
 			}
 			"store/filterByMetadata" => {
-				self.with_store(|s| handle_filter_by_metadata(s, req.params))
+				self.with_state(|s| handle_filter_by_metadata(s, req.params))
 			}
 			"store/filterByDateRange" => {
-				self.with_store(|s| handle_filter_by_date_range(s, req.params))
+				self.with_state(|s| handle_filter_by_date_range(s, req.params))
 			}
-			"store/filterByTopic" => self.with_store(|s| handle_filter_by_topic(s, req.params)),
-			"store/getTopics" => self.with_store(|s| {
+			"store/filterByTopic" => self.with_state(|s| handle_filter_by_topic(s, req.params)),
+			"store/getTopics" => self.with_state(|s| {
 				let topics = s.get_topics();
 				Ok(serde_json::json!({ "topics": topics }))
 			}),
 
 			// -- Recommendation ------------------------------------------
-			"store/recommend" => self.with_store(|s| handle_recommend(s, req.params)),
+			"store/recommend" => self.with_state(|s| handle_recommend(s, req.params)),
 
 			// -- Deduplication -------------------------------------------
 			"store/checkDuplicate" => {
-				self.with_store(|s| handle_check_duplicate(s, req.params))
+				self.with_state(|s| handle_check_duplicate(s, req.params))
 			}
 			"store/findDuplicates" => {
-				self.with_store(|s| handle_find_duplicates(s, req.params))
+				self.with_state(|s| handle_find_duplicates(s, req.params))
 			}
 
 			// -- Size / Dirty --------------------------------------------
-			"store/size" => self.with_store(|s| Ok(serde_json::json!({ "count": s.size() }))),
+			"store/size" => self.with_state(|s| Ok(serde_json::json!({ "count": s.size() }))),
 			"store/isDirty" => {
-				self.with_store(|s| Ok(serde_json::json!({ "dirty": s.is_dirty() })))
+				self.with_state(|s| Ok(serde_json::json!({ "dirty": s.is_dirty() })))
 			}
 
 			// -- Catalog -------------------------------------------------
-			"catalog/resolve" => self.with_store_mut(|s| handle_catalog_resolve(s, req.params)),
+			"catalog/resolve" => self.with_state_transition(|s| handle_catalog_resolve(s, req.params)),
 			"catalog/relocate" => {
-				self.with_store_mut(|s| handle_catalog_relocate(s, req.params))
+				self.with_state_transition(|s| handle_catalog_relocate(s, req.params))
 			}
-			"catalog/merge" => self.with_store_mut(|s| handle_catalog_merge(s, req.params)),
-			"catalog/sections" => self.with_store(|s| {
+			"catalog/merge" => self.with_state_transition(|s| handle_catalog_merge(s, req.params)),
+			"catalog/sections" => self.with_state(|s| {
 				let sections = s.catalog_sections();
 				Ok(serde_json::json!({ "sections": sections }))
 			}),
-			"catalog/volumes" => self.with_store(|s| handle_catalog_volumes(s, req.params)),
+			"catalog/volumes" => self.with_state(|s| handle_catalog_volumes(s, req.params)),
 
 			// -- Learning ------------------------------------------------
 			"learning/recordQuery" => {
-				self.with_store_mut(|s| handle_record_query(s, req.params))
+				self.with_state_transition(|s| handle_record_query(s, req.params))
 			}
 			"learning/recordFeedback" => {
-				self.with_store_mut(|s| handle_record_feedback(s, req.params))
+				self.with_state_transition(|s| handle_record_feedback(s, req.params))
 			}
-			"learning/profile" => self.with_store(|s| {
+			"learning/profile" => self.with_state(|s| {
 				let profile = s.get_profile();
 				Ok(serde_json::json!({ "profile": profile }))
 			}),
@@ -186,8 +186,8 @@ impl AdaptiveServer {
 			"format/memoryContext" => handle_format_memory_context(req.params),
 
 			// -- Graph ---------------------------------------------------
-			"graph/neighbors" => self.with_store(|s| handle_graph_neighbors(s, req.params)),
-			"graph/traverse" => self.with_store(|s| handle_graph_traverse(s, req.params)),
+			"graph/neighbors" => self.with_state(|s| handle_graph_neighbors(s, req.params)),
+			"graph/traverse" => self.with_state(|s| handle_graph_traverse(s, req.params)),
 
 			// -- PCN lifecycle -------------------------------------------
 			"pcn/initialize" => self.handle_pcn_initialize(req.params),
@@ -232,7 +232,7 @@ impl AdaptiveServer {
 
 	// ── Store accessors ───────────────────────────────────────────────────
 
-	fn with_store<F>(&self, f: F) -> Result<serde_json::Value, AdaptiveError>
+	fn with_state<F>(&self, f: F) -> Result<serde_json::Value, AdaptiveError>
 	where
 		F: FnOnce(&VolumeStore) -> Result<serde_json::Value, AdaptiveError>,
 	{
@@ -242,13 +242,21 @@ impl AdaptiveServer {
 		}
 	}
 
-	fn with_store_mut<F>(&mut self, f: F) -> Result<serde_json::Value, AdaptiveError>
+	fn with_state_transition<F>(&mut self, f: F) -> Result<serde_json::Value, AdaptiveError>
 	where
-		F: FnOnce(&mut VolumeStore) -> Result<serde_json::Value, AdaptiveError>,
+		F: FnOnce(VolumeStore) -> Result<(VolumeStore, serde_json::Value), AdaptiveError>,
 	{
-		match &mut self.store {
-			Some(s) => f(s),
-			None => Err(AdaptiveError::NotInitialized),
+		let state = self.store.take().ok_or(AdaptiveError::NotInitialized)?;
+		let backup = state.clone();
+		match f(state) {
+			Ok((new_state, value)) => {
+				self.store = Some(new_state);
+				Ok(value)
+			}
+			Err(e) => {
+				self.store = Some(backup);
+				Err(e)
+			}
 		}
 	}
 
@@ -281,8 +289,8 @@ impl AdaptiveServer {
 			graph_config: Default::default(),
 		};
 
-		let mut store = VolumeStore::new(config);
-		store.initialize(p.storage_path.as_deref())?;
+		let store = VolumeStore::new(config);
+		let store = store.initialize(p.storage_path.as_deref())?;
 		self.store = Some(store);
 
 		Ok(serde_json::json!({}))
@@ -635,18 +643,18 @@ struct MemoryContextParams {
 // ---------------------------------------------------------------------------
 
 fn handle_add(
-	store: &mut VolumeStore,
+	store: VolumeStore,
 	params: serde_json::Value,
-) -> Result<serde_json::Value, AdaptiveError> {
+) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
 	let p: AddParams = parse_params(params)?;
-	let id = store.add(p.text, p.embedding, p.metadata.unwrap_or_default())?;
-	Ok(serde_json::json!({ "id": id }))
+	let (store, id) = store.add(p.text, p.embedding, p.metadata.unwrap_or_default())?;
+	Ok((store, serde_json::json!({ "id": id })))
 }
 
 fn handle_add_batch(
-	store: &mut VolumeStore,
+	store: VolumeStore,
 	params: serde_json::Value,
-) -> Result<serde_json::Value, AdaptiveError> {
+) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
 	let p: AddBatchParams = parse_params(params)?;
 	let entries: Vec<AddEntry> = p
 		.entries
@@ -657,44 +665,44 @@ fn handle_add_batch(
 			metadata: e.metadata.unwrap_or_default(),
 		})
 		.collect();
-	let ids = store.add_batch(entries)?;
-	Ok(serde_json::json!({ "ids": ids }))
+	let (store, ids) = store.add_batch(entries)?;
+	Ok((store, serde_json::json!({ "ids": ids })))
 }
 
 fn handle_delete(
-	store: &mut VolumeStore,
+	store: VolumeStore,
 	params: serde_json::Value,
-) -> Result<serde_json::Value, AdaptiveError> {
+) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
 	let p: IdParams = parse_params(params)?;
-	let deleted = store.delete(&p.id);
-	Ok(serde_json::json!({ "deleted": deleted }))
+	let (store, deleted) = store.delete(&p.id);
+	Ok((store, serde_json::json!({ "deleted": deleted })))
 }
 
 fn handle_delete_batch(
-	store: &mut VolumeStore,
+	store: VolumeStore,
 	params: serde_json::Value,
-) -> Result<serde_json::Value, AdaptiveError> {
+) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
 	let p: IdsParams = parse_params(params)?;
-	let count = store.delete_batch(&p.ids);
-	Ok(serde_json::json!({ "count": count }))
+	let (store, count) = store.delete_batch(&p.ids);
+	Ok((store, serde_json::json!({ "count": count })))
 }
 
 fn handle_get_by_id(
-	store: &mut VolumeStore,
+	store: VolumeStore,
 	params: serde_json::Value,
-) -> Result<serde_json::Value, AdaptiveError> {
+) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
 	let p: IdParams = parse_params(params)?;
-	let volume = store.get_by_id(&p.id);
-	Ok(serde_json::json!({ "volume": volume }))
+	let (store, volume) = store.get_by_id(&p.id);
+	Ok((store, serde_json::json!({ "volume": volume })))
 }
 
 fn handle_search(
-	store: &mut VolumeStore,
+	store: VolumeStore,
 	params: serde_json::Value,
-) -> Result<serde_json::Value, AdaptiveError> {
+) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
 	let p: SearchParams = parse_params(params)?;
-	let results = store.search(&p.query_embedding, p.max_results.unwrap_or(10), p.threshold.unwrap_or(0.0))?;
-	Ok(serde_json::json!({ "results": results }))
+	let (store, results) = store.search(&p.query_embedding, p.max_results.unwrap_or(10), p.threshold.unwrap_or(0.0))?;
+	Ok((store, serde_json::json!({ "results": results })))
 }
 
 fn handle_text_search(
@@ -707,12 +715,12 @@ fn handle_text_search(
 }
 
 fn handle_advanced_search(
-	store: &mut VolumeStore,
+	store: VolumeStore,
 	params: serde_json::Value,
-) -> Result<serde_json::Value, AdaptiveError> {
+) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
 	let options: crate::types::SearchOptions = parse_params(params)?;
-	let results = store.advanced_search(&options)?;
-	Ok(serde_json::json!({ "results": results }))
+	let (store, results) = store.advanced_search(&options)?;
+	Ok((store, serde_json::json!({ "results": results })))
 }
 
 fn handle_filter_by_metadata(
@@ -776,30 +784,30 @@ fn handle_find_duplicates(
 }
 
 fn handle_catalog_resolve(
-	store: &mut VolumeStore,
+	store: VolumeStore,
 	params: serde_json::Value,
-) -> Result<serde_json::Value, AdaptiveError> {
+) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
 	let p: CatalogResolveParams = parse_params(params)?;
-	let resolved = store.catalog_resolve(&p.topic);
-	Ok(serde_json::json!({ "resolved": resolved }))
+	let (store, resolved) = store.catalog_resolve(&p.topic);
+	Ok((store, serde_json::json!({ "resolved": resolved })))
 }
 
 fn handle_catalog_relocate(
-	store: &mut VolumeStore,
+	store: VolumeStore,
 	params: serde_json::Value,
-) -> Result<serde_json::Value, AdaptiveError> {
+) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
 	let p: CatalogRelocateParams = parse_params(params)?;
-	store.catalog_relocate(&p.volume_id, &p.new_topic);
-	Ok(serde_json::json!({}))
+	let store = store.catalog_relocate(&p.volume_id, &p.new_topic);
+	Ok((store, serde_json::json!({})))
 }
 
 fn handle_catalog_merge(
-	store: &mut VolumeStore,
+	store: VolumeStore,
 	params: serde_json::Value,
-) -> Result<serde_json::Value, AdaptiveError> {
+) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
 	let p: CatalogMergeParams = parse_params(params)?;
-	store.catalog_merge(&p.source, &p.target);
-	Ok(serde_json::json!({}))
+	let store = store.catalog_merge(&p.source, &p.target);
+	Ok((store, serde_json::json!({})))
 }
 
 fn handle_catalog_volumes(
@@ -812,21 +820,21 @@ fn handle_catalog_volumes(
 }
 
 fn handle_record_query(
-	store: &mut VolumeStore,
+	store: VolumeStore,
 	params: serde_json::Value,
-) -> Result<serde_json::Value, AdaptiveError> {
+) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
 	let p: RecordQueryParams = parse_params(params)?;
-	store.record_query(&p.embedding, &p.selected_ids);
-	Ok(serde_json::json!({}))
+	let store = store.record_query(&p.embedding, &p.selected_ids);
+	Ok((store, serde_json::json!({})))
 }
 
 fn handle_record_feedback(
-	store: &mut VolumeStore,
+	store: VolumeStore,
 	params: serde_json::Value,
-) -> Result<serde_json::Value, AdaptiveError> {
+) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
 	let p: RecordFeedbackParams = parse_params(params)?;
-	store.record_feedback(&p.entry_id, p.relevant);
-	Ok(serde_json::json!({}))
+	let store = store.record_feedback(&p.entry_id, p.relevant);
+	Ok((store, serde_json::json!({})))
 }
 
 fn handle_query_parse(params: serde_json::Value) -> Result<serde_json::Value, AdaptiveError> {

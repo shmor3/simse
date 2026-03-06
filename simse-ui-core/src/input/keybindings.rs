@@ -3,7 +3,12 @@
 //! This module is platform-agnostic — no I/O, no timing. It stores
 //! keybinding definitions and provides combo matching. Actual event
 //! handling and double-tap detection live in `simse-tui`.
+//!
+//! All mutating methods use owned-return (`self -> Self` or `self -> (Self, T)`)
+//! for functional-style state transitions. Internal collections use `im::Vector`
+//! for cheap cloning via structural sharing.
 
+use im::Vector;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
@@ -65,9 +70,13 @@ pub struct KeybindingEntry {
 ///
 /// Handler execution and double-tap timing are handled by `simse-tui`,
 /// not here. This crate only stores the registry and does matching.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+///
+/// Uses `im::Vector` for entries to enable cheap cloning and functional-style
+/// state transitions. All mutating methods take `self` by value and return
+/// the updated `Self` (owned-return pattern).
+#[derive(Debug, Clone)]
 pub struct KeybindingRegistry {
-	entries: Vec<KeybindingEntry>,
+	entries: Vector<KeybindingEntry>,
 	next_id: usize,
 	/// Double-tap window in milliseconds (stored for consumers to read).
 	pub double_tap_ms: u64,
@@ -83,7 +92,7 @@ impl KeybindingRegistry {
 	/// Create a new empty registry with default double-tap window (400ms).
 	pub fn new() -> Self {
 		Self {
-			entries: Vec::new(),
+			entries: Vector::new(),
 			next_id: 1,
 			double_tap_ms: 400,
 		}
@@ -92,27 +101,28 @@ impl KeybindingRegistry {
 	/// Create a new registry with a custom double-tap window.
 	pub fn with_double_tap_ms(double_tap_ms: u64) -> Self {
 		Self {
-			entries: Vec::new(),
+			entries: Vector::new(),
 			next_id: 1,
 			double_tap_ms,
 		}
 	}
 
-	/// Register a keybinding. Returns the entry ID.
-	pub fn register(&mut self, combo: KeyCombo, label: impl Into<String>) -> usize {
+	/// Register a keybinding. Returns `(updated_self, entry_id)`.
+	pub fn register(mut self, combo: KeyCombo, label: impl Into<String>) -> (Self, usize) {
 		let id = self.next_id;
 		self.next_id += 1;
-		self.entries.push(KeybindingEntry {
+		self.entries.push_back(KeybindingEntry {
 			combo,
 			label: label.into(),
 			id,
 		});
-		id
+		(self, id)
 	}
 
-	/// Unregister a keybinding by ID.
-	pub fn unregister(&mut self, id: usize) {
-		self.entries.retain(|e| e.id != id);
+	/// Unregister a keybinding by ID. Returns the updated registry.
+	pub fn unregister(mut self, id: usize) -> Self {
+		self.entries = self.entries.into_iter().filter(|e| e.id != id).collect();
+		self
 	}
 
 	/// Check if a combo matches an event.
@@ -131,7 +141,7 @@ impl KeybindingRegistry {
 	}
 
 	/// List all registered keybindings.
-	pub fn list(&self) -> &[KeybindingEntry] {
+	pub fn list(&self) -> &Vector<KeybindingEntry> {
 		&self.entries
 	}
 
@@ -171,27 +181,27 @@ mod tests {
 
 	#[test]
 	fn register_returns_unique_ids() {
-		let mut reg = KeybindingRegistry::new();
-		let id1 = reg.register(KeyCombo::new("c").ctrl(), "Copy");
-		let id2 = reg.register(KeyCombo::new("v").ctrl(), "Paste");
+		let reg = KeybindingRegistry::new();
+		let (reg, id1) = reg.register(KeyCombo::new("c").ctrl(), "Copy");
+		let (reg, id2) = reg.register(KeyCombo::new("v").ctrl(), "Paste");
 		assert_ne!(id1, id2);
 		assert_eq!(reg.list().len(), 2);
 	}
 
 	#[test]
 	fn unregister_removes_entry() {
-		let mut reg = KeybindingRegistry::new();
-		let id = reg.register(KeyCombo::new("c").ctrl(), "Copy");
+		let reg = KeybindingRegistry::new();
+		let (reg, id) = reg.register(KeyCombo::new("c").ctrl(), "Copy");
 		assert_eq!(reg.list().len(), 1);
-		reg.unregister(id);
+		let reg = reg.unregister(id);
 		assert_eq!(reg.list().len(), 0);
 	}
 
 	#[test]
 	fn unregister_nonexistent_is_noop() {
-		let mut reg = KeybindingRegistry::new();
-		reg.register(KeyCombo::new("c").ctrl(), "Copy");
-		reg.unregister(9999);
+		let reg = KeybindingRegistry::new();
+		let (reg, _) = reg.register(KeyCombo::new("c").ctrl(), "Copy");
+		let reg = reg.unregister(9999);
 		assert_eq!(reg.list().len(), 1);
 	}
 
@@ -239,9 +249,9 @@ mod tests {
 
 	#[test]
 	fn find_match_returns_first_match() {
-		let mut reg = KeybindingRegistry::new();
-		let id1 = reg.register(KeyCombo::new("c").ctrl(), "Copy");
-		let _id2 = reg.register(KeyCombo::new("v").ctrl(), "Paste");
+		let reg = KeybindingRegistry::new();
+		let (reg, id1) = reg.register(KeyCombo::new("c").ctrl(), "Copy");
+		let (reg, _id2) = reg.register(KeyCombo::new("v").ctrl(), "Paste");
 		let event = KeyCombo::new("c").ctrl();
 		let found = reg.find_match(&event);
 		assert!(found.is_some());
@@ -251,18 +261,18 @@ mod tests {
 
 	#[test]
 	fn find_match_returns_none_when_no_match() {
-		let mut reg = KeybindingRegistry::new();
-		reg.register(KeyCombo::new("c").ctrl(), "Copy");
+		let reg = KeybindingRegistry::new();
+		let (reg, _) = reg.register(KeyCombo::new("c").ctrl(), "Copy");
 		let event = KeyCombo::new("x").ctrl();
 		assert!(reg.find_match(&event).is_none());
 	}
 
 	#[test]
 	fn list_returns_all_entries_in_order() {
-		let mut reg = KeybindingRegistry::new();
-		reg.register(KeyCombo::new("c").ctrl(), "Copy");
-		reg.register(KeyCombo::new("v").ctrl(), "Paste");
-		reg.register(KeyCombo::new("escape"), "Cancel");
+		let reg = KeybindingRegistry::new();
+		let (reg, _) = reg.register(KeyCombo::new("c").ctrl(), "Copy");
+		let (reg, _) = reg.register(KeyCombo::new("v").ctrl(), "Paste");
+		let (reg, _) = reg.register(KeyCombo::new("escape"), "Cancel");
 		let entries = reg.list();
 		assert_eq!(entries.len(), 3);
 		assert_eq!(entries[0].label, "Copy");
@@ -330,18 +340,18 @@ mod tests {
 
 	#[test]
 	fn register_after_unregister_gives_new_id() {
-		let mut reg = KeybindingRegistry::new();
-		let id1 = reg.register(KeyCombo::new("c").ctrl(), "Copy");
-		reg.unregister(id1);
-		let id2 = reg.register(KeyCombo::new("c").ctrl(), "Copy");
+		let reg = KeybindingRegistry::new();
+		let (reg, id1) = reg.register(KeyCombo::new("c").ctrl(), "Copy");
+		let reg = reg.unregister(id1);
+		let (_, id2) = reg.register(KeyCombo::new("c").ctrl(), "Copy");
 		assert!(id2 > id1);
 	}
 
 	#[test]
 	fn multiple_bindings_same_combo() {
-		let mut reg = KeybindingRegistry::new();
-		reg.register(KeyCombo::new("escape"), "Cancel");
-		reg.register(KeyCombo::new("escape"), "Close Dialog");
+		let reg = KeybindingRegistry::new();
+		let (reg, _) = reg.register(KeyCombo::new("escape"), "Cancel");
+		let (reg, _) = reg.register(KeyCombo::new("escape"), "Close Dialog");
 		// find_match returns the first one registered
 		let event = KeyCombo::new("escape");
 		let found = reg.find_match(&event);
@@ -350,8 +360,8 @@ mod tests {
 
 	#[test]
 	fn entry_stores_combo_and_label() {
-		let mut reg = KeybindingRegistry::new();
-		let id = reg.register(KeyCombo::new("o").ctrl(), "Open File");
+		let reg = KeybindingRegistry::new();
+		let (reg, id) = reg.register(KeyCombo::new("o").ctrl(), "Open File");
 		let entry = reg.list().iter().find(|e| e.id == id).unwrap();
 		assert_eq!(entry.label, "Open File");
 		assert_eq!(entry.combo.name, "o");

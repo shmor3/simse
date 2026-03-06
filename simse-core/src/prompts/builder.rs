@@ -301,8 +301,8 @@ impl SystemPromptBuilder {
 		}
 
 		// 5. Instruction files
-		if let Some(ref instructions) = self.instructions {
-			if !instructions.is_empty() {
+		if let Some(ref instructions) = self.instructions
+			&& !instructions.is_empty() {
 				let instr_section = instructions
 					.iter()
 					.map(|i| format!("## {}\n\n{}", i.path, i.content))
@@ -310,7 +310,6 @@ impl SystemPromptBuilder {
 					.join("\n\n");
 				sections.push(format!("# Project Instructions\n\n{instr_section}"));
 			}
-		}
 
 		// 6. Custom sections
 		for section in &self.custom_sections {
@@ -320,18 +319,16 @@ impl SystemPromptBuilder {
 		}
 
 		// 7. Tool definitions
-		if let Some(ref tool_defs) = self.tool_defs {
-			if !tool_defs.is_empty() {
+		if let Some(ref tool_defs) = self.tool_defs
+			&& !tool_defs.is_empty() {
 				sections.push(tool_defs.clone());
 			}
-		}
 
 		// 8. Memory context (most dynamic, last for cache efficiency)
-		if let Some(ref memory) = self.memory {
-			if !memory.is_empty() {
+		if let Some(ref memory) = self.memory
+			&& !memory.is_empty() {
 				sections.push(format!("# Memory Context\n\n{memory}"));
 			}
-		}
 
 		sections.join("\n\n")
 	}

@@ -16,6 +16,14 @@ const requestHandler = createRequestHandler(
 
 export default {
 	async fetch(request, env, ctx) {
+		const url = new URL(request.url);
+
+		if (url.pathname === '/health') {
+			return new Response(JSON.stringify({ ok: true }), {
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
+
 		const start = Date.now();
 		const response = await requestHandler(request, {
 			cloudflare: { env, ctx },
@@ -24,7 +32,6 @@ export default {
 
 		// biome-ignore lint/suspicious/noExplicitAny: Cloudflare cf object not typed on Request
 		const cf = (request as any).cf;
-		const url = new URL(request.url);
 
 		ctx.waitUntil(
 			Promise.resolve(

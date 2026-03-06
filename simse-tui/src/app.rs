@@ -29,7 +29,7 @@ use crate::commands::{
 use crate::dispatch::{parse_command_line, DispatchContext};
 use crate::output;
 use crate::overlays::librarian::{render_librarian_explorer, LibrarianExplorerState};
-use crate::overlays::settings::{render_settings_explorer, SettingsExplorerState};
+use crate::overlays::settings::render_settings_form;
 use simse_ui_core::config::settings_state::{SettingsFormState, SettingsAction, SettingsLevel};
 use crate::overlays::setup::{render_setup_selector, SetupSelectorState};
 
@@ -955,10 +955,7 @@ pub fn view(app: &App, frame: &mut Frame) {
 	match &app.screen {
 		Screen::Shortcuts => render_shortcuts_overlay(frame, area),
 		Screen::Settings => {
-			// Temporary bridge: SettingsFormState → SettingsExplorerState for rendering.
-			// This will be replaced by render_settings_form() in Task 7.
-			let compat = settings_form_to_explorer(&app.settings_state);
-			render_settings_explorer(frame, area, &compat, &app.settings_state.config_data);
+			render_settings_form(frame, area, &app.settings_state);
 		}
 		Screen::Librarians => {
 			render_librarian_explorer(frame, area, &app.librarian_state);
@@ -1161,26 +1158,6 @@ fn render_confirm_overlay(frame: &mut Frame, area: Rect, message: &str) {
 	frame.render_widget(popup, popup_area);
 }
 
-
-/// Temporary bridge: convert SettingsFormState to SettingsExplorerState for rendering.
-///
-/// This will be removed in Task 7 when the render function is updated to accept
-/// SettingsFormState directly.
-fn settings_form_to_explorer(form: &SettingsFormState) -> SettingsExplorerState {
-	use crate::overlays::settings::SettingsLevel as OldLevel;
-	let level = match form.level {
-		SettingsLevel::FileList => OldLevel::FileList,
-		SettingsLevel::FieldList => OldLevel::FieldList,
-		SettingsLevel::Editing | SettingsLevel::ArrayEntry => OldLevel::Editing,
-	};
-	SettingsExplorerState {
-		level,
-		selected_file: form.selected_file,
-		selected_field: form.selected_field,
-		edit_value: form.edit_value.clone(),
-		saved_indicator: form.saved_indicator,
-	}
-}
 
 /// Handle a SettingsAction by converting it to the appropriate app state change.
 fn handle_settings_action(app: &mut App, action: SettingsAction) {

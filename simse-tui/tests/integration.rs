@@ -14,7 +14,8 @@ use simse_tui::cli_args::parse_cli_args;
 use simse_tui::dialogs::confirm::ConfirmDialogState;
 use simse_tui::dispatch::{dispatch_command, parse_command_line, DispatchContext};
 use simse_tui::commands::{BridgeAction, CommandContext, CommandOutput, OverlayAction};
-use simse_tui::overlays::settings::{SettingsExplorerState, SettingsLevel, CONFIG_FILES};
+use simse_tui::overlays::settings::render_settings_form;
+use simse_ui_core::config::settings_state::{SettingsFormState, SettingsLevel, SettingsAction};
 use simse_ui_core::app::{
     OutputItem, PermissionOption, PermissionRequest, ToolCallState, ToolCallStatus,
 };
@@ -585,19 +586,19 @@ fn autocomplete_full_workflow_type_navigate_accept() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 7. Settings explorer navigation
+// 7. Settings form navigation (SettingsFormState)
 // ═══════════════════════════════════════════════════════════════
 
 #[test]
 fn settings_file_list_navigation() {
-    let mut state = SettingsExplorerState::new();
+    let mut state = SettingsFormState::new();
     assert_eq!(state.level, SettingsLevel::FileList);
     assert_eq!(state.selected_file, 0);
     assert_eq!(state.selected_file_name(), "config.json");
 
     // Navigate down to "mcp.json" (index 2).
-    state.move_down(CONFIG_FILES.len());
-    state.move_down(CONFIG_FILES.len());
+    state.move_down();
+    state.move_down();
     assert_eq!(state.selected_file, 2);
     assert_eq!(state.selected_file_name(), "mcp.json");
     assert_eq!(state.selected_file_label(), "MCP Servers");
@@ -605,17 +606,25 @@ fn settings_file_list_navigation() {
 
 #[test]
 fn settings_enter_field_list_and_navigate() {
-    let mut state = SettingsExplorerState::new();
+    let mut state = SettingsFormState::new();
 
-    // Enter a config file -> FieldList.
-    state.enter("");
+    // Enter a config file -> FieldList + LoadFile action.
+    let action = state.enter();
     assert_eq!(state.level, SettingsLevel::FieldList);
+    assert!(matches!(action, SettingsAction::LoadFile { .. }));
     assert_eq!(state.selected_field, 0);
 
+    // Simulate file loaded with some fields.
+    state.file_loaded(serde_json::json!({
+        "logLevel": "warn",
+        "maxTokens": 4096,
+        "debug": false
+    }));
+
     // Navigate fields.
-    state.move_down(5);
+    state.move_down();
     assert_eq!(state.selected_field, 1);
-    state.move_down(5);
+    state.move_down();
     assert_eq!(state.selected_field, 2);
     state.move_up();
     assert_eq!(state.selected_field, 1);
@@ -623,57 +632,76 @@ fn settings_enter_field_list_and_navigate() {
 
 #[test]
 fn settings_enter_editing_and_modify() {
-    let mut state = SettingsExplorerState::new();
+    let mut state = SettingsFormState::new();
 
-    state.enter(""); // -> FieldList
-    state.enter("localhost"); // -> Editing
+    // FileList -> FieldList.
+    state.enter();
+    // Simulate host loading the config file.
+    state.file_loaded(serde_json::json!({"logLevel": "warn"}));
 
+    // FieldList -> Editing.
+    let action = state.enter();
     assert_eq!(state.level, SettingsLevel::Editing);
-    assert_eq!(state.edit_value, "localhost");
+    assert_eq!(action, SettingsAction::None);
+    assert_eq!(state.edit_value, "warn");
 
     // Modify the value.
-    state.backspace(); // "localhos"
-    state.backspace(); // "localho"
-    state.type_char('a'); // "localhoa"
-    assert_eq!(state.edit_value, "localhoa");
+    state.backspace(); // "war"
+    state.backspace(); // "wa"
+    state.type_char('x'); // "wax"
+    assert_eq!(state.edit_value, "wax");
 }
 
 #[test]
 fn settings_back_navigation_full_cycle() {
-    let mut state = SettingsExplorerState::new();
+    let mut state = SettingsFormState::new();
 
-    // FileList -> FieldList -> Editing
-    state.enter("");
-    state.enter("value");
+    // FileList -> FieldList.
+    state.enter();
+    state.file_loaded(serde_json::json!({"key": "value"}));
+
+    // FieldList -> Editing.
+    state.enter();
     assert_eq!(state.level, SettingsLevel::Editing);
 
-    // Editing -> FieldList
-    let dismiss = state.back();
-    assert!(!dismiss);
+    // Editing -> FieldList.
+    let action = state.back();
+    assert_eq!(action, SettingsAction::None);
     assert_eq!(state.level, SettingsLevel::FieldList);
     assert!(state.edit_value.is_empty());
 
-    // FieldList -> FileList
-    let dismiss = state.back();
-    assert!(!dismiss);
+    // FieldList -> FileList.
+    let action = state.back();
+    assert_eq!(action, SettingsAction::None);
     assert_eq!(state.level, SettingsLevel::FileList);
 
-    // FileList -> dismiss
-    let dismiss = state.back();
-    assert!(dismiss);
+    // FileList -> dismiss.
+    let action = state.back();
+    assert_eq!(action, SettingsAction::Dismiss);
 }
 
 #[test]
 fn settings_toggle_boolean() {
-    let mut state = SettingsExplorerState::new();
-    state.enter(""); // -> FieldList
-    state.enter("true"); // -> Editing
+    let mut state = SettingsFormState::new();
+    // Select memory.json (index 4) which has "enabled" as a Boolean field.
+    state.selected_file = 4;
+    state.enter(); // -> FieldList + LoadFile
+    state.file_loaded(serde_json::json!({"enabled": true}));
+    state.enter(); // -> Editing (edit_value = "true")
+    assert_eq!(state.edit_value, "true");
 
-    state.toggle();
+    let action = state.toggle();
+    assert_eq!(state.edit_value, "false");
+    assert!(matches!(action, SettingsAction::SaveField { .. }));
+
+    // Simulate save callback to go back to FieldList, then re-enter editing.
+    state.field_saved("enabled", &serde_json::json!(false));
+    state.enter(); // -> Editing again (edit_value = "false")
     assert_eq!(state.edit_value, "false");
 
-    state.toggle();
+    let action = state.toggle();
     assert_eq!(state.edit_value, "true");
+    assert!(matches!(action, SettingsAction::SaveField { .. }));
 }
 
 #[test]
@@ -689,44 +717,30 @@ fn settings_render_all_levels_without_panic() {
     });
 
     // FileList level.
-    let mut state = SettingsExplorerState::new();
+    let mut state = SettingsFormState::new();
     terminal
         .draw(|frame| {
             let area = frame.area();
-            simse_tui::overlays::settings::render_settings_explorer(
-                frame,
-                area,
-                &state,
-                &config_data,
-            );
+            render_settings_form(frame, area, &state);
         })
         .unwrap();
 
     // FieldList level.
-    state.enter("");
+    state.enter();
+    state.file_loaded(config_data.clone());
     terminal
         .draw(|frame| {
             let area = frame.area();
-            simse_tui::overlays::settings::render_settings_explorer(
-                frame,
-                area,
-                &state,
-                &config_data,
-            );
+            render_settings_form(frame, area, &state);
         })
         .unwrap();
 
     // Editing level.
-    state.enter("localhost");
+    state.enter();
     terminal
         .draw(|frame| {
             let area = frame.area();
-            simse_tui::overlays::settings::render_settings_explorer(
-                frame,
-                area,
-                &state,
-                &config_data,
-            );
+            render_settings_form(frame, area, &state);
         })
         .unwrap();
 }

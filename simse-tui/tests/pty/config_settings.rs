@@ -1,6 +1,7 @@
 //! PTY tests for config settings behavior.
 //!
-//! These tests verify project-level config operations and directory separation:
+//! These tests verify settings persistence (actual file I/O on disk):
+//! - Settings form loads config data from a pre-written config file
 //! - `/factory-reset-project` deletes `.simse/` in work_dir
 //! - `/init` creates `.simse/` and config files can be verified
 //! - Global data_dir and project work_dir are separate paths
@@ -10,10 +11,57 @@
 //! - init_creates_project_directory (covered by init_command_creates_project_directory)
 
 use super::r#mod::*;
+use std::time::Duration;
 use tempfile::TempDir;
 
+/// Small delay to let the PTY propagate key events and re-render.
+fn settle() {
+	std::thread::sleep(Duration::from_millis(300));
+}
+
 // ═══════════════════════════════════════════════════════════════
-// 1. /factory-reset-project deletes .simse/ in work_dir
+// 1. /settings opens config.json and shows values loaded from disk
+// ═══════════════════════════════════════════════════════════════
+
+/// Open /settings → press Enter to open config.json → verify field values from disk are shown.
+#[test]
+fn settings_form_loads_config_from_disk() {
+	let tmp = TempDir::new().unwrap();
+	let data_dir = tmp.path().join("data");
+	let work_dir = tmp.path().join("work");
+	std::fs::create_dir_all(&data_dir).unwrap();
+	std::fs::create_dir_all(&work_dir).unwrap();
+
+	// Write a config.json with a known value.
+	let config_data = serde_json::json!({"logLevel": "debug"});
+	std::fs::write(
+		data_dir.join("config.json"),
+		serde_json::to_string_pretty(&config_data).unwrap(),
+	)
+	.unwrap();
+
+	let mut h = spawn_simse_with_cwd(&data_dir, &work_dir);
+	wait_for_startup(&h);
+
+	type_command(&mut h, "/settings");
+	h.wait_for_text("Settings")
+		.expect("Settings overlay should open");
+
+	// Press Enter to open config.json (first item in the file list).
+	h.send_keys("\r").unwrap();
+	settle();
+	settle(); // extra settle for async file load
+
+	// Should show the field value loaded from disk.
+	let contents = h.screen_contents();
+	assert!(
+		contents.contains("debug") || contents.contains("logLevel"),
+		"Settings form should show loaded config data from disk. Screen:\n{contents}"
+	);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 2. /factory-reset-project deletes .simse/ in work_dir
 // ═══════════════════════════════════════════════════════════════
 
 #[test]
@@ -55,7 +103,7 @@ fn factory_reset_project_deletes_project_config() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 2. /init creates .simse/ and config can be verified
+// 3. /init creates .simse/ and config can be verified
 // ═══════════════════════════════════════════════════════════════
 
 #[test]
@@ -91,7 +139,7 @@ fn config_file_round_trip_via_init() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// 3. Global data_dir and project work_dir are separate
+// 4. Global data_dir and project work_dir are separate
 // ═══════════════════════════════════════════════════════════════
 
 #[test]

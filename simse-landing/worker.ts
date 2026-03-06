@@ -3,7 +3,11 @@ import { createRequestHandler } from 'react-router';
 declare module 'react-router' {
 	export interface AppLoadContext {
 		cloudflare: {
-			env: Env;
+			env: {
+				DB: D1Database;
+				COMMS_QUEUE: Queue;
+				ANALYTICS: AnalyticsEngineDataset;
+			};
 			ctx: ExecutionContext;
 		};
 	}
@@ -29,12 +33,12 @@ export default {
 		ctx.waitUntil(
 			Promise.resolve(
 				env.ANALYTICS.writeDataPoint({
-					indexes: ['simse-cloud'],
+					indexes: ['simse-landing'],
 					blobs: [
 						request.method,
 						url.pathname,
 						String(response.status),
-						'simse-cloud',
+						'simse-landing',
 						'',
 						'',
 						cf?.country ?? '',
@@ -58,4 +62,4 @@ export default {
 
 		return response;
 	},
-} satisfies ExportedHandler<Env>;
+} satisfies ExportedHandler;

@@ -19,3 +19,7 @@ queue = "simse-api-comms"
 
 [[queues.consumers]]
 queue = "simse-landing-comms"
+
+[analytics_engine]
+dataset = "simse-analytics"
+binding = "ANALYTICS"

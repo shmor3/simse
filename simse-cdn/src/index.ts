@@ -11,58 +11,96 @@ const IMMUTABLE_CACHE = 'public, max-age=31536000, immutable';
 
 export default {
 	async fetch(request: Request, env: Env): Promise<Response> {
+		const start = Date.now();
+		const response = await handleRequest(request, env);
+		const latencyMs = Date.now() - start;
+
+		// biome-ignore lint/suspicious/noExplicitAny: Cloudflare cf object not typed on Request
+		const cf = (request as any).cf;
 		const url = new URL(request.url);
-		const path = url.pathname;
 
-		if (path === '/health') {
-			return new Response('ok', { status: 200 });
-		}
+		env.ANALYTICS?.writeDataPoint({
+			indexes: ['simse-cdn'],
+			blobs: [
+				request.method,
+				url.pathname,
+				String(response.status),
+				'simse-cdn',
+				'',
+				'',
+				cf?.country ?? '',
+				cf?.city ?? '',
+				cf?.continent ?? '',
+				(request.headers.get('User-Agent') ?? '').slice(0, 256),
+				request.headers.get('Referer') ?? '',
+				response.headers.get('Content-Type') ?? '',
+				request.headers.get('Cf-Ray') ?? '',
+			],
+			doubles: [
+				latencyMs,
+				response.status,
+				Number(request.headers.get('Content-Length') ?? 0),
+				Number(response.headers.get('Content-Length') ?? 0),
+				Number(cf?.colo ?? 0),
+			],
+		});
 
-		const mediaMatch = path.match(/^\/media\/(.+)$/);
-		if (mediaMatch) {
-			return serveR2(env.CDN_BUCKET, `media/${mediaMatch[1]}`, {
-				immutable: true,
-			});
-		}
-
-		const versionedMatch = path.match(
-			/^\/download\/([^/]+)\/([^/]+)\/([^/]+)$/,
-		);
-		if (versionedMatch && versionedMatch[1] !== 'latest') {
-			const [, version, os, arch] = versionedMatch;
-			const platform = `${os}/${arch}`;
-			const filename = BINARY_FILENAMES[platform];
-			if (!filename) {
-				return new Response('unknown platform', { status: 404 });
-			}
-			const key = `releases/${os}/${arch}/${version}/${filename}`;
-			return serveR2(env.CDN_BUCKET, key, {
-				immutable: true,
-				binary: true,
-				filename,
-			});
-		}
-
-		const latestMatch = path.match(/^\/download\/latest\/([^/]+)\/([^/]+)$/);
-		if (latestMatch) {
-			const [, os, arch] = latestMatch;
-			const kvKey = `latest:${os}-${arch}`;
-			const version = await env.VERSION_STORE.get(kvKey);
-			if (!version) {
-				return new Response('unknown platform', { status: 404 });
-			}
-			return new Response(null, {
-				status: 301,
-				headers: {
-					Location: `/download/${version}/${os}/${arch}`,
-					'Cache-Control': 'no-store',
-				},
-			});
-		}
-
-		return new Response('not found', { status: 404 });
+		return response;
 	},
 } satisfies ExportedHandler<Env>;
+
+async function handleRequest(request: Request, env: Env): Promise<Response> {
+	const url = new URL(request.url);
+	const path = url.pathname;
+
+	if (path === '/health') {
+		return new Response('ok', { status: 200 });
+	}
+
+	const mediaMatch = path.match(/^\/media\/(.+)$/);
+	if (mediaMatch) {
+		return serveR2(env.CDN_BUCKET, `media/${mediaMatch[1]}`, {
+			immutable: true,
+		});
+	}
+
+	const versionedMatch = path.match(
+		/^\/download\/([^/]+)\/([^/]+)\/([^/]+)$/,
+	);
+	if (versionedMatch && versionedMatch[1] !== 'latest') {
+		const [, version, os, arch] = versionedMatch;
+		const platform = `${os}/${arch}`;
+		const filename = BINARY_FILENAMES[platform];
+		if (!filename) {
+			return new Response('unknown platform', { status: 404 });
+		}
+		const key = `releases/${os}/${arch}/${version}/${filename}`;
+		return serveR2(env.CDN_BUCKET, key, {
+			immutable: true,
+			binary: true,
+			filename,
+		});
+	}
+
+	const latestMatch = path.match(/^\/download\/latest\/([^/]+)\/([^/]+)$/);
+	if (latestMatch) {
+		const [, os, arch] = latestMatch;
+		const kvKey = `latest:${os}-${arch}`;
+		const version = await env.VERSION_STORE.get(kvKey);
+		if (!version) {
+			return new Response('unknown platform', { status: 404 });
+		}
+		return new Response(null, {
+			status: 301,
+			headers: {
+				Location: `/download/${version}/${os}/${arch}`,
+				'Cache-Control': 'no-store',
+			},
+		});
+	}
+
+	return new Response('not found', { status: 404 });
+}
 
 async function serveR2(
 	bucket: R2Bucket,

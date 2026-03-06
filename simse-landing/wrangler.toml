@@ -14,3 +14,7 @@ queue = "simse-landing-comms"
 binding = "COMMS_QUEUE"
 
 # No RESEND_API_KEY — emails enqueued to simse-landing-comms → simse-mailer
+
+[analytics_engine]
+dataset = "simse-analytics"
+binding = "ANALYTICS"

@@ -13,3 +13,7 @@ bucket_name = "simse-cdn"
 [[kv_namespaces]]
 binding = "VERSION_STORE"
 id = "PLACEHOLDER_REPLACE_WITH_KV_ID"
+
+[analytics_engine]
+dataset = "simse-analytics"
+binding = "ANALYTICS"

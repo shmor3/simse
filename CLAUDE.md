@@ -327,6 +327,7 @@ simse-payments/             # Payments service — Stripe subscriptions, credits
 - **Structured compaction**: Auto-compaction requests 6 sections (Goal, Progress, Current State, Key Decisions, Relevant Files, Next Steps).
 - **Arc<AtomicBool> for health flags**: Connection health shared between spawned reader tasks and main struct.
 - **Backend trait abstraction**: Each engine crate (VFS, VSH, VNet) defines a backend trait (`FsBackend`, `ShellBackend`, `NetBackend`). LocalBackend wraps existing logic, SshBackend in simse-sandbox uses russh multiplexed SSH connections.
+- **Workers Analytics Engine**: All 7 Cloudflare Workers write to a shared `simse-analytics` dataset via `ANALYTICS: AnalyticsEngineDataset` binding. Data points include method, path, status, latency, userId, geo (country/city/continent), userAgent, and cfRay. Hono workers use an analytics middleware; CDN wraps its fetch handler; Pages workers wrap worker.ts with `ctx.waitUntil`.
 
 ### ACP Protocol
 

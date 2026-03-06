@@ -9,3 +9,7 @@ routes = [{ pattern = "app.simse.dev", custom_domain = true }]
 
 # No database — calls simse-api
 # No secrets — simse-api handles service auth
+
+[analytics_engine]
+dataset = "simse-analytics"
+binding = "ANALYTICS"

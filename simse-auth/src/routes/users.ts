@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { hashPassword, verifyPassword } from '../lib/password';
+import { deleteAllUserSessions } from '../lib/session';
 import {
 	changePasswordSchema,
 	deleteAccountSchema,
@@ -86,6 +87,10 @@ users.put('/me/password', async (c) => {
 		.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
 		.bind(newHash, userId)
 		.run();
+
+	// Invalidate all sessions — user must re-authenticate
+	await deleteAllUserSessions(db, userId);
+
 	return c.json({ data: { ok: true } });
 });
 
@@ -123,6 +128,26 @@ users.delete('/me', async (c) => {
 	) {
 		return c.json(
 			{ error: { code: 'EMAIL_MISMATCH', message: 'Email does not match' } },
+			400,
+		);
+	}
+
+	// Check if user is the sole owner of any team
+	const soleOwnership = await db
+		.prepare(
+			"SELECT tm.team_id FROM team_members tm WHERE tm.user_id = ? AND tm.role = 'owner' AND NOT EXISTS (SELECT 1 FROM team_members tm2 WHERE tm2.team_id = tm.team_id AND tm2.role = 'owner' AND tm2.user_id != ?)",
+		)
+		.bind(userId, userId)
+		.first<{ team_id: string }>();
+
+	if (soleOwnership) {
+		return c.json(
+			{
+				error: {
+					code: 'SOLE_OWNER',
+					message: 'Transfer team ownership before deleting your account',
+				},
+			},
 			400,
 		);
 	}

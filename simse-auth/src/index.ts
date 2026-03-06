@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { analyticsMiddleware } from './middleware/analytics';
+import { cleanupMiddleware } from './middleware/cleanup';
 import apiKeys from './routes/api-keys';
 import auth from './routes/auth';
 import teams from './routes/teams';
@@ -9,6 +10,7 @@ import type { Env } from './types';
 const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', analyticsMiddleware);
+app.use('*', cleanupMiddleware);
 app.get('/health', (c) => c.json({ ok: true }));
 
 // Auth routes (public — gateway forwards without auth check)

@@ -85,6 +85,7 @@ teams.post('/me/invite', async (c) => {
 	}
 
 	const db = c.env.DB;
+	const normalizedEmail = parsed.data.email.toLowerCase();
 
 	const membership = await db
 		.prepare(
@@ -109,7 +110,7 @@ teams.post('/me/invite', async (c) => {
 		.prepare(
 			'SELECT 1 FROM team_members tm JOIN users u ON tm.user_id = u.id WHERE tm.team_id = ? AND LOWER(u.email) = ?',
 		)
-		.bind(membership.team_id, parsed.data.email.toLowerCase())
+		.bind(membership.team_id, normalizedEmail)
 		.first();
 
 	if (existingMember) {
@@ -118,6 +119,26 @@ teams.post('/me/invite', async (c) => {
 				error: {
 					code: 'ALREADY_MEMBER',
 					message: 'User is already a team member',
+				},
+			},
+			409,
+		);
+	}
+
+	// Check for existing pending invite to prevent duplicates
+	const existingInvite = await db
+		.prepare(
+			"SELECT id FROM team_invites WHERE team_id = ? AND LOWER(email) = ? AND expires_at > datetime('now')",
+		)
+		.bind(membership.team_id, normalizedEmail)
+		.first();
+
+	if (existingInvite) {
+		return c.json(
+			{
+				error: {
+					code: 'ALREADY_INVITED',
+					message: 'An invite is already pending for this email',
 				},
 			},
 			409,
@@ -136,14 +157,13 @@ teams.post('/me/invite', async (c) => {
 		.bind(
 			inviteId,
 			membership.team_id,
-			parsed.data.email.toLowerCase(),
+			normalizedEmail,
 			parsed.data.role,
 			userId,
 			expiresAt,
 		)
 		.run();
 
-	// Get inviter name for email
 	const inviter = await db
 		.prepare('SELECT name FROM users WHERE id = ?')
 		.bind(userId)
@@ -186,14 +206,27 @@ teams.put('/me/members/:userId/role', async (c) => {
 
 	const membership = await db
 		.prepare(
-			"SELECT t.id as team_id FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role IN ('owner', 'admin') LIMIT 1",
+			"SELECT t.id as team_id, tm.role FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role IN ('owner', 'admin') LIMIT 1",
 		)
 		.bind(userId)
-		.first<{ team_id: string }>();
+		.first<{ team_id: string; role: string }>();
 
 	if (!membership) {
 		return c.json(
 			{ error: { code: 'FORBIDDEN', message: 'Insufficient permissions' } },
+			403,
+		);
+	}
+
+	// Only owners can promote to admin
+	if (body.role === 'admin' && membership.role !== 'owner') {
+		return c.json(
+			{
+				error: {
+					code: 'FORBIDDEN',
+					message: 'Only the team owner can promote members to admin',
+				},
+			},
 			403,
 		);
 	}

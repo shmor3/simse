@@ -1,8 +1,13 @@
 import { Hono } from 'hono';
 import { sendEmail } from '../lib/comms';
 import { generateId } from '../lib/db';
-import { hashPassword, verifyPassword } from '../lib/password';
-import { createSession, deleteSession } from '../lib/session';
+import { hashPassword, needsRehash, verifyPassword } from '../lib/password';
+import { checkRateLimit } from '../lib/rate-limit';
+import {
+	createSession,
+	deleteAllUserSessions,
+	deleteSession,
+} from '../lib/session';
 import {
 	createToken,
 	generateCode,
@@ -15,8 +20,16 @@ import {
 	registerSchema,
 	resetPasswordSchema,
 	twoFactorSchema,
+	verifyEmailSchema,
 } from '../schemas';
 import type { AuthContext, Env } from '../types';
+
+const RATE_LIMIT_ERROR = {
+	error: {
+		code: 'RATE_LIMITED',
+		message: 'Too many attempts. Please try again later.',
+	},
+} as const;
 
 const auth = new Hono<{
 	Bindings: Env;
@@ -43,15 +56,31 @@ auth.post('/register', async (c) => {
 	const normalizedEmail = email.toLowerCase();
 	const db = c.env.DB;
 
+	// Rate limit by IP
+	const ip =
+		c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
+		c.req.header('CF-Connecting-IP') ??
+		'unknown';
+	const rl = await checkRateLimit(db, `register:${ip}`, 60, 5);
+	if (!rl.allowed) {
+		return c.json(RATE_LIMIT_ERROR, 429);
+	}
+
 	const existing = await db
 		.prepare('SELECT id FROM users WHERE LOWER(email) = ?')
 		.bind(normalizedEmail)
 		.first();
 
 	if (existing) {
+		// Generic error to prevent account enumeration
 		return c.json(
-			{ error: { code: 'EMAIL_EXISTS', message: 'Email already registered' } },
-			409,
+			{
+				error: {
+					code: 'REGISTRATION_FAILED',
+					message: 'Unable to complete registration',
+				},
+			},
+			400,
 		);
 	}
 
@@ -85,7 +114,6 @@ auth.post('/register', async (c) => {
 
 	const token = await createSession(db, userId);
 
-	// Send verification email via queue
 	await sendEmail(c.env.COMMS_QUEUE, 'verify-email', normalizedEmail, {
 		code: verifyCode,
 	});
@@ -118,13 +146,20 @@ auth.post('/login', async (c) => {
 	}
 
 	const { email, password } = parsed.data;
+	const normalizedEmail = email.toLowerCase();
 	const db = c.env.DB;
+
+	// Rate limit by email — 5 attempts per 15 minutes
+	const rl = await checkRateLimit(db, `login:${normalizedEmail}`, 900, 5);
+	if (!rl.allowed) {
+		return c.json(RATE_LIMIT_ERROR, 429);
+	}
 
 	const user = await db
 		.prepare(
 			'SELECT id, email, password_hash, two_factor_enabled FROM users WHERE LOWER(email) = ?',
 		)
-		.bind(email.toLowerCase())
+		.bind(normalizedEmail)
 		.first<{
 			id: string;
 			email: string;
@@ -144,9 +179,17 @@ auth.post('/login', async (c) => {
 		);
 	}
 
+	// Lazy rehash if using legacy PBKDF2 iterations
+	if (needsRehash(user.password_hash)) {
+		const newHash = await hashPassword(password);
+		await db
+			.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+			.bind(newHash, user.id)
+			.run();
+	}
+
 	if (user.two_factor_enabled) {
 		const { id, code } = await createToken(db, user.id, '2fa', 10);
-		// Send 2FA code via queue
 		await sendEmail(c.env.COMMS_QUEUE, 'two-factor', user.email, { code });
 		return c.json({ data: { requires2fa: true, pendingToken: id } });
 	}
@@ -173,6 +216,12 @@ auth.post('/2fa', async (c) => {
 
 	const { code, pendingToken } = parsed.data;
 	const db = c.env.DB;
+
+	// Rate limit by pending token — 5 attempts per 10 minutes
+	const rl = await checkRateLimit(db, `2fa:${pendingToken}`, 600, 5);
+	if (!rl.allowed) {
+		return c.json(RATE_LIMIT_ERROR, 429);
+	}
 
 	const pending = await db
 		.prepare(
@@ -228,10 +277,18 @@ auth.post('/reset-password', async (c) => {
 		);
 	}
 
+	const normalizedEmail = parsed.data.email.toLowerCase();
 	const db = c.env.DB;
+
+	// Rate limit by email — 3 per 15 minutes
+	const rl = await checkRateLimit(db, `reset:${normalizedEmail}`, 900, 3);
+	if (!rl.allowed) {
+		return c.json(RATE_LIMIT_ERROR, 429);
+	}
+
 	const user = await db
 		.prepare('SELECT id, email FROM users WHERE LOWER(email) = ?')
-		.bind(parsed.data.email.toLowerCase())
+		.bind(normalizedEmail)
 		.first<{ id: string; email: string }>();
 
 	if (user) {
@@ -239,6 +296,7 @@ auth.post('/reset-password', async (c) => {
 		await sendEmail(c.env.COMMS_QUEUE, 'reset-password', user.email, { code });
 	}
 
+	// Always return same response to prevent enumeration
 	return c.json({ data: { ok: true } });
 });
 
@@ -259,6 +317,17 @@ auth.post('/new-password', async (c) => {
 	}
 
 	const db = c.env.DB;
+
+	// Rate limit by IP
+	const ip =
+		c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
+		c.req.header('CF-Connecting-IP') ??
+		'unknown';
+	const rl = await checkRateLimit(db, `newpw:${ip}`, 60, 5);
+	if (!rl.allowed) {
+		return c.json(RATE_LIMIT_ERROR, 429);
+	}
+
 	const token = await validateToken(db, parsed.data.token, 'password_reset');
 	if (!token) {
 		return c.json(
@@ -279,21 +348,41 @@ auth.post('/new-password', async (c) => {
 		.run();
 	await markTokenUsed(db, token.id);
 
+	// Invalidate all existing sessions after password reset
+	await deleteAllUserSessions(db, token.userId);
+
 	return c.json({ data: { ok: true } });
 });
 
 // POST /auth/verify-email
 auth.post('/verify-email', async (c) => {
-	const body = await c.req.json<{ code: string }>();
-	if (!body.code) {
+	const body = await c.req.json();
+	const parsed = verifyEmailSchema.safeParse(body);
+	if (!parsed.success) {
 		return c.json(
-			{ error: { code: 'VALIDATION_ERROR', message: 'Code required' } },
+			{
+				error: {
+					code: 'VALIDATION_ERROR',
+					message: parsed.error.issues[0].message,
+				},
+			},
 			400,
 		);
 	}
 
 	const db = c.env.DB;
-	const token = await validateToken(db, body.code, 'email_verify');
+
+	// Rate limit by IP
+	const ip =
+		c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
+		c.req.header('CF-Connecting-IP') ??
+		'unknown';
+	const rl = await checkRateLimit(db, `verify:${ip}`, 60, 5);
+	if (!rl.allowed) {
+		return c.json(RATE_LIMIT_ERROR, 429);
+	}
+
+	const token = await validateToken(db, parsed.data.code, 'email_verify');
 	if (!token) {
 		return c.json(
 			{ error: { code: 'INVALID_TOKEN', message: 'Invalid or expired code' } },
@@ -321,24 +410,31 @@ auth.post('/validate', async (c) => {
 	}
 
 	const db = c.env.DB;
-	const token = body.token;
+	const rawToken = body.token;
 	let userId: string | null = null;
 	let sessionId: string | undefined;
 
-	if (token.startsWith('session_')) {
+	if (rawToken.startsWith('session_')) {
+		// Hash the session token before DB lookup (tokens are stored hashed)
+		const encoder = new TextEncoder();
+		const data = encoder.encode(rawToken);
+		const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+		const hashArray = new Uint8Array(hashBuffer);
+		const tokenHash = btoa(String.fromCharCode(...hashArray));
+
 		const row = await db
 			.prepare(
 				"SELECT user_id FROM sessions WHERE id = ? AND expires_at > datetime('now')",
 			)
-			.bind(token)
+			.bind(tokenHash)
 			.first<{ user_id: string }>();
 		if (row) {
 			userId = row.user_id;
-			sessionId = token;
+			sessionId = rawToken;
 		}
-	} else if (token.startsWith('sk_')) {
+	} else if (rawToken.startsWith('sk_')) {
 		const encoder = new TextEncoder();
-		const data = encoder.encode(token);
+		const data = encoder.encode(rawToken);
 		const hashBuffer = await crypto.subtle.digest('SHA-256', data);
 		const hashArray = new Uint8Array(hashBuffer);
 		const keyHash = btoa(String.fromCharCode(...hashArray));

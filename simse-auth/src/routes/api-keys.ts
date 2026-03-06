@@ -3,6 +3,8 @@ import { createApiKey } from '../lib/api-key';
 import { createApiKeySchema } from '../schemas';
 import type { Env } from '../types';
 
+const MAX_API_KEYS_PER_USER = 25;
+
 const apiKeys = new Hono<{ Bindings: Env }>();
 
 // POST /api-keys
@@ -22,6 +24,25 @@ apiKeys.post('/', async (c) => {
 				error: {
 					code: 'VALIDATION_ERROR',
 					message: parsed.error.issues[0].message,
+				},
+			},
+			400,
+		);
+	}
+
+	// Enforce max API keys per user
+	const count = await c.env.DB.prepare(
+		'SELECT COUNT(*) as cnt FROM api_keys WHERE user_id = ?',
+	)
+		.bind(userId)
+		.first<{ cnt: number }>();
+
+	if (count && count.cnt >= MAX_API_KEYS_PER_USER) {
+		return c.json(
+			{
+				error: {
+					code: 'LIMIT_EXCEEDED',
+					message: `Maximum of ${MAX_API_KEYS_PER_USER} API keys allowed`,
 				},
 			},
 			400,

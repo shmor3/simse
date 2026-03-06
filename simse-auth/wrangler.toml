@@ -16,3 +16,7 @@ database_id = "PLACEHOLDER_FILL_AFTER_CREATION"
 [[queues.producers]]
 queue = "simse-auth-comms"
 binding = "COMMS_QUEUE"
+
+[analytics_engine]
+dataset = "simse-analytics"
+binding = "ANALYTICS"

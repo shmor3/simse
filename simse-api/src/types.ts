@@ -4,6 +4,11 @@ export interface Env {
 	ANALYTICS: AnalyticsEngineDataset;
 }
 
+export interface AppVariables {
+	secrets: ApiSecrets;
+	requestId: string;
+}
+
 export interface ApiSecrets {
 	authApiUrl: string;
 	authApiSecret: string;
@@ -11,6 +16,7 @@ export interface ApiSecrets {
 	paymentsApiSecret: string;
 	mailerApiUrl: string;
 	mailerApiSecret: string;
+	jwtSecret: string;
 }
 
 export interface ValidateResponse {

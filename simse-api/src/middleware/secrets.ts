@@ -12,6 +12,7 @@ export const secretsMiddleware = createMiddleware<{
 		paymentsApiSecret,
 		mailerApiUrl,
 		mailerApiSecret,
+		jwtSecret,
 	] = await Promise.all([
 		c.env.SECRETS.get('AUTH_API_URL'),
 		c.env.SECRETS.get('AUTH_API_SECRET'),
@@ -19,6 +20,7 @@ export const secretsMiddleware = createMiddleware<{
 		c.env.SECRETS.get('PAYMENTS_API_SECRET'),
 		c.env.SECRETS.get('MAILER_API_URL'),
 		c.env.SECRETS.get('MAILER_API_SECRET'),
+		c.env.SECRETS.get('JWT_SECRET'),
 	]);
 
 	if (
@@ -27,7 +29,8 @@ export const secretsMiddleware = createMiddleware<{
 		!paymentsApiUrl ||
 		!paymentsApiSecret ||
 		!mailerApiUrl ||
-		!mailerApiSecret
+		!mailerApiSecret ||
+		!jwtSecret
 	) {
 		return c.json(
 			{ error: { code: 'MISCONFIGURED', message: 'Service misconfigured' } },
@@ -42,6 +45,7 @@ export const secretsMiddleware = createMiddleware<{
 		paymentsApiSecret,
 		mailerApiUrl,
 		mailerApiSecret,
+		jwtSecret,
 	});
 	await next();
 });

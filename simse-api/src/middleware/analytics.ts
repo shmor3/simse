@@ -8,7 +8,7 @@ export const analyticsMiddleware = createMiddleware<{
 	await next();
 	const latencyMs = Date.now() - start;
 
-	const cf = (c.req.raw as any).cf;
+	const cf = (c.req.raw as Request & { cf?: IncomingRequestCfProperties }).cf;
 
 	c.env.ANALYTICS.writeDataPoint({
 		indexes: ['simse-api'],

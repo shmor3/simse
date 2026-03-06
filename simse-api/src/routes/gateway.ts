@@ -1,12 +1,17 @@
-import { Hono } from 'hono';
-import type { ApiSecrets, Env, ValidateResponse } from '../types';
+import { type Context, Hono } from 'hono';
+import { breakers } from '../index';
+import type { CircuitBreaker } from '../lib/circuit-breaker';
+import { verifyJwt } from '../lib/jwt';
+import { resilientFetch } from '../lib/resilient-fetch';
+import type { AppVariables, Env, ValidateResponse } from '../types';
+
+type GatewayContext = Context<{ Bindings: Env; Variables: AppVariables }>;
 
 const gateway = new Hono<{
 	Bindings: Env;
-	Variables: { secrets: ApiSecrets };
+	Variables: AppVariables;
 }>();
 
-// Public auth routes — proxy directly without validation
 const PUBLIC_AUTH_PATHS = [
 	'/register',
 	'/login',
@@ -14,37 +19,42 @@ const PUBLIC_AUTH_PATHS = [
 	'/reset-password',
 	'/new-password',
 	'/verify-email',
+	'/refresh',
+	'/revoke',
 ];
 
+// --- Auth routes ---
 gateway.all('/auth/*', async (c) => {
 	const subpath = c.req.path.replace('/auth', '');
 	const isPublic = PUBLIC_AUTH_PATHS.some((p) => subpath === p);
 
 	const headers = new Headers();
 	headers.set('Content-Type', 'application/json');
+	headers.set('X-Request-Id', c.get('requestId') ?? '');
 
-	// For protected auth routes, validate first
 	if (!isPublic) {
-		const auth = await validateToken(c);
+		const auth = await authenticateRequest(c);
 		if (!auth) {
 			return c.json(
 				{ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } },
 				401,
 			);
 		}
-		headers.set('X-User-Id', auth.userId);
-		if (auth.sessionId) headers.set('X-Session-Id', auth.sessionId);
-		if (auth.teamId) headers.set('X-Team-Id', auth.teamId);
-		if (auth.role) headers.set('X-Role', auth.role);
+		setAuthHeaders(headers, auth);
 	}
 
-	return proxyTo(c, `${c.var.secrets.authApiUrl}${c.req.path}`, headers);
+	return proxyTo(
+		c,
+		`${c.var.secrets.authApiUrl}${c.req.path}`,
+		headers,
+		breakers.auth,
+	);
 });
 
-// Protected service routes
+// --- Protected service routes ---
 for (const prefix of ['/users', '/teams', '/api-keys']) {
 	gateway.all(`${prefix}/*`, async (c) => {
-		const auth = await validateToken(c);
+		const auth = await authenticateRequest(c);
 		if (!auth) {
 			return c.json(
 				{ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } },
@@ -52,14 +62,19 @@ for (const prefix of ['/users', '/teams', '/api-keys']) {
 			);
 		}
 
-		const headers = serviceHeaders(auth);
-		return proxyTo(c, `${c.var.secrets.authApiUrl}${c.req.path}`, headers);
+		const headers = serviceHeaders(auth, c);
+		return proxyTo(
+			c,
+			`${c.var.secrets.authApiUrl}${c.req.path}`,
+			headers,
+			breakers.auth,
+		);
 	});
 }
 
-// Payments proxy
+// --- Payments proxy ---
 gateway.all('/payments/*', async (c) => {
-	const auth = await validateToken(c);
+	const auth = await authenticateRequest(c);
 	if (!auth) {
 		return c.json(
 			{ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } },
@@ -72,21 +87,23 @@ gateway.all('/payments/*', async (c) => {
 	headers.set('Authorization', `Bearer ${c.var.secrets.paymentsApiSecret}`);
 	headers.set('Content-Type', 'application/json');
 	headers.set('X-User-Id', auth.userId);
+	headers.set('X-Request-Id', c.get('requestId') ?? '');
 	if (auth.teamId) headers.set('X-Team-Id', auth.teamId);
 
-	return proxyTo(c, `${c.var.secrets.paymentsApiUrl}${path}`, headers);
+	return proxyTo(
+		c,
+		`${c.var.secrets.paymentsApiUrl}${path}`,
+		headers,
+		breakers.payments,
+	);
 });
 
-// Notifications proxy (to mailer)
-gateway.all('/notifications', async (c) => {
-	return proxyNotifications(c);
-});
-gateway.all('/notifications/*', async (c) => {
-	return proxyNotifications(c);
-});
+// --- Notifications proxy ---
+gateway.all('/notifications', proxyNotifications);
+gateway.all('/notifications/*', proxyNotifications);
 
-async function proxyNotifications(c: any) {
-	const auth = await validateToken(c);
+async function proxyNotifications(c: GatewayContext) {
+	const auth = await authenticateRequest(c);
 	if (!auth) {
 		return c.json(
 			{ error: { code: 'UNAUTHORIZED', message: 'Invalid token' } },
@@ -94,7 +111,6 @@ async function proxyNotifications(c: any) {
 		);
 	}
 
-	// POST /notifications → enqueue (fire-and-forget)
 	if (c.req.method === 'POST') {
 		const body = await c.req.json();
 		await c.env.COMMS_QUEUE.send({
@@ -105,28 +121,81 @@ async function proxyNotifications(c: any) {
 		return c.json({ data: { ok: true } });
 	}
 
-	// GET/PUT → proxy to mailer HTTP (needs response)
 	const headers = new Headers();
 	headers.set('Authorization', `Bearer ${c.var.secrets.mailerApiSecret}`);
 	headers.set('Content-Type', 'application/json');
 	headers.set('X-User-Id', auth.userId);
+	headers.set('X-Request-Id', c.get('requestId') ?? '');
 
-	return proxyTo(c, `${c.var.secrets.mailerApiUrl}${c.req.path}`, headers);
+	return proxyTo(
+		c,
+		`${c.var.secrets.mailerApiUrl}${c.req.path}`,
+		headers,
+		breakers.mailer,
+	);
 }
 
 // --- Helpers ---
 
-async function validateToken(c: any): Promise<ValidateResponse['data'] | null> {
+interface AuthResult {
+	userId: string;
+	sessionId?: string;
+	teamId: string | null;
+	role: string | null;
+}
+
+async function authenticateRequest(
+	c: GatewayContext,
+): Promise<AuthResult | null> {
 	const authHeader = c.req.header('Authorization');
 	if (!authHeader?.startsWith('Bearer ')) return null;
 
 	const token = authHeader.slice(7);
 
-	const res = await fetch(`${c.var.secrets.authApiUrl}/auth/validate`, {
+	// API keys — validate via auth service
+	if (token.startsWith('sk_')) {
+		return validateTokenViaService(c, token);
+	}
+
+	// JWT access token — validate locally
+	const jwtSecret = c.var.secrets.jwtSecret;
+	const result = await verifyJwt(token, jwtSecret);
+
+	if (!result) {
+		// Not a valid JWT — try legacy session token validation
+		if (token.startsWith('session_')) {
+			return validateTokenViaService(c, token);
+		}
+		return null;
+	}
+
+	if (result.expired) {
+		return null;
+	}
+
+	return {
+		userId: result.payload.sub,
+		sessionId: result.payload.sid,
+		teamId: result.payload.tid,
+		role: result.payload.role,
+	};
+}
+
+async function validateTokenViaService(
+	c: GatewayContext,
+	token: string,
+): Promise<AuthResult | null> {
+	const init: RequestInit = {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ token }),
-	});
+	};
+
+	const res = await resilientFetch(
+		`${c.var.secrets.authApiUrl}/auth/validate`,
+		init,
+		breakers.auth,
+	);
 
 	if (!res.ok) return null;
 
@@ -134,20 +203,26 @@ async function validateToken(c: any): Promise<ValidateResponse['data'] | null> {
 	return json.data;
 }
 
-function serviceHeaders(auth: ValidateResponse['data']): Headers {
-	const headers = new Headers();
-	headers.set('Content-Type', 'application/json');
+function setAuthHeaders(headers: Headers, auth: AuthResult): void {
 	headers.set('X-User-Id', auth.userId);
 	if (auth.sessionId) headers.set('X-Session-Id', auth.sessionId);
 	if (auth.teamId) headers.set('X-Team-Id', auth.teamId);
 	if (auth.role) headers.set('X-Role', auth.role);
+}
+
+function serviceHeaders(auth: AuthResult, c: GatewayContext): Headers {
+	const headers = new Headers();
+	headers.set('Content-Type', 'application/json');
+	headers.set('X-Request-Id', c.get('requestId') ?? '');
+	setAuthHeaders(headers, auth);
 	return headers;
 }
 
 async function proxyTo(
-	c: any,
+	c: GatewayContext,
 	url: string,
 	headers: Headers,
+	breaker: CircuitBreaker,
 ): Promise<Response> {
 	const init: RequestInit = {
 		method: c.req.method,
@@ -158,12 +233,13 @@ async function proxyTo(
 		init.body = await c.req.text();
 	}
 
-	const res = await fetch(url, init);
-	const body = await res.text();
+	const res = await resilientFetch(url, init, breaker);
 
-	return new Response(body, {
+	// Stream response, preserve original Content-Type
+	const contentType = res.headers.get('Content-Type') ?? 'application/json';
+	return new Response(res.body, {
 		status: res.status,
-		headers: { 'Content-Type': 'application/json' },
+		headers: { 'Content-Type': contentType },
 	});
 }
 

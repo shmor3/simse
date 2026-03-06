@@ -36,8 +36,10 @@ use crate::app::AppMessage;
 use crate::commands::{
 	AgentInfo, BridgeAction, CommandContext, PromptInfo, SessionInfo, SkillInfo, ToolDefInfo,
 };
-use crate::config::{AcpFileConfig, AcpServerConfig, LoadedConfig};
+use crate::config::{AcpFileConfig, AcpServerConfig, FileConfigStorage, LoadedConfig};
 use crate::session_store::SessionStore;
+
+use simse_ui_core::config::storage::ConfigStorage;
 
 // ---------------------------------------------------------------------------
 // ACP Adapter — bridges simse-acp's AcpClient with simse-core's AcpClient trait
@@ -166,12 +168,16 @@ pub struct TuiRuntime {
 	pub verbose: bool,
 	/// Session persistence store.
 	session_store: SessionStore,
+	/// Config file storage for settings UI persistence.
+	pub config_storage: FileConfigStorage,
 }
 
 impl TuiRuntime {
 	/// Create a new TUI runtime from a loaded configuration.
 	pub fn new(config: LoadedConfig) -> Self {
 		let session_store = SessionStore::new(&config.data_dir);
+		let config_storage =
+			FileConfigStorage::new(config.data_dir.clone(), config.work_dir.clone());
 		Self {
 			config,
 			acp_engine: None,
@@ -182,6 +188,7 @@ impl TuiRuntime {
 			cancel_token: CancellationToken::new(),
 			verbose: false,
 			session_store,
+			config_storage,
 		}
 	}
 
@@ -555,22 +562,29 @@ impl TuiRuntime {
 
 			// ── Config ──────────────────────────────────
 			BridgeAction::InitConfig { force } => {
-				let dir = self.config.work_dir.join(".simse");
-				if dir.exists() && !force {
+				use simse_ui_core::config::storage::ConfigScope;
+				let exists = self
+					.config_storage
+					.file_exists("settings.json", ConfigScope::Project)
+					.await;
+				if exists && !force {
 					return Ok(
 						"Project already initialized. Use --force to overwrite.".into(),
 					);
 				}
-				std::fs::create_dir_all(&dir)
+				self.config_storage
+					.ensure_dir(ConfigScope::Project)
+					.await
 					.map_err(|e| RuntimeError::Acp(e.to_string()))?;
+				let dir = self.config.work_dir.join(".simse");
 				Ok(format!("Initialized project config at {}", dir.display()))
 			}
 			BridgeAction::FactoryReset => {
-				let data_dir = &self.config.data_dir;
-				if data_dir.exists() {
-					std::fs::remove_dir_all(data_dir)
-						.map_err(|e| RuntimeError::Acp(e.to_string()))?;
-				}
+				use simse_ui_core::config::storage::ConfigScope;
+				self.config_storage
+					.delete_all(ConfigScope::Global)
+					.await
+					.map_err(|e| RuntimeError::Acp(e.to_string()))?;
 				Ok("Factory reset complete. Global configuration removed.".into())
 			}
 			BridgeAction::SetupAcp { name, command, args } => {
@@ -610,11 +624,11 @@ impl TuiRuntime {
 				Ok(format!("ACP server '{name}' configured. Ready to connect."))
 			}
 			BridgeAction::FactoryResetProject => {
-				let dir = self.config.work_dir.join(".simse");
-				if dir.exists() {
-					std::fs::remove_dir_all(&dir)
-						.map_err(|e| RuntimeError::Acp(e.to_string()))?;
-				}
+				use simse_ui_core::config::storage::ConfigScope;
+				self.config_storage
+					.delete_all(ConfigScope::Project)
+					.await
+					.map_err(|e| RuntimeError::Acp(e.to_string()))?;
 				Ok("Project configuration reset.".into())
 			}
 
@@ -800,12 +814,9 @@ impl TuiRuntime {
 					"Conversation compacted ({msg_count} messages → 1 summary)."
 				))
 			}
-			// Placeholder stubs — full implementation in Task 8.
-			BridgeAction::LoadConfigFile { .. } => {
-				todo!("Task 8: implement LoadConfigFile dispatch via ConfigStorage")
-			}
-			BridgeAction::SaveConfigField { .. } => {
-				todo!("Task 8: implement SaveConfigField dispatch via ConfigStorage")
+			// Handled directly in dispatch_bridge_action (returns AppMessage).
+			BridgeAction::LoadConfigFile { .. } | BridgeAction::SaveConfigField { .. } => {
+				unreachable!("LoadConfigFile and SaveConfigField are dispatched directly in dispatch_bridge_action")
 			}
 		}
 	}
@@ -818,6 +829,48 @@ impl TuiRuntime {
 	/// perform action-specific side effects (e.g. restarting onboarding
 	/// after a factory-reset).
 	pub async fn dispatch_bridge_action(&mut self, action: BridgeAction) -> AppMessage {
+		// LoadConfigFile and SaveConfigField return dedicated AppMessage
+		// variants instead of the generic BridgeResult wrapper.
+		match &action {
+			BridgeAction::LoadConfigFile { filename, scope } => {
+				match self.config_storage.load_file(filename, *scope).await {
+					Ok(data) => return AppMessage::SettingsFileLoaded(data),
+					Err(e) => {
+						if matches!(
+							e,
+							simse_ui_core::config::storage::ConfigError::NotFound { .. }
+						) {
+							return AppMessage::SettingsFileLoaded(serde_json::json!({}));
+						}
+						return AppMessage::SettingsError(e.to_string());
+					}
+				}
+			}
+			BridgeAction::SaveConfigField {
+				filename,
+				scope,
+				key,
+				value,
+			} => {
+				let mut data = self
+					.config_storage
+					.load_file(filename, *scope)
+					.await
+					.unwrap_or(serde_json::json!({}));
+				simse_ui_core::config::storage::set_field(&mut data, key, value.clone());
+				match self.config_storage.save_file(filename, *scope, &data).await {
+					Ok(()) => {
+						return AppMessage::SettingsFieldSaved {
+							key: key.clone(),
+							value: value.clone(),
+						}
+					}
+					Err(e) => return AppMessage::SettingsError(e.to_string()),
+				}
+			}
+			_ => {}
+		}
+
 		let action_name = action.action_name().to_string();
 		match self.execute_bridge_action(action).await {
 			Ok(text) => AppMessage::BridgeResult {

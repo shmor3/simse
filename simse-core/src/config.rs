@@ -1,7 +1,5 @@
 //! Configuration system with typed validation and `define_config`.
 //!
-//! Ports `src/config/schema.ts` + `src/config/settings.ts` (~1,160 lines).
-//!
 //! - `AppConfig` struct with nested `AcpConfig`, `McpConfig`, `LibraryConfig`,
 //!   `ToolsConfig`, `LoopConfig`, `PromptsConfig`, chain types
 //! - All derive `Serialize, Deserialize, Clone, Debug, Default`

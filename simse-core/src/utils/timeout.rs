@@ -1,8 +1,7 @@
 //! Timeout utility — wraps a future with a deadline that rejects with a
 //! structured `RESILIENCE_TIMEOUT` error.
 //!
-//! Ports the TypeScript `src/utils/timeout.ts` to Rust using
-//! `tokio::time::timeout`.
+//! Uses `tokio::time::timeout` under the hood.
 
 use std::future::Future;
 use std::time::Duration;

@@ -322,7 +322,7 @@ pub fn render_command_autocomplete(
 	let line_count = visible.len() as u16;
 	// +2 for top/bottom border
 	let popup_height = (line_count + 2).min(area.height);
-	let popup_width = area.width.min(60).max(30);
+	let popup_width = area.width.clamp(30, 60);
 
 	// Anchor to bottom-left of the area (just above the input).
 	let popup_y = area.y + area.height.saturating_sub(popup_height);

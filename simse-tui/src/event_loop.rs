@@ -1009,8 +1009,8 @@ fn resolve_npx_to_node(command: &str, args: &[String]) -> Option<(String, Vec<St
 		let pkg_dir = node_dir.join("node_modules").join(package.as_str());
 		let pkg_json_path = pkg_dir.join("package.json");
 
-		if let Ok(pkg_json) = std::fs::read_to_string(&pkg_json_path) {
-			if let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&pkg_json) {
+		if let Ok(pkg_json) = std::fs::read_to_string(&pkg_json_path)
+			&& let Ok(pkg) = serde_json::from_str::<serde_json::Value>(&pkg_json) {
 				// Prefer the `bin` entry point (what `npx` runs) over `main`
 				// (which is the library entry point). For scoped packages,
 				// `bin` is an object with named entries; use the first value.
@@ -1053,7 +1053,6 @@ fn resolve_npx_to_node(command: &str, args: &[String]) -> Option<(String, Vec<St
 					));
 				}
 			}
-		}
 	}
 
 	None
@@ -1077,8 +1076,8 @@ fn find_node_module_dirs() -> Vec<std::path::PathBuf> {
 	// 2. Check proto tool versions (handles proto shim manager on Windows).
 	if let Some(home) = home_dir() {
 		let proto_node_dir = home.join(".proto").join("tools").join("node");
-		if proto_node_dir.exists() {
-			if let Ok(entries) = std::fs::read_dir(&proto_node_dir) {
+		if proto_node_dir.exists()
+			&& let Ok(entries) = std::fs::read_dir(&proto_node_dir) {
 				for entry in entries.flatten() {
 					if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
 						let name = entry.file_name();
@@ -1089,19 +1088,17 @@ fn find_node_module_dirs() -> Vec<std::path::PathBuf> {
 					}
 				}
 			}
-		}
 
 		// 3. Check nvm versions (common on Linux/macOS).
 		let nvm_dir = home.join(".nvm").join("versions").join("node");
-		if nvm_dir.exists() {
-			if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+		if nvm_dir.exists()
+			&& let Ok(entries) = std::fs::read_dir(&nvm_dir) {
 				for entry in entries.flatten() {
 					if entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
 						dirs.push(entry.path());
 					}
 				}
 			}
-		}
 	}
 
 	// 3. Also check `where node` / `which node` for PATH-based installs.
@@ -1112,20 +1109,16 @@ fn find_node_module_dirs() -> Vec<std::path::PathBuf> {
 	})
 	.arg("node")
 	.output()
-	{
-		if output.status.success() {
-			if let Ok(paths) = String::from_utf8(output.stdout) {
+		&& output.status.success()
+			&& let Ok(paths) = String::from_utf8(output.stdout) {
 				for line in paths.lines() {
 					let p = std::path::Path::new(line.trim());
-					if let Some(parent) = p.parent() {
-						if !dirs.contains(&parent.to_path_buf()) {
+					if let Some(parent) = p.parent()
+						&& !dirs.contains(&parent.to_path_buf()) {
 							dirs.push(parent.to_path_buf());
 						}
-					}
 				}
 			}
-		}
-	}
 
 	dirs
 }

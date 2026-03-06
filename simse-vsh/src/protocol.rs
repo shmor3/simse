@@ -4,8 +4,6 @@ use serde::{Deserialize, Serialize};
 
 pub const INTERNAL_ERROR: i32 = -32603;
 pub const METHOD_NOT_FOUND: i32 = -32601;
-#[allow(dead_code)]
-pub const INVALID_PARAMS: i32 = -32602;
 pub const VSH_ERROR: i32 = -32000;
 
 // -- Incoming request ---------------------------------------------------------

@@ -1,6 +1,4 @@
 //! Tool registry types — definitions, calls, results, metrics.
-//!
-//! Ports `src/ai/tools/types.ts` (~145 lines of TS) to Rust.
 
 use std::collections::HashMap;
 use std::fmt;

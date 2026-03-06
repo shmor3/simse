@@ -6,7 +6,7 @@ use crate::protocol::*;
 /// Run embedding inference and return an ACP response with embedding vectors.
 ///
 /// Returns embeddings in a `data` content block matching the format expected
-/// by the simse ACP client (`extractEmbeddings` in acp-results.ts).
+/// by the simse ACP client.
 pub fn run_embedding(
     registry: &ModelRegistry,
     model_id: &str,

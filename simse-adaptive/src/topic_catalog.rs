@@ -4,8 +4,6 @@
 //
 // Manages a tree of topics with fuzzy matching (Levenshtein), aliases,
 // volume tracking, merge, and relocate operations.
-//
-// Ported from the TypeScript implementation in src/topic-catalog.ts.
 // ---------------------------------------------------------------------------
 
 use std::collections::{HashMap, HashSet};

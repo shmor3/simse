@@ -1,7 +1,6 @@
 //! Retry utility with exponential backoff and jitter.
 //!
-//! Ports the TypeScript `src/utils/retry.ts` to async Rust using
-//! `tokio_util::sync::CancellationToken` for cooperative cancellation.
+//! Uses `tokio_util::sync::CancellationToken` for cooperative cancellation.
 
 use std::future::Future;
 use std::sync::Arc;
@@ -110,9 +109,9 @@ where
                 }
 
                 // Check whether this error is retryable
-                if let Some(ref predicate) = should_retry {
-                    if !predicate(last_error.as_ref().unwrap(), attempt) {
-                        return Err(last_error.unwrap());
+                if let (Some(ref predicate), Some(ref err)) = (&should_retry, &last_error) {
+                    if !predicate(err, attempt) {
+                        return Err(last_error.expect("checked above"));
                     }
                 }
 
@@ -132,8 +131,8 @@ where
                 let final_secs = (capped_secs + jitter).max(0.0);
                 let final_delay = Duration::from_secs_f64(final_secs);
 
-                if let Some(ref cb) = on_retry {
-                    cb(last_error.as_ref().unwrap(), attempt + 1, final_delay);
+                if let (Some(ref cb), Some(ref err)) = (&on_retry, &last_error) {
+                    cb(err, attempt + 1, final_delay);
                 }
 
                 // Sleep, but respect cancellation

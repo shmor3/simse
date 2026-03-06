@@ -44,12 +44,6 @@ export async function validateToken(
 	return { id: token.id, userId: token.user_id };
 }
 
-export async function markTokenUsed(
-	db: D1Database,
-	id: string,
-): Promise<void> {
-	await db
-		.prepare('UPDATE tokens SET used = 1 WHERE id = ?')
-		.bind(id)
-		.run();
+export async function markTokenUsed(db: D1Database, id: string): Promise<void> {
+	await db.prepare('UPDATE tokens SET used = 1 WHERE id = ?').bind(id).run();
 }

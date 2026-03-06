@@ -251,17 +251,14 @@ impl SettingsFormState {
 		if self.level != SettingsLevel::Editing {
 			return SettingsAction::None;
 		}
-		if let Some(schema) = self.current_file_schema() {
-			if let Some(field_schema) = schema.fields.get(self.selected_field) {
-				if let FieldType::Select { options } = &field_schema.field_type {
-					if !options.is_empty() {
+		if let Some(schema) = self.current_file_schema()
+			&& let Some(field_schema) = schema.fields.get(self.selected_field)
+				&& let FieldType::Select { options } = &field_schema.field_type
+					&& !options.is_empty() {
 						self.select_index = (self.select_index + 1) % options.len();
 						self.edit_value = options[self.select_index].clone();
 						return self.save_current_field();
 					}
-				}
-			}
-		}
 		SettingsAction::None
 	}
 
@@ -397,11 +394,10 @@ impl SettingsFormState {
 	/// Number of fields in the current file (from loaded data or schema).
 	fn field_count(&self) -> usize {
 		// Use loaded data keys if available, fall back to schema.
-		if let Some(obj) = self.config_data.as_object() {
-			if !obj.is_empty() {
+		if let Some(obj) = self.config_data.as_object()
+			&& !obj.is_empty() {
 				return obj.len();
 			}
-		}
 		self.current_file_schema()
 			.map(|s| s.fields.len())
 			.unwrap_or(0)
@@ -409,8 +405,8 @@ impl SettingsFormState {
 
 	/// Get the current field value as a string for the edit buffer.
 	fn current_field_value(&self) -> String {
-		if let Some(schema) = self.current_file_schema() {
-			if let Some(field_schema) = schema.fields.get(self.selected_field) {
+		if let Some(schema) = self.current_file_schema()
+			&& let Some(field_schema) = schema.fields.get(self.selected_field) {
 				// Try loaded data first, then default.
 				let value = self
 					.config_data
@@ -419,32 +415,28 @@ impl SettingsFormState {
 					.unwrap_or(&field_schema.default_value);
 				return value_to_edit_string(value);
 			}
-		}
 		// Fallback: get from raw data by index.
 		if let Some(obj) = self.config_data.as_object() {
 			let keys: Vec<_> = obj.keys().collect();
-			if let Some(key) = keys.get(self.selected_field) {
-				if let Some(val) = obj.get(*key) {
+			if let Some(key) = keys.get(self.selected_field)
+				&& let Some(val) = obj.get(*key) {
 					return value_to_edit_string(val);
 				}
-			}
 		}
 		String::new()
 	}
 
 	/// Get the current select index for a Select field.
 	fn current_select_index(&self) -> usize {
-		if let Some(schema) = self.current_file_schema() {
-			if let Some(field_schema) = schema.fields.get(self.selected_field) {
-				if let FieldType::Select { options } = &field_schema.field_type {
+		if let Some(schema) = self.current_file_schema()
+			&& let Some(field_schema) = schema.fields.get(self.selected_field)
+				&& let FieldType::Select { options } = &field_schema.field_type {
 					let current = self.current_field_value();
 					return options
 						.iter()
 						.position(|o| o == &current)
 						.unwrap_or(0);
 				}
-			}
-		}
 		0
 	}
 
@@ -453,8 +445,8 @@ impl SettingsFormState {
 		let (filename, _, scope) = CONFIG_FILES[self.selected_file];
 
 		// Determine the key and typed value.
-		if let Some(schema) = self.current_file_schema() {
-			if let Some(field_schema) = schema.fields.get(self.selected_field) {
+		if let Some(schema) = self.current_file_schema()
+			&& let Some(field_schema) = schema.fields.get(self.selected_field) {
 				let value = parse_edit_value(&self.edit_value, &field_schema.field_type);
 				return SettingsAction::SaveField {
 					filename: filename.to_string(),
@@ -463,7 +455,6 @@ impl SettingsFormState {
 					value,
 				};
 			}
-		}
 
 		// Fallback: raw key from data.
 		if let Some(obj) = self.config_data.as_object() {

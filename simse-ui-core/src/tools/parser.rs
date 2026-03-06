@@ -5,9 +5,15 @@
 //! This module extracts those blocks into [`ToolCallRequest`] values and
 //! returns the remaining text with the blocks stripped out.
 
+use std::sync::LazyLock;
+
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
+
+static TOOL_USE_RE: LazyLock<Regex> = LazyLock::new(|| {
+	Regex::new(r"<tool_use>\s*([\s\S]*?)\s*</tool_use>").expect("valid regex")
+});
 
 use super::ToolCallRequest;
 
@@ -55,7 +61,7 @@ struct RawToolCall {
 /// assert_eq!(parsed.text, "Let me search for that.");
 /// ```
 pub fn parse_tool_calls(response: &str) -> ParsedResponse {
-	let pattern = Regex::new(r"<tool_use>\s*([\s\S]*?)\s*</tool_use>").unwrap();
+	let pattern = &*TOOL_USE_RE;
 
 	let mut tool_calls = Vec::new();
 

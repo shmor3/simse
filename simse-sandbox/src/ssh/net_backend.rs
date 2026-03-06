@@ -102,7 +102,7 @@ impl NetBackend for SshNetBackend {
         let start = Instant::now();
 
         // Build curl command
-        let timeout_secs = (timeout_ms + 999) / 1000; // ceil division
+        let timeout_secs = timeout_ms.div_ceil(1000); // ceil division
         let mut cmd = format!(
             "curl -s -S -i -X {} --max-time {} --max-filesize {}",
             shell_escape(method),

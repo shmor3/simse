@@ -1,7 +1,5 @@
 //! Cross-ACP delegation tool registration.
 //!
-//! Ports `src/ai/tools/delegation-tools.ts` (~131 lines of TS) to Rust.
-//!
 //! Registers a `delegate_{server_name}` tool for each non-primary ACP server
 //! so that one ACP model can invoke another via single-shot generation.
 //! Follows the same trait-based pattern as `builtin.rs` and `subagent.rs`.

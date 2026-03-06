@@ -1,9 +1,6 @@
 //! Agentic loop — multi-turn orchestration with doom loop detection,
 //! auto-compaction, and retry.
 //!
-//! Ports `src/ai/loop/agentic-loop.ts` + `types.ts` (~600 lines of TS) to
-//! async Rust.
-//!
 //! The loop drives the conversation between an ACP client, a tool executor,
 //! and optional compaction providers. It detects doom loops (repeated identical
 //! tool calls), supports two-stage compaction (prune then summarise), and

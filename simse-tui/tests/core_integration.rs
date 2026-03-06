@@ -1,8 +1,7 @@
 //! Integration tests verifying simse-core direct dependency works correctly.
 //!
 //! These tests confirm that simse-tui can use simse-core types directly
-//! (without the former simse-bridge intermediary) and that the key APIs
-//! used by the TUI are accessible and functional.
+//! and that the key APIs used by the TUI are accessible and functional.
 
 use simse_core::agentic_loop::{CancellationToken, LoopCallbacks};
 use simse_core::conversation::Conversation;

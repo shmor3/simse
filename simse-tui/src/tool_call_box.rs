@@ -169,8 +169,8 @@ pub fn render_tool_call(display: &ToolCallDisplay, verbose: bool) -> Vec<Line<'s
 	lines.push(Line::from(spans));
 
 	// ── Verbose: full args JSON ─────────────────────
-	if verbose {
-		if let Some(ref json) = display.args_json {
+	if verbose
+		&& let Some(ref json) = display.args_json {
 			for json_line in json.lines() {
 				lines.push(Line::from(Span::styled(
 					format!("    {json_line}"),
@@ -178,7 +178,6 @@ pub fn render_tool_call(display: &ToolCallDisplay, verbose: bool) -> Vec<Line<'s
 				)));
 			}
 		}
-	}
 
 	// ── Diff output ─────────────────────────────────
 	if let Some(ref diff) = display.diff {

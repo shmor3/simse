@@ -5,8 +5,6 @@
 // Formats memory search results as structured XML tags or natural text
 // for injection into the system prompt. This gives the LLM relevant
 // context from past conversations without polluting the user's message.
-//
-// Ported from the TypeScript implementation in src/prompt-injection.ts.
 // ---------------------------------------------------------------------------
 
 use crate::types::Lookup;

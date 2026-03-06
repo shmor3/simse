@@ -9,8 +9,6 @@
 //   fuzzy~term           — fuzzy text search
 //   score>N              — minimum score threshold
 //   plain text           — BM25 search (default)
-//
-// Ported from the TypeScript implementation in src/query-dsl.ts.
 // ---------------------------------------------------------------------------
 
 use serde::{Deserialize, Serialize};

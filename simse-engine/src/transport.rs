@@ -5,7 +5,6 @@ use crate::protocol::{JsonRpcError, JsonRpcNotification, JsonRpcResponse};
 /// NDJSON transport over stdin/stdout for JSON-RPC 2.0 communication.
 ///
 /// Reads one JSON object per line from stdin, writes one per line to stdout.
-/// Matches the transport in simse-code/acp-ollama-bridge.ts.
 pub struct NdjsonTransport;
 
 impl Default for NdjsonTransport {

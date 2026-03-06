@@ -208,11 +208,7 @@ impl PermissionManager {
 			}
 
 			PermissionMode::AcceptEdits => {
-				if is_read_only_tool(tool_name) {
-					PermissionDecision::Allow
-				} else if is_write_tool(tool_name) {
-					PermissionDecision::Allow
-				} else if is_bash_tool(tool_name) {
+				if is_bash_tool(tool_name) {
 					PermissionDecision::Ask
 				} else {
 					PermissionDecision::Allow

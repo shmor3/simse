@@ -13,16 +13,13 @@ use serde::{Deserialize, Serialize};
 /// Output format for non-interactive results.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[derive(Default)]
 pub enum OutputFormat {
-	Text,
+	#[default]
+ Text,
 	Json,
 }
 
-impl Default for OutputFormat {
-	fn default() -> Self {
-		Self::Text
-	}
-}
 
 /// Parsed arguments for a non-interactive invocation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

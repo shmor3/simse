@@ -81,7 +81,7 @@ pub fn check_config(config: &serde_json::Value) -> bool {
 		.get("acp")
 		.and_then(|acp| acp.get("servers"))
 		.and_then(|servers| servers.as_array())
-		.map_or(false, |servers| !servers.is_empty())
+		.is_some_and(|servers| !servers.is_empty())
 }
 
 // ---------------------------------------------------------------------------

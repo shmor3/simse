@@ -51,6 +51,7 @@ pub struct AcpServerConfig {
 /// Top-level ACP config from `acp.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub struct AcpFileConfig {
 	#[serde(default)]
 	pub servers: Vec<AcpServerConfig>,
@@ -58,15 +59,6 @@ pub struct AcpFileConfig {
 	pub default_agent: Option<String>,
 }
 
-impl Default for AcpFileConfig {
-	fn default() -> Self {
-		Self {
-			servers: Vec::new(),
-			default_server: None,
-			default_agent: None,
-		}
-	}
-}
 
 /// A single MCP server entry from `mcp.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,18 +83,12 @@ fn default_transport() -> String {
 /// Top-level MCP config from `mcp.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub struct McpFileConfig {
 	#[serde(default)]
 	pub servers: Vec<McpServerConfig>,
 }
 
-impl Default for McpFileConfig {
-	fn default() -> Self {
-		Self {
-			servers: Vec::new(),
-		}
-	}
-}
 
 /// Embedding provider config from `embed.json`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

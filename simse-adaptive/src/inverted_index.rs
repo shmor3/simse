@@ -4,8 +4,6 @@
 //
 // Builds an in-memory inverted index mapping terms to document IDs and
 // supports Okapi BM25 ranking for full-text search queries.
-//
-// Ported from the TypeScript implementation in src/inverted-index.ts.
 // ---------------------------------------------------------------------------
 
 use std::collections::{HashMap, HashSet};

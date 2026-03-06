@@ -1,8 +1,6 @@
 //! Subagent tool registration — spawn nested agentic loops and delegate
 //! single-shot tasks to ACP agents.
 //!
-//! Ports `src/ai/tools/subagent-tools.ts` (~396 lines of TS) to Rust.
-//!
 //! Defines trait abstractions (`SubagentLoopRunner`, `DelegateRunner`) so that
 //! the actual agentic loop and ACP client implementations can be plugged in
 //! later. This follows the same pattern used in `builtin.rs` with

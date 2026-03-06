@@ -649,8 +649,8 @@ impl AcpConnection {
 		writer
 			.write_all(&data)
 			.await
-			.map_err(|e| AcpError::Io(e))?;
-		writer.flush().await.map_err(|e| AcpError::Io(e))?;
+			.map_err(AcpError::Io)?;
+		writer.flush().await.map_err(AcpError::Io)?;
 
 		Ok(())
 	}

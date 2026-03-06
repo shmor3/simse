@@ -12,9 +12,7 @@ export async function createSession(
 	).toISOString();
 
 	await db
-		.prepare(
-			'INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)',
-		)
+		.prepare('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)')
 		.bind(id, userId, expiresAt)
 		.run();
 
@@ -39,8 +37,5 @@ export async function deleteSession(
 	db: D1Database,
 	sessionId: string,
 ): Promise<void> {
-	await db
-		.prepare('DELETE FROM sessions WHERE id = ?')
-		.bind(sessionId)
-		.run();
+	await db.prepare('DELETE FROM sessions WHERE id = ?').bind(sessionId).run();
 }

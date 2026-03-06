@@ -16,6 +16,7 @@ use crate::executor::ExecResult;
 /// Session state (env, cwd, aliases, history) is managed by `VirtualShell`;
 /// the backend only handles raw execution.
 #[async_trait]
+#[allow(clippy::too_many_arguments)]
 pub trait ShellBackend: Send + Sync {
 	/// Execute a shell command with the given parameters.
 	///

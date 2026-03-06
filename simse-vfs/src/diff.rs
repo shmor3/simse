@@ -161,17 +161,16 @@ fn compute_lcs(old_lines: &[&str], new_lines: &[&str]) -> Vec<DiffLine> {
         while k <= d {
             let idx_k = (offset + k) as usize;
 
-            let x: isize;
-            if k == -d
+            let x: isize = if k == -d
                 || (k != d
                     && v[(offset + k - 1) as usize] < v[(offset + k + 1) as usize])
             {
                 // Move down (insertion from new)
-                x = v[(offset + k + 1) as usize];
+                v[(offset + k + 1) as usize]
             } else {
                 // Move right (deletion from old)
-                x = v[(offset + k - 1) as usize] + 1;
-            }
+                v[(offset + k - 1) as usize] + 1
+            };
 
             let mut cx = x;
             let mut cy = cx - k;
@@ -209,15 +208,14 @@ fn compute_lcs(old_lines: &[&str], new_lines: &[&str]) -> Vec<DiffLine> {
         let k = x - y;
         let d_i = d as isize;
 
-        let prev_k: isize;
-        if k == -d_i
+        let prev_k: isize = if k == -d_i
             || (k != d_i
                 && v_prev[(offset + k - 1) as usize] < v_prev[(offset + k + 1) as usize])
         {
-            prev_k = k + 1;
+            k + 1
         } else {
-            prev_k = k - 1;
-        }
+            k - 1
+        };
 
         let prev_x = v_prev[(offset + prev_k) as usize];
         let prev_y = prev_x - prev_k;
@@ -321,11 +319,7 @@ fn build_single_hunk(
     last_change: usize,
     context_lines: usize,
 ) -> DiffHunk {
-    let start = if first_change >= context_lines {
-        first_change - context_lines
-    } else {
-        0
-    };
+    let start = first_change.saturating_sub(context_lines);
     let end = std::cmp::min(lines.len() - 1, last_change + context_lines);
 
     let mut hunk_lines: Vec<DiffLine> = Vec::new();
@@ -335,8 +329,7 @@ fn build_single_hunk(
     let mut new_count: usize = 0;
     let mut found_first = false;
 
-    for i in start..=end {
-        let line = &lines[i];
+    for line in &lines[start..=end] {
         hunk_lines.push(line.clone());
 
         if !found_first {

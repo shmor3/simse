@@ -1,6 +1,5 @@
 //! Tool Registry — registers tools, parses tool calls, executes handlers.
 //!
-//! Ports `src/ai/tools/tool-registry.ts` (~416 lines of TS) to Rust.
 //! Uses interior mutability for metrics so `execute` can take `&self`.
 
 use std::collections::HashMap;
@@ -290,7 +289,7 @@ impl ToolRegistry {
 			.map(|call| {
 				let sem = Arc::clone(&semaphore);
 				async move {
-					let _permit = sem.acquire().await.unwrap();
+					let _permit = sem.acquire().await.expect("semaphore closed");
 					self.execute(call).await
 				}
 			})

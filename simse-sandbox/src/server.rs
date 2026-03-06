@@ -379,10 +379,10 @@ struct TcpSendParams {
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 struct UdpSendParams {
     host: String,
     port: u16,
+    #[allow(dead_code)]
     data: String,
 }
 
@@ -1889,8 +1889,8 @@ impl SandboxServer {
                 p.body.as_deref(),
             )?;
             Ok(serde_json::to_value(result)?)
-        } else if url.starts_with("net://") {
-            let remainder = &url[6..]; // strip "net://"
+        } else if let Some(remainder) = url.strip_prefix("net://") {
+            // strip "net://"
             let real_url = if remainder.starts_with("http://") || remainder.starts_with("https://") {
                 remainder.to_string()
             } else {

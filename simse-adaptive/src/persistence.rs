@@ -2,12 +2,8 @@
 // Binary persistence format + Gzip compression
 // ---------------------------------------------------------------------------
 //
-// Ports the TypeScript stacks-serialize.ts (228 lines) and preservation.ts
-// (85 lines) into a single Rust module.
-//
-// **Format compatibility**: Rust produces the exact same binary format as the
-// TypeScript implementation so existing TS-written stores can be read by Rust
-// and vice versa.
+// **Format compatibility**: Rust produces the exact same binary format so
+// existing stores can be read and written consistently.
 //
 // Entry binary format per key-value pair:
 //   [4B text-len BE][text UTF-8]

@@ -5,8 +5,6 @@
 // Keeps frequently accessed entry texts in memory to avoid repeated disk
 // reads during search result hydration. Evicts by entry count and total
 // byte budget (whichever limit is hit first).
-//
-// Ported from the TypeScript implementation in src/text-cache.ts.
 // ---------------------------------------------------------------------------
 
 use std::collections::HashMap;

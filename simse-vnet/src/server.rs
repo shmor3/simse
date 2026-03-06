@@ -170,11 +170,11 @@ impl VnetServer {
                 p.body.as_deref(),
             )?;
             Ok(serde_json::to_value(result)?)
-        } else if url.starts_with("net://") {
+        } else if let Some(remainder) = url.strip_prefix("net://") {
             // Strip the net:// prefix and reconstruct as a real URL.
             // net://https://example.com/path -> https://example.com/path
             // net://example.com/path         -> https://example.com/path (default)
-            let remainder = &url[6..]; // strip "net://"
+            // strip "net://"
             let real_url = if remainder.starts_with("http://") || remainder.starts_with("https://") {
                 remainder.to_string()
             } else {

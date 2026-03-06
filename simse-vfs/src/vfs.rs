@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// In-memory VFS core — Rust port of createVirtualFS (TypeScript)
+// In-memory VFS core
 // ---------------------------------------------------------------------------
 
 use std::collections::HashMap;
@@ -268,7 +268,7 @@ impl VirtualFs {
 	fn now() -> u64 {
 		SystemTime::now()
 			.duration_since(UNIX_EPOCH)
-			.unwrap()
+			.unwrap_or_default()
 			.as_millis() as u64
 	}
 
@@ -437,7 +437,7 @@ impl VirtualFs {
 		let entries = self
 			.history
 			.entry(path.to_string())
-			.or_insert_with(Vec::new);
+			.or_default();
 
 		let version = entries.len() + 1;
 		let entry = HistoryEntryInternal {
@@ -1195,7 +1195,7 @@ impl VirtualFs {
 			context,
 			self.limits.max_diff_lines as u32,
 		)
-		.map_err(|e| VfsError::LimitExceeded(e))?;
+		.map_err(VfsError::LimitExceeded)?;
 
 		Ok(DiffResultOutput {
 			old_path: normalized_old,
@@ -1253,7 +1253,7 @@ impl VirtualFs {
 			context,
 			self.limits.max_diff_lines as u32,
 		)
-		.map_err(|e| VfsError::LimitExceeded(e))?;
+		.map_err(VfsError::LimitExceeded)?;
 
 		Ok(DiffResultOutput {
 			old_path: format!("{}@v{}", normalized, old_ver),
@@ -1453,7 +1453,12 @@ impl VirtualFs {
 			.collect();
 
 		for file in &snap.files {
-			let normalized = normalize_path(&file.path).unwrap();
+			let normalized = normalize_path(&file.path).map_err(|_| {
+				VfsError::InvalidOperation(format!(
+					"Snapshot restore failed: invalid path \"{}\"",
+					file.path
+				))
+			})?;
 			let ancestors = ancestor_paths(&normalized);
 			for ancestor in &ancestors {
 				if ancestor == VFS_ROOT {
@@ -1486,7 +1491,12 @@ impl VirtualFs {
 		self.do_clear();
 
 		for dir in &sorted_dirs {
-			let normalized = normalize_path(&dir.path).unwrap();
+			let normalized = normalize_path(&dir.path).map_err(|_| {
+				VfsError::InvalidOperation(format!(
+					"Snapshot restore failed: invalid path \"{}\"",
+					dir.path
+				))
+			})?;
 			self.nodes.insert(
 				normalized,
 				InternalNode {
@@ -1503,7 +1513,12 @@ impl VirtualFs {
 		}
 
 		for file in &snap.files {
-			let normalized = normalize_path(&file.path).unwrap();
+			let normalized = normalize_path(&file.path).map_err(|_| {
+				VfsError::InvalidOperation(format!(
+					"Snapshot restore failed: invalid path \"{}\"",
+					file.path
+				))
+			})?;
 			if file.content_type == "binary" {
 				if let Some(ref b64) = file.base64 {
 					let binary = BASE64.decode(b64).unwrap_or_default();

@@ -67,30 +67,29 @@ impl SshFsBackend {
         self.pool
             .get_sftp_session()
             .await
-            .map_err(|e| VfsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string())))
+            .map_err(|e| VfsError::Io(std::io::Error::other(e.to_string())))
     }
 
     /// Execute a remote command and return stdout.
     async fn run_remote_cmd(&self, command: &str) -> Result<String, VfsError> {
         let mut channel = self.pool.get_exec_channel().await.map_err(|e| {
-            VfsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            VfsError::Io(std::io::Error::other(e.to_string()))
         })?;
 
         channel.exec(true, command.as_bytes()).await.map_err(|e| {
-            VfsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            VfsError::Io(std::io::Error::other(e.to_string()))
         })?;
 
         let output = read_channel_output(&mut channel, EXEC_TIMEOUT_MS, EXEC_MAX_BYTES)
             .await
             .map_err(|e| {
-                VfsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+                VfsError::Io(std::io::Error::other(e.to_string()))
             })?;
 
         if output.exit_code.unwrap_or(1) != 0 {
             let stderr = output.stderr.trim().to_string();
             if !stderr.is_empty() {
-                return Err(VfsError::Io(std::io::Error::new(
-                    std::io::ErrorKind::Other,
+                return Err(VfsError::Io(std::io::Error::other(
                     stderr,
                 )));
             }
@@ -140,8 +139,7 @@ impl SshFsBackend {
                     // May already exist after recursive creation
                     match sftp.metadata(path.to_string()).await {
                         Ok(attrs) if attrs.is_dir() => Ok(()),
-                        _ => Err(VfsError::Io(std::io::Error::new(
-                            std::io::ErrorKind::Other,
+                        _ => Err(VfsError::Io(std::io::Error::other(
                             format!("failed to create directory: {path}"),
                         ))),
                     }
@@ -225,13 +223,11 @@ fn sftp_err(e: russh_sftp::client::error::Error) -> VfsError {
             StatusCode::PermissionDenied => {
                 VfsError::PermissionDenied(status.error_message.clone())
             }
-            _ => VfsError::Io(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            _ => VfsError::Io(std::io::Error::other(
                 e.to_string(),
             )),
         },
-        _ => VfsError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        _ => VfsError::Io(std::io::Error::other(
             e.to_string(),
         )),
     }
@@ -311,11 +307,11 @@ impl FsBackend for SshFsBackend {
 
         use tokio::io::AsyncWriteExt;
         file.write_all(content.as_bytes()).await.map_err(|e| {
-            VfsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            VfsError::Io(std::io::Error::other(e.to_string()))
         })?;
 
         file.shutdown().await.map_err(|e| {
-            VfsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            VfsError::Io(std::io::Error::other(e.to_string()))
         })?;
 
         Ok(())
@@ -343,11 +339,11 @@ impl FsBackend for SshFsBackend {
 
         use tokio::io::AsyncWriteExt;
         file.write_all(&combined).await.map_err(|e| {
-            VfsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            VfsError::Io(std::io::Error::other(e.to_string()))
         })?;
 
         file.shutdown().await.map_err(|e| {
-            VfsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            VfsError::Io(std::io::Error::other(e.to_string()))
         })?;
 
         Ok(())
@@ -472,11 +468,11 @@ impl FsBackend for SshFsBackend {
 
         use tokio::io::AsyncWriteExt;
         file.write_all(&data).await.map_err(|e| {
-            VfsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            VfsError::Io(std::io::Error::other(e.to_string()))
         })?;
 
         file.shutdown().await.map_err(|e| {
-            VfsError::Io(std::io::Error::new(std::io::ErrorKind::Other, e.to_string()))
+            VfsError::Io(std::io::Error::other(e.to_string()))
         })?;
 
         Ok(())

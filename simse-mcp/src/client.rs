@@ -450,14 +450,6 @@ impl TransportKind {
 		}
 	}
 
-	/// Returns `true` if the transport is currently connected.
-	#[allow(dead_code)]
-	fn is_connected(&self) -> bool {
-		match self {
-			Self::Stdio(t) => t.is_connected(),
-			Self::Http(t) => t.is_connected(),
-		}
-	}
 }
 
 // ===========================================================================

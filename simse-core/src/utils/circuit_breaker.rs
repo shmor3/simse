@@ -2,8 +2,6 @@
 //! requests to unhealthy services.
 //!
 //! States: Closed -> Open -> HalfOpen -> Closed
-//!
-//! Ports the TypeScript `src/utils/circuit-breaker.ts` to Rust.
 
 use std::future::Future;
 use std::sync::Mutex;

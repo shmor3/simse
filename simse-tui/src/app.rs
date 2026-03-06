@@ -10,9 +10,8 @@ use ratatui::{
 use simse_ui_core::app::{
 	OutputItem, PermissionRequest, ToolCallState, ToolCallStatus,
 };
-use simse_ui_core::commands::registry::{all_commands, CommandCategory, CommandDefinition};
+use simse_ui_core::commands::registry::{all_commands, CommandDefinition};
 use simse_ui_core::input::state as input;
-use std::collections::BTreeMap;
 
 use crate::autocomplete::{render_inline_completions, CommandAutocompleteState};
 use crate::onboarding::OnboardingState;
@@ -30,7 +29,7 @@ use crate::dispatch::{parse_command_line, DispatchContext};
 use crate::output;
 use crate::overlays::librarian::{render_librarian_explorer, LibrarianExplorerState};
 use crate::overlays::settings::render_settings_form;
-use simse_ui_core::config::settings_state::{SettingsFormState, SettingsAction, SettingsLevel};
+use simse_ui_core::config::settings_state::{SettingsFormState, SettingsAction};
 use crate::overlays::setup::{render_setup_selector, SetupSelectorState};
 
 // ── Screen ──────────────────────────────────────────────
@@ -110,6 +109,12 @@ pub struct App {
 	pub onboarding: OnboardingState,
 	/// Thinking spinner — visible during the entire generation lifecycle.
 	pub spinner: Option<ThinkingSpinner>,
+}
+
+impl Default for App {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl App {
@@ -336,7 +341,7 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			}
 
 			// Add to history (dedup consecutive, cap at 100).
-			if app.history.last().map_or(true, |last| *last != text) {
+			if app.history.last().is_none_or(|last| *last != text) {
 				app.history.push(text.clone());
 				if app.history.len() > 100 {
 					app.history.remove(0);
@@ -475,24 +480,21 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 				app.autocomplete.move_down();
 				return app;
 			}
-			match app.history_index {
-				Some(idx) => {
-					if idx + 1 < app.history.len() {
-						let new_idx = idx + 1;
-						app.history_index = Some(new_idx);
-						let text = app.history[new_idx].clone();
-						app.input = input::InputState::default();
-						app.input = input::insert(&app.input, &text);
-					} else {
-						// Past end: restore draft.
-						app.history_index = None;
-						let draft = app.history_draft.clone();
-						app.input = input::InputState::default();
-						app.input = input::insert(&app.input, &draft);
-					}
-				}
-				None => {}
-			}
+			if let Some(idx) = app.history_index {
+   					if idx + 1 < app.history.len() {
+   						let new_idx = idx + 1;
+   						app.history_index = Some(new_idx);
+   						let text = app.history[new_idx].clone();
+   						app.input = input::InputState::default();
+   						app.input = input::insert(&app.input, &text);
+   					} else {
+   						// Past end: restore draft.
+   						app.history_index = None;
+   						let draft = app.history_draft.clone();
+   						app.input = input::InputState::default();
+   						app.input = input::insert(&app.input, &draft);
+   					}
+   				}
 		}
 
 		// ── Navigation ──────────────────────────────
@@ -569,10 +571,7 @@ pub fn update(mut app: App, msg: AppMessage) -> App {
 			};
 		}
 		AppMessage::Tab => {
-			match &app.screen {
-				Screen::Setup { .. } => { app.setup_state.toggle_field(); return app; }
-				_ => {}
-			}
+			if let Screen::Setup { .. } = &app.screen { app.setup_state.toggle_field(); return app; }
 			if app.autocomplete.is_active() {
 				if let Some(completed) = app.autocomplete.accept() {
 					let with_space = format!("{completed} ");
@@ -841,56 +840,6 @@ fn dispatch_command(mut app: App, text: &str) -> App {
 		}
 	}
 	app
-}
-
-// ── Helpers ─────────────────────────────────────────────
-
-/// Format help text grouped by category.
-fn format_help_text(commands: &[CommandDefinition]) -> String {
-	let mut groups: BTreeMap<String, Vec<&CommandDefinition>> = BTreeMap::new();
-	for cmd in commands {
-		if cmd.hidden {
-			continue;
-		}
-		let cat = match cmd.category {
-			CommandCategory::Meta => "Meta",
-			CommandCategory::Library => "Library",
-			CommandCategory::Tools => "Tools",
-			CommandCategory::Session => "Session",
-			CommandCategory::Config => "Config",
-			CommandCategory::Files => "Files",
-			CommandCategory::Ai => "AI",
-		};
-		groups.entry(cat.into()).or_default().push(cmd);
-	}
-
-	let mut out = String::from("Available commands:\n");
-	for (cat, cmds) in &groups {
-		out.push_str(&format!("\n  {cat}:\n"));
-		for cmd in cmds {
-			let aliases = if cmd.aliases.is_empty() {
-				String::new()
-			} else {
-				format!(" ({})", cmd.aliases.join(", "))
-			};
-			out.push_str(&format!(
-				"    /{}{} — {}\n",
-				cmd.name, aliases, cmd.description
-			));
-		}
-	}
-	out
-}
-
-/// Format token count: 1000+ as "1.0k", etc.
-pub fn format_tokens(tokens: u64) -> String {
-	if tokens >= 1_000_000 {
-		format!("{:.1}M", tokens as f64 / 1_000_000.0)
-	} else if tokens >= 1_000 {
-		format!("{:.1}k", tokens as f64 / 1_000.0)
-	} else {
-		tokens.to_string()
-	}
 }
 
 // ── View ────────────────────────────────────────────────
@@ -1223,7 +1172,7 @@ fn handle_setup_action(app: &mut App, action: crate::overlays::setup::SetupActio
 				args: parsed_args,
 			});
 			app.output.push(OutputItem::CommandResult {
-				text: format!("Custom ACP configured."),
+				text: "Custom ACP configured.".to_string(),
 			});
 			app.screen = Screen::Chat;
 		}
@@ -1236,6 +1185,7 @@ fn handle_setup_action(app: &mut App, action: crate::overlays::setup::SetupActio
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use simse_ui_core::config::settings_state::SettingsLevel;
 
 	#[test]
 	fn new_app_defaults() {
@@ -1469,19 +1419,6 @@ mod tests {
 		app = update(app, AppMessage::CharInput('a'));
 		assert_eq!(app.screen, Screen::Chat);
 		assert!(app.input.value.is_empty()); // key should NOT be inserted
-	}
-
-	#[test]
-	fn format_tokens_small() {
-		assert_eq!(format_tokens(42), "42");
-		assert_eq!(format_tokens(999), "999");
-	}
-
-	#[test]
-	fn format_tokens_thousands() {
-		assert_eq!(format_tokens(1000), "1.0k");
-		assert_eq!(format_tokens(1500), "1.5k");
-		assert_eq!(format_tokens(42000), "42.0k");
 	}
 
 	#[test]

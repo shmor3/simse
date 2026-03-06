@@ -491,7 +491,7 @@ impl McpServer {
 			}],
 		};
 
-		Ok(serde_json::to_value(&result).map_err(|e| McpError::Serialization(e.to_string()))?)
+		serde_json::to_value(&result).map_err(|e| McpError::Serialization(e.to_string()))
 	}
 
 	fn handle_resource_templates_list(&self) -> Result<serde_json::Value, McpError> {
@@ -532,7 +532,7 @@ impl McpServer {
 
 		let result = GetPromptResult { messages };
 
-		Ok(serde_json::to_value(&result).map_err(|e| McpError::Serialization(e.to_string()))?)
+		serde_json::to_value(&result).map_err(|e| McpError::Serialization(e.to_string()))
 	}
 
 	fn handle_set_logging_level(
@@ -548,8 +548,8 @@ impl McpServer {
 	}
 
 	fn handle_roots_list(&self) -> Result<serde_json::Value, McpError> {
-		Ok(serde_json::to_value(&self.roots)
-			.map_err(|e| McpError::Serialization(e.to_string()))?)
+		serde_json::to_value(&self.roots)
+			.map_err(|e| McpError::Serialization(e.to_string()))
 	}
 
 	fn handle_completion_complete(&self) -> Result<serde_json::Value, McpError> {

@@ -20,14 +20,6 @@ struct JsonRpcErrorBody {
 	data: Option<serde_json::Value>,
 }
 
-#[derive(Serialize)]
-struct JsonRpcNotification<'a> {
-	jsonrpc: &'a str,
-	method: &'a str,
-	#[serde(skip_serializing_if = "Option::is_none")]
-	params: Option<serde_json::Value>,
-}
-
 pub struct NdjsonTransport;
 
 impl Default for NdjsonTransport {
@@ -66,15 +58,6 @@ impl NdjsonTransport {
 				message: message.into(),
 				data,
 			}),
-		});
-	}
-
-	#[allow(dead_code)]
-	pub fn write_notification(&self, method: &str, params: serde_json::Value) {
-		self.write_line(&JsonRpcNotification {
-			jsonrpc: "2.0",
-			method,
-			params: Some(params),
 		});
 	}
 

@@ -6,9 +6,6 @@
 // deduplication, recommendation, learning, topic_catalog, persistence,
 // text_cache) into a single stateful struct with full CRUD, search,
 // recommendation, and persistence capabilities.
-//
-// Ports stacks.ts (914 lines), stacks-search.ts (490 lines), and
-// stacks-recommend.ts (203 lines) from TypeScript into Rust.
 // ---------------------------------------------------------------------------
 
 use std::collections::{HashMap, HashSet};

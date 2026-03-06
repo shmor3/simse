@@ -1,7 +1,5 @@
 //! Health monitor — tracks success/failure rates and reports service health
 //! using a sliding time window.
-//!
-//! Ports the TypeScript `src/utils/health-monitor.ts` to Rust.
 
 use std::sync::Mutex;
 use std::time::Instant;

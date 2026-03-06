@@ -409,17 +409,14 @@ pub struct PermissionResult {
 /// Permission policy for tool use requests.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 pub enum PermissionPolicy {
 	AutoApprove,
-	Prompt,
+	#[default]
+ Prompt,
 	Deny,
 }
 
-impl Default for PermissionPolicy {
-	fn default() -> Self {
-		Self::Prompt
-	}
-}
 
 // ---------------------------------------------------------------------------
 // ACP protocol — tool calls

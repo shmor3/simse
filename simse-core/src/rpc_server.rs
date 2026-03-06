@@ -176,11 +176,6 @@ impl CoreRpcServer {
 		&self.pending_tool_calls
 	}
 
-	#[allow(dead_code)]
-	fn require_context_mut(&mut self) -> Option<&mut CoreContext> {
-		self.context.as_mut()
-	}
-
 	fn write_not_initialized(&self, req_id: u64) {
 		self.transport.write_error(
 			req_id,
@@ -701,7 +696,7 @@ impl CoreRpcServer {
 
 		match ctx.task_list.create_checked(input) {
 			Ok(task) => {
-				let value = serde_json::to_value(&task).unwrap();
+				let value = serde_json::to_value(&task).expect("Task serialization");
 				self.transport.write_response(req.id, value);
 			}
 			Err(e) => {
@@ -735,7 +730,7 @@ impl CoreRpcServer {
 
 		match ctx.task_list.get(&params.id) {
 			Some(task) => {
-				let value = serde_json::to_value(task).unwrap();
+				let value = serde_json::to_value(task).expect("Task serialization");
 				self.transport.write_response(req.id, value);
 			}
 			None => {
@@ -757,7 +752,7 @@ impl CoreRpcServer {
 			.task_list
 			.list()
 			.iter()
-			.map(|t| serde_json::to_value(t).unwrap())
+			.map(|t| serde_json::to_value(t).expect("Task serialization"))
 			.collect();
 
 		self.transport
@@ -777,7 +772,7 @@ impl CoreRpcServer {
 			.task_list
 			.list_available()
 			.iter()
-			.map(|t| serde_json::to_value(t).unwrap())
+			.map(|t| serde_json::to_value(t).expect("Task serialization"))
 			.collect();
 
 		self.transport
@@ -835,7 +830,7 @@ impl CoreRpcServer {
 
 		match ctx.task_list.update(&params.id, input) {
 			Ok(Some(task)) => {
-				let value = serde_json::to_value(&task).unwrap();
+				let value = serde_json::to_value(&task).expect("Task serialization");
 				self.transport.write_response(req.id, value);
 			}
 			Ok(None) => {

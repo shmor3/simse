@@ -64,9 +64,7 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
 		});
 	}
 
-	const versionedMatch = path.match(
-		/^\/download\/([^/]+)\/([^/]+)\/([^/]+)$/,
-	);
+	const versionedMatch = path.match(/^\/download\/([^/]+)\/([^/]+)\/([^/]+)$/);
 	if (versionedMatch && versionedMatch[1] !== 'latest') {
 		const [, version, os, arch] = versionedMatch;
 		const platform = `${os}/${arch}`;

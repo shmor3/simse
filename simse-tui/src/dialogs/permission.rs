@@ -130,9 +130,8 @@ pub fn render_permission_dialog(frame: &mut Frame, area: Rect, request: &Permiss
 	}
 
 	// Key hints line.
-	let mut hint_spans = Vec::new();
 	// Always show y/n.
-	hint_spans.push(Span::raw("  "));
+	let mut hint_spans = vec![Span::raw("  ")];
 	hint_spans.push(Span::styled(
 		"[y]",
 		Style::default()
@@ -200,11 +199,10 @@ pub fn render_permission_dialog(frame: &mut Frame, area: Rect, request: &Permiss
 fn extract_primary_arg(args: &serde_json::Value) -> Option<String> {
 	let obj = args.as_object()?;
 	for key in PRIMARY_ARG_KEYS {
-		if let Some(serde_json::Value::String(val)) = obj.get(*key) {
-			if !val.is_empty() {
+		if let Some(serde_json::Value::String(val)) = obj.get(*key)
+			&& !val.is_empty() {
 				return Some(truncate_str(val, MAX_ARG_VALUE_LEN));
 			}
-		}
 	}
 	None
 }

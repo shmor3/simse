@@ -4,11 +4,16 @@ pages_build_output_dir = "./build/client"
 
 [vars]
 APP_URL = "https://app.simse.dev"
+AUTH_API_URL = "https://auth.test.internal"
 
 routes = [{ pattern = "app.simse.dev", custom_domain = true }]
 
-# No database — calls simse-api
-# No secrets — simse-api handles service auth
+[durable_objects]
+bindings = [{ name = "TUNNEL_SESSION", class_name = "TunnelSession" }]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["TunnelSession"]
 
 [analytics_engine]
 dataset = "simse-analytics"
@@ -21,6 +26,7 @@ name = "simse-cloud-staging"
 
 [env.staging.vars]
 APP_URL = "https://simse-cloud-staging.pages.dev"
+AUTH_API_URL = "https://auth.test.internal"
 
 [env.production]
 name = "simse-cloud"
@@ -28,3 +34,4 @@ routes = [{ pattern = "app.simse.dev", custom_domain = true }]
 
 [env.production.vars]
 APP_URL = "https://app.simse.dev"
+AUTH_API_URL = "https://auth.simse.dev"

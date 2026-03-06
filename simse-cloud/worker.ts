@@ -1,4 +1,7 @@
 import { createRequestHandler } from 'react-router';
+import { handleRelayRequest } from '~/relay/handler';
+
+export { TunnelSession } from '~/relay/tunnel';
 
 declare module 'react-router' {
 	export interface AppLoadContext {
@@ -22,6 +25,12 @@ export default {
 			return new Response(JSON.stringify({ ok: true }), {
 				headers: { 'Content-Type': 'application/json' },
 			});
+		}
+
+		// Relay routes (WebSocket tunnel + REST)
+		const relayResponse = await handleRelayRequest(request, env);
+		if (relayResponse) {
+			return relayResponse;
 		}
 
 		const start = Date.now();

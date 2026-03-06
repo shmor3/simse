@@ -81,11 +81,6 @@ updates:
       interval: weekly
 
   - package-ecosystem: npm
-    directory: /simse-relay
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: npm
     directory: /simse-mailer
     schedule:
       interval: weekly

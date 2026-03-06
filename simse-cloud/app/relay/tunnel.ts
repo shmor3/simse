@@ -1,5 +1,3 @@
-import type { Env } from './types';
-
 interface SessionState {
 	userId: string;
 	tunnelWs: WebSocket | null;
@@ -88,7 +86,6 @@ export class TunnelSession implements DurableObject {
 				: new TextDecoder().decode(message);
 
 		if (tags.includes('tunnel')) {
-			// Message from local simse -> forward to client
 			if (this.session.clientWs) {
 				try {
 					this.session.clientWs.send(msgStr);
@@ -97,7 +94,6 @@ export class TunnelSession implements DurableObject {
 				}
 			}
 		} else if (tags.includes('client')) {
-			// Message from web client -> forward to tunnel
 			if (this.session.tunnelWs) {
 				try {
 					this.session.tunnelWs.send(msgStr);
@@ -110,7 +106,7 @@ export class TunnelSession implements DurableObject {
 
 	async webSocketClose(
 		ws: WebSocket,
-		code: number,
+		_code: number,
 		_reason: string,
 		_wasClean: boolean,
 	): Promise<void> {
@@ -120,7 +116,6 @@ export class TunnelSession implements DurableObject {
 
 		if (tags.includes('tunnel')) {
 			this.session.tunnelWs = null;
-			// Also close client if tunnel drops
 			if (this.session.clientWs) {
 				try {
 					this.session.clientWs.close(1001, 'tunnel disconnected');

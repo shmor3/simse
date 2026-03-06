@@ -29,12 +29,10 @@ cd simse-api && npm run lint       # API gateway lint
 cd simse-auth && npm run lint      # Auth service lint
 cd simse-payments && npm run lint  # Payments service lint
 cd simse-cdn && npm run lint       # CDN worker lint
-cd simse-relay && npm run lint     # Relay worker lint
 
 # TypeScript tests
 cd simse-cdn && npm run test    # CDN worker tests (Vitest + @cloudflare/vitest-pool-workers)
 cd simse-mailer && npm run test # Mailer tests (Vitest + @cloudflare/vitest-pool-workers)
-cd simse-relay && npm run test  # Relay worker tests (Vitest + @cloudflare/vitest-pool-workers)
 ```
 
 ## Architecture
@@ -55,9 +53,8 @@ simse-ui-core/              # Pure Rust crate — platform-agnostic UI logic (no
 simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Architecture)
 simse-remote/               # Pure Rust crate — remote access engine (JSON-RPC over stdio)
 simse-engine/               # Pure Rust crate — core engine
-simse-relay/                # TypeScript — Relay worker (WebSocket tunnel, Cloudflare Worker + Durable Objects)
 simse-cdn/                  # TypeScript — CDN worker (R2 + KV, Cloudflare Worker)
-simse-cloud/                # TypeScript — SaaS web app (React Router + Cloudflare Pages)
+simse-cloud/                # TypeScript — SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects)
 simse-api/                  # TypeScript — API gateway (Cloudflare Worker, proxies to backend services)
 simse-auth/                 # TypeScript — Auth service (Cloudflare Worker, D1, users/sessions/teams/API keys)
 simse-payments/             # TypeScript — Payments service (Cloudflare Worker, Stripe)
@@ -326,20 +323,18 @@ simse-payments/             # Payments service — Stripe subscriptions, credits
     middleware/
       auth.ts               # Service-to-service auth (X-User-Id)
 
-simse-relay/                # Relay service — WebSocket tunnel (Durable Objects)
-  src/
-    index.ts                # Hono app entry, health + analytics + secrets middleware
-    types.ts                # Env interface (DurableObjectNamespace, SecretsStore, AnalyticsEngine)
-    tunnel.ts               # Durable Object: TunnelSession (WebSocket pair management)
-    routes/
-      ws.ts                 # WebSocket upgrade handlers (/ws/tunnel, /ws/client)
-      tunnels.ts            # REST endpoint for listing active tunnels
-  wrangler.toml             # Durable Object + Analytics Engine bindings
+simse-cloud/                # SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects)
+  worker.ts                 # CF Pages worker entry (React Router + relay routing)
+  app/
+    relay/
+      tunnel.ts             # TunnelSession Durable Object (WebSocket pair management)
+      handler.ts            # Relay request handler (/ws/tunnel, /ws/client, /tunnels)
+  wrangler.toml             # Pages + Durable Object + Analytics Engine bindings
 ```
 
 ### Key Patterns
 
-- **Rust-first architecture**: All core logic is in Rust. TS packages are application/service layers (simse-cloud, simse-api, simse-auth, simse-payments, simse-cdn, simse-landing, simse-mailer).
+- **Rust-first architecture**: All core logic is in Rust. TS packages are application/service layers (simse-cloud (includes relay), simse-api, simse-auth, simse-payments, simse-cdn, simse-landing, simse-mailer).
 - **JSON-RPC 2.0 / NDJSON stdio**: All Rust crates expose their APIs via JSON-RPC over newline-delimited JSON on stdin/stdout. Tracing/logs go to stderr.
 - **Callback pattern**: Tools, hooks, chains, and loops registered from external callers use oneshot channels + JSON-RPC notifications for async callback execution.
 - **CoreContext wiring**: `CoreContext` ties together EventBus, Logger, AppConfig, TaskList, HookSystem, SessionManager, ToolRegistry, and optional Library.
@@ -350,7 +345,7 @@ simse-relay/                # Relay service — WebSocket tunnel (Durable Object
 - **Structured compaction**: Auto-compaction requests 6 sections (Goal, Progress, Current State, Key Decisions, Relevant Files, Next Steps).
 - **Arc<AtomicBool> for health flags**: Connection health shared between spawned reader tasks and main struct.
 - **Backend enum dispatch**: simse-sandbox uses enum dispatch (`FsImpl`, `ShellImpl`, `NetImpl`) instead of trait objects. Each enum has `Local` and `Ssh` variants. Local wraps in-crate logic, Ssh uses russh multiplexed SSH connections.
-- **Workers Analytics Engine**: All 7 Cloudflare Workers write to a shared `simse-analytics` dataset via `ANALYTICS: AnalyticsEngineDataset` binding. Data points include method, path, status, latency, userId, geo (country/city/continent), userAgent, and cfRay. Hono workers use an analytics middleware; CDN wraps its fetch handler; Pages workers wrap worker.ts with `ctx.waitUntil`.
+- **Workers Analytics Engine**: All Cloudflare Workers write to a shared `simse-analytics` dataset via `ANALYTICS: AnalyticsEngineDataset` binding. Data points include method, path, status, latency, userId, geo (country/city/continent), userAgent, and cfRay. Hono workers use an analytics middleware; CDN wraps its fetch handler; Pages workers wrap worker.ts with `ctx.waitUntil`.
 
 ### ACP Protocol
 

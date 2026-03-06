@@ -201,7 +201,7 @@ impl TrainingWorker {
 
             // Auto-save before the RwLock swap to avoid re-locking.
             if config.auto_save_epochs > 0
-                && stats.epochs.is_multiple_of(config.auto_save_epochs)
+                && stats.epochs % config.auto_save_epochs == 0
             {
                 if let Some(ref storage_path) = config.storage_path {
                     let path = format!("{}/pcn-auto-{}.json.gz", storage_path, stats.epochs);

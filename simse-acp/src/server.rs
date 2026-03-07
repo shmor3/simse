@@ -14,9 +14,14 @@
 //
 // Streaming is handled by spawning a tokio task per stream, which reads
 // chunks from an AcpStream and writes notifications to stdout.
+//
+// Uses `rpc_types` for JSON-RPC framing and `agent_client_protocol` SDK
+// types for ACP protocol structures.
 // ---------------------------------------------------------------------------
 
 use std::collections::HashMap;
+use std::io::Write;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use futures::StreamExt;
 use serde::Deserialize;
@@ -24,11 +29,59 @@ use tokio::io::AsyncBufReadExt;
 
 use crate::client::{
 	AcpClient, AcpConfig, ChatMessage, ChatOptions, EmbedResult, GenerateOptions, GenerateResult,
-	McpServerEntry, ServerEntry, StreamOptions,
+	McpServerEntry, SamplingParams, ServerEntry, StreamOptions,
 };
 use crate::error::AcpError;
-use crate::protocol::*;
-use crate::transport::NdjsonTransport;
+use crate::permission::PermissionPolicy;
+use crate::rpc_types::*;
+use crate::stream::StreamChunk;
+
+// ---------------------------------------------------------------------------
+// Stream ID generation — simple atomic counter (no uuid dependency)
+// ---------------------------------------------------------------------------
+
+static STREAM_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+fn next_stream_id() -> String {
+	format!("stream-{}", STREAM_COUNTER.fetch_add(1, Ordering::Relaxed))
+}
+
+// ---------------------------------------------------------------------------
+// Inline transport helpers — write JSON-RPC messages to stdout
+// ---------------------------------------------------------------------------
+
+fn write_response(response: &JsonRpcResponse) {
+	let mut stdout = std::io::stdout().lock();
+	serde_json::to_writer(&mut stdout, response).ok();
+	stdout.write_all(b"\n").ok();
+	stdout.flush().ok();
+}
+
+fn write_notification(notification: &JsonRpcNotification) {
+	let mut stdout = std::io::stdout().lock();
+	serde_json::to_writer(&mut stdout, notification).ok();
+	stdout.write_all(b"\n").ok();
+	stdout.flush().ok();
+}
+
+/// Write a success response.
+fn send_response(id: u64, result: serde_json::Value) {
+	write_response(&JsonRpcResponse::success(id, result));
+}
+
+/// Write an error response.
+fn send_error(id: u64, code: i32, message: impl Into<String>, data: Option<serde_json::Value>) {
+	let resp = match data {
+		Some(d) => JsonRpcResponse::error_with_data(id, code, message, d),
+		None => JsonRpcResponse::error(id, code, message),
+	};
+	write_response(&resp);
+}
+
+/// Write a notification.
+fn send_notification(method: impl Into<String>, params: serde_json::Value) {
+	write_notification(&JsonRpcNotification::new(method, params));
+}
 
 // ---------------------------------------------------------------------------
 // State — immutable with owned-return transitions
@@ -72,16 +125,14 @@ impl Default for AcpServerState {
 /// - `with_state`: read-only access (borrows the state)
 /// - `with_state_transition`: owned access (takes state, returns new state)
 pub struct AcpServer {
-	transport: NdjsonTransport,
 	state: Option<AcpServerState>,
 }
 
 impl AcpServer {
-	/// Create a new server with the given transport. The client is created
-	/// lazily when `acp/initialize` is called.
-	pub fn new(transport: NdjsonTransport) -> Self {
+	/// Create a new server. The client is created lazily when
+	/// `acp/initialize` is called.
+	pub fn new() -> Self {
 		Self {
-			transport,
 			state: Some(AcpServerState::new()),
 		}
 	}
@@ -95,18 +146,15 @@ impl AcpServer {
 	}
 
 	/// Mutating access via owned-return pattern. Takes the state out of
-	/// the `Option`, clones a backup, passes ownership to `f`, and stores
-	/// the returned state. On panic/error the backup is restored.
-	///
-	/// `f` receives owned state and must return the (possibly modified)
+	/// the `Option`, passes ownership to `f`, and stores the returned
 	/// state.
 	async fn with_state_transition<F, Fut>(&mut self, f: F)
 	where
-		F: FnOnce(AcpServerState, NdjsonTransport) -> Fut,
+		F: FnOnce(AcpServerState) -> Fut,
 		Fut: std::future::Future<Output = AcpServerState>,
 	{
 		let state = self.state.take().expect("state invariant: always Some");
-		let new_state = f(state, self.transport.clone()).await;
+		let new_state = f(state).await;
 		self.state = Some(new_state);
 	}
 
@@ -141,91 +189,77 @@ impl AcpServer {
 		match req.method.as_str() {
 			// -- Lifecycle (state transitions) ----------------------------
 			"acp/initialize" => {
-				self.with_state_transition(|state, transport| {
-					handle_initialize(state, transport, req)
+				self.with_state_transition(|state| {
+					handle_initialize(state, req)
 				}).await;
 			}
 			"acp/dispose" => {
-				self.with_state_transition(|state, transport| {
-					handle_dispose(state, transport, req)
+				self.with_state_transition(|state| {
+					handle_dispose(state, req)
 				}).await;
 			}
 
 			// -- Read-only methods (with_state) ---------------------------
 			"acp/serverHealth" => {
-				let transport = self.transport.clone();
-				self.with_state(|state| handle_server_health(state, &transport, req));
+				self.with_state(|state| handle_server_health(state, req));
 			}
 
 			// -- Methods that delegate to client (async, no state mutation)
-			// These read the client reference from state inline; the state
-			// borrow ends before the async call so lifetimes are satisfied.
 			"acp/generate" => {
-				let transport = self.transport.clone();
 				let client = self.state.as_ref().unwrap().client.as_ref();
-				handle_generate_async(client, transport, req).await;
+				handle_generate_async(client, req).await;
 			}
 			"acp/chat" => {
-				let transport = self.transport.clone();
 				let client = self.state.as_ref().unwrap().client.as_ref();
-				handle_chat_async(client, transport, req).await;
+				handle_chat_async(client, req).await;
 			}
 			"acp/embed" => {
-				let transport = self.transport.clone();
 				let client = self.state.as_ref().unwrap().client.as_ref();
-				handle_embed_async(client, transport, req).await;
+				handle_embed_async(client, req).await;
 			}
 			"acp/listAgents" => {
-				let transport = self.transport.clone();
 				let client = self.state.as_ref().unwrap().client.as_ref();
-				handle_list_agents_async(client, transport, req).await;
+				handle_list_agents_async(client, req).await;
 			}
 			"acp/listSessions" => {
-				let transport = self.transport.clone();
 				let client = self.state.as_ref().unwrap().client.as_ref();
-				handle_list_sessions_async(client, transport, req).await;
+				handle_list_sessions_async(client, req).await;
 			}
 			"acp/loadSession" => {
-				let transport = self.transport.clone();
 				let client = self.state.as_ref().unwrap().client.as_ref();
-				handle_load_session_async(client, transport, req).await;
+				handle_load_session_async(client, req).await;
 			}
 			"acp/deleteSession" => {
-				let transport = self.transport.clone();
 				let client = self.state.as_ref().unwrap().client.as_ref();
-				handle_delete_session_async(client, transport, req).await;
+				handle_delete_session_async(client, req).await;
 			}
 			"acp/setSessionMode" => {
-				let transport = self.transport.clone();
 				let client = self.state.as_ref().unwrap().client.as_ref();
-				handle_set_session_mode_async(client, transport, req).await;
+				handle_set_session_mode_async(client, req).await;
 			}
 			"acp/setSessionModel" => {
-				let transport = self.transport.clone();
 				let client = self.state.as_ref().unwrap().client.as_ref();
-				handle_set_session_model_async(client, transport, req).await;
+				handle_set_session_model_async(client, req).await;
 			}
 			"acp/setPermissionPolicy" => {
-				let transport = self.transport.clone();
 				let client = self.state.as_ref().unwrap().client.as_ref();
-				handle_set_permission_policy_async(client, transport, req).await;
+				handle_set_permission_policy(client, req);
 			}
 			"acp/permissionResponse" => {
-				let transport = self.transport.clone();
 				let client = self.state.as_ref().unwrap().client.as_ref();
-				handle_permission_response_async(client, transport, req).await;
+				handle_permission_response(client, req);
 			}
 
 			// -- Stream start (state transition — inserts into active_streams)
 			"acp/streamStart" => {
-				self.with_state_transition(|state, transport| {
-					handle_stream_start(state, transport, req)
+				self.with_state_transition(|state| {
+					handle_stream_start(state, req)
 				}).await;
 			}
 
 			// -- Unknown -------------------------------------------------
 			_ => {
-				self.transport.write_error(
+				send_error(
 					req.id,
 					METHOD_NOT_FOUND,
 					format!("Unknown method: {}", req.method),
@@ -236,19 +270,24 @@ impl AcpServer {
 	}
 }
 
+impl Default for AcpServer {
+	fn default() -> Self {
+		Self::new()
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Lifecycle handlers (state transitions — owned state)
 // ---------------------------------------------------------------------------
 
 async fn handle_initialize(
 	mut state: AcpServerState,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) -> AcpServerState {
 	let params: InitializeServerParams = match parse_params(req.params) {
 		Ok(p) => p,
 		Err(e) => {
-			transport.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
+			send_error(req.id, INVALID_PARAMS, e.to_string(), None);
 			return state;
 		}
 	};
@@ -290,13 +329,13 @@ async fn handle_initialize(
 		Ok(client) => {
 			let server_names = client.server_names();
 			state.client = Some(client);
-			transport.write_response(
+			send_response(
 				req.id,
 				serde_json::json!({ "serverNames": server_names }),
 			);
 		}
 		Err(e) => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				e.to_string(),
@@ -310,12 +349,11 @@ async fn handle_initialize(
 
 async fn handle_dispose(
 	mut state: AcpServerState,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) -> AcpServerState {
 	if let Some(client) = state.client.take() {
 		if let Err(e) = client.dispose().await {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				e.to_string(),
@@ -325,7 +363,7 @@ async fn handle_dispose(
 		}
 	}
 	state.active_streams = im::HashMap::new();
-	transport.write_response(req.id, serde_json::json!({}));
+	send_response(req.id, serde_json::json!({}));
 	state
 }
 
@@ -335,13 +373,12 @@ async fn handle_dispose(
 
 fn handle_server_health(
 	state: &AcpServerState,
-	transport: &NdjsonTransport,
 	req: JsonRpcRequest,
 ) {
 	let client = match state.client.as_ref() {
 		Some(c) => c,
 		None => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				"Not initialized".to_string(),
@@ -359,7 +396,7 @@ fn handle_server_health(
 	let available = client.is_available(params.server.as_deref());
 	let server_names = client.server_names();
 
-	transport.write_response(
+	send_response(
 		req.id,
 		serde_json::json!({
 			"available": available,
@@ -374,13 +411,12 @@ fn handle_server_health(
 
 async fn handle_generate_async(
 	client: Option<&AcpClient>,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) {
 	let client = match client {
 		Some(c) => c,
 		None => {
-			transport.write_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
+			send_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
 			return;
 		}
 	};
@@ -388,7 +424,7 @@ async fn handle_generate_async(
 	let params: GenerateParams = match parse_params(req.params) {
 		Ok(p) => p,
 		Err(e) => {
-			transport.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
+			send_error(req.id, INVALID_PARAMS, e.to_string(), None);
 			return;
 		}
 	};
@@ -403,10 +439,10 @@ async fn handle_generate_async(
 
 	match client.generate(&params.prompt, options).await {
 		Ok(result) => {
-			transport.write_response(req.id, serialize_generate_result(&result));
+			send_response(req.id, serialize_generate_result(&result));
 		}
 		Err(e) => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				e.to_string(),
@@ -418,13 +454,12 @@ async fn handle_generate_async(
 
 async fn handle_chat_async(
 	client: Option<&AcpClient>,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) {
 	let client = match client {
 		Some(c) => c,
 		None => {
-			transport.write_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
+			send_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
 			return;
 		}
 	};
@@ -432,7 +467,7 @@ async fn handle_chat_async(
 	let params: ChatParams = match parse_params(req.params) {
 		Ok(p) => p,
 		Err(e) => {
-			transport.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
+			send_error(req.id, INVALID_PARAMS, e.to_string(), None);
 			return;
 		}
 	};
@@ -455,10 +490,10 @@ async fn handle_chat_async(
 
 	match client.chat(&messages, options).await {
 		Ok(result) => {
-			transport.write_response(req.id, serialize_generate_result(&result));
+			send_response(req.id, serialize_generate_result(&result));
 		}
 		Err(e) => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				e.to_string(),
@@ -470,13 +505,12 @@ async fn handle_chat_async(
 
 async fn handle_embed_async(
 	client: Option<&AcpClient>,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) {
 	let client = match client {
 		Some(c) => c,
 		None => {
-			transport.write_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
+			send_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
 			return;
 		}
 	};
@@ -484,7 +518,7 @@ async fn handle_embed_async(
 	let params: EmbedParams = match parse_params(req.params) {
 		Ok(p) => p,
 		Err(e) => {
-			transport.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
+			send_error(req.id, INVALID_PARAMS, e.to_string(), None);
 			return;
 		}
 	};
@@ -496,10 +530,10 @@ async fn handle_embed_async(
 		.await
 	{
 		Ok(result) => {
-			transport.write_response(req.id, serialize_embed_result(&result));
+			send_response(req.id, serialize_embed_result(&result));
 		}
 		Err(e) => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				e.to_string(),
@@ -511,13 +545,12 @@ async fn handle_embed_async(
 
 async fn handle_list_agents_async(
 	client: Option<&AcpClient>,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) {
 	let client = match client {
 		Some(c) => c,
 		None => {
-			transport.write_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
+			send_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
 			return;
 		}
 	};
@@ -529,10 +562,10 @@ async fn handle_list_agents_async(
 
 	match client.list_agents(params.server.as_deref()).await {
 		Ok(agents) => {
-			transport.write_response(req.id, serde_json::json!({ "agents": agents }));
+			send_response(req.id, serde_json::json!({ "agents": agents }));
 		}
 		Err(e) => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				e.to_string(),
@@ -544,13 +577,12 @@ async fn handle_list_agents_async(
 
 async fn handle_list_sessions_async(
 	client: Option<&AcpClient>,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) {
 	let client = match client {
 		Some(c) => c,
 		None => {
-			transport.write_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
+			send_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
 			return;
 		}
 	};
@@ -562,13 +594,13 @@ async fn handle_list_sessions_async(
 
 	match client.list_sessions(params.server.as_deref()).await {
 		Ok(sessions) => {
-			transport.write_response(
+			send_response(
 				req.id,
 				serde_json::json!({ "sessions": sessions }),
 			);
 		}
 		Err(e) => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				e.to_string(),
@@ -580,13 +612,12 @@ async fn handle_list_sessions_async(
 
 async fn handle_load_session_async(
 	client: Option<&AcpClient>,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) {
 	let client = match client {
 		Some(c) => c,
 		None => {
-			transport.write_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
+			send_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
 			return;
 		}
 	};
@@ -594,7 +625,7 @@ async fn handle_load_session_async(
 	let params: SessionIdParams = match parse_params(req.params) {
 		Ok(p) => p,
 		Err(e) => {
-			transport.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
+			send_error(req.id, INVALID_PARAMS, e.to_string(), None);
 			return;
 		}
 	};
@@ -603,14 +634,11 @@ async fn handle_load_session_async(
 		.load_session(&params.session_id, params.server.as_deref())
 		.await
 	{
-		Ok(info) => {
-			transport.write_response(
-				req.id,
-				serde_json::to_value(info).unwrap_or(serde_json::json!({})),
-			);
+		Ok(()) => {
+			send_response(req.id, serde_json::json!({}));
 		}
 		Err(e) => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				e.to_string(),
@@ -622,13 +650,12 @@ async fn handle_load_session_async(
 
 async fn handle_delete_session_async(
 	client: Option<&AcpClient>,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) {
 	let client = match client {
 		Some(c) => c,
 		None => {
-			transport.write_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
+			send_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
 			return;
 		}
 	};
@@ -636,7 +663,7 @@ async fn handle_delete_session_async(
 	let params: SessionIdParams = match parse_params(req.params) {
 		Ok(p) => p,
 		Err(e) => {
-			transport.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
+			send_error(req.id, INVALID_PARAMS, e.to_string(), None);
 			return;
 		}
 	};
@@ -646,10 +673,10 @@ async fn handle_delete_session_async(
 		.await
 	{
 		Ok(()) => {
-			transport.write_response(req.id, serde_json::json!({}));
+			send_response(req.id, serde_json::json!({}));
 		}
 		Err(e) => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				e.to_string(),
@@ -661,13 +688,12 @@ async fn handle_delete_session_async(
 
 async fn handle_set_session_mode_async(
 	client: Option<&AcpClient>,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) {
 	let client = match client {
 		Some(c) => c,
 		None => {
-			transport.write_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
+			send_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
 			return;
 		}
 	};
@@ -675,7 +701,7 @@ async fn handle_set_session_mode_async(
 	let params: SetSessionConfigParams = match parse_params(req.params) {
 		Ok(p) => p,
 		Err(e) => {
-			transport.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
+			send_error(req.id, INVALID_PARAMS, e.to_string(), None);
 			return;
 		}
 	};
@@ -685,10 +711,10 @@ async fn handle_set_session_mode_async(
 		.await
 	{
 		Ok(()) => {
-			transport.write_response(req.id, serde_json::json!({}));
+			send_response(req.id, serde_json::json!({}));
 		}
 		Err(e) => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				e.to_string(),
@@ -700,13 +726,12 @@ async fn handle_set_session_mode_async(
 
 async fn handle_set_session_model_async(
 	client: Option<&AcpClient>,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) {
 	let client = match client {
 		Some(c) => c,
 		None => {
-			transport.write_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
+			send_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
 			return;
 		}
 	};
@@ -714,7 +739,7 @@ async fn handle_set_session_model_async(
 	let params: SetSessionConfigParams = match parse_params(req.params) {
 		Ok(p) => p,
 		Err(e) => {
-			transport.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
+			send_error(req.id, INVALID_PARAMS, e.to_string(), None);
 			return;
 		}
 	};
@@ -724,10 +749,10 @@ async fn handle_set_session_model_async(
 		.await
 	{
 		Ok(()) => {
-			transport.write_response(req.id, serde_json::json!({}));
+			send_response(req.id, serde_json::json!({}));
 		}
 		Err(e) => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				e.to_string(),
@@ -737,15 +762,14 @@ async fn handle_set_session_model_async(
 	}
 }
 
-async fn handle_set_permission_policy_async(
+fn handle_set_permission_policy(
 	client: Option<&AcpClient>,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) {
 	let client = match client {
 		Some(c) => c,
 		None => {
-			transport.write_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
+			send_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
 			return;
 		}
 	};
@@ -753,24 +777,23 @@ async fn handle_set_permission_policy_async(
 	let params: SetPermissionPolicyParams = match parse_params(req.params) {
 		Ok(p) => p,
 		Err(e) => {
-			transport.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
+			send_error(req.id, INVALID_PARAMS, e.to_string(), None);
 			return;
 		}
 	};
 
-	client.set_permission_policy(params.policy).await;
-	transport.write_response(req.id, serde_json::json!({}));
+	client.set_permission_policy(params.policy);
+	send_response(req.id, serde_json::json!({}));
 }
 
-async fn handle_permission_response_async(
+fn handle_permission_response(
 	client: Option<&AcpClient>,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) {
 	let _client = match client {
 		Some(c) => c,
 		None => {
-			transport.write_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
+			send_error(req.id, ACP_ERROR, "Not initialized".to_string(), None);
 			return;
 		}
 	};
@@ -778,30 +801,18 @@ async fn handle_permission_response_async(
 	let params: PermissionResponseParams = match parse_params(req.params) {
 		Ok(p) => p,
 		Err(e) => {
-			transport.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
+			send_error(req.id, INVALID_PARAMS, e.to_string(), None);
 			return;
 		}
 	};
 
-	// Build permission result from the option ID.
-	let result = PermissionResult {
-		outcome: PermissionOutcome {
-			outcome: "selected".to_string(),
-			option_id: Some(params.option_id),
-		},
-	};
-
-	// Permission responses are forwarded directly to the connection.
-	// Since AcpClient doesn't expose respond_to_permission directly,
-	// we acknowledge receipt. The TS layer handles the permission flow
-	// through the connection's notification system.
 	tracing::debug!(
-		"Permission response for request {}: {:?}",
+		"Permission response for request {}: option_id={}",
 		params.request_id,
-		result
+		params.option_id,
 	);
 
-	transport.write_response(req.id, serde_json::json!({}));
+	send_response(req.id, serde_json::json!({}));
 }
 
 // ---------------------------------------------------------------------------
@@ -810,13 +821,12 @@ async fn handle_permission_response_async(
 
 async fn handle_stream_start(
 	mut state: AcpServerState,
-	transport: NdjsonTransport,
 	req: JsonRpcRequest,
 ) -> AcpServerState {
 	let client = match state.client.as_ref() {
 		Some(c) => c,
 		None => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				"Not initialized".to_string(),
@@ -829,7 +839,7 @@ async fn handle_stream_start(
 	let params: StreamStartParams = match parse_params(req.params) {
 		Ok(p) => p,
 		Err(e) => {
-			transport.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
+			send_error(req.id, INVALID_PARAMS, e.to_string(), None);
 			return state;
 		}
 	};
@@ -845,21 +855,20 @@ async fn handle_stream_start(
 
 	match client.generate_stream(&params.prompt, options).await {
 		Ok(stream) => {
-			let stream_id = uuid::Uuid::new_v4().to_string();
+			let stream_id = next_stream_id();
 
 			// Create a cancellation channel for this stream.
 			let (cancel_tx, mut cancel_rx) = tokio::sync::mpsc::channel::<()>(1);
 			state.active_streams = state.active_streams.update(stream_id.clone(), cancel_tx);
 
 			// Return the stream ID immediately.
-			transport.write_response(
+			send_response(
 				req.id,
 				serde_json::json!({ "streamId": stream_id }),
 			);
 
 			// Spawn a task that reads the stream and writes notifications.
 			let sid = stream_id.clone();
-			let stream_transport = NdjsonTransport::new();
 
 			tokio::spawn(async move {
 				let mut stream = Box::pin(stream);
@@ -869,7 +878,7 @@ async fn handle_stream_start(
 						biased;
 						_ = cancel_rx.recv() => {
 							// Cancellation requested.
-							stream_transport.write_notification(
+							send_notification(
 								"stream/complete",
 								serde_json::json!({
 									"streamId": sid,
@@ -881,7 +890,7 @@ async fn handle_stream_start(
 						chunk = stream.next() => {
 							match chunk {
 								Some(StreamChunk::Delta { text }) => {
-									stream_transport.write_notification(
+									send_notification(
 										"stream/delta",
 										serde_json::json!({
 											"streamId": sid,
@@ -890,7 +899,7 @@ async fn handle_stream_start(
 									);
 								}
 								Some(StreamChunk::ToolCall { tool_call }) => {
-									stream_transport.write_notification(
+									send_notification(
 										"stream/toolCall",
 										serde_json::json!({
 											"streamId": sid,
@@ -899,7 +908,7 @@ async fn handle_stream_start(
 									);
 								}
 								Some(StreamChunk::ToolCallUpdate { update }) => {
-									stream_transport.write_notification(
+									send_notification(
 										"stream/toolCallUpdate",
 										serde_json::json!({
 											"streamId": sid,
@@ -908,7 +917,7 @@ async fn handle_stream_start(
 									);
 								}
 								Some(StreamChunk::Complete { usage }) => {
-									stream_transport.write_notification(
+									send_notification(
 										"stream/complete",
 										serde_json::json!({
 											"streamId": sid,
@@ -919,7 +928,7 @@ async fn handle_stream_start(
 								}
 								None => {
 									// Stream ended without Complete chunk.
-									stream_transport.write_notification(
+									send_notification(
 										"stream/complete",
 										serde_json::json!({
 											"streamId": sid,
@@ -934,7 +943,7 @@ async fn handle_stream_start(
 			});
 		}
 		Err(e) => {
-			transport.write_error(
+			send_error(
 				req.id,
 				ACP_ERROR,
 				e.to_string(),
@@ -951,9 +960,10 @@ async fn handle_stream_start(
 // ---------------------------------------------------------------------------
 
 fn parse_params<T: serde::de::DeserializeOwned>(
-	params: serde_json::Value,
+	params: Option<serde_json::Value>,
 ) -> Result<T, AcpError> {
-	serde_json::from_value(params)
+	let value = params.unwrap_or(serde_json::Value::Null);
+	serde_json::from_value(value)
 		.map_err(|e| AcpError::Serialization(format!("Invalid params: {}", e)))
 }
 
@@ -1016,7 +1026,7 @@ struct GenerateParams {
 #[serde(rename_all = "camelCase")]
 struct ChatMessageParams {
 	role: String,
-	content: Vec<ContentBlock>,
+	content: String,
 }
 
 #[derive(Deserialize)]

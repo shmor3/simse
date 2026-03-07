@@ -117,13 +117,23 @@ simse-core/
 | `tunnel/` | `connect`, `disconnect`, `status` |
 | `remote/` | `health` |
 
+### simse-adaptive JSON-RPC Methods
+
+| Domain | Methods |
+|--------|---------|
+| `store/` | `add`, `get`, `remove`, `search`, `searchWithOptions`, `list`, `clear`, `save`, `load`, `setIndexStrategy`, `setQuantization`, `getIndexStats` |
+
 ### Other Rust Crates
 
 ```tree
 simse-adaptive/             # Pure Rust crate — adaptive engine (vector store + PCN, JSON-RPC over stdio)
-  src/
+  src/                      # Key deps: rayon (parallel search), hnsw_rs (approximate NN)
     store.rs                # Store: core state manager (CRUD, search, indexing, persistence)
-    cosine.rs               # Cosine similarity (clamped [-1,1])
+    distance.rs             # Distance metrics (Cosine, Euclidean, DotProduct, Manhattan) with SIMD acceleration (AVX2, NEON)
+    vector_storage.rs       # SoA contiguous embedding storage for cache-friendly scans
+    index.rs                # IndexBackend trait, FlatIndex (brute force), HnswIndex (approximate NN via hnsw_rs)
+    quantization.rs         # Scalar (f32→u8, 4x) and Binary (sign-bit, 32x) vector quantization
+    fusion.rs               # MMR diversity reranking, Reciprocal Rank Fusion for hybrid search
     persistence.rs          # Binary codec + gzip compression for entries/learning/graph state
     cataloging.rs           # TopicIndex, MetadataIndex, MagnitudeCache
     deduplication.rs        # Duplicate detection & clustering
@@ -385,7 +395,7 @@ The MCP engine (`simse-mcp/`) implements the [Model Context Protocol](https://mo
 The adaptive store has two layers: the storage engine in Rust (`simse-adaptive/`), with orchestration in `simse-core/src/library/`.
 
 **Rust engine** (`simse-adaptive/src/`) — all vector + PCN operations via JSON-RPC:
-- Store (entries, CRUD, search), persistence, cataloging, deduplication, recommendation, text search, BM25, topic classification, adaptive learning, context formatting, graph index, predictive coding network (`pcn/`)
+- Store (entries, CRUD, search), distance metrics (SIMD-accelerated), SoA vector storage, index backends (Flat/HNSW), quantization (Scalar/Binary), fusion (MMR/RRF), persistence, cataloging, deduplication, recommendation, text search, BM25, topic classification, adaptive learning, context formatting, graph index, predictive coding network (`pcn/`)
 
 **simse-core orchestration layer** (`simse-core/src/library/`) — high-level operations:
 - Library, Stacks, Shelf, Librarian, LibrarianRegistry, CirculationDesk

@@ -404,7 +404,7 @@ fn code_other_variant() {
 
 #[test]
 fn from_acp_error() {
-	let acp_err = simse_acp_engine::error::AcpError::NotInitialized;
+	let acp_err = simse_engine::acp::error::AcpError::NotInitialized;
 	let err: SimseError = acp_err.into();
 	assert_eq!(err.code(), "ACP_ERROR");
 	assert!(
@@ -417,7 +417,7 @@ fn from_acp_error() {
 #[test]
 fn from_mcp_error() {
 	let mcp_err =
-		simse_mcp_engine::error::McpError::ConnectionFailed("refused".into());
+		simse_engine::mcp::error::McpError::ConnectionFailed("refused".into());
 	let err: SimseError = mcp_err.into();
 	assert_eq!(err.code(), "MCP_ENGINE_ERROR");
 	assert!(

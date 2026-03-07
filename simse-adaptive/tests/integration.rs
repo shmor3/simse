@@ -132,7 +132,7 @@ fn initialize_and_add() {
 	let mut proc = VectorProcess::spawn();
 	proc.initialize();
 
-	// Add a volume
+	// Add an entry
 	let result = proc.call(
 		"store/add",
 		json!({
@@ -146,10 +146,10 @@ fn initialize_and_add() {
 
 	// Get by ID and verify
 	let result = proc.call("store/getById", json!({ "id": id }));
-	let volume = &result["volume"];
-	assert_eq!(volume["text"].as_str().unwrap(), "hello world");
-	assert_eq!(volume["metadata"]["topic"].as_str().unwrap(), "test");
-	assert_eq!(volume["id"].as_str().unwrap(), id);
+	let entry = &result["entry"];
+	assert_eq!(entry["text"].as_str().unwrap(), "hello world");
+	assert_eq!(entry["metadata"]["topic"].as_str().unwrap(), "test");
+	assert_eq!(entry["id"].as_str().unwrap(), id);
 }
 
 #[test]
@@ -198,7 +198,7 @@ fn search_by_embedding() {
 
 	// First result should be "rust programming" (exact match, score = 1.0)
 	assert_eq!(
-		results[0]["volume"]["text"].as_str().unwrap(),
+		results[0]["entry"]["text"].as_str().unwrap(),
 		"rust programming"
 	);
 }
@@ -245,14 +245,14 @@ fn text_search_fuzzy() {
 	let results = result["results"].as_array().expect("results should be array");
 	assert!(
 		results.len() >= 2,
-		"should return at least the 2 learning-related volumes, got {}",
+		"should return at least the 2 learning-related entries, got {}",
 		results.len()
 	);
 
-	// Verify the learning-related volumes are in the results
+	// Verify the learning-related entries are in the results
 	let texts: Vec<&str> = results
 		.iter()
-		.map(|r| r["volume"]["text"].as_str().unwrap())
+		.map(|r| r["entry"]["text"].as_str().unwrap())
 		.collect();
 	assert!(
 		texts.contains(&"machine learning algorithms"),
@@ -311,7 +311,7 @@ fn text_search_bm25() {
 
 	// All results should contain "learning" in the text
 	for r in results {
-		let text = r["volume"]["text"].as_str().unwrap();
+		let text = r["entry"]["text"].as_str().unwrap();
 		assert!(
 			text.contains("learning"),
 			"bm25 result text should contain 'learning', got: {text}"
@@ -357,14 +357,14 @@ fn metadata_filtering() {
 		}),
 	);
 
-	let volumes = result["volumes"].as_array().expect("volumes should be array");
-	assert_eq!(volumes.len(), 1, "should return exactly 1 volume");
+	let entries = result["entries"].as_array().expect("entries should be array");
+	assert_eq!(entries.len(), 1, "should return exactly 1 entry");
 	assert_eq!(
-		volumes[0]["metadata"]["language"].as_str().unwrap(),
+		entries[0]["metadata"]["language"].as_str().unwrap(),
 		"rust"
 	);
 	assert_eq!(
-		volumes[0]["text"].as_str().unwrap(),
+		entries[0]["text"].as_str().unwrap(),
 		"rust systems programming"
 	);
 }
@@ -377,7 +377,7 @@ fn date_range_filtering() {
 	proc.call(
 		"store/add",
 		json!({
-			"text": "volume one",
+			"text": "entry one",
 			"embedding": [1.0, 0.0, 0.0],
 			"metadata": {}
 		}),
@@ -385,7 +385,7 @@ fn date_range_filtering() {
 	proc.call(
 		"store/add",
 		json!({
-			"text": "volume two",
+			"text": "entry two",
 			"embedding": [0.0, 1.0, 0.0],
 			"metadata": {}
 		}),
@@ -399,20 +399,20 @@ fn date_range_filtering() {
 			"before": 9999999999999_u64
 		}),
 	);
-	let volumes = result["volumes"].as_array().expect("volumes should be array");
+	let entries = result["entries"].as_array().expect("entries should be array");
 	assert_eq!(
-		volumes.len(),
+		entries.len(),
 		2,
-		"wide date range should return all volumes"
+		"wide date range should return all entries"
 	);
 
 	// Filter with before = 0 (nothing should match since timestamps are current)
 	let result = proc.call("store/filterByDateRange", json!({ "before": 0 }));
-	let volumes = result["volumes"].as_array().expect("volumes should be array");
+	let entries = result["entries"].as_array().expect("entries should be array");
 	assert_eq!(
-		volumes.len(),
+		entries.len(),
 		0,
-		"before=0 should return no volumes since timestamps are current"
+		"before=0 should return no entries since timestamps are current"
 	);
 }
 
@@ -568,7 +568,7 @@ fn advanced_search() {
 
 	// First result should be the rust volume (matches all criteria)
 	let first = &results[0];
-	assert_eq!(first["volume"]["text"].as_str().unwrap(), "rust systems programming language");
+	assert_eq!(first["entry"]["text"].as_str().unwrap(), "rust systems programming language");
 	// Should have score breakdown
 	assert!(first.get("scores").is_some(), "should include score breakdown");
 }
@@ -578,7 +578,7 @@ fn topic_operations() {
 	let mut proc = VectorProcess::spawn();
 	proc.initialize();
 
-	// Add volume with a topic
+	// Add entry with a topic
 	let r = proc.call(
 		"store/add",
 		json!({
@@ -587,7 +587,7 @@ fn topic_operations() {
 			"metadata": { "topic": "code/rust" }
 		}),
 	);
-	let volume_id = r["id"].as_str().unwrap().to_string();
+	let entry_id = r["id"].as_str().unwrap().to_string();
 
 	// Get topics
 	let result = proc.call("store/getTopics", json!({}));
@@ -607,9 +607,9 @@ fn topic_operations() {
 		"store/filterByTopic",
 		json!({ "topics": ["code/rust"] }),
 	);
-	let volumes = result["volumes"].as_array().expect("volumes should be array");
-	assert_eq!(volumes.len(), 1);
-	assert_eq!(volumes[0]["id"].as_str().unwrap(), volume_id);
+	let entries = result["entries"].as_array().expect("entries should be array");
+	assert_eq!(entries.len(), 1);
+	assert_eq!(entries[0]["id"].as_str().unwrap(), entry_id);
 
 	// Catalog resolve
 	let result = proc.call("catalog/resolve", json!({ "topic": "code/rust" }));
@@ -766,7 +766,7 @@ fn persistence_round_trip() {
 
 	let (id1, id2);
 
-	// --- First process: add volumes and save ---
+	// --- First process: add entries and save ---
 	{
 		let mut proc = VectorProcess::spawn();
 		proc.initialize_with_path(storage_path);
@@ -774,7 +774,7 @@ fn persistence_round_trip() {
 		let r1 = proc.call(
 			"store/add",
 			json!({
-				"text": "persisted volume one",
+				"text": "persisted entry one",
 				"embedding": [1.0, 0.0, 0.0],
 				"metadata": { "source": "test" }
 			}),
@@ -784,7 +784,7 @@ fn persistence_round_trip() {
 		let r2 = proc.call(
 			"store/add",
 			json!({
-				"text": "persisted volume two",
+				"text": "persisted entry two",
 				"embedding": [0.0, 1.0, 0.0],
 				"metadata": { "source": "test" }
 			}),
@@ -810,19 +810,19 @@ fn persistence_round_trip() {
 		assert_eq!(
 			result["count"].as_u64().unwrap(),
 			2,
-			"should have 2 volumes after reload"
+			"should have 2 entries after reload"
 		);
 
-		// Verify first volume
+		// Verify first entry
 		let result = proc.call("store/getById", json!({ "id": id1 }));
-		let vol = &result["volume"];
-		assert_eq!(vol["text"].as_str().unwrap(), "persisted volume one");
+		let vol = &result["entry"];
+		assert_eq!(vol["text"].as_str().unwrap(), "persisted entry one");
 		assert_eq!(vol["metadata"]["source"].as_str().unwrap(), "test");
 
-		// Verify second volume
+		// Verify second entry
 		let result = proc.call("store/getById", json!({ "id": id2 }));
-		let vol = &result["volume"];
-		assert_eq!(vol["text"].as_str().unwrap(), "persisted volume two");
+		let vol = &result["entry"];
+		assert_eq!(vol["text"].as_str().unwrap(), "persisted entry two");
 		assert_eq!(vol["metadata"]["source"].as_str().unwrap(), "test");
 	}
 }
@@ -850,9 +850,9 @@ fn error_before_init() {
 
 	let has_not_init_code = err
 		.get("data")
-		.and_then(|d| d.get("vectorCode"))
+		.and_then(|d| d.get("adaptiveCode"))
 		.and_then(|c| c.as_str())
-		.map(|c| c == "STACKS_NOT_LOADED")
+		.map(|c| c == "STORE_NOT_INITIALIZED")
 		.unwrap_or(false);
 
 	assert!(
@@ -886,22 +886,22 @@ fn graph_neighbors_with_explicit_edges() {
 	let mut proc = VectorProcess::spawn();
 	proc.initialize();
 
-	// Add volume A
+	// Add entry A
 	let ra = proc.call(
 		"store/add",
 		json!({
-			"text": "Volume A — base concept",
+			"text": "Entry A — base concept",
 			"embedding": [1.0, 0.0, 0.0],
 			"metadata": {}
 		}),
 	);
 	let id_a = ra["id"].as_str().unwrap().to_string();
 
-	// Add volume B with rel:related metadata pointing to A
+	// Add entry B with rel:related metadata pointing to A
 	let rb = proc.call(
 		"store/add",
 		json!({
-			"text": "Volume B — related to A",
+			"text": "Entry B — related to A",
 			"embedding": [0.0, 1.0, 0.0],
 			"metadata": { "rel:related": id_a }
 		}),
@@ -919,7 +919,7 @@ fn graph_neighbors_with_explicit_edges() {
 
 	// Assert neighbors contains A with Related edge type
 	let has_a = neighbors.iter().any(|n| {
-		n["volume"]["id"].as_str() == Some(id_a.as_str())
+		n["entry"]["id"].as_str() == Some(id_a.as_str())
 			&& n["edge"]["edgeType"].as_str() == Some("Related")
 	});
 	assert!(has_a, "B's neighbors should include A with Related edge type, got: {neighbors:?}");
@@ -928,7 +928,7 @@ fn graph_neighbors_with_explicit_edges() {
 	let result = proc.call("graph/neighbors", json!({ "id": id_a }));
 	let neighbors = result["neighbors"].as_array().expect("neighbors should be array");
 	let has_b = neighbors.iter().any(|n| {
-		n["volume"]["id"].as_str() == Some(id_b.as_str())
+		n["entry"]["id"].as_str() == Some(id_b.as_str())
 			&& n["edge"]["edgeType"].as_str() == Some("Related")
 	});
 	assert!(has_b, "A's neighbors should include B with Related edge type");
@@ -939,33 +939,33 @@ fn graph_traverse_two_hops() {
 	let mut proc = VectorProcess::spawn();
 	proc.initialize();
 
-	// Add volume A
+	// Add entry A
 	let ra = proc.call(
 		"store/add",
 		json!({
-			"text": "Volume A — chain start",
+			"text": "Entry A — chain start",
 			"embedding": [1.0, 0.0, 0.0],
 			"metadata": {}
 		}),
 	);
 	let id_a = ra["id"].as_str().unwrap().to_string();
 
-	// Add volume B that extends A
+	// Add entry B that extends A
 	let rb = proc.call(
 		"store/add",
 		json!({
-			"text": "Volume B — extends A",
+			"text": "Entry B — extends A",
 			"embedding": [0.0, 1.0, 0.0],
 			"metadata": { "rel:extends": id_a }
 		}),
 	);
 	let id_b = rb["id"].as_str().unwrap().to_string();
 
-	// Add volume C that extends B
+	// Add entry C that extends B
 	let rc = proc.call(
 		"store/add",
 		json!({
-			"text": "Volume C — extends B",
+			"text": "Entry C — extends B",
 			"embedding": [0.0, 0.0, 1.0],
 			"metadata": { "rel:extends": id_b }
 		}),
@@ -1001,7 +1001,7 @@ fn graph_traverse_two_hops() {
 		"should have at least one node at depth 1"
 	);
 	let b_at_depth_1 = depth_1_nodes.iter().any(|n| {
-		n["volume"]["id"].as_str() == Some(id_b.as_str())
+		n["entry"]["id"].as_str() == Some(id_b.as_str())
 	});
 	assert!(b_at_depth_1, "B should be at depth 1 from C");
 
@@ -1015,7 +1015,7 @@ fn graph_traverse_two_hops() {
 		"should have at least one node at depth 2"
 	);
 	let a_at_depth_2 = depth_2_nodes.iter().any(|n| {
-		n["volume"]["id"].as_str() == Some(id_a.as_str())
+		n["entry"]["id"].as_str() == Some(id_a.as_str())
 	});
 	assert!(a_at_depth_2, "A should be at depth 2 from C");
 }
@@ -1077,29 +1077,29 @@ fn graph_boosted_search() {
 		"graph-boosted search should return results"
 	);
 
-	// The ML-related volumes should appear in results
+	// The ML-related entries should appear in results
 	let result_ids: Vec<&str> = results
 		.iter()
-		.filter_map(|r| r["volume"]["id"].as_str())
+		.filter_map(|r| r["entry"]["id"].as_str())
 		.collect();
 	assert!(
 		result_ids.contains(&id1.as_str()),
-		"results should contain the ML volume (id1)"
+		"results should contain the ML entry (id1)"
 	);
 	assert!(
 		result_ids.contains(&id2.as_str()),
-		"results should contain the neural networks volume (id2)"
+		"results should contain the neural networks entry (id2)"
 	);
 
-	// The ML volume should score higher than gardening
+	// The ML entry should score higher than gardening
 	let ml_score = results
 		.iter()
-		.find(|r| r["volume"]["id"].as_str() == Some(id1.as_str()))
+		.find(|r| r["entry"]["id"].as_str() == Some(id1.as_str()))
 		.and_then(|r| r["score"].as_f64())
-		.expect("ML volume should have a score");
+		.expect("ML entry should have a score");
 	let gardening_score = results
 		.iter()
-		.find(|r| r["volume"]["text"].as_str().map(|t| t.contains("Gardening")).unwrap_or(false))
+		.find(|r| r["entry"]["text"].as_str().map(|t| t.contains("Gardening")).unwrap_or(false))
 		.and_then(|r| r["score"].as_f64());
 	if let Some(gs) = gardening_score {
 		assert!(
@@ -1116,12 +1116,12 @@ fn graph_persistence_round_trip() {
 
 	let (id_a, id_b);
 
-	// --- First process: add volumes with explicit edges and save ---
+	// --- First process: add entries with explicit edges and save ---
 	{
 		let mut proc = VectorProcess::spawn();
 		proc.initialize_with_path(storage_path);
 
-		// Add volume A
+		// Add entry A
 		let ra = proc.call(
 			"store/add",
 			json!({
@@ -1132,7 +1132,7 @@ fn graph_persistence_round_trip() {
 		);
 		id_a = ra["id"].as_str().unwrap().to_string();
 
-		// Add volume B with rel:related to A
+		// Add entry B with rel:related to A
 		let rb = proc.call(
 			"store/add",
 			json!({
@@ -1161,12 +1161,12 @@ fn graph_persistence_round_trip() {
 		let mut proc = VectorProcess::spawn();
 		proc.initialize_with_path(storage_path);
 
-		// Verify volumes loaded
+		// Verify entries loaded
 		let result = proc.call("store/size", json!({}));
 		assert_eq!(
 			result["count"].as_u64().unwrap(),
 			2,
-			"should have 2 volumes after reload"
+			"should have 2 entries after reload"
 		);
 
 		// Verify graph edges survived: A should have B as neighbor
@@ -1177,7 +1177,7 @@ fn graph_persistence_round_trip() {
 			"A should have neighbors after reload from disk"
 		);
 		let has_b = neighbors.iter().any(|n| {
-			n["volume"]["id"].as_str() == Some(id_b.as_str())
+			n["entry"]["id"].as_str() == Some(id_b.as_str())
 				&& n["edge"]["edgeType"].as_str() == Some("Related")
 		});
 		assert!(has_b, "A's neighbors should include B with Related edge after reload");
@@ -1186,7 +1186,7 @@ fn graph_persistence_round_trip() {
 		let result = proc.call("graph/neighbors", json!({ "id": id_b }));
 		let neighbors = result["neighbors"].as_array().expect("neighbors should be array");
 		let has_a = neighbors.iter().any(|n| {
-			n["volume"]["id"].as_str() == Some(id_a.as_str())
+			n["entry"]["id"].as_str() == Some(id_a.as_str())
 				&& n["edge"]["edgeType"].as_str() == Some("Related")
 		});
 		assert!(has_a, "B's neighbors should include A with Related edge after reload");
@@ -1194,11 +1194,11 @@ fn graph_persistence_round_trip() {
 }
 
 #[test]
-fn delete_volume_cascades_graph_edges() {
+fn delete_entry_cascades_graph_edges() {
 	let mut proc = VectorProcess::spawn();
 	proc.initialize();
 
-	// Add volume A
+	// Add entry A
 	let ra = proc.call(
 		"store/add",
 		json!({
@@ -1209,7 +1209,7 @@ fn delete_volume_cascades_graph_edges() {
 	);
 	let id_a = ra["id"].as_str().unwrap().to_string();
 
-	// Add volume B with rel:related to A
+	// Add entry B with rel:related to A
 	let rb = proc.call(
 		"store/add",
 		json!({
@@ -1224,7 +1224,7 @@ fn delete_volume_cascades_graph_edges() {
 	let result = proc.call("graph/neighbors", json!({ "id": id_a }));
 	let neighbors = result["neighbors"].as_array().expect("neighbors should be array");
 	let has_b = neighbors.iter().any(|n| {
-		n["volume"]["id"].as_str() == Some(id_b.as_str())
+		n["entry"]["id"].as_str() == Some(id_b.as_str())
 	});
 	assert!(has_b, "A should have B as neighbor before deletion");
 

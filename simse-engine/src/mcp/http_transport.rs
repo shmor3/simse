@@ -20,12 +20,12 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 
-use crate::error::McpError;
-use crate::protocol::{
+use crate::mcp::error::McpError;
+use crate::mcp::protocol::{
 	ClientCapabilities, ImplementationInfo, McpInitializeParams, McpInitializeResult,
 	RootCapabilities,
 };
-use crate::stdio_transport::{
+use crate::mcp::stdio_transport::{
 	NotificationHandler, SubscriptionHandle, Transport, MCP_PROTOCOL_VERSION,
 };
 

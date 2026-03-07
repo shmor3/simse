@@ -19,8 +19,8 @@ use tokio::process::Command;
 use tokio::sync::{broadcast, mpsc, oneshot, RwLock};
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
-use crate::error::AcpError;
-use crate::permission::PermissionPolicy;
+use crate::acp::error::AcpError;
+use crate::acp::permission::PermissionPolicy;
 
 // ---------------------------------------------------------------------------
 // Configuration

@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::client::TokenUsage;
+use crate::acp::client::TokenUsage;
 
 // ---------------------------------------------------------------------------
 // Streaming types (previously in protocol.rs)

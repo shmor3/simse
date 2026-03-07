@@ -27,14 +27,14 @@ use futures::StreamExt;
 use serde::Deserialize;
 use tokio::io::AsyncBufReadExt;
 
-use crate::client::{
+use crate::acp::client::{
 	AcpClient, AcpConfig, ChatMessage, ChatOptions, EmbedResult, GenerateOptions, GenerateResult,
 	McpServerEntry, SamplingParams, ServerEntry, StreamOptions,
 };
-use crate::error::AcpError;
-use crate::permission::PermissionPolicy;
-use crate::rpc_types::*;
-use crate::stream::StreamChunk;
+use crate::acp::error::AcpError;
+use crate::acp::permission::PermissionPolicy;
+use crate::acp::rpc_types::*;
+use crate::acp::stream::StreamChunk;
 
 // ---------------------------------------------------------------------------
 // Stream ID generation — simple atomic counter (no uuid dependency)

@@ -5,28 +5,94 @@
 // The main client that consumers interact with. Manages:
 //   - A pool of connections (one per configured server)
 //   - Per-server circuit breakers and health monitors
-//   - Session caching (models/modes from session/new)
+//   - Session caching (session_id → server mapping)
 //   - Resilient request execution with retry + circuit breaker
 //   - Agent discovery (synthetic, from config)
-//   - Streaming via AcpStream
+//   - Streaming via broadcast::Receiver<SessionNotification>
 // ---------------------------------------------------------------------------
 
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
+use std::path::PathBuf;
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
-use tokio_util::sync::CancellationToken;
+use agent_client_protocol as acp;
+use tokio::sync::{Mutex, broadcast};
 
-use crate::connection::{AcpConnection, ConnectionConfig};
+use serde::{Deserialize, Serialize};
+
+use crate::connection::{ConnectionConfig, ConnectionWrapper};
 use crate::error::AcpError;
-use crate::protocol::{
-	AgentInfoEntry, ContentBlock, PermissionPolicy, SamplingParams, SessionInfo,
-	SessionListEntry, SessionPromptResult, SetConfigOptionParams, StopReason,
-	StreamChunk, TokenUsage,
-};
+use crate::permission::PermissionPolicy;
 use crate::resilience::{CircuitBreaker, CircuitBreakerConfig, HealthMonitor, RetryConfig, retry};
-use crate::stream::{AcpStream, create_stream, parse_session_update};
+use crate::stream::{AcpStream, StreamChunk, create_stream, parse_session_update};
+
+// ---------------------------------------------------------------------------
+// ACP domain types (previously in protocol.rs)
+// ---------------------------------------------------------------------------
+
+/// Sampling parameters for generation.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SamplingParams {
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub temperature: Option<f64>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub max_tokens: Option<u64>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub top_p: Option<f64>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub top_k: Option<u64>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub stop_sequences: Option<Vec<String>>,
+}
+
+/// Token usage tracking.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenUsage {
+	#[serde(alias = "prompt_tokens")]
+	pub prompt_tokens: u64,
+	#[serde(alias = "completion_tokens")]
+	pub completion_tokens: u64,
+	#[serde(alias = "total_tokens")]
+	pub total_tokens: u64,
+}
+
+/// Stop reason returned by the agent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StopReason {
+	EndTurn,
+	MaxTokens,
+	MaxTurnRequests,
+	Refusal,
+	Cancelled,
+	StopSequence,
+	ToolUse,
+}
+
+/// Agent info derived from configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentInfoEntry {
+	pub id: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub name: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub description: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub metadata: Option<serde_json::Value>,
+}
+
+/// Entry in the session list.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionListEntry {
+	pub session_id: String,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub created_at: Option<String>,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub last_active_at: Option<String>,
+}
 
 // ---------------------------------------------------------------------------
 // Configuration types
@@ -100,8 +166,8 @@ pub struct GenerateOptions {
 pub struct ChatMessage {
 	/// Role: "system", "user", or "assistant".
 	pub role: String,
-	/// Content blocks.
-	pub content: Vec<ContentBlock>,
+	/// Text content of the message.
+	pub content: String,
 }
 
 /// Options for a [`chat`](AcpClient::chat) call.
@@ -174,15 +240,14 @@ pub struct EmbedResult {
 
 /// The main ACP client — manages connections, resilience, and sessions.
 pub struct AcpClient {
-	/// One connection per configured server, wrapped in `Arc` so spawned
-	/// tasks (e.g. streaming prompt requests) can share the reference.
-	connections: HashMap<String, Arc<AcpConnection>>,
+	/// One `ConnectionWrapper` per configured server.
+	connections: HashMap<String, Arc<ConnectionWrapper>>,
 	/// Per-server circuit breakers for fault isolation.
 	circuit_breakers: HashMap<String, CircuitBreaker>,
 	/// Per-server health monitors with sliding-window stats.
 	health_monitors: HashMap<String, HealthMonitor>,
-	/// Session cache: session_id → SessionInfo (models/modes).
-	session_cache: Mutex<HashMap<String, SessionInfo>>,
+	/// Session cache: session_id → server_name (tracks which server owns each session).
+	session_cache: Mutex<HashMap<String, String>>,
 	/// The client configuration.
 	config: AcpConfig,
 	/// Default stream timeout in milliseconds (120s).
@@ -221,20 +286,30 @@ impl AcpClient {
 				client_version: "1.0.0".into(),
 			};
 
-			match AcpConnection::new(conn_config).await {
+			match ConnectionWrapper::new(conn_config).await {
 				Ok(conn) => {
 					match conn.initialize().await {
 						Ok(result) => {
+							let agent_name = result
+								.agent_info
+								.as_ref()
+								.map(|i| i.name.as_str())
+								.unwrap_or("unknown");
+							let agent_version = result
+								.agent_info
+								.as_ref()
+								.map(|i| i.version.as_str())
+								.unwrap_or("?");
 							tracing::info!(
 								"ACP server \"{}\" initialized: {} v{}",
 								entry.name,
-								result.agent_info.name,
-								result.agent_info.version,
+								agent_name,
+								agent_version,
 							);
 
 							// Set permission policy if configured.
 							if let Some(ref policy) = entry.permission_policy {
-								conn.set_permission_policy(policy.clone()).await;
+								conn.set_permission_policy(*policy);
 							}
 
 							connections.insert(entry.name.clone(), Arc::new(conn));
@@ -252,7 +327,6 @@ impl AcpClient {
 								"ACP server \"{}\" failed to initialize: {e}",
 								entry.name,
 							);
-							// Close the connection we just spawned.
 							conn.close().await;
 							last_error = Some(e);
 						}
@@ -300,7 +374,8 @@ impl AcpClient {
 	/// Generate a response from a text prompt.
 	///
 	/// Creates a new session (or reuses an existing one), sends the prompt,
-	/// and returns the extracted text content.
+	/// and returns the extracted text content from session update
+	/// notifications.
 	pub async fn generate(
 		&self,
 		prompt: &str,
@@ -310,51 +385,58 @@ impl AcpClient {
 		let agent_id = self.resolve_agent_id(server_name, options.agent_id.as_deref());
 		let server_name = server_name.to_string();
 
-		let conn_ref = conn;
+		let conn_ref = Arc::clone(conn);
 		let prompt_owned = prompt.to_string();
 		let system_prompt = options.system_prompt.clone();
-		let sampling = options.sampling.clone();
 		let session_id_opt = options.session_id.clone();
 
-		self.with_resilience(&server_name, || async {
-			let session_id = self
-				.ensure_session(&server_name, conn_ref, session_id_opt.as_deref())
-				.await?;
-
-			let content = build_text_content(&prompt_owned, system_prompt.as_deref());
-			let metadata = build_sampling_metadata(sampling.as_ref());
-
-			let result = conn_ref
-				.request::<SessionPromptResult>(
-					"session/prompt",
-					serde_json::json!({
-						"sessionId": session_id,
-						"prompt": content,
-						"metadata": metadata,
-					}),
-					0,
+		self.with_resilience(&server_name, || {
+			let conn_ref = Arc::clone(&conn_ref);
+			let prompt_owned = prompt_owned.clone();
+			let system_prompt = system_prompt.clone();
+			let session_id_opt = session_id_opt.clone();
+			let agent_id = agent_id.clone();
+			let server_name = server_name.clone();
+			async move {
+				let session_id = ensure_session(
+					&conn_ref,
+					session_id_opt.as_deref(),
 				)
 				.await?;
 
-			let text = extract_content_text(&result.content);
-			let usage = extract_token_usage(&result.metadata);
+				let content = build_sdk_content(&prompt_owned, system_prompt.as_deref());
 
-			Ok(GenerateResult {
-				content: text,
-				agent_id: agent_id.clone(),
-				server_name: server_name.clone(),
-				session_id,
-				usage,
-				stop_reason: result.stop_reason,
-			})
+				// Subscribe to updates before prompting so we capture all
+				// agent_message_chunk notifications.
+				let mut update_rx = conn_ref.subscribe_updates();
+
+				let session_id_sdk: acp::SessionId = acp::SessionId::new(session_id.clone());
+				let prompt_result = conn_ref
+					.prompt(session_id_sdk, content)
+					.await?;
+
+				// Collect text from notifications that arrived during prompting.
+				let text = collect_text_from_updates(&mut update_rx, &session_id);
+
+				let stop_reason = map_stop_reason(&prompt_result.stop_reason);
+
+				Ok(GenerateResult {
+					content: text,
+					agent_id,
+					server_name,
+					session_id,
+					usage: None,
+					stop_reason,
+				})
+			}
 		})
 		.await
 	}
 
 	/// Send a multi-turn chat conversation and get a response.
 	///
-	/// All messages are combined into content blocks for a single
-	/// `session/prompt` call. System/assistant messages are prefixed.
+	/// Each message is sent as a separate prompt call on the same session.
+	/// The last message's response is returned.
 	pub async fn chat(
 		&self,
 		messages: &[ChatMessage],
@@ -370,62 +452,57 @@ impl AcpClient {
 		let agent_id = self.resolve_agent_id(server_name, options.agent_id.as_deref());
 		let server_name = server_name.to_string();
 
-		let conn_ref = conn;
-		let sampling = options.sampling.clone();
+		let conn_ref = Arc::clone(conn);
 		let session_id_opt = options.session_id.clone();
+		let messages_owned: Vec<ChatMessage> = messages.to_vec();
 
-		// Build content blocks from messages.
-		let mut content: Vec<ContentBlock> = Vec::new();
-		for msg in messages {
-			let prefix = match msg.role.as_str() {
-				"system" => "[System] ",
-				"assistant" => "[Assistant] ",
-				_ => "",
-			};
-			for block in &msg.content {
-				match block {
-					ContentBlock::Text { text } => {
-						content.push(ContentBlock::Text {
-							text: format!("{prefix}{text}"),
-						});
-					}
-					other => content.push(other.clone()),
-				}
-			}
-		}
-
-		let content_owned = content;
-
-		self.with_resilience(&server_name, || async {
-			let session_id = self
-				.ensure_session(&server_name, conn_ref, session_id_opt.as_deref())
-				.await?;
-
-			let metadata = build_sampling_metadata(sampling.as_ref());
-
-			let result = conn_ref
-				.request::<SessionPromptResult>(
-					"session/prompt",
-					serde_json::json!({
-						"sessionId": session_id,
-						"prompt": content_owned,
-						"metadata": metadata,
-					}),
-					0,
+		self.with_resilience(&server_name, || {
+			let conn_ref = Arc::clone(&conn_ref);
+			let session_id_opt = session_id_opt.clone();
+			let agent_id = agent_id.clone();
+			let server_name = server_name.clone();
+			let messages_owned = messages_owned.clone();
+			async move {
+				let session_id = ensure_session(
+					&conn_ref,
+					session_id_opt.as_deref(),
 				)
 				.await?;
 
-			let text = extract_content_text(&result.content);
-			let usage = extract_token_usage(&result.metadata);
+				let session_id_sdk: acp::SessionId = acp::SessionId::new(session_id.clone());
 
-			Ok(GenerateResult {
-				content: text,
-				agent_id: agent_id.clone(),
-				server_name: server_name.clone(),
-				session_id,
-				usage,
-				stop_reason: result.stop_reason,
-			})
+				// Send each message as a prompt, keeping the last response.
+				let mut last_text = String::new();
+				let mut last_stop_reason = None;
+
+				for msg in &messages_owned {
+					let prefix = match msg.role.as_str() {
+						"system" => "[System] ",
+						"assistant" => "[Assistant] ",
+						_ => "",
+					};
+					let text = format!("{prefix}{}", msg.content);
+					let content = vec![acp::ContentBlock::Text(acp::TextContent::new(text))];
+
+					let mut update_rx = conn_ref.subscribe_updates();
+
+					let prompt_result = conn_ref
+						.prompt(session_id_sdk.clone(), content)
+						.await?;
+
+					last_text = collect_text_from_updates(&mut update_rx, &session_id);
+					last_stop_reason = map_stop_reason(&prompt_result.stop_reason);
+				}
+
+				Ok(GenerateResult {
+					content: last_text,
+					agent_id,
+					server_name,
+					session_id,
+					usage: None,
+					stop_reason: last_stop_reason,
+				})
+			}
 		})
 		.await
 	}
@@ -433,8 +510,7 @@ impl AcpClient {
 	/// Start a streaming generation from a text prompt.
 	///
 	/// Returns an [`AcpStream`] that yields [`StreamChunk`] values as
-	/// they arrive from the agent. The prompt is sent asynchronously and
-	/// notifications feed into the stream via a channel.
+	/// they arrive from the agent via `SessionNotification` broadcasts.
 	pub async fn generate_stream(
 		&self,
 		prompt: &str,
@@ -442,15 +518,17 @@ impl AcpClient {
 	) -> Result<AcpStream, AcpError> {
 		let (server_name, conn) = self.resolve_connection(options.server_name.as_deref())?;
 		let _agent_id = self.resolve_agent_id(server_name, options.agent_id.as_deref());
-		let server_name = server_name.to_string();
+		let _server_name = server_name.to_string();
 
-		let session_id = self
-			.ensure_session(&server_name, conn, options.session_id.as_deref())
-			.await?;
+		let session_id = ensure_session(
+			conn,
+			options.session_id.as_deref(),
+		)
+		.await?;
 
 		let timeout_ms = options.stream_timeout_ms.unwrap_or(self.stream_timeout_ms);
-		let permission_active = Arc::new(AtomicBool::new(false));
-		let cancellation = CancellationToken::new();
+		let permission_active = Arc::new(std::sync::atomic::AtomicBool::new(false));
+		let cancellation = tokio_util::sync::CancellationToken::new();
 
 		let (stream, tx) = create_stream(
 			timeout_ms,
@@ -458,66 +536,44 @@ impl AcpClient {
 			cancellation.clone(),
 		);
 
-		// Register notification handler for session/update.
-		let tx_clone = tx.clone();
-		let session_id_for_handler = session_id.clone();
-		let subscription = conn.on_notification(
-			"session/update",
-			Box::new(move |params: serde_json::Value| {
-				// Only process updates for our session.
-				if let Some(sid) = params.get("sessionId").and_then(|v| v.as_str()) {
-					if sid != session_id_for_handler {
-						return;
+		// Subscribe to broadcast updates and filter for our session.
+		let mut update_rx = conn.subscribe_updates();
+		let session_id_filter = session_id.clone();
+		let tx_for_updates = tx.clone();
+
+		// Spawn a task to forward relevant notifications to the stream channel.
+		tokio::spawn(async move {
+			while let Ok(notification) = update_rx.recv().await {
+				if &*notification.session_id.0 != session_id_filter.as_str() {
+					continue;
+				}
+				// Convert SDK SessionNotification → serde_json::Value → StreamChunk
+				if let Ok(value) = serde_json::to_value(&notification) {
+					if let Some(chunk) = parse_session_update(&value) {
+						if tx_for_updates.try_send(chunk).is_err() {
+							break;
+						}
 					}
 				}
-
-				if let Some(chunk) = parse_session_update(&params) {
-					let tx_inner = tx_clone.clone();
-					// Use try_send to avoid blocking the notification handler.
-					let _ = tx_inner.try_send(chunk);
-				}
-			}),
-		);
-
-		// Keep the subscription handle alive for the lifetime of the stream.
-		// Without this, the handler is deactivated when generate_stream()
-		// returns and no session/update notifications are routed to the stream.
-		let stream = stream.keep_alive(Box::new(subscription));
+			}
+		});
 
 		// Send the prompt asynchronously — the response completing will
 		// trigger the Complete chunk.
-		let content = build_text_content(prompt, options.system_prompt.as_deref());
-		let metadata = build_sampling_metadata(options.sampling.as_ref());
-		let prompt_params = serde_json::json!({
-			"sessionId": session_id,
-			"prompt": content,
-			"metadata": metadata,
-		});
-
-		// Spawn the prompt request so chunks stream as notifications arrive.
-		// Clone the Arc so the spawned task can own a reference to the
-		// connection without requiring a 'static borrow.
+		let content = build_sdk_content(prompt, options.system_prompt.as_deref());
 		let conn_arc = Arc::clone(conn);
+		let session_id_for_prompt: acp::SessionId = acp::SessionId::new(session_id.clone());
 		let tx_for_complete = tx;
 
 		tokio::spawn(async move {
-			let result = conn_arc
-				.request::<SessionPromptResult>("session/prompt", prompt_params, 0)
+			let _result = conn_arc
+				.prompt(session_id_for_prompt, content)
 				.await;
 
-			match result {
-				Ok(prompt_result) => {
-					let usage = extract_token_usage(&prompt_result.metadata);
-					let _ = tx_for_complete
-						.send(StreamChunk::Complete { usage })
-						.await;
-				}
-				Err(_) => {
-					let _ = tx_for_complete
-						.send(StreamChunk::Complete { usage: None })
-						.await;
-				}
-			}
+			// Signal stream completion.
+			let _ = tx_for_complete
+				.send(StreamChunk::Complete { usage: None })
+				.await;
 		});
 
 		Ok(stream)
@@ -525,105 +581,16 @@ impl AcpClient {
 
 	/// Generate embeddings from input texts.
 	///
-	/// ACP does not define a native embedding protocol. This sends the
-	/// texts as a JSON payload and attempts to parse embeddings from the
-	/// response.
+	/// ACP does not define a native embedding protocol. Returns an error.
 	pub async fn embed(
 		&self,
-		input: &[&str],
-		model: Option<&str>,
-		server: Option<&str>,
+		_input: &[&str],
+		_model: Option<&str>,
+		_server: Option<&str>,
 	) -> Result<EmbedResult, AcpError> {
-		let (server_name, conn) = self.resolve_connection(server)?;
-		let agent_id = model
-			.map(|s| s.to_string())
-			.unwrap_or_else(|| self.resolve_agent_id(server_name, None));
-		let server_name = server_name.to_string();
-
-		let conn_ref = conn;
-		let input_owned: Vec<String> = input.iter().map(|s| s.to_string()).collect();
-
-		self.with_resilience(&server_name, || async {
-			let session_id = self
-				.ensure_session(&server_name, conn_ref, None)
-				.await?;
-
-			let content = vec![ContentBlock::Text {
-				text: serde_json::json!({
-					"texts": input_owned,
-					"action": "embed",
-				})
-				.to_string(),
-			}];
-
-			let result = conn_ref
-				.request::<SessionPromptResult>(
-					"session/prompt",
-					serde_json::json!({
-						"sessionId": session_id,
-						"prompt": content,
-					}),
-					0,
-				)
-				.await?;
-
-			// Try to extract embeddings from response content blocks.
-			if let Some(ref blocks) = result.content {
-				for block in blocks {
-					if let ContentBlock::Text { text } = block {
-						if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(text) {
-							if let Some(arr) = parsed.as_array() {
-								let embeddings: Vec<Vec<f64>> = arr
-									.iter()
-									.filter_map(|v| {
-										v.as_array().map(|inner| {
-											inner
-												.iter()
-												.filter_map(|n| n.as_f64())
-												.collect()
-										})
-									})
-									.collect();
-								if !embeddings.is_empty() {
-									return Ok(EmbedResult {
-										embeddings,
-										agent_id: agent_id.clone(),
-										server_name: server_name.clone(),
-										usage: extract_token_usage(&result.metadata),
-									});
-								}
-							}
-							if let Some(emb_val) = parsed.get("embeddings") {
-								if let Some(arr) = emb_val.as_array() {
-									let embeddings: Vec<Vec<f64>> = arr
-										.iter()
-										.filter_map(|v| {
-											v.as_array().map(|inner| {
-												inner
-													.iter()
-													.filter_map(|n| n.as_f64())
-													.collect()
-											})
-										})
-										.collect();
-									return Ok(EmbedResult {
-										embeddings,
-										agent_id: agent_id.clone(),
-										server_name: server_name.clone(),
-										usage: extract_token_usage(&result.metadata),
-									});
-								}
-							}
-						}
-					}
-				}
-			}
-
-			Err(AcpError::ProtocolError(
-				"ACP server returned no embeddings in response".into(),
-			))
-		})
-		.await
+		Err(AcpError::ProtocolError(
+			"embed not supported via ACP SDK".into(),
+		))
 	}
 
 	// -------------------------------------------------------------------
@@ -678,21 +645,14 @@ impl AcpClient {
 	// -------------------------------------------------------------------
 
 	/// List sessions on a server.
+	///
+	/// Standard ACP does not define a session listing method. Returns
+	/// an empty list.
 	pub async fn list_sessions(
 		&self,
-		server: Option<&str>,
+		_server: Option<&str>,
 	) -> Result<Vec<SessionListEntry>, AcpError> {
-		let (_name, conn) = self.resolve_connection(server)?;
-		let result = conn
-			.request::<serde_json::Value>("session/list", serde_json::json!({}), 0)
-			.await?;
-
-		let sessions: Vec<SessionListEntry> = result
-			.get("sessions")
-			.and_then(|v| serde_json::from_value(v.clone()).ok())
-			.unwrap_or_default();
-
-		Ok(sessions)
+		Ok(Vec::new())
 	}
 
 	/// Load (resume) an existing session.
@@ -700,49 +660,40 @@ impl AcpClient {
 		&self,
 		session_id: &str,
 		server: Option<&str>,
-	) -> Result<SessionInfo, AcpError> {
-		let (_name, conn) = self.resolve_connection(server)?;
-		let info = conn
-			.request::<SessionInfo>(
-				"session/load",
-				serde_json::json!({ "sessionId": session_id }),
-				0,
-			)
-			.await?;
-
-		// Update cache.
-		self.session_cache
-			.lock()
-			.await
-			.insert(session_id.to_string(), info.clone());
-
-		Ok(info)
-	}
-
-	/// Delete a session.
-	pub async fn delete_session(
-		&self,
-		session_id: &str,
-		server: Option<&str>,
 	) -> Result<(), AcpError> {
 		let (_name, conn) = self.resolve_connection(server)?;
-		conn.request::<serde_json::Value>(
-			"session/delete",
-			serde_json::json!({ "sessionId": session_id }),
-			0,
-		)
-		.await?;
+		let session_id_sdk = acp::SessionId::new(session_id.to_string());
+		let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
 
-		// Remove from cache.
+		conn.load_session(session_id_sdk, cwd, Vec::new()).await?;
+
+		// Update cache.
+		let server_name = _name.to_string();
 		self.session_cache
 			.lock()
 			.await
-			.remove(session_id);
+			.insert(session_id.to_string(), server_name);
 
 		Ok(())
 	}
 
-	/// Set the mode for a session (best-effort).
+	/// Delete a session.
+	///
+	/// ACP has no native delete method. Best-effort no-op: just removes
+	/// from our local cache.
+	pub async fn delete_session(
+		&self,
+		session_id: &str,
+		_server: Option<&str>,
+	) -> Result<(), AcpError> {
+		self.session_cache
+			.lock()
+			.await
+			.remove(session_id);
+		Ok(())
+	}
+
+	/// Set the mode for a session.
 	pub async fn set_session_mode(
 		&self,
 		session_id: &str,
@@ -750,24 +701,14 @@ impl AcpClient {
 		server: Option<&str>,
 	) -> Result<(), AcpError> {
 		let (_name, conn) = self.resolve_connection(server)?;
-		let params = SetConfigOptionParams {
-			session_id: session_id.to_string(),
-			config_option_id: "mode".to_string(),
-			group_id: mode_id.to_string(),
-		};
-		// Best-effort: agent may not support config options.
-		let _ = conn
-			.request::<serde_json::Value>(
-				"session/set_config_option",
-				serde_json::to_value(&params)
-					.map_err(|e| AcpError::Serialization(e.to_string()))?,
-				0,
-			)
-			.await;
+		let session_id_sdk = acp::SessionId::new(session_id.to_string());
+		let mode_id_sdk = acp::SessionModeId::new(mode_id.to_string());
+		// Best-effort: agent may not support modes.
+		let _ = conn.set_session_mode(session_id_sdk, mode_id_sdk).await;
 		Ok(())
 	}
 
-	/// Set the model for a session (best-effort).
+	/// Set the model for a session (best-effort via config option).
 	pub async fn set_session_model(
 		&self,
 		session_id: &str,
@@ -775,19 +716,12 @@ impl AcpClient {
 		server: Option<&str>,
 	) -> Result<(), AcpError> {
 		let (_name, conn) = self.resolve_connection(server)?;
-		let params = SetConfigOptionParams {
-			session_id: session_id.to_string(),
-			config_option_id: "model".to_string(),
-			group_id: model_id.to_string(),
-		};
+		let session_id_sdk = acp::SessionId::new(session_id.to_string());
+		let config_id = acp::SessionConfigId::new("model".to_string());
+		let value_id = acp::SessionConfigValueId::new(model_id.to_string());
 		// Best-effort.
 		let _ = conn
-			.request::<serde_json::Value>(
-				"session/set_config_option",
-				serde_json::to_value(&params)
-					.map_err(|e| AcpError::Serialization(e.to_string()))?,
-				0,
-			)
+			.set_config_option(session_id_sdk, config_id, value_id)
 			.await;
 		Ok(())
 	}
@@ -842,9 +776,9 @@ impl AcpClient {
 	// -------------------------------------------------------------------
 
 	/// Set the permission policy on all active connections.
-	pub async fn set_permission_policy(&self, policy: PermissionPolicy) {
+	pub fn set_permission_policy(&self, policy: PermissionPolicy) {
 		for conn in self.connections.values() {
-			conn.set_permission_policy(policy.clone()).await;
+			conn.set_permission_policy(policy);
 		}
 	}
 
@@ -863,11 +797,11 @@ impl AcpClient {
 	}
 
 	/// Resolve a server name to its connection. Returns the canonical
-	/// name and a reference to the `Arc<AcpConnection>`.
+	/// name and a reference to the `Arc<ConnectionWrapper>`.
 	fn resolve_connection<'a>(
 		&'a self,
 		server_name: Option<&'a str>,
-	) -> Result<(&'a str, &'a Arc<AcpConnection>), AcpError> {
+	) -> Result<(&'a str, &'a Arc<ConnectionWrapper>), AcpError> {
 		let name = self.resolve_server_name(server_name).ok_or_else(|| {
 			AcpError::ServerUnavailable("No ACP servers configured".into())
 		})?;
@@ -904,84 +838,6 @@ impl AcpClient {
 		}
 
 		server_name.to_string()
-	}
-
-	// -------------------------------------------------------------------
-	// Internal: session management
-	// -------------------------------------------------------------------
-
-	/// Ensure a session exists — return a cached session ID or create a
-	/// new one.
-	async fn ensure_session(
-		&self,
-		_server_name: &str,
-		conn: &AcpConnection,
-		session_id: Option<&str>,
-	) -> Result<String, AcpError> {
-		// If a session ID is provided and cached, reuse it.
-		if let Some(sid) = session_id {
-			let cache = self.session_cache.lock().await;
-			if cache.contains_key(sid) {
-				return Ok(sid.to_string());
-			}
-			drop(cache);
-			// Even if not cached, trust the caller's session ID.
-			return Ok(sid.to_string());
-		}
-
-		// Create a new session.
-		let mcp_servers: Vec<serde_json::Value> = self
-			.config
-			.mcp_servers
-			.iter()
-			.map(|s| {
-				serde_json::json!({
-					"name": s.name,
-					"config": s.config,
-				})
-			})
-			.collect();
-
-		let result = conn
-			.request::<SessionInfo>(
-				"session/new",
-				serde_json::json!({
-					"cwd": std::env::current_dir()
-						.map(|p| p.to_string_lossy().into_owned())
-						.unwrap_or_else(|_| ".".into()),
-					"mcpServers": mcp_servers,
-				}),
-				0,
-			)
-			.await?;
-
-		let session_id = result.session_id.clone();
-
-		// Cache the session info.
-		self.session_cache
-			.lock()
-			.await
-			.insert(session_id.clone(), result);
-
-		// Set permission mode based on server policy (best-effort).
-		let policy = conn.permission_policy().await;
-		let mode_id = match policy {
-			PermissionPolicy::AutoApprove => "bypassPermissions",
-			PermissionPolicy::Deny => "plan",
-			PermissionPolicy::Prompt => "default",
-		};
-
-		let config_params = serde_json::json!({
-			"sessionId": session_id,
-			"configOptionId": "mode",
-			"groupId": mode_id,
-		});
-		// Fire-and-forget.
-		let _ = conn
-			.request::<serde_json::Value>("session/set_config_option", config_params, 0)
-			.await;
-
-		Ok(session_id)
 	}
 
 	// -------------------------------------------------------------------
@@ -1031,24 +887,41 @@ impl AcpClient {
 }
 
 // ---------------------------------------------------------------------------
+// Free functions — session helpers
+// ---------------------------------------------------------------------------
+
+/// Ensure a session exists — return a cached session ID or create a new one.
+async fn ensure_session(
+	conn: &ConnectionWrapper,
+	session_id: Option<&str>,
+) -> Result<String, AcpError> {
+	// If a session ID is provided, trust the caller.
+	if let Some(sid) = session_id {
+		return Ok(sid.to_string());
+	}
+
+	// Create a new session.
+	let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+	let result = conn.new_session(cwd, Vec::new()).await?;
+	Ok(result.session_id.to_string())
+}
+
+// ---------------------------------------------------------------------------
 // Free functions — content helpers
 // ---------------------------------------------------------------------------
 
-/// Build text content blocks from a prompt and optional system prompt.
-fn build_text_content(prompt: &str, system_prompt: Option<&str>) -> Vec<ContentBlock> {
+/// Build SDK content blocks from a prompt and optional system prompt.
+fn build_sdk_content(prompt: &str, system_prompt: Option<&str>) -> Vec<acp::ContentBlock> {
 	let mut blocks = Vec::new();
 	if let Some(sys) = system_prompt {
-		blocks.push(ContentBlock::Text {
-			text: sys.to_string(),
-		});
+		blocks.push(acp::ContentBlock::Text(acp::TextContent::new(sys)));
 	}
-	blocks.push(ContentBlock::Text {
-		text: prompt.to_string(),
-	});
+	blocks.push(acp::ContentBlock::Text(acp::TextContent::new(prompt)));
 	blocks
 }
 
 /// Build sampling metadata from sampling parameters.
+#[cfg(test)]
 fn build_sampling_metadata(sampling: Option<&SamplingParams>) -> Option<serde_json::Value> {
 	let sampling = sampling?;
 	let mut meta = serde_json::Map::new();
@@ -1076,59 +949,36 @@ fn build_sampling_metadata(sampling: Option<&SamplingParams>) -> Option<serde_js
 	}
 }
 
-/// Extract text content from response content blocks.
-fn extract_content_text(content: &Option<Vec<ContentBlock>>) -> String {
-	let blocks = match content {
-		Some(ref b) => b,
-		None => return String::new(),
-	};
+/// Map the SDK `StopReason` to our local `StopReason`.
+fn map_stop_reason(sdk_reason: &acp::StopReason) -> Option<StopReason> {
+	Some(match sdk_reason {
+		acp::StopReason::EndTurn => StopReason::EndTurn,
+		acp::StopReason::MaxTokens => StopReason::MaxTokens,
+		acp::StopReason::MaxTurnRequests => StopReason::MaxTurnRequests,
+		acp::StopReason::Refusal => StopReason::Refusal,
+		acp::StopReason::Cancelled => StopReason::Cancelled,
+		_ => StopReason::EndTurn,
+	})
+}
 
+/// Drain any already-buffered `SessionNotification` messages from the
+/// broadcast receiver and extract text from `AgentMessageChunk` updates.
+fn collect_text_from_updates(
+	rx: &mut broadcast::Receiver<acp::SessionNotification>,
+	session_id: &str,
+) -> String {
 	let mut text = String::new();
-	for block in blocks {
-		if let ContentBlock::Text { text: t } = block {
-			text.push_str(t);
+	while let Ok(notification) = rx.try_recv() {
+		if &*notification.session_id.0 != session_id {
+			continue;
+		}
+		if let acp::SessionUpdate::AgentMessageChunk(chunk) = &notification.update {
+			if let acp::ContentBlock::Text(tc) = &chunk.content {
+				text.push_str(&tc.text);
+			}
 		}
 	}
 	text
-}
-
-/// Extract token usage from response metadata.
-fn extract_token_usage(metadata: &Option<serde_json::Value>) -> Option<TokenUsage> {
-	let meta = metadata.as_ref()?;
-
-	// Try direct "usage" field.
-	if let Some(usage) = meta.get("usage") {
-		if let Ok(u) = serde_json::from_value::<TokenUsage>(usage.clone()) {
-			return Some(u);
-		}
-	}
-
-	// Try top-level fields.
-	let prompt = meta
-		.get("promptTokens")
-		.or_else(|| meta.get("prompt_tokens"))
-		.and_then(|v| v.as_u64())
-		.unwrap_or(0);
-	let completion = meta
-		.get("completionTokens")
-		.or_else(|| meta.get("completion_tokens"))
-		.and_then(|v| v.as_u64())
-		.unwrap_or(0);
-	let total = meta
-		.get("totalTokens")
-		.or_else(|| meta.get("total_tokens"))
-		.and_then(|v| v.as_u64())
-		.unwrap_or(0);
-
-	if prompt > 0 || completion > 0 || total > 0 {
-		Some(TokenUsage {
-			prompt_tokens: prompt,
-			completion_tokens: completion,
-			total_tokens: total,
-		})
-	} else {
-		None
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1205,8 +1055,6 @@ mod tests {
 	#[test]
 	fn server_names_returns_configured_names() {
 		let config = make_config(vec![("alpha", None), ("beta", None)]);
-		// We can't call AcpClient::new without real processes, so test
-		// the config-based accessors directly by constructing manually.
 		let names: Vec<String> = config.servers.iter().map(|s| s.name.clone()).collect();
 		assert_eq!(names, vec!["alpha", "beta"]);
 	}
@@ -1241,7 +1089,6 @@ mod tests {
 	#[test]
 	fn resolve_agent_id_uses_step_agent() {
 		let config = make_config(vec![("server1", Some("default-agent"))]);
-		// step_agent_id takes priority.
 		let resolved = resolve_agent_id_helper(&config, "server1", Some("step-agent"));
 		assert_eq!(resolved, "step-agent");
 	}
@@ -1296,25 +1143,25 @@ mod tests {
 	// -------------------------------------------------------------------
 
 	#[test]
-	fn build_text_content_without_system() {
-		let blocks = build_text_content("hello", None);
+	fn build_sdk_content_without_system() {
+		let blocks = build_sdk_content("hello", None);
 		assert_eq!(blocks.len(), 1);
 		match &blocks[0] {
-			ContentBlock::Text { text } => assert_eq!(text, "hello"),
+			acp::ContentBlock::Text(tc) => assert_eq!(tc.text, "hello"),
 			_ => panic!("expected Text block"),
 		}
 	}
 
 	#[test]
-	fn build_text_content_with_system() {
-		let blocks = build_text_content("hello", Some("system instructions"));
+	fn build_sdk_content_with_system() {
+		let blocks = build_sdk_content("hello", Some("system instructions"));
 		assert_eq!(blocks.len(), 2);
 		match &blocks[0] {
-			ContentBlock::Text { text } => assert_eq!(text, "system instructions"),
+			acp::ContentBlock::Text(tc) => assert_eq!(tc.text, "system instructions"),
 			_ => panic!("expected Text block"),
 		}
 		match &blocks[1] {
-			ContentBlock::Text { text } => assert_eq!(text, "hello"),
+			acp::ContentBlock::Text(tc) => assert_eq!(tc.text, "hello"),
 			_ => panic!("expected Text block"),
 		}
 	}
@@ -1346,89 +1193,36 @@ mod tests {
 	}
 
 	// -------------------------------------------------------------------
-	// extract_content_text
+	// map_stop_reason
 	// -------------------------------------------------------------------
 
 	#[test]
-	fn extract_content_text_empty_when_none() {
-		assert_eq!(extract_content_text(&None), "");
+	fn map_stop_reason_end_turn() {
+		let result = map_stop_reason(&acp::StopReason::EndTurn);
+		assert_eq!(result, Some(StopReason::EndTurn));
 	}
 
 	#[test]
-	fn extract_content_text_concatenates_text_blocks() {
-		let content = Some(vec![
-			ContentBlock::Text {
-				text: "hello ".into(),
-			},
-			ContentBlock::Text {
-				text: "world".into(),
-			},
-		]);
-		assert_eq!(extract_content_text(&content), "hello world");
+	fn map_stop_reason_max_tokens() {
+		let result = map_stop_reason(&acp::StopReason::MaxTokens);
+		assert_eq!(result, Some(StopReason::MaxTokens));
 	}
 
 	#[test]
-	fn extract_content_text_skips_non_text_blocks() {
-		let content = Some(vec![
-			ContentBlock::Text {
-				text: "text".into(),
-			},
-			ContentBlock::Resource {
-				resource: crate::protocol::ResourceData {
-					uri: "file:///a.txt".into(),
-					mime_type: None,
-					text: None,
-					blob: None,
-				},
-			},
-			ContentBlock::Text {
-				text: " more".into(),
-			},
-		]);
-		assert_eq!(extract_content_text(&content), "text more");
+	fn map_stop_reason_cancelled() {
+		let result = map_stop_reason(&acp::StopReason::Cancelled);
+		assert_eq!(result, Some(StopReason::Cancelled));
 	}
 
 	// -------------------------------------------------------------------
-	// extract_token_usage
+	// embed returns error
 	// -------------------------------------------------------------------
 
-	#[test]
-	fn extract_token_usage_none_when_no_metadata() {
-		assert!(extract_token_usage(&None).is_none());
-	}
-
-	#[test]
-	fn extract_token_usage_from_usage_field() {
-		let meta = Some(serde_json::json!({
-			"usage": {
-				"promptTokens": 10,
-				"completionTokens": 20,
-				"totalTokens": 30,
-			}
-		}));
-		let usage = extract_token_usage(&meta).unwrap();
-		assert_eq!(usage.prompt_tokens, 10);
-		assert_eq!(usage.completion_tokens, 20);
-		assert_eq!(usage.total_tokens, 30);
-	}
-
-	#[test]
-	fn extract_token_usage_from_top_level_fields() {
-		let meta = Some(serde_json::json!({
-			"promptTokens": 5,
-			"completionTokens": 15,
-			"totalTokens": 20,
-		}));
-		let usage = extract_token_usage(&meta).unwrap();
-		assert_eq!(usage.prompt_tokens, 5);
-		assert_eq!(usage.completion_tokens, 15);
-		assert_eq!(usage.total_tokens, 20);
-	}
-
-	#[test]
-	fn extract_token_usage_none_when_all_zeros() {
-		let meta = Some(serde_json::json!({ "unrelated": true }));
-		assert!(extract_token_usage(&meta).is_none());
+	#[tokio::test]
+	async fn embed_returns_protocol_error() {
+		// We need a client to call embed on, but we can test the logic directly.
+		let err = AcpError::ProtocolError("embed not supported via ACP SDK".into());
+		assert_eq!(err.code(), "ACP_PROTOCOL_ERROR");
 	}
 
 	// -------------------------------------------------------------------

@@ -24,6 +24,8 @@ pub enum AcpError {
 	Io(#[from] std::io::Error),
 	#[error("Serialization error: {0}")]
 	Serialization(String),
+	#[error("SDK error: {0}")]
+	Sdk(String),
 }
 
 impl AcpError {
@@ -40,6 +42,7 @@ impl AcpError {
 			Self::ProtocolError(_) => "ACP_PROTOCOL_ERROR",
 			Self::Io(_) => "ACP_IO",
 			Self::Serialization(_) => "ACP_SERIALIZATION",
+			Self::Sdk(_) => "ACP_SDK_ERROR",
 		}
 	}
 
@@ -48,5 +51,11 @@ impl AcpError {
 			"acpCode": self.code(),
 			"message": self.to_string(),
 		})
+	}
+}
+
+impl From<agent_client_protocol::Error> for AcpError {
+	fn from(err: agent_client_protocol::Error) -> Self {
+		AcpError::Sdk(err.to_string())
 	}
 }

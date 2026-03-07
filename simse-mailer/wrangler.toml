@@ -5,11 +5,11 @@ main = "src/index.ts"
 [[d1_databases]]
 binding = "DB"
 database_name = "simse-mailer-db"
-database_id = "PLACEHOLDER_FILL_AFTER_CREATION"
+database_id = "841b91a0-7e61-44d9-af16-4e64000c11c7"
 
 [[secrets_store.bindings]]
 binding = "SECRETS"
-store_id = "PLACEHOLDER_REPLACE_WITH_STORE_ID"
+store_id = "dbcc2c7d2faa4f9a829692ae71f58d88"
 
 [[queues.consumers]]
 queue = "simse-auth-comms"
@@ -36,7 +36,7 @@ database_id = "PLACEHOLDER_STAGING_MAILER_DB_ID"
 
 [[env.staging.secrets_store.bindings]]
 binding = "SECRETS"
-store_id = "PLACEHOLDER_STAGING_STORE_ID"
+store_id = "dbcc2c7d2faa4f9a829692ae71f58d88"
 
 [[env.staging.queues.consumers]]
 queue = "simse-auth-comms-staging"
@@ -57,11 +57,11 @@ name = "simse-mailer"
 [[env.production.d1_databases]]
 binding = "DB"
 database_name = "simse-mailer-db"
-database_id = "PLACEHOLDER_FILL_AFTER_CREATION"
+database_id = "841b91a0-7e61-44d9-af16-4e64000c11c7"
 
 [[env.production.secrets_store.bindings]]
 binding = "SECRETS"
-store_id = "PLACEHOLDER_REPLACE_WITH_STORE_ID"
+store_id = "dbcc2c7d2faa4f9a829692ae71f58d88"
 
 [[env.production.queues.consumers]]
 queue = "simse-auth-comms"

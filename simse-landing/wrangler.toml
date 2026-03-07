@@ -2,8 +2,6 @@ name = "simse-landing"
 compatibility_date = "2026-02-28"
 pages_build_output_dir = "./build/client"
 
-routes = [{ pattern = "simse.dev", custom_domain = true }]
-
 [[d1_databases]]
 binding = "DB"
 database_name = "simse_waitlist"
@@ -13,33 +11,28 @@ database_id = "e5659e77-878c-440c-bbf6-dd74a324938b"
 queue = "simse-landing-comms"
 binding = "COMMS_QUEUE"
 
-# No RESEND_API_KEY — emails enqueued to simse-landing-comms → simse-mailer
-
 [[queues.producers]]
 queue = "simse-landing-analytics"
 binding = "ANALYTICS_QUEUE"
 
-# --- Environments ---
+[env.preview]
+name = "simse-landing-preview"
 
-[env.staging]
-name = "simse-landing-staging"
-
-[[env.staging.d1_databases]]
+[[env.preview.d1_databases]]
 binding = "DB"
 database_name = "simse-waitlist-staging"
 database_id = "PLACEHOLDER_STAGING_WAITLIST_DB_ID"
 
-[[env.staging.queues.producers]]
+[[env.preview.queues.producers]]
 queue = "simse-landing-comms-staging"
 binding = "COMMS_QUEUE"
 
-[[env.staging.queues.producers]]
+[[env.preview.queues.producers]]
 queue = "simse-landing-analytics-staging"
 binding = "ANALYTICS_QUEUE"
 
 [env.production]
 name = "simse-landing"
-routes = [{ pattern = "simse.dev", custom_domain = true }]
 
 [[env.production.d1_databases]]
 binding = "DB"

@@ -10,17 +10,13 @@ routes = [
 
 # No database — pure gateway
 
-[[services]]
-binding = "CLOUD_SERVICE"
-service = "simse-cloud"
-
 [[queues.producers]]
 queue = "simse-api-comms"
 binding = "COMMS_QUEUE"
 
 [[secrets_store.bindings]]
 binding = "SECRETS"
-store_id = "PLACEHOLDER_REPLACE_WITH_STORE_ID"
+store_id = "dbcc2c7d2faa4f9a829692ae71f58d88"
 
 [[queues.producers]]
 queue = "simse-api-analytics"
@@ -33,10 +29,6 @@ name = "simse-api-staging"
 workers_dev = true
 routes = []
 
-[[env.staging.services]]
-binding = "CLOUD_SERVICE"
-service = "simse-cloud-staging"
-
 [[env.staging.queues.producers]]
 queue = "simse-api-comms-staging"
 binding = "COMMS_QUEUE"
@@ -47,15 +39,11 @@ binding = "ANALYTICS_QUEUE"
 
 [[env.staging.secrets_store.bindings]]
 binding = "SECRETS"
-store_id = "PLACEHOLDER_STAGING_STORE_ID"
+store_id = "dbcc2c7d2faa4f9a829692ae71f58d88"
 
 [env.production]
 name = "simse-api"
 routes = [{ pattern = "api.simse.dev", custom_domain = true }]
-
-[[env.production.services]]
-binding = "CLOUD_SERVICE"
-service = "simse-cloud"
 
 [[env.production.queues.producers]]
 queue = "simse-api-comms"
@@ -67,4 +55,4 @@ binding = "ANALYTICS_QUEUE"
 
 [[env.production.secrets_store.bindings]]
 binding = "SECRETS"
-store_id = "PLACEHOLDER_REPLACE_WITH_STORE_ID"
+store_id = "dbcc2c7d2faa4f9a829692ae71f58d88"

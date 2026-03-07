@@ -1,4 +1,5 @@
 import { type Context, Hono } from 'hono';
+import { sendAuditEvent } from '../lib/audit';
 import { sendEmail } from '../lib/comms';
 import { generateId } from '../lib/db';
 import { signJwt } from '../lib/jwt';
@@ -11,11 +12,12 @@ import {
 	rotateRefreshToken,
 } from '../lib/refresh-token';
 import { deleteAllUserSessions, deleteSession } from '../lib/session';
+import { timingSafeEqual } from '../lib/timing-safe';
 import {
+	consumeToken,
 	createToken,
 	generateCode,
 	markTokenUsed,
-	validateToken,
 } from '../lib/token';
 import {
 	loginSchema,
@@ -78,20 +80,16 @@ async function issueTokenPair(
 	}
 
 	const teamRow = await getTeamInfo(db, userId);
-	const sid = familyId ?? generateId();
+	const { token: refreshToken, familyId: actualFamilyId } =
+		await createRefreshToken(db, userId, familyId);
 	const { token: accessToken, expiresIn } = await signJwt(
 		{
 			sub: userId,
 			tid: teamRow?.id ?? null,
 			role: teamRow?.role ?? null,
-			sid,
+			sid: actualFamilyId,
 		},
 		jwtSecret,
-	);
-	const { token: refreshToken } = await createRefreshToken(
-		db,
-		userId,
-		familyId,
 	);
 
 	return {
@@ -104,7 +102,15 @@ async function issueTokenPair(
 
 // POST /auth/register
 auth.post('/register', async (c) => {
-	const body = await c.req.json();
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json(
+			{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+			400,
+		);
+	}
 	const parsed = registerSchema.safeParse(body);
 	if (!parsed.success) {
 		return c.json(
@@ -124,8 +130,8 @@ auth.post('/register', async (c) => {
 
 	// Rate limit by IP
 	const ip =
-		c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
 		c.req.header('CF-Connecting-IP') ??
+		c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
 		'unknown';
 	const rl = await checkRateLimit(db, `register:${ip}`, 60, 5);
 	if (!rl.allowed) {
@@ -165,7 +171,7 @@ auth.post('/register', async (c) => {
 			.bind(userId, normalizedEmail, name, passwordHash),
 		db
 			.prepare('INSERT INTO teams (id, name) VALUES (?, ?)')
-			.bind(teamId, `${name}'s Team`),
+			.bind(teamId, `${name.slice(0, 88)}'s Team`),
 		db
 			.prepare(
 				"INSERT INTO team_members (team_id, user_id, role) VALUES (?, ?, 'owner')",
@@ -210,7 +216,15 @@ auth.post('/register', async (c) => {
 
 // POST /auth/login
 auth.post('/login', async (c) => {
-	const body = await c.req.json();
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json(
+			{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+			400,
+		);
+	}
 	const parsed = loginSchema.safeParse(body);
 	if (!parsed.success) {
 		return c.json(
@@ -234,13 +248,24 @@ auth.post('/login', async (c) => {
 		return c.json(RATE_LIMIT_ERROR, 429);
 	}
 
+	// Also rate limit by IP — prevents a single source from locking out multiple accounts
+	const ip =
+		c.req.header('CF-Connecting-IP') ??
+		c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
+		'unknown';
+	const ipRl = await checkRateLimit(db, `login-ip:${ip}`, 900, 20);
+	if (!ipRl.allowed) {
+		return c.json(RATE_LIMIT_ERROR, 429);
+	}
+
 	const user = await db
 		.prepare(
-			'SELECT id, email, password_hash, two_factor_enabled FROM users WHERE LOWER(email) = ?',
+			'SELECT id, email, name, password_hash, two_factor_enabled FROM users WHERE LOWER(email) = ?',
 		)
 		.bind(normalizedEmail)
 		.first<{
 			id: string;
+			name: string;
 			email: string;
 			password_hash: string;
 			two_factor_enabled: number;
@@ -258,13 +283,18 @@ auth.post('/login', async (c) => {
 		);
 	}
 
-	// Lazy rehash if using legacy PBKDF2 iterations
+	// Lazy rehash in background — avoids timing leak (double-hash is slower)
 	if (needsRehash(user.password_hash)) {
-		const newHash = await hashPassword(password);
-		await db
-			.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
-			.bind(newHash, user.id)
-			.run();
+		c.executionCtx.waitUntil(
+			hashPassword(password).then((newHash) =>
+				db
+					.prepare(
+						"UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
+					)
+					.bind(newHash, user.id)
+					.run(),
+			),
+		);
 	}
 
 	if (user.two_factor_enabled) {
@@ -291,14 +321,22 @@ auth.post('/login', async (c) => {
 			accessToken: tokens.accessToken,
 			refreshToken: tokens.refreshToken,
 			expiresIn: tokens.expiresIn,
-			user: { id: user.id },
+			user: { id: user.id, email: user.email, name: user.name },
 		},
 	});
 });
 
 // POST /auth/2fa
 auth.post('/2fa', async (c) => {
-	const body = await c.req.json();
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json(
+			{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+			400,
+		);
+	}
 	const parsed = twoFactorSchema.safeParse(body);
 	if (!parsed.success) {
 		return c.json(
@@ -321,12 +359,13 @@ auth.post('/2fa', async (c) => {
 		return c.json(RATE_LIMIT_ERROR, 429);
 	}
 
+	// Validate code directly against the pending token (not a global code search)
 	const pending = await db
 		.prepare(
-			"SELECT user_id FROM tokens WHERE id = ? AND type = '2fa' AND used = 0 AND expires_at > datetime('now')",
+			"SELECT user_id, code FROM tokens WHERE id = ? AND type = '2fa' AND used = 0 AND expires_at > datetime('now')",
 		)
 		.bind(pendingToken)
-		.first<{ user_id: string }>();
+		.first<{ user_id: string; code: string }>();
 
 	if (!pending) {
 		return c.json(
@@ -335,8 +374,23 @@ auth.post('/2fa', async (c) => {
 		);
 	}
 
-	const codeToken = await validateToken(db, code, '2fa');
-	if (!codeToken || codeToken.userId !== pending.user_id) {
+	// Rate limit by user — prevents cycling through multiple pending tokens
+	const userRl = await checkRateLimit(
+		db,
+		`2fa-user:${pending.user_id}`,
+		900,
+		15,
+	);
+	if (!userRl.allowed) {
+		return c.json(RATE_LIMIT_ERROR, 429);
+	}
+
+	// Constant-time comparison to prevent timing side-channel
+	let diff = 0;
+	for (let i = 0; i < 6; i++) {
+		diff |= pending.code.charCodeAt(i) ^ code.charCodeAt(i);
+	}
+	if (diff !== 0) {
 		return c.json(
 			{ error: { code: 'INVALID_CODE', message: 'Invalid 2FA code' } },
 			401,
@@ -344,7 +398,6 @@ auth.post('/2fa', async (c) => {
 	}
 
 	await markTokenUsed(db, pendingToken);
-	await markTokenUsed(db, codeToken.id);
 
 	const tokens = await issueTokenPair(c, db, pending.user_id);
 	if (tokens.error) {
@@ -359,18 +412,35 @@ auth.post('/2fa', async (c) => {
 		);
 	}
 
+	const userInfo = await db
+		.prepare('SELECT email, name FROM users WHERE id = ?')
+		.bind(pending.user_id)
+		.first<{ email: string; name: string }>();
+
 	return c.json({
 		data: {
 			accessToken: tokens.accessToken,
 			refreshToken: tokens.refreshToken,
 			expiresIn: tokens.expiresIn,
-			user: { id: pending.user_id },
+			user: {
+				id: pending.user_id,
+				email: userInfo?.email ?? '',
+				name: userInfo?.name ?? '',
+			},
 		},
 	});
 });
 
 // POST /auth/logout (requires auth — called via gateway with X-User-Id)
 auth.post('/logout', async (c) => {
+	const userId = c.req.header('X-User-Id');
+	if (!userId) {
+		return c.json(
+			{ error: { code: 'UNAUTHORIZED', message: 'Not authenticated' } },
+			401,
+		);
+	}
+
 	const sessionId = c.req.header('X-Session-Id');
 	const db = c.env.DB;
 
@@ -380,17 +450,25 @@ auth.post('/logout', async (c) => {
 
 	// Also revoke refresh token if provided
 	try {
-		const body = await c.req.json<{ refreshToken?: string }>();
-		if (body.refreshToken?.startsWith('rt_')) {
+		const body = await c.req.json();
+		const refreshToken =
+			typeof body === 'object' &&
+			body !== null &&
+			typeof body.refreshToken === 'string'
+				? body.refreshToken
+				: null;
+		if (refreshToken?.startsWith('rt_')) {
 			const encoder = new TextEncoder();
-			const data = encoder.encode(body.refreshToken);
+			const data = encoder.encode(refreshToken);
 			const hashBuffer = await crypto.subtle.digest('SHA-256', data);
 			const hashArray = new Uint8Array(hashBuffer);
 			const tokenHash = btoa(String.fromCharCode(...hashArray));
 
 			const row = await db
-				.prepare('SELECT family_id FROM refresh_tokens WHERE token_hash = ?')
-				.bind(tokenHash)
+				.prepare(
+					'SELECT family_id FROM refresh_tokens WHERE token_hash = ? AND user_id = ?',
+				)
+				.bind(tokenHash, userId)
 				.first<{ family_id: string }>();
 
 			if (row) {
@@ -406,7 +484,15 @@ auth.post('/logout', async (c) => {
 
 // POST /auth/reset-password
 auth.post('/reset-password', async (c) => {
-	const body = await c.req.json();
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json(
+			{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+			400,
+		);
+	}
 	const parsed = resetPasswordSchema.safeParse(body);
 	if (!parsed.success) {
 		return c.json(
@@ -447,7 +533,15 @@ auth.post('/reset-password', async (c) => {
 
 // POST /auth/new-password
 auth.post('/new-password', async (c) => {
-	const body = await c.req.json();
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json(
+			{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+			400,
+		);
+	}
 	const parsed = newPasswordSchema.safeParse(body);
 	if (!parsed.success) {
 		return c.json(
@@ -465,15 +559,17 @@ auth.post('/new-password', async (c) => {
 
 	// Rate limit by IP
 	const ip =
-		c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
 		c.req.header('CF-Connecting-IP') ??
+		c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
 		'unknown';
 	const rl = await checkRateLimit(db, `newpw:${ip}`, 60, 5);
 	if (!rl.allowed) {
 		return c.json(RATE_LIMIT_ERROR, 429);
 	}
 
-	const token = await validateToken(db, parsed.data.token, 'password_reset');
+	// Atomic validate + mark used — prevents race where two concurrent requests
+	// both consume the same reset token
+	const token = await consumeToken(db, parsed.data.token, 'password_reset');
 	if (!token) {
 		return c.json(
 			{
@@ -488,21 +584,32 @@ auth.post('/new-password', async (c) => {
 
 	const passwordHash = await hashPassword(parsed.data.password);
 	await db
-		.prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+		.prepare(
+			"UPDATE users SET password_hash = ?, updated_at = datetime('now') WHERE id = ?",
+		)
 		.bind(passwordHash, token.userId)
 		.run();
-	await markTokenUsed(db, token.id);
 
 	// Invalidate all existing sessions and refresh tokens after password reset
 	await deleteAllUserSessions(db, token.userId);
 	await revokeAllUserTokens(db, token.userId);
+
+	sendAuditEvent(c.env.ANALYTICS_QUEUE, 'password.reset', token.userId);
 
 	return c.json({ data: { ok: true } });
 });
 
 // POST /auth/verify-email
 auth.post('/verify-email', async (c) => {
-	const body = await c.req.json();
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json(
+			{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+			400,
+		);
+	}
 	const parsed = verifyEmailSchema.safeParse(body);
 	if (!parsed.success) {
 		return c.json(
@@ -520,15 +627,15 @@ auth.post('/verify-email', async (c) => {
 
 	// Rate limit by IP
 	const ip =
-		c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
 		c.req.header('CF-Connecting-IP') ??
+		c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
 		'unknown';
 	const rl = await checkRateLimit(db, `verify:${ip}`, 60, 5);
 	if (!rl.allowed) {
 		return c.json(RATE_LIMIT_ERROR, 429);
 	}
 
-	const token = await validateToken(db, parsed.data.code, 'email_verify');
+	const token = await consumeToken(db, parsed.data.code, 'email_verify');
 	if (!token) {
 		return c.json(
 			{
@@ -542,17 +649,26 @@ auth.post('/verify-email', async (c) => {
 	}
 
 	await db
-		.prepare('UPDATE users SET email_verified = 1 WHERE id = ?')
+		.prepare(
+			"UPDATE users SET email_verified = 1, updated_at = datetime('now') WHERE id = ?",
+		)
 		.bind(token.userId)
 		.run();
-	await markTokenUsed(db, token.id);
 
 	return c.json({ data: { ok: true } });
 });
 
 // POST /auth/refresh — rotate refresh token, issue new JWT
 auth.post('/refresh', async (c) => {
-	const body = await c.req.json();
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json(
+			{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+			400,
+		);
+	}
 	const parsed = refreshSchema.safeParse(body);
 	if (!parsed.success) {
 		return c.json(
@@ -567,6 +683,17 @@ auth.post('/refresh', async (c) => {
 	}
 
 	const db = c.env.DB;
+
+	// Rate limit by IP — 30 refreshes per 15 minutes
+	const ip =
+		c.req.header('CF-Connecting-IP') ??
+		c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
+		'unknown';
+	const rl = await checkRateLimit(db, `refresh:${ip}`, 900, 30);
+	if (!rl.allowed) {
+		return c.json(RATE_LIMIT_ERROR, 429);
+	}
+
 	const result = await rotateRefreshToken(db, parsed.data.refreshToken);
 
 	if (!result.ok) {
@@ -615,7 +742,15 @@ auth.post('/refresh', async (c) => {
 
 // POST /auth/revoke — revoke a refresh token family (explicit logout)
 auth.post('/revoke', async (c) => {
-	const body = await c.req.json();
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json(
+			{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+			400,
+		);
+	}
 	const parsed = revokeSchema.safeParse(body);
 	if (!parsed.success) {
 		return c.json(
@@ -629,13 +764,24 @@ auth.post('/revoke', async (c) => {
 		);
 	}
 
+	const db = c.env.DB;
+
+	// Rate limit by IP — 20 per minute
+	const ip =
+		c.req.header('CF-Connecting-IP') ??
+		c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
+		'unknown';
+	const rl = await checkRateLimit(db, `revoke:${ip}`, 60, 20);
+	if (!rl.allowed) {
+		return c.json(RATE_LIMIT_ERROR, 429);
+	}
+
 	const encoder = new TextEncoder();
 	const data = encoder.encode(parsed.data.refreshToken);
 	const hashBuffer = await crypto.subtle.digest('SHA-256', data);
 	const hashArray = new Uint8Array(hashBuffer);
 	const tokenHash = btoa(String.fromCharCode(...hashArray));
 
-	const db = c.env.DB;
 	const row = await db
 		.prepare('SELECT family_id FROM refresh_tokens WHERE token_hash = ?')
 		.bind(tokenHash)
@@ -649,10 +795,48 @@ auth.post('/revoke', async (c) => {
 	return c.json({ data: { ok: true } });
 });
 
-// POST /auth/validate — called by simse-api gateway (for API keys and legacy session tokens)
+// POST /auth/validate — called by simse-api gateway (service-to-service)
 auth.post('/validate', async (c) => {
-	const body = await c.req.json<{ token: string }>();
-	if (!body.token) {
+	// Require service-to-service auth — only the gateway should call this
+	const internalSecret = await c.env.SECRETS.get('AUTH_API_SECRET');
+	if (!internalSecret) {
+		return c.json(
+			{
+				error: { code: 'MISCONFIGURED', message: 'Service not configured' },
+			},
+			500,
+		);
+	}
+	const authHeader = c.req.header('Authorization') ?? '';
+	const expected = `Bearer ${internalSecret}`;
+	if (!timingSafeEqual(authHeader, expected)) {
+		return c.json(
+			{
+				error: {
+					code: 'FORBIDDEN',
+					message: 'Invalid service credentials',
+				},
+			},
+			403,
+		);
+	}
+
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json(
+			{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+			400,
+		);
+	}
+	const rawToken =
+		typeof body === 'object' &&
+		body !== null &&
+		typeof (body as Record<string, unknown>).token === 'string'
+			? ((body as Record<string, unknown>).token as string)
+			: null;
+	if (!rawToken || rawToken.length > 4096) {
 		return c.json(
 			{ error: { code: 'VALIDATION_ERROR', message: 'Token required' } },
 			400,
@@ -660,7 +844,6 @@ auth.post('/validate', async (c) => {
 	}
 
 	const db = c.env.DB;
-	const rawToken = body.token;
 	let userId: string | null = null;
 	let sessionId: string | undefined;
 
@@ -709,7 +892,7 @@ auth.post('/validate', async (c) => {
 		if (jwtSecret) {
 			const { verifyJwt } = await import('../lib/jwt');
 			const payload = await verifyJwt(rawToken, jwtSecret);
-			if (payload && payload.exp > Math.floor(Date.now() / 1000)) {
+			if (payload) {
 				userId = payload.sub;
 				sessionId = payload.sid;
 				const teamFromJwt = payload.tid

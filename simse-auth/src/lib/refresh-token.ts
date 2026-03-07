@@ -90,11 +90,23 @@ export async function rotateRefreshToken(
 		return { ok: false, code: 'INVALID_TOKEN' };
 	}
 
-	// Revoke old token
-	await db
-		.prepare('UPDATE refresh_tokens SET revoked = 1 WHERE id = ?')
+	// Atomic revoke — prevents TOCTOU race where two concurrent requests
+	// both pass the revoked check and issue duplicate tokens
+	const revoked = await db
+		.prepare(
+			'UPDATE refresh_tokens SET revoked = 1 WHERE id = ? AND revoked = 0 RETURNING id',
+		)
 		.bind(row.id)
-		.run();
+		.first<{ id: string }>();
+
+	if (!revoked) {
+		// Another concurrent request already revoked this token
+		await db
+			.prepare('UPDATE refresh_tokens SET revoked = 1 WHERE family_id = ?')
+			.bind(row.family_id)
+			.run();
+		return { ok: false, code: 'TOKEN_REUSED' };
+	}
 
 	// Issue new token in same family
 	const result = await createRefreshToken(db, row.user_id, row.family_id);

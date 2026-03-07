@@ -22,9 +22,9 @@ binding = "COMMS_QUEUE"
 binding = "SECRETS"
 store_id = "PLACEHOLDER_REPLACE_WITH_STORE_ID"
 
-[analytics_engine]
-dataset = "simse-analytics"
-binding = "ANALYTICS"
+[[queues.producers]]
+queue = "simse-api-analytics"
+binding = "ANALYTICS_QUEUE"
 
 # --- Environments ---
 
@@ -41,6 +41,10 @@ service = "simse-cloud-staging"
 queue = "simse-api-comms-staging"
 binding = "COMMS_QUEUE"
 
+[[env.staging.queues.producers]]
+queue = "simse-api-analytics-staging"
+binding = "ANALYTICS_QUEUE"
+
 [[env.staging.secrets_store.bindings]]
 binding = "SECRETS"
 store_id = "PLACEHOLDER_STAGING_STORE_ID"
@@ -56,6 +60,10 @@ service = "simse-cloud"
 [[env.production.queues.producers]]
 queue = "simse-api-comms"
 binding = "COMMS_QUEUE"
+
+[[env.production.queues.producers]]
+queue = "simse-api-analytics"
+binding = "ANALYTICS_QUEUE"
 
 [[env.production.secrets_store.bindings]]
 binding = "SECRETS"

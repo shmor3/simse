@@ -53,6 +53,7 @@ simse-ui-core/              # Pure Rust crate — platform-agnostic UI logic (no
 simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Architecture)
 simse-remote/               # Pure Rust crate — remote access engine (JSON-RPC over stdio)
 simse-engine/               # Pure Rust crate — core engine
+simse-analytics/            # TypeScript — Analytics + audit service (Cloudflare Worker, D1, Queues, Analytics Engine)
 simse-cdn/                  # TypeScript — CDN worker (R2 + KV, Cloudflare Worker)
 simse-app/                  # TypeScript — SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects)
 simse-api/                  # TypeScript — API gateway (Cloudflare Worker, proxies to backend services)
@@ -283,6 +284,14 @@ simse-cdn/                  # TypeScript — Cloudflare Worker at cdn.simse.dev
 ### TypeScript Services (Cloudflare Workers)
 
 ```tree
+simse-analytics/            # Analytics + audit — centralized queue consumer
+  src/
+    index.ts                # Hono app, queue handler (datapoint + audit), HTTP routes (/health, /audit/:userId)
+    types.ts                # Env (D1, AnalyticsEngine), DatapointMessage, AuditMessage
+  migrations/
+    0001_initial.sql        # audit_events table + indexes
+  wrangler.toml             # D1, Analytics Engine, 8 queue consumers (one per service)
+
 simse-api/                  # API gateway — proxies to backend services
   src/
     index.ts                # Hono app, health + secrets middleware + gateway routes
@@ -348,7 +357,7 @@ simse-cloud/                # SaaS web app + relay (React Router + Cloudflare Pa
 - **Structured compaction**: Auto-compaction requests 6 sections (Goal, Progress, Current State, Key Decisions, Relevant Files, Next Steps).
 - **Arc<AtomicBool> for health flags**: Connection health shared between spawned reader tasks and main struct.
 - **Backend enum dispatch**: simse-sandbox uses enum dispatch (`FsImpl`, `ShellImpl`, `NetImpl`) instead of trait objects. Each enum has `Local` and `Ssh` variants. Local wraps in-crate logic, Ssh uses russh multiplexed SSH connections.
-- **Workers Analytics Engine**: All Cloudflare Workers write to a shared `simse-analytics` dataset via `ANALYTICS: AnalyticsEngineDataset` binding. Data points include method, path, status, latency, userId, geo (country/city/continent), userAgent, and cfRay. Hono workers use an analytics middleware; CDN wraps its fetch handler; Pages workers wrap worker.ts with `ctx.waitUntil`.
+- **Centralized Analytics**: All 8 services produce analytics/audit events to per-service `ANALYTICS_QUEUE` queues consumed by `simse-analytics`, which is the sole writer to the Analytics Engine dataset (`simse-analytics`) and D1 audit store. Data points include method, path, status, latency, userId, geo (country/city/continent), userAgent, and cfRay. Audit events are persisted in D1 `audit_events` table and also written to Analytics Engine with `indexes: ['audit']`.
 
 ### ACP Protocol
 

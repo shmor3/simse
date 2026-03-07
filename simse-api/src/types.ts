@@ -10,7 +10,7 @@ export interface SecretsStoreNamespace {
 export interface Env {
 	COMMS_QUEUE: Queue;
 	SECRETS: SecretsStoreNamespace;
-	ANALYTICS: AnalyticsEngineDataset;
+	ANALYTICS_QUEUE: Queue;
 	CLOUD_SERVICE: Fetcher;
 }
 

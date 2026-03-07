@@ -28,14 +28,16 @@ export async function createToken(
 	return { id, code };
 }
 
-export async function validateToken(
+// Atomic validate + mark used — prevents race where two concurrent requests
+// both validate the same token before either marks it used
+export async function consumeToken(
 	db: D1Database,
 	code: string,
 	type: string,
 ): Promise<{ id: string; userId: string } | null> {
 	const token = await db
 		.prepare(
-			"SELECT id, user_id FROM tokens WHERE code = ? AND type = ? AND used = 0 AND expires_at > datetime('now')",
+			"UPDATE tokens SET used = 1 WHERE id = (SELECT id FROM tokens WHERE code = ? AND type = ? AND used = 0 AND expires_at > datetime('now') LIMIT 1) AND used = 0 RETURNING id, user_id",
 		)
 		.bind(code, type)
 		.first<{ id: string; user_id: string }>();

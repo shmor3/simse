@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { analyticsMiddleware } from './middleware/analytics';
 import { cleanupMiddleware } from './middleware/cleanup';
+import { securityHeadersMiddleware } from './middleware/security';
+import { serviceAuthMiddleware } from './middleware/service-auth';
 import apiKeys from './routes/api-keys';
 import auth from './routes/auth';
 import teams from './routes/teams';
@@ -30,13 +32,20 @@ app.notFound((c) => {
 });
 
 app.use('*', analyticsMiddleware);
+app.use('*', securityHeadersMiddleware);
 app.use('*', cleanupMiddleware);
 app.get('/health', (c) => c.json({ ok: true }));
 
-// Auth routes (public — gateway forwards without auth check)
+// Auth routes (mostly public — gateway forwards without auth check)
+// These specific auth routes require auth and must be gated
+app.use('/auth/me', serviceAuthMiddleware);
+app.use('/auth/logout', serviceAuthMiddleware);
 app.route('/auth', auth);
 
-// Protected routes (gateway validates token first, passes X-User-Id)
+// Protected routes — require gateway service auth to prevent direct access
+app.use('/users/*', serviceAuthMiddleware);
+app.use('/teams/*', serviceAuthMiddleware);
+app.use('/api-keys/*', serviceAuthMiddleware);
 app.route('/users', users);
 app.route('/teams', teams);
 app.route('/api-keys', apiKeys);

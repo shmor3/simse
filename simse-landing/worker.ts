@@ -1,9 +1,16 @@
 import { createRequestHandler } from 'react-router';
 
-interface Env {
-	DB: D1Database;
-	COMMS_QUEUE: Queue;
-	ANALYTICS: AnalyticsEngineDataset;
+declare module 'react-router' {
+	export interface AppLoadContext {
+		cloudflare: {
+			env: {
+				DB: D1Database;
+				COMMS_QUEUE: Queue;
+				ANALYTICS_QUEUE: Queue;
+			};
+			ctx: ExecutionContext;
+		};
+	}
 }
 
 const requestHandler = createRequestHandler(
@@ -31,33 +38,24 @@ export default {
 		const cf = (request as any).cf;
 
 		ctx.waitUntil(
-			Promise.resolve(
-				env.ANALYTICS.writeDataPoint({
-					indexes: ['simse-landing'],
-					blobs: [
-						request.method,
-						url.pathname,
-						String(response.status),
-						'simse-landing',
-						'',
-						'',
-						cf?.country ?? '',
-						cf?.city ?? '',
-						cf?.continent ?? '',
-						(request.headers.get('User-Agent') ?? '').slice(0, 256),
-						request.headers.get('Referer') ?? '',
-						response.headers.get('Content-Type') ?? '',
-						request.headers.get('Cf-Ray') ?? '',
-					],
-					doubles: [
-						latencyMs,
-						response.status,
-						Number(request.headers.get('Content-Length') ?? 0),
-						Number(response.headers.get('Content-Length') ?? 0),
-						Number(cf?.colo ?? 0),
-					],
-				}),
-			),
+			env.ANALYTICS_QUEUE.send({
+				type: 'datapoint',
+				service: 'simse-landing',
+				method: request.method,
+				path: url.pathname,
+				status: response.status,
+				country: cf?.country ?? '',
+				city: cf?.city ?? '',
+				continent: cf?.continent ?? '',
+				userAgent: (request.headers.get('User-Agent') ?? '').slice(0, 256),
+				referer: (request.headers.get('Referer') ?? '').split('?')[0],
+				contentType: response.headers.get('Content-Type') ?? '',
+				cfRay: request.headers.get('Cf-Ray') ?? '',
+				latencyMs,
+				requestSize: Number(request.headers.get('Content-Length') ?? 0),
+				responseSize: Number(response.headers.get('Content-Length') ?? 0),
+				colo: Number(cf?.colo ?? 0),
+			}).catch(() => {}),
 		);
 
 		return response;

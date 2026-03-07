@@ -15,9 +15,9 @@ binding = "COMMS_QUEUE"
 
 # No RESEND_API_KEY — emails enqueued to simse-landing-comms → simse-mailer
 
-[analytics_engine]
-dataset = "simse-analytics"
-binding = "ANALYTICS"
+[[queues.producers]]
+queue = "simse-landing-analytics"
+binding = "ANALYTICS_QUEUE"
 
 # --- Environments ---
 
@@ -33,6 +33,10 @@ database_id = "PLACEHOLDER_STAGING_WAITLIST_DB_ID"
 queue = "simse-landing-comms-staging"
 binding = "COMMS_QUEUE"
 
+[[env.staging.queues.producers]]
+queue = "simse-landing-analytics-staging"
+binding = "ANALYTICS_QUEUE"
+
 [env.production]
 name = "simse-landing"
 routes = [{ pattern = "simse.dev", custom_domain = true }]
@@ -45,3 +49,7 @@ database_id = "e5659e77-878c-440c-bbf6-dd74a324938b"
 [[env.production.queues.producers]]
 queue = "simse-landing-comms"
 binding = "COMMS_QUEUE"
+
+[[env.production.queues.producers]]
+queue = "simse-landing-analytics"
+binding = "ANALYTICS_QUEUE"

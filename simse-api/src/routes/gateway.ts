@@ -26,11 +26,21 @@ const PUBLIC_AUTH_PATHS = [
 // --- Auth routes ---
 gateway.all('/auth/*', async (c) => {
 	const subpath = c.req.path.replace('/auth', '');
+
+	// /auth/validate is internal-only (gateway calls it for token validation)
+	if (subpath === '/validate') {
+		return c.json(
+			{ error: { code: 'NOT_FOUND', message: 'Route not found' } },
+			404,
+		);
+	}
+
 	const isPublic = PUBLIC_AUTH_PATHS.some((p) => subpath === p);
 
 	const headers = new Headers();
 	headers.set('Content-Type', 'application/json');
 	headers.set('X-Request-Id', c.get('requestId') ?? '');
+	setClientIp(headers, c);
 
 	if (!isPublic) {
 		const auth = await authenticateRequest(c);
@@ -40,6 +50,7 @@ gateway.all('/auth/*', async (c) => {
 				401,
 			);
 		}
+		headers.set('Authorization', `Bearer ${c.var.secrets.authApiSecret}`);
 		setAuthHeaders(headers, auth);
 	}
 
@@ -88,6 +99,7 @@ gateway.all('/payments/*', async (c) => {
 	headers.set('Content-Type', 'application/json');
 	headers.set('X-User-Id', auth.userId);
 	headers.set('X-Request-Id', c.get('requestId') ?? '');
+	setClientIp(headers, c);
 	if (auth.teamId) headers.set('X-Team-Id', auth.teamId);
 
 	return proxyTo(
@@ -126,7 +138,16 @@ async function proxyNotifications(c: GatewayContext) {
 			await c.env.COMMS_QUEUE.send({
 				type: 'notification',
 				userId: auth.userId,
-				...body,
+				title:
+					typeof body.title === 'string' ? body.title.slice(0, 500) : undefined,
+				message:
+					typeof body.message === 'string'
+						? body.message.slice(0, 5000)
+						: undefined,
+				kind:
+					typeof body.kind === 'string' ? body.kind.slice(0, 50) : undefined,
+				link:
+					typeof body.link === 'string' ? body.link.slice(0, 2000) : undefined,
 			});
 		} catch {
 			return c.json(
@@ -147,6 +168,7 @@ async function proxyNotifications(c: GatewayContext) {
 	headers.set('Content-Type', 'application/json');
 	headers.set('X-User-Id', auth.userId);
 	headers.set('X-Request-Id', c.get('requestId') ?? '');
+	setClientIp(headers, c);
 
 	return proxyTo(
 		c,
@@ -186,10 +208,24 @@ for (const path of ['/ws/tunnel', '/ws/client']) {
 		url.searchParams.delete('token');
 		url.searchParams.set('userId', auth.userId);
 
+		// Only forward WebSocket upgrade headers — don't pass raw client headers
+		// which could include spoofed X-User-Id or Authorization
+		const wsHeaders = new Headers();
+		const upgrade = c.req.header('Upgrade');
+		if (upgrade) wsHeaders.set('Upgrade', upgrade);
+		const connection = c.req.header('Connection');
+		if (connection) wsHeaders.set('Connection', connection);
+		const wsKey = c.req.header('Sec-WebSocket-Key');
+		if (wsKey) wsHeaders.set('Sec-WebSocket-Key', wsKey);
+		const wsVersion = c.req.header('Sec-WebSocket-Version');
+		if (wsVersion) wsHeaders.set('Sec-WebSocket-Version', wsVersion);
+		const wsProtocol = c.req.header('Sec-WebSocket-Protocol');
+		if (wsProtocol) wsHeaders.set('Sec-WebSocket-Protocol', wsProtocol);
+		const wsExtensions = c.req.header('Sec-WebSocket-Extensions');
+		if (wsExtensions) wsHeaders.set('Sec-WebSocket-Extensions', wsExtensions);
+
 		return c.env.CLOUD_SERVICE.fetch(
-			new Request(url.toString(), {
-				headers: c.req.raw.headers,
-			}),
+			new Request(url.toString(), { headers: wsHeaders }),
 		);
 	});
 }
@@ -268,7 +304,10 @@ async function validateTokenViaService(
 ): Promise<AuthResult | null> {
 	const init: RequestInit = {
 		method: 'POST',
-		headers: { 'Content-Type': 'application/json' },
+		headers: {
+			'Content-Type': 'application/json',
+			Authorization: `Bearer ${c.var.secrets.authApiSecret}`,
+		},
 		body: JSON.stringify({ token }),
 	};
 
@@ -295,10 +334,17 @@ function setAuthHeaders(headers: Headers, auth: AuthResult): void {
 	if (auth.role) headers.set('X-Role', auth.role);
 }
 
+function setClientIp(headers: Headers, c: GatewayContext): void {
+	const clientIp = c.req.header('CF-Connecting-IP');
+	if (clientIp) headers.set('X-Forwarded-For', clientIp);
+}
+
 function serviceHeaders(auth: AuthResult, c: GatewayContext): Headers {
 	const headers = new Headers();
 	headers.set('Content-Type', 'application/json');
+	headers.set('Authorization', `Bearer ${c.var.secrets.authApiSecret}`);
 	headers.set('X-Request-Id', c.get('requestId') ?? '');
+	setClientIp(headers, c);
 	setAuthHeaders(headers, auth);
 	return headers;
 }
@@ -320,8 +366,11 @@ async function proxyTo(
 
 	const res = await resilientFetch(url, init, breaker);
 
-	// Stream response, preserve original Content-Type
-	const contentType = res.headers.get('Content-Type') ?? 'application/json';
+	// Only allow safe Content-Types — prevent XSS via compromised backend
+	const rawCt = res.headers.get('Content-Type') ?? 'application/json';
+	const contentType = rawCt.startsWith('application/json')
+		? rawCt
+		: 'application/json';
 	return new Response(res.body, {
 		status: res.status,
 		headers: { 'Content-Type': contentType },

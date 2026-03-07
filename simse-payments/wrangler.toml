@@ -14,9 +14,9 @@ database_id = "cb43715c-8536-4334-9386-64dd8855a96e"
 # MAILER_API_URL
 # MAILER_API_SECRET
 
-[analytics_engine]
-dataset = "simse-analytics"
-binding = "ANALYTICS"
+[[queues.producers]]
+queue = "simse-payments-analytics"
+binding = "ANALYTICS_QUEUE"
 
 # --- Environments ---
 
@@ -29,6 +29,10 @@ binding = "DB"
 database_name = "simse-payments-db-staging"
 database_id = "PLACEHOLDER_STAGING_PAYMENTS_DB_ID"
 
+[[env.staging.queues.producers]]
+queue = "simse-payments-analytics-staging"
+binding = "ANALYTICS_QUEUE"
+
 [env.production]
 name = "simse-payments"
 
@@ -36,3 +40,7 @@ name = "simse-payments"
 binding = "DB"
 database_name = "simse-payments-db"
 database_id = "cb43715c-8536-4334-9386-64dd8855a96e"
+
+[[env.production.queues.producers]]
+queue = "simse-payments-analytics"
+binding = "ANALYTICS_QUEUE"

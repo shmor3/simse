@@ -23,7 +23,7 @@ type CommsMessage =
 export interface Env {
 	DB: D1Database;
 	SECRETS: SecretsStoreNamespace;
-	ANALYTICS: AnalyticsEngineDataset;
+	ANALYTICS_QUEUE: Queue;
 }
 
 interface MailerSecrets {
@@ -48,31 +48,25 @@ app.use('*', async (c, next) => {
 	// biome-ignore lint/suspicious/noExplicitAny: Cloudflare cf object not typed on Request
 	const cf = (c.req.raw as any).cf;
 
-	c.env.ANALYTICS?.writeDataPoint({
-		indexes: ['simse-mailer'],
-		blobs: [
-			c.req.method,
-			c.req.path,
-			String(c.res.status),
-			'simse-mailer',
-			c.req.header('X-User-Id') ?? '',
-			'',
-			cf?.country ?? '',
-			cf?.city ?? '',
-			cf?.continent ?? '',
-			(c.req.header('User-Agent') ?? '').slice(0, 256),
-			c.req.header('Referer') ?? '',
-			c.res.headers.get('Content-Type') ?? '',
-			c.req.header('Cf-Ray') ?? '',
-		],
-		doubles: [
-			latencyMs,
-			c.res.status,
-			Number(c.req.header('Content-Length') ?? 0),
-			Number(c.res.headers.get('Content-Length') ?? 0),
-			Number(cf?.colo ?? 0),
-		],
-	});
+	c.env.ANALYTICS_QUEUE.send({
+		type: 'datapoint',
+		service: 'simse-mailer',
+		method: c.req.method,
+		path: c.req.path,
+		status: c.res.status,
+		userId: c.req.header('X-User-Id') ?? '',
+		country: cf?.country ?? '',
+		city: cf?.city ?? '',
+		continent: cf?.continent ?? '',
+		userAgent: (c.req.header('User-Agent') ?? '').slice(0, 256),
+		referer: (c.req.header('Referer') ?? '').split('?')[0],
+		contentType: c.res.headers.get('Content-Type') ?? '',
+		cfRay: c.req.header('Cf-Ray') ?? '',
+		latencyMs,
+		requestSize: Number(c.req.header('Content-Length') ?? 0),
+		responseSize: Number(c.res.headers.get('Content-Length') ?? 0),
+		colo: Number(cf?.colo ?? 0),
+	}).catch(() => {});
 });
 
 // Secrets middleware
@@ -145,18 +139,16 @@ export default {
 					);
 					await sendEmail(resendApiKey, { to: msg.to, subject, html });
 
-					env.ANALYTICS.writeDataPoint({
-						indexes: ['simse-mailer'],
-						blobs: [
-							'queue',
-							'email',
-							'success',
-							msg.template,
-							msg.to,
-							batch.queue,
-						],
-						doubles: [Date.now() - msgStart],
-					});
+					env.ANALYTICS_QUEUE.send({
+						type: 'datapoint',
+						service: 'simse-mailer',
+						method: 'queue',
+						path: msg.template,
+						status: 200,
+						latencyMs: Date.now() - msgStart,
+						requestSize: 0,
+						responseSize: 0,
+					}).catch(() => {});
 				} else if (msg.type === 'notification') {
 					const id = crypto.randomUUID();
 					await env.DB.prepare(
@@ -172,18 +164,16 @@ export default {
 						)
 						.run();
 
-					env.ANALYTICS.writeDataPoint({
-						indexes: ['simse-mailer'],
-						blobs: [
-							'queue',
-							'notification',
-							'success',
-							msg.kind ?? 'info',
-							msg.userId,
-							batch.queue,
-						],
-						doubles: [Date.now() - msgStart],
-					});
+					env.ANALYTICS_QUEUE.send({
+						type: 'datapoint',
+						service: 'simse-mailer',
+						method: 'queue',
+						path: msg.kind ?? 'info',
+						status: 200,
+						latencyMs: Date.now() - msgStart,
+						requestSize: 0,
+						responseSize: 0,
+					}).catch(() => {});
 				}
 				message.ack();
 			} catch (e) {
@@ -203,25 +193,28 @@ export default {
 					message.retry();
 				}
 
-				env.ANALYTICS.writeDataPoint({
-					indexes: ['simse-mailer'],
-					blobs: [
-						'queue',
-						msg.type,
-						'error',
-						label,
-						errorMsg.slice(0, 256),
-						batch.queue,
-					],
-					doubles: [Date.now() - msgStart],
-				});
+				env.ANALYTICS_QUEUE.send({
+					type: 'datapoint',
+					service: 'simse-mailer',
+					method: 'queue',
+					path: label,
+					status: 500,
+					latencyMs: Date.now() - msgStart,
+					requestSize: 0,
+					responseSize: 0,
+				}).catch(() => {});
 			}
 		}
 
-		env.ANALYTICS.writeDataPoint({
-			indexes: ['simse-mailer'],
-			blobs: ['queue', 'batch', 'complete', '', '', batch.queue],
-			doubles: [Date.now() - batchStart, batch.messages.length],
-		});
+		env.ANALYTICS_QUEUE.send({
+			type: 'datapoint',
+			service: 'simse-mailer',
+			method: 'queue',
+			path: 'batch',
+			status: 200,
+			latencyMs: Date.now() - batchStart,
+			requestSize: batch.messages.length,
+			responseSize: 0,
+		}).catch(() => {});
 	},
 };

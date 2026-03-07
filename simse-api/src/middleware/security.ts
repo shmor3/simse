@@ -7,8 +7,8 @@ export const requestValidationMiddleware = createMiddleware<{
 	Bindings: Env;
 	Variables: AppVariables;
 }>(async (c, next) => {
-	// Generate or pass through correlation ID
-	const requestId = c.req.header('X-Request-Id') ?? crypto.randomUUID();
+	// Always generate a fresh request ID — don't trust client-provided values
+	const requestId = crypto.randomUUID();
 	c.set('requestId', requestId);
 
 	// Validate Content-Type on request bodies
@@ -47,6 +47,7 @@ export const requestValidationMiddleware = createMiddleware<{
 	// Set security headers on all responses
 	c.header('X-Request-Id', requestId);
 	c.header('X-Content-Type-Options', 'nosniff');
+	c.header('Vary', 'Authorization');
 
 	// Strip leaked backend headers
 	c.res.headers.delete('Server');

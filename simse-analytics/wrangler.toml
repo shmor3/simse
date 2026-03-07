@@ -1,0 +1,106 @@
+name = "simse-analytics"
+compatibility_date = "2025-04-01"
+main = "src/index.ts"
+
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "simse-analytics-db"
+database_id = "PLACEHOLDER_FILL_AFTER_CREATION"
+
+[analytics_engine]
+dataset = "simse-analytics"
+binding = "ANALYTICS"
+
+# Consumes analytics events from all services
+[[queues.consumers]]
+queue = "simse-api-analytics"
+
+[[queues.consumers]]
+queue = "simse-auth-analytics"
+
+[[queues.consumers]]
+queue = "simse-cdn-analytics"
+
+[[queues.consumers]]
+queue = "simse-cloud-analytics"
+
+[[queues.consumers]]
+queue = "simse-mailer-analytics"
+
+[[queues.consumers]]
+queue = "simse-payments-analytics"
+
+[[queues.consumers]]
+queue = "simse-landing-analytics"
+
+[[queues.consumers]]
+queue = "simse-status-analytics"
+
+# --- Environments ---
+
+[env.staging]
+name = "simse-analytics-staging"
+workers_dev = true
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "simse-analytics-db-staging"
+database_id = "PLACEHOLDER_STAGING_ANALYTICS_DB_ID"
+
+[[env.staging.queues.consumers]]
+queue = "simse-api-analytics-staging"
+
+[[env.staging.queues.consumers]]
+queue = "simse-auth-analytics-staging"
+
+[[env.staging.queues.consumers]]
+queue = "simse-cdn-analytics-staging"
+
+[[env.staging.queues.consumers]]
+queue = "simse-cloud-analytics-staging"
+
+[[env.staging.queues.consumers]]
+queue = "simse-mailer-analytics-staging"
+
+[[env.staging.queues.consumers]]
+queue = "simse-payments-analytics-staging"
+
+[[env.staging.queues.consumers]]
+queue = "simse-landing-analytics-staging"
+
+[[env.staging.queues.consumers]]
+queue = "simse-status-analytics-staging"
+
+[env.production]
+name = "simse-analytics"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "simse-analytics-db"
+database_id = "PLACEHOLDER_FILL_AFTER_CREATION"
+
+[[env.production.queues.consumers]]
+queue = "simse-api-analytics"
+
+[[env.production.queues.consumers]]
+queue = "simse-auth-analytics"
+
+[[env.production.queues.consumers]]
+queue = "simse-cdn-analytics"
+
+[[env.production.queues.consumers]]
+queue = "simse-cloud-analytics"
+
+[[env.production.queues.consumers]]
+queue = "simse-mailer-analytics"
+
+[[env.production.queues.consumers]]
+queue = "simse-payments-analytics"
+
+[[env.production.queues.consumers]]
+queue = "simse-landing-analytics"
+
+[[env.production.queues.consumers]]
+queue = "simse-status-analytics"

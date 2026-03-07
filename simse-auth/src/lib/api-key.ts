@@ -25,31 +25,3 @@ export async function createApiKey(
 
 	return { id, key: rawKey, prefix };
 }
-
-export async function validateApiKey(
-	db: D1Database,
-	rawKey: string,
-): Promise<string | null> {
-	const encoder = new TextEncoder();
-	const data = encoder.encode(rawKey);
-	const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-	const hashArray = new Uint8Array(hashBuffer);
-	const keyHash = btoa(String.fromCharCode(...hashArray));
-
-	const row = await db
-		.prepare('SELECT user_id FROM api_keys WHERE key_hash = ?')
-		.bind(keyHash)
-		.first<{ user_id: string }>();
-
-	if (!row) return null;
-
-	// Update last_used_at
-	await db
-		.prepare(
-			"UPDATE api_keys SET last_used_at = datetime('now') WHERE key_hash = ?",
-		)
-		.bind(keyHash)
-		.run();
-
-	return row.user_id;
-}

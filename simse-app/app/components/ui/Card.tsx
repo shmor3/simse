@@ -2,7 +2,7 @@ import clsx from 'clsx';
 import type { HTMLAttributes } from 'react';
 
 interface CardProps extends HTMLAttributes<HTMLDivElement> {
-	accent?: boolean;
+	accent?: boolean | 'gradient';
 }
 
 export default function Card({
@@ -20,7 +20,10 @@ export default function Card({
 			)}
 			{...props}
 		>
-			{accent && <div className="h-1 bg-emerald-400" />}
+			{accent === true && <div className="h-px bg-emerald-400" />}
+			{accent === 'gradient' && (
+				<div className="h-px gradient-border animate-gradient-shift" />
+			)}
 			{children}
 		</div>
 	);

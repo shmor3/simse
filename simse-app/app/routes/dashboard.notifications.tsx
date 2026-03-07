@@ -3,6 +3,7 @@ import PageHeader from '~/components/layout/PageHeader';
 
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
+import EmptyState from '~/components/ui/EmptyState';
 import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
 import type { Route } from './+types/dashboard.notifications';
 
@@ -150,29 +151,13 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
 			/>
 
 			{notifications.length === 0 ? (
-				<Card className="mt-8 p-10 text-center">
-					<div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-zinc-800">
-						<svg
-							className="h-6 w-6 text-zinc-600"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke="currentColor"
-							strokeWidth={1.5}
-						>
-							<path
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-							/>
-						</svg>
-					</div>
-					<p className="mt-4 text-sm font-medium text-zinc-400">
-						All caught up
-					</p>
-					<p className="mt-1 text-[13px] text-zinc-600">
-						We'll let you know when something important happens.
-					</p>
-				</Card>
+				<div className="mt-8">
+					<EmptyState
+						type="notifications"
+						title="All caught up"
+						description="We'll let you know when something important happens."
+					/>
+				</div>
 			) : (
 				<Card className="mt-8 overflow-hidden">
 					<div className="divide-y divide-zinc-800/50">

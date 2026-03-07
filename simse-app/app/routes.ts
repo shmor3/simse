@@ -21,6 +21,7 @@ export default [
 	layout('./routes/dashboard.tsx', [
 		route('dashboard', './routes/dashboard._index.tsx'),
 		route('dashboard/usage', './routes/dashboard.usage.tsx'),
+		route('dashboard/library', './routes/dashboard.library.tsx'),
 		route('dashboard/notifications', './routes/dashboard.notifications.tsx'),
 		route('dashboard/account', './routes/dashboard.account.tsx'),
 		layout('./routes/dashboard.settings.tsx', [

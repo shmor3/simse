@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Form, redirect, useNavigation } from 'react-router';
+import { Form, Link, redirect, useNavigation } from 'react-router';
 import PageHeader from '~/components/layout/PageHeader';
 import Badge from '~/components/ui/Badge';
 import Button from '~/components/ui/Button';
@@ -173,14 +173,9 @@ export default function Billing({ loaderData }: Route.ComponentProps) {
 							${loaderData.creditBalance.toFixed(2)}
 						</p>
 					</div>
-					<Button
-						variant="secondary"
-						onClick={() => {
-							window.location.href = '/dashboard/settings/billing/credit';
-						}}
-					>
-						Manage credit
-					</Button>
+					<Link to="/dashboard/settings/billing/credit">
+						<Button variant="secondary">Manage credit</Button>
+					</Link>
 				</div>
 			</Card>
 		</>

@@ -29,7 +29,16 @@ export default function ProgressBar({
 						</span>
 					)}
 					{showValue && (
-						<span className="font-mono text-[12px] text-zinc-400">
+						<span
+							className={clsx(
+								'font-mono text-[12px]',
+								isHigh
+									? 'text-red-400'
+									: isMedium
+										? 'text-amber-400'
+										: 'text-zinc-400',
+							)}
+						>
 							{value.toLocaleString()} / {max.toLocaleString()}
 						</span>
 					)}
@@ -38,12 +47,12 @@ export default function ProgressBar({
 			<div className="h-2 overflow-hidden rounded-full bg-zinc-800">
 				<div
 					className={clsx(
-						'h-full rounded-full transition-all duration-500',
+						'h-full rounded-full transition-all duration-700 ease-out',
 						isHigh
-							? 'bg-red-400'
+							? 'bg-gradient-to-r from-red-500 to-red-400'
 							: isMedium
-								? 'bg-amber-400'
-								: 'bg-emerald-400',
+								? 'bg-gradient-to-r from-amber-500 to-amber-400'
+								: 'bg-gradient-to-r from-emerald-500 to-emerald-400',
 					)}
 					style={{ width: `${pct}%` }}
 				/>

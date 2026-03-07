@@ -71,7 +71,7 @@ export default function AcpSwitcher({
 			</button>
 
 			{open && (
-				<div className="absolute left-0 top-full z-50 mt-2 w-64 rounded-xl border border-zinc-800 bg-zinc-900 py-1.5 shadow-2xl animate-fade-in">
+				<div className="absolute left-0 top-full z-50 mt-2 w-64 origin-top-left rounded-xl border border-zinc-800 bg-zinc-900 py-1.5 shadow-2xl animate-scale-in">
 					<div className="px-4 py-2">
 						<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
 							ACP Backend

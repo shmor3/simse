@@ -20,6 +20,7 @@ pub mod quantization;
 pub mod context_format;
 pub mod graph;
 pub mod vector_storage;
+pub mod index;
 pub mod store;
 pub mod server;
 

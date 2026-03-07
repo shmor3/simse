@@ -30,21 +30,6 @@ updates:
       interval: weekly
 
   - package-ecosystem: cargo
-    directory: /simse-vfs
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: cargo
-    directory: /simse-vsh
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: cargo
-    directory: /simse-vnet
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: cargo
     directory: /simse-engine
     schedule:
       interval: weekly
@@ -92,5 +77,10 @@ updates:
 
   - package-ecosystem: npm
     directory: /simse-landing
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /simse-status
     schedule:
       interval: weekly

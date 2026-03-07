@@ -14,7 +14,7 @@ use crate::types::Lookup;
 // ---------------------------------------------------------------------------
 
 #[derive(Default)]
-pub struct PromptInjectionOptions {
+pub struct ContextFormatOptions {
 	/// Maximum number of results to include.
 	pub max_results: Option<usize>,
 	/// Minimum relevance score to include (0-1).
@@ -31,6 +31,17 @@ pub struct PromptInjectionOptions {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/// Escape a string for safe use in XML attributes.
+///
+/// Replaces `&`, `<`, `>`, `"`, and `'` with their XML entity equivalents.
+fn escape_xml_attr(s: &str) -> String {
+	s.replace('&', "&amp;")
+		.replace('<', "&lt;")
+		.replace('>', "&gt;")
+		.replace('"', "&quot;")
+		.replace('\'', "&apos;")
+}
 
 /// Format a duration in milliseconds as a human-readable age string.
 ///
@@ -61,9 +72,9 @@ pub fn format_age(ms: u64) -> String {
 /// Returns an empty string if no results pass the filters.
 ///
 /// `now` is the current timestamp in milliseconds.
-pub fn format_memory_context(
+pub fn format_context(
 	results: &[Lookup],
-	options: &PromptInjectionOptions,
+	options: &ContextFormatOptions,
 	now: u64,
 ) -> String {
 	if results.is_empty() {
@@ -96,14 +107,14 @@ pub fn format_memory_context(
 
 		for r in &filtered {
 			let topic = r
-				.volume
+				.entry
 				.metadata
 				.get("topic")
 				.map(|s| s.as_str())
 				.unwrap_or("uncategorized");
 			let line = format!(
 				"- [{}] (relevance: {:.2}) {}",
-				topic, r.score, r.volume.text
+				topic, r.score, r.entry.text
 			);
 			if chars + line.len() > max_chars {
 				break;
@@ -121,19 +132,19 @@ pub fn format_memory_context(
 
 	for r in &filtered {
 		let topic = r
-			.volume
+			.entry
 			.metadata
 			.get("topic")
 			.map(|s| s.as_str())
 			.unwrap_or("uncategorized");
-		let age = if now >= r.volume.timestamp {
-			format_age(now - r.volume.timestamp)
+		let age = if now >= r.entry.timestamp {
+			format_age(now - r.entry.timestamp)
 		} else {
 			"0s".to_string()
 		};
 		let entry = format!(
 			"<entry topic=\"{}\" relevance=\"{:.2}\" age=\"{}\">\n{}\n</entry>",
-			topic, r.score, age, r.volume.text
+			escape_xml_attr(topic), r.score, age, r.entry.text
 		);
 		if chars + entry.len() > max_chars {
 			break;
@@ -152,14 +163,14 @@ pub fn format_memory_context(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::types::Volume;
+	use crate::types::Entry;
 	use std::collections::HashMap;
 
 	fn make_lookup(text: &str, score: f64, topic: &str, timestamp: u64) -> Lookup {
 		let mut metadata = HashMap::new();
 		metadata.insert("topic".to_string(), topic.to_string());
 		Lookup {
-			volume: Volume {
+			entry: Entry {
 				id: format!("vol-{}", text.len()),
 				text: text.to_string(),
 				embedding: vec![],
@@ -172,15 +183,15 @@ mod tests {
 
 	#[test]
 	fn empty_results_returns_empty_string() {
-		let result = format_memory_context(&[], &PromptInjectionOptions::default(), 1000);
+		let result = format_context(&[], &ContextFormatOptions::default(), 1000);
 		assert_eq!(result, "");
 	}
 
 	#[test]
 	fn structured_format_basic() {
 		let results = vec![make_lookup("Hello world", 0.92, "rust", 1000)];
-		let opts = PromptInjectionOptions::default();
-		let output = format_memory_context(&results, &opts, 2000);
+		let opts = ContextFormatOptions::default();
+		let output = format_context(&results, &opts, 2000);
 		assert!(output.contains("<memory-context>"));
 		assert!(output.contains("</memory-context>"));
 		assert!(output.contains("topic=\"rust\""));
@@ -191,11 +202,11 @@ mod tests {
 	#[test]
 	fn natural_format_basic() {
 		let results = vec![make_lookup("Hello world", 0.85, "go", 1000)];
-		let opts = PromptInjectionOptions {
+		let opts = ContextFormatOptions {
 			format: Some("natural".to_string()),
 			..Default::default()
 		};
-		let output = format_memory_context(&results, &opts, 2000);
+		let output = format_context(&results, &opts, 2000);
 		assert!(output.starts_with("Relevant context from library:"));
 		assert!(output.contains("[go]"));
 		assert!(output.contains("relevance: 0.85"));
@@ -208,11 +219,11 @@ mod tests {
 			make_lookup("high score", 0.9, "rust", 1000),
 			make_lookup("low score", 0.3, "rust", 1000),
 		];
-		let opts = PromptInjectionOptions {
+		let opts = ContextFormatOptions {
 			min_score: Some(0.5),
 			..Default::default()
 		};
-		let output = format_memory_context(&results, &opts, 2000);
+		let output = format_context(&results, &opts, 2000);
 		assert!(output.contains("high score"));
 		assert!(!output.contains("low score"));
 	}
@@ -220,11 +231,11 @@ mod tests {
 	#[test]
 	fn min_score_all_filtered_returns_empty() {
 		let results = vec![make_lookup("low", 0.2, "rust", 1000)];
-		let opts = PromptInjectionOptions {
+		let opts = ContextFormatOptions {
 			min_score: Some(0.5),
 			..Default::default()
 		};
-		let output = format_memory_context(&results, &opts, 2000);
+		let output = format_context(&results, &opts, 2000);
 		assert_eq!(output, "");
 	}
 
@@ -235,11 +246,11 @@ mod tests {
 			make_lookup("second", 0.8, "rust", 1000),
 			make_lookup("third", 0.7, "rust", 1000),
 		];
-		let opts = PromptInjectionOptions {
+		let opts = ContextFormatOptions {
 			max_results: Some(2),
 			..Default::default()
 		};
-		let output = format_memory_context(&results, &opts, 2000);
+		let output = format_context(&results, &opts, 2000);
 		assert!(output.contains("first"));
 		assert!(output.contains("second"));
 		assert!(!output.contains("third"));
@@ -248,11 +259,11 @@ mod tests {
 	#[test]
 	fn custom_tag() {
 		let results = vec![make_lookup("text", 0.9, "rust", 1000)];
-		let opts = PromptInjectionOptions {
+		let opts = ContextFormatOptions {
 			tag: Some("context".to_string()),
 			..Default::default()
 		};
-		let output = format_memory_context(&results, &opts, 2000);
+		let output = format_context(&results, &opts, 2000);
 		assert!(output.contains("<context>"));
 		assert!(output.contains("</context>"));
 	}
@@ -264,11 +275,11 @@ mod tests {
 			make_lookup(&long_text, 0.9, "rust", 1000),
 			make_lookup(&long_text, 0.8, "rust", 1000),
 		];
-		let opts = PromptInjectionOptions {
+		let opts = ContextFormatOptions {
 			max_chars: Some(300),
 			..Default::default()
 		};
-		let output = format_memory_context(&results, &opts, 2000);
+		let output = format_context(&results, &opts, 2000);
 		// Should only include one entry because two would exceed max_chars
 		let entry_count = output.matches("<entry").count();
 		assert_eq!(entry_count, 1);
@@ -302,15 +313,15 @@ mod tests {
 	fn structured_age_calculated() {
 		// now=10000, timestamp=3000 => age=7000ms => 7s
 		let results = vec![make_lookup("text", 0.9, "rust", 3000)];
-		let opts = PromptInjectionOptions::default();
-		let output = format_memory_context(&results, &opts, 10000);
+		let opts = ContextFormatOptions::default();
+		let output = format_context(&results, &opts, 10000);
 		assert!(output.contains("age=\"7s\""));
 	}
 
 	#[test]
 	fn uncategorized_when_no_topic() {
 		let results = vec![Lookup {
-			volume: Volume {
+			entry: Entry {
 				id: "vol-1".to_string(),
 				text: "no topic text".to_string(),
 				embedding: vec![],
@@ -319,8 +330,8 @@ mod tests {
 			},
 			score: 0.9,
 		}];
-		let opts = PromptInjectionOptions::default();
-		let output = format_memory_context(&results, &opts, 2000);
+		let opts = ContextFormatOptions::default();
+		let output = format_context(&results, &opts, 2000);
 		assert!(output.contains("topic=\"uncategorized\""));
 	}
 }

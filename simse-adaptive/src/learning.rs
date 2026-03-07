@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 use crate::cosine::cosine_similarity;
-use crate::types::{PatronProfile, QueryRecord, RequiredWeightProfile};
+use crate::types::{LearnerProfile, QueryRecord, RequiredWeightProfile};
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -677,8 +677,8 @@ impl LearningEngine {
 	}
 
 	/// Get the full learning profile snapshot.
-	pub fn get_profile(&self) -> PatronProfile {
-		PatronProfile {
+	pub fn get_profile(&self) -> LearnerProfile {
+		LearnerProfile {
 			query_history: self.query_history.clone(),
 			adapted_weights: self.adapted_weights.clone(),
 			interest_embedding: self.interest_embedding.clone(),

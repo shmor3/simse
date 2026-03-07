@@ -37,7 +37,7 @@ cd simse-mailer && npm run test # Mailer tests (Vitest + @cloudflare/vitest-pool
 
 ## Architecture
 
-simse is a modular pipeline framework for orchestrating multi-step AI workflows. It connects to AI backends via **ACP** (Agent Client Protocol), exposes tools via **MCP** (Model Context Protocol), and provides a file-backed **library** (vector store) with compression, cataloging, deduplication, recommendation, and compendium (summarization).
+simse is a modular pipeline framework for orchestrating multi-step AI workflows. It connects to AI backends via **ACP** (Agent Client Protocol), exposes tools via **MCP** (Model Context Protocol), and provides a file-backed **adaptive store** (vector store + PCN) with compression, cataloging, deduplication, recommendation, and summarization.
 
 The entire core is implemented in **Rust**. Each crate is a standalone binary communicating over JSON-RPC 2.0 / NDJSON stdio.
 
@@ -119,11 +119,11 @@ simse-core/
 ### Other Rust Crates
 
 ```tree
-simse-adaptive/             # Pure Rust crate — vector store + predictive coding network (PCN)
+simse-adaptive/             # Pure Rust crate — adaptive engine (vector store + PCN, JSON-RPC over stdio)
   src/
-    store.rs                # Main vector store implementation
+    store.rs                # Store: core state manager (CRUD, search, indexing, persistence)
     cosine.rs               # Cosine similarity (clamped [-1,1])
-    persistence.rs          # Float32 base64 encoding, gzip, save/load + PCN snapshot save/load
+    persistence.rs          # Binary codec + gzip compression for entries/learning/graph state
     cataloging.rs           # TopicIndex, MetadataIndex, MagnitudeCache
     deduplication.rs        # Duplicate detection & clustering
     recommendation.rs       # Scoring with recency/frequency
@@ -132,15 +132,18 @@ simse-adaptive/             # Pure Rust crate — vector store + predictive codi
     topic_catalog.rs        # Hierarchical topic classification
     learning.rs             # Adaptive learning engine
     query_dsl.rs            # Query DSL parsing
-    prompt_injection.rs     # Memory context formatting
-    pcn_config.rs           # PCN model configuration
-    encoder.rs              # Input encoding (embeddings → PCN input)
-    vocabulary.rs           # Token vocabulary management
-    network.rs              # Predictive coding network layers
-    layer.rs                # Layer implementation
-    predictor.rs            # Prediction engine (read-only, concurrent)
-    trainer.rs              # Model training (async background worker)
-    snapshot.rs             # Model snapshots (serializable weights)
+    context_format.rs       # Context formatting for LLM prompts (XML/natural)
+    graph.rs                # Graph index with explicit/similarity/correlation edges
+    text_cache.rs           # LRU text cache with entry-count + byte-budget limits
+    pcn/                    # Predictive coding network subsystem
+      config.rs             # PCN model configuration
+      encoder.rs            # Input encoding (embeddings → PCN input)
+      vocabulary.rs         # Token vocabulary management
+      network.rs            # Predictive coding network layers
+      layer.rs              # Layer implementation
+      predictor.rs          # Prediction engine (read-only, concurrent)
+      trainer.rs            # Model training (async background worker)
+      snapshot.rs           # Model snapshots (serializable weights)
 
 simse-acp/                  # Pure Rust crate — ACP engine
   src/
@@ -368,14 +371,14 @@ The MCP engine (`simse-mcp/`) implements the [Model Context Protocol](https://mo
 - **Server**: Exposes simse capabilities as MCP tools
 - **Features**: Logging, list-changed notifications, completions, roots, resource templates
 
-### Library System
+### Adaptive Store System
 
-The library subsystem uses a **library analogy**. The storage engine is in Rust (`simse-adaptive/`), with orchestration in `simse-core/src/library/`.
+The adaptive store has two layers: the storage engine in Rust (`simse-adaptive/`), with orchestration in `simse-core/src/library/`.
 
 **Rust engine** (`simse-adaptive/src/`) — all vector + PCN operations via JSON-RPC:
-- Store, persistence, cataloging, deduplication, recommendation, text search, BM25, topic classification, adaptive learning, predictive coding network (pcn/*, feed/*, predict/*, model/*)
+- Store (entries, CRUD, search), persistence, cataloging, deduplication, recommendation, text search, BM25, topic classification, adaptive learning, context formatting, graph index, predictive coding network (`pcn/`)
 
-**simse-core library layer** (`simse-core/src/library/`) — orchestration:
+**simse-core orchestration layer** (`simse-core/src/library/`) — high-level operations:
 - Library, Stacks, Shelf, Librarian, LibrarianRegistry, CirculationDesk
 
 ### Formatting

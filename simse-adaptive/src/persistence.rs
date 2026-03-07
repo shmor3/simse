@@ -28,7 +28,7 @@ use thiserror::Error;
 
 use crate::graph::GraphState;
 use crate::learning::LearningState;
-use crate::types::Volume;
+use crate::types::Entry;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -133,7 +133,7 @@ pub fn is_gzipped(data: &[u8]) -> bool {
 /// [4B accessCount BE]
 /// [8B lastAccessed as two 32-bit BE halves]
 /// ```
-pub fn serialize_entry(volume: &Volume, stats: Option<&AccessStats>) -> Vec<u8> {
+pub fn serialize_entry(volume: &Entry, stats: Option<&AccessStats>) -> Vec<u8> {
 	let text_bytes = volume.text.as_bytes();
 	let emb_b64 = encode_embedding(&volume.embedding);
 	let emb_bytes = emb_b64.as_bytes();
@@ -178,7 +178,7 @@ pub fn serialize_entry(volume: &Volume, stats: Option<&AccessStats>) -> Vec<u8> 
 /// Deserialized result from a single binary entry.
 #[derive(Debug, Clone)]
 pub struct DeserializedEntry {
-	pub volume: Volume,
+	pub entry: Entry,
 	pub access_count: u32,
 	pub last_accessed: u64,
 }
@@ -271,7 +271,7 @@ pub fn deserialize_entry(id: &str, data: &[u8]) -> Result<DeserializedEntry, Per
 	let last_accessed = ((la_high as u64) << 32) | (la_low as u64);
 
 	Ok(DeserializedEntry {
-		volume: Volume {
+		entry: Entry {
 			id: id.to_string(),
 			text,
 			embedding,
@@ -290,7 +290,7 @@ pub fn deserialize_entry(id: &str, data: &[u8]) -> Result<DeserializedEntry, Per
 /// Result of deserializing an entire store from raw storage data.
 #[derive(Debug)]
 pub struct DeserializedData {
-	pub entries: Vec<Volume>,
+	pub entries: Vec<Entry>,
 	pub access_stats: HashMap<String, AccessStats>,
 	pub learning_state: Option<LearningState>,
 	pub graph_state: Option<GraphState>,
@@ -351,14 +351,14 @@ pub fn deserialize_from_storage(raw_data: &HashMap<String, Vec<u8>>) -> Deserial
 			Ok(result) => {
 				if result.access_count > 0 || result.last_accessed > 0 {
 					access_stats.insert(
-						result.volume.id.clone(),
+						result.entry.id.clone(),
 						AccessStats {
 							access_count: result.access_count,
 							last_accessed: result.last_accessed,
 						},
 					);
 				}
-				entries.push(result.volume);
+				entries.push(result.entry);
 			}
 			Err(_) => {
 				skipped += 1;
@@ -377,7 +377,7 @@ pub fn deserialize_from_storage(raw_data: &HashMap<String, Vec<u8>>) -> Deserial
 
 /// Serialize all entries + learning state + graph state to storage format.
 pub fn serialize_to_storage(
-	entries: &[Volume],
+	entries: &[Entry],
 	access_stats: &HashMap<String, AccessStats>,
 	learning_state: Option<&LearningState>,
 	graph_state: Option<&GraphState>,
@@ -442,7 +442,7 @@ struct IndexFileV2 {
 /// This is compatible with the TS v2 format.
 pub fn save_to_directory(
 	dir: &str,
-	entries: &[Volume],
+	entries: &[Entry],
 	access_stats: &HashMap<String, AccessStats>,
 	learning_state: Option<&LearningState>,
 	graph_state: Option<&GraphState>,
@@ -468,9 +468,12 @@ pub fn save_to_directory(
 	// Gzip the JSON
 	let compressed = compress(json.as_bytes())?;
 
-	// Write to index.gz
-	let path = std::path::Path::new(dir).join("index.gz");
-	std::fs::write(&path, &compressed).map_err(PersistenceError::Io)?;
+	// Atomic write: write to a temp file then rename, so a crash during
+	// write doesn't corrupt the existing index.gz.
+	let final_path = std::path::Path::new(dir).join("index.gz");
+	let tmp_path = std::path::Path::new(dir).join("index.gz.tmp");
+	std::fs::write(&tmp_path, &compressed).map_err(PersistenceError::Io)?;
+	std::fs::rename(&tmp_path, &final_path).map_err(PersistenceError::Io)?;
 
 	Ok(())
 }
@@ -544,8 +547,8 @@ mod tests {
 	use crate::learning::LearningState;
 	use crate::types::RequiredWeightProfile;
 
-	fn make_volume(id: &str, text: &str, embedding: &[f32], ts: u64) -> Volume {
-		Volume {
+	fn make_volume(id: &str, text: &str, embedding: &[f32], ts: u64) -> Entry {
+		Entry {
 			id: id.to_string(),
 			text: text.to_string(),
 			embedding: embedding.to_vec(),
@@ -560,8 +563,8 @@ mod tests {
 		embedding: &[f32],
 		ts: u64,
 		meta: HashMap<String, String>,
-	) -> Volume {
-		Volume {
+	) -> Entry {
+		Entry {
 			id: id.to_string(),
 			text: text.to_string(),
 			embedding: embedding.to_vec(),
@@ -638,13 +641,13 @@ mod tests {
 		let serialized = serialize_entry(&volume, None);
 		let deserialized = deserialize_entry("vol-1", &serialized).unwrap();
 
-		assert_eq!(deserialized.volume.id, "vol-1");
-		assert_eq!(deserialized.volume.text, "Rust is a systems programming language");
-		assert_eq!(deserialized.volume.timestamp, 1700000000000);
-		assert_eq!(deserialized.volume.metadata.get("topic").unwrap(), "rust");
-		assert_eq!(deserialized.volume.metadata.get("source").unwrap(), "test");
-		assert_eq!(deserialized.volume.embedding.len(), 4);
-		for (a, b) in volume.embedding.iter().zip(deserialized.volume.embedding.iter()) {
+		assert_eq!(deserialized.entry.id, "vol-1");
+		assert_eq!(deserialized.entry.text, "Rust is a systems programming language");
+		assert_eq!(deserialized.entry.timestamp, 1700000000000);
+		assert_eq!(deserialized.entry.metadata.get("topic").unwrap(), "rust");
+		assert_eq!(deserialized.entry.metadata.get("source").unwrap(), "test");
+		assert_eq!(deserialized.entry.embedding.len(), 4);
+		for (a, b) in volume.embedding.iter().zip(deserialized.entry.embedding.iter()) {
 			assert!((a - b).abs() < 1e-6);
 		}
 		assert_eq!(deserialized.access_count, 0);
@@ -677,7 +680,7 @@ mod tests {
 		let serialized = serialize_entry(&volume, None);
 		let deserialized = deserialize_entry("vol-large-ts", &serialized).unwrap();
 
-		assert_eq!(deserialized.volume.timestamp, large_ts);
+		assert_eq!(deserialized.entry.timestamp, large_ts);
 	}
 
 	// 8. deserialize_corrupt_data
@@ -886,13 +889,13 @@ mod tests {
 		let volume = make_volume("unicode", "Hello, world!", &[1.0], 1000);
 		let serialized = serialize_entry(&volume, None);
 		let deserialized = deserialize_entry("unicode", &serialized).unwrap();
-		assert_eq!(deserialized.volume.text, "Hello, world!");
+		assert_eq!(deserialized.entry.text, "Hello, world!");
 
 		// Multi-byte characters
 		let volume2 = make_volume("emoji", "Rust is great", &[1.0], 2000);
 		let serialized2 = serialize_entry(&volume2, None);
 		let deserialized2 = deserialize_entry("emoji", &serialized2).unwrap();
-		assert_eq!(deserialized2.volume.text, "Rust is great");
+		assert_eq!(deserialized2.entry.text, "Rust is great");
 	}
 
 	// 16. compress_empty_data
@@ -933,7 +936,7 @@ mod tests {
 		let serialized = serialize_entry(&volume, None);
 		let deserialized = deserialize_entry("ts-test", &serialized).unwrap();
 
-		assert_eq!(deserialized.volume.timestamp, ts);
+		assert_eq!(deserialized.entry.timestamp, ts);
 
 		// Also check with lastAccessed
 		let stats = AccessStats {
@@ -992,7 +995,7 @@ mod tests {
 // PCN model snapshot persistence
 // ---------------------------------------------------------------------------
 
-use crate::snapshot::ModelSnapshot;
+use crate::pcn::snapshot::ModelSnapshot;
 
 /// Save a [`ModelSnapshot`] to a file as JSON, optionally gzip-compressed.
 pub fn save_snapshot(snapshot: &ModelSnapshot, path: &str, compress: bool) -> Result<(), crate::error::AdaptiveError> {

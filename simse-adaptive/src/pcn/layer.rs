@@ -1,7 +1,7 @@
 use rand::rngs::StdRng;
 use rand::{Rng, RngExt, SeedableRng};
 
-use crate::pcn_config::Activation;
+use crate::pcn::config::Activation;
 
 /// A single layer in a predictive coding network.
 ///

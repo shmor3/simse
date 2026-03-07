@@ -1,7 +1,7 @@
-//! High-level Library wrapping `VolumeStore` with automatic embedding,
+//! High-level Library wrapping `Store` with automatic embedding,
 //! event publishing, shelf management, and compendium (LLM summarization).
 //!
-//! The `Library` struct holds a `VolumeStore` behind `Arc<Mutex<_>>` so it
+//! The `Library` struct holds a `Store` behind `Arc<Mutex<_>>` so it
 //! can be shared across shelves and async tasks. All mutating operations
 //! acquire the lock, perform work, and release it before awaiting embeddings
 //! or text generation so the lock is never held across `.await` points.
@@ -12,11 +12,11 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use simse_adaptive_engine::store::{StoreConfig, VolumeStore};
+use simse_adaptive_engine::store::{StoreConfig, Store};
 use simse_adaptive_engine::types::{
-	AdvancedLookup, DateRange, DuplicateCheckResult, DuplicateVolumes, Lookup, MetadataFilter,
-	PatronProfile, Recommendation, RecommendOptions, SearchOptions, TextLookup, TextSearchOptions,
-	TopicInfo, Volume,
+	AdvancedLookup, DateRange, DuplicateCheckResult, DuplicateCluster, Entry, Lookup, MetadataFilter,
+	LearnerProfile, Recommendation, RecommendOptions, SearchOptions, TextLookup, TextSearchOptions,
+	TopicInfo,
 };
 
 use crate::error::{LibraryErrorCode, SimseError};
@@ -57,29 +57,29 @@ pub trait TextGenerationProvider: Send + Sync {
 // CompendiumOptions / CompendiumResult
 // ---------------------------------------------------------------------------
 
-/// Options for creating a compendium (summarization of multiple volumes).
+/// Options for creating a compendium (summarization of multiple entries).
 #[derive(Debug, Clone)]
 pub struct CompendiumOptions {
-	/// IDs of volumes to summarize (minimum 2).
+	/// IDs of entries to summarize (minimum 2).
 	pub ids: Vec<String>,
 	/// Custom instruction prompt for the summarization.
 	pub prompt: Option<String>,
 	/// Optional system prompt passed to the text generation provider.
 	pub system_prompt: Option<String>,
-	/// If true, delete the original volumes after summarization.
+	/// If true, delete the original entries after summarization.
 	pub delete_originals: bool,
-	/// Additional metadata to attach to the compendium volume.
+	/// Additional metadata to attach to the compendium entry.
 	pub metadata: HashMap<String, String>,
 }
 
 /// Result of a compendium operation.
 #[derive(Debug, Clone)]
 pub struct CompendiumResult {
-	/// ID of the newly created compendium volume.
+	/// ID of the newly created compendium entry.
 	pub compendium_id: String,
 	/// The generated summary text.
 	pub text: String,
-	/// IDs of the source volumes that were summarized.
+	/// IDs of the source entries that were summarized.
 	pub source_ids: Vec<String>,
 	/// Whether the originals were deleted.
 	pub deleted_originals: bool,
@@ -117,13 +117,13 @@ impl Default for LibraryConfig {
 /// High-level vector library with automatic embedding, shelf management,
 /// and compendium support.
 ///
-/// Wraps a `VolumeStore` with:
+/// Wraps a `Store` with:
 /// - Automatic text-to-embedding conversion via `EmbeddingProvider`
 /// - Event publishing via `EventBus`
 /// - Shelf (agent-scoped partition) caching
 /// - Compendium (LLM summarization) via `TextGenerationProvider`
 pub struct Library {
-	store: Arc<Mutex<VolumeStore>>,
+	store: Arc<Mutex<Store>>,
 	embedder: Arc<dyn EmbeddingProvider>,
 	config: LibraryConfig,
 	event_bus: Option<EventBus>,
@@ -133,7 +133,7 @@ pub struct Library {
 }
 
 impl Library {
-	/// Create a new Library wrapping a fresh `VolumeStore`.
+	/// Create a new Library wrapping a fresh `Store`.
 	///
 	/// Call [`initialize`](Library::initialize) before use.
 	pub fn new(
@@ -142,7 +142,7 @@ impl Library {
 		store_config: StoreConfig,
 		event_bus: Option<EventBus>,
 	) -> Self {
-		let store = VolumeStore::new(store_config);
+		let store = Store::new(store_config);
 		Self {
 			store: Arc::new(Mutex::new(store)),
 			embedder,
@@ -154,9 +154,9 @@ impl Library {
 		}
 	}
 
-	/// Create a Library from an existing `VolumeStore` wrapped in `Arc<Mutex<_>>`.
+	/// Create a Library from an existing `Store` wrapped in `Arc<Mutex<_>>`.
 	pub fn from_store(
-		store: Arc<Mutex<VolumeStore>>,
+		store: Arc<Mutex<Store>>,
 		embedder: Arc<dyn EmbeddingProvider>,
 		config: LibraryConfig,
 		event_bus: Option<EventBus>,
@@ -237,7 +237,7 @@ impl Library {
 
 		{
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 			*store = taken.initialize(storage_path)?;
 		}
 
@@ -253,7 +253,7 @@ impl Library {
 	pub fn dispose(&self) -> Result<(), SimseError> {
 		{
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 			*store = taken.dispose()?;
 		}
 
@@ -276,7 +276,7 @@ impl Library {
 
 	/// Embed text and add it to the library.
 	///
-	/// Returns the generated volume ID.
+	/// Returns the generated entry ID.
 	pub async fn add(
 		&self,
 		text: &str,
@@ -295,7 +295,7 @@ impl Library {
 
 		let id = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 			let (new_store, id) = taken.add(text.to_string(), embedding, metadata)?;
 			*store = new_store;
 			id
@@ -311,7 +311,7 @@ impl Library {
 
 	/// Embed multiple texts and add them in batch.
 	///
-	/// Returns the generated volume IDs.
+	/// Returns the generated entry IDs.
 	pub async fn add_batch(
 		&self,
 		entries: &[(&str, HashMap<String, String>)],
@@ -379,7 +379,7 @@ impl Library {
 
 		let ids = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 			let (new_store, ids) = taken.add_batch(store_entries)?;
 			*store = new_store;
 			ids
@@ -409,7 +409,7 @@ impl Library {
 
 		let results = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 			let (new_store, results) = taken.search(
 				&embedding,
 				max_results.unwrap_or(self.config.max_results),
@@ -445,19 +445,19 @@ impl Library {
 		Ok(store.text_search(options)?)
 	}
 
-	/// Filter volumes by metadata filters (logical AND).
+	/// Filter entries by metadata filters (logical AND).
 	pub fn filter_by_metadata(
 		&self,
 		filters: &[MetadataFilter],
-	) -> Result<Vec<Volume>, SimseError> {
+	) -> Result<Vec<Entry>, SimseError> {
 		self.ensure_initialized()?;
 
 		let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
 		Ok(store.filter_by_metadata(filters))
 	}
 
-	/// Filter volumes by timestamp range.
-	pub fn filter_by_date_range(&self, range: &DateRange) -> Result<Vec<Volume>, SimseError> {
+	/// Filter entries by timestamp range.
+	pub fn filter_by_date_range(&self, range: &DateRange) -> Result<Vec<Entry>, SimseError> {
 		self.ensure_initialized()?;
 
 		let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
@@ -487,7 +487,7 @@ impl Library {
 			}
 
 		let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-		let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+		let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 		let (new_store, results) = taken.advanced_search(&resolved)?;
 		*store = new_store;
 		Ok(results)
@@ -536,7 +536,7 @@ impl Library {
 
 		let mut results = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 			let (new_store, results) = taken.advanced_search(&search_options)?;
 			*store = new_store;
 			results
@@ -553,7 +553,7 @@ impl Library {
 						.map(|v| v.id)
 						.collect()
 				};
-				results.retain(|r| topic_ids.contains(&r.volume.id));
+				results.retain(|r| topic_ids.contains(&r.entry.id));
 			}
 
 		Ok(results)
@@ -563,19 +563,19 @@ impl Library {
 	// Accessors
 	// -----------------------------------------------------------------------
 
-	/// Get a volume by ID.
-	pub fn get_by_id(&self, id: &str) -> Result<Option<Volume>, SimseError> {
+	/// Get an entry by ID.
+	pub fn get_by_id(&self, id: &str) -> Result<Option<Entry>, SimseError> {
 		self.ensure_initialized()?;
 
 		let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-		let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+		let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 		let (new_store, vol) = taken.get_by_id(id);
 		*store = new_store;
 		Ok(vol)
 	}
 
-	/// Return all volumes.
-	pub fn get_all(&self) -> Result<Vec<Volume>, SimseError> {
+	/// Return all entries.
+	pub fn get_all(&self) -> Result<Vec<Entry>, SimseError> {
 		self.ensure_initialized()?;
 
 		let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
@@ -590,8 +590,8 @@ impl Library {
 		Ok(store.get_topics())
 	}
 
-	/// Filter volumes by topic names.
-	pub fn filter_by_topic(&self, topics: &[String]) -> Result<Vec<Volume>, SimseError> {
+	/// Filter entries by topic names.
+	pub fn filter_by_topic(&self, topics: &[String]) -> Result<Vec<Entry>, SimseError> {
 		self.ensure_initialized()?;
 
 		let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
@@ -647,11 +647,11 @@ impl Library {
 	// Deduplication
 	// -----------------------------------------------------------------------
 
-	/// Find groups of near-duplicate volumes.
+	/// Find groups of near-duplicate entries.
 	pub fn find_duplicates(
 		&self,
 		threshold: Option<f64>,
-	) -> Result<Vec<DuplicateVolumes>, SimseError> {
+	) -> Result<Vec<DuplicateCluster>, SimseError> {
 		self.ensure_initialized()?;
 
 		let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
@@ -665,7 +665,7 @@ impl Library {
 		if text.trim().is_empty() {
 			return Ok(DuplicateCheckResult {
 				is_duplicate: false,
-				existing_volume: None,
+				existing_entry: None,
 				similarity: None,
 			});
 		}
@@ -680,10 +680,10 @@ impl Library {
 	// Compendium
 	// -----------------------------------------------------------------------
 
-	/// Create a compendium (summary) of multiple volumes using a text generation provider.
+	/// Create a compendium (summary) of multiple entries using a text generation provider.
 	///
-	/// Gathers the specified volumes, asks the LLM to summarize them, then
-	/// embeds and stores the summary as a new volume. Optionally deletes the originals.
+	/// Gathers the specified entries, asks the LLM to summarize them, then
+	/// embeds and stores the summary as a new entry. Optionally deletes the originals.
 	pub async fn compendium(
 		&self,
 		options: CompendiumOptions,
@@ -706,22 +706,22 @@ impl Library {
 		if options.ids.len() < 2 {
 			return Err(SimseError::library(
 				LibraryErrorCode::InvalidInput,
-				"Compendium requires at least 2 volume IDs",
+				"Compendium requires at least 2 entry IDs",
 			));
 		}
 
-		// Gather source volumes
-		let source_volumes = {
+		// Gather source entries
+		let source_entries = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
 			let mut vols = Vec::new();
 			for id in &options.ids {
-				let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+				let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 				let (new_store, vol) = taken.get_by_id(id);
 				*store = new_store;
 				let vol = vol.ok_or_else(|| {
 					SimseError::library(
 						LibraryErrorCode::NotFound,
-						format!("Volume \"{}\" not found for compendium", id),
+						format!("Entry \"{}\" not found for compendium", id),
 					)
 				})?;
 				vols.push(vol);
@@ -730,15 +730,15 @@ impl Library {
 		};
 
 		// Build prompt
-		let combined_text: String = source_volumes
+		let combined_text: String = source_entries
 			.iter()
 			.enumerate()
-			.map(|(i, v)| format!("--- Volume {} ---\n{}", i + 1, v.text))
+			.map(|(i, v)| format!("--- Entry {} ---\n{}", i + 1, v.text))
 			.collect::<Vec<_>>()
 			.join("\n\n");
 
 		let instruction = options.prompt.as_deref().unwrap_or(
-			"Summarize the following volumes into a single concise summary that captures all key information:",
+			"Summarize the following entries into a single concise summary that captures all key information:",
 		);
 
 		let prompt = format!("{}\n\n{}", instruction, combined_text);
@@ -759,7 +759,7 @@ impl Library {
 
 		let compendium_id = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 			let (new_store, id) = taken.add(
 				compendium_text.clone(),
 				compendium_embedding,
@@ -772,7 +772,7 @@ impl Library {
 		// Optionally delete originals
 		if options.delete_originals {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 			let (new_store, _count) = taken.delete_batch(&options.ids);
 			*store = new_store;
 		}
@@ -807,7 +807,7 @@ impl Library {
 	// Feedback
 	// -----------------------------------------------------------------------
 
-	/// Record explicit user feedback on whether a volume was relevant.
+	/// Record explicit user feedback on whether an entry was relevant.
 	pub fn record_feedback(
 		&self,
 		entry_id: &str,
@@ -816,7 +816,7 @@ impl Library {
 		self.ensure_initialized()?;
 
 		let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-		let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+		let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 		*store = taken.record_feedback(entry_id, relevant);
 		Ok(())
 	}
@@ -825,13 +825,13 @@ impl Library {
 	// Delete / clear
 	// -----------------------------------------------------------------------
 
-	/// Delete a volume by ID. Returns true if it existed and was removed.
+	/// Delete an entry by ID. Returns true if it existed and was removed.
 	pub fn delete(&self, id: &str) -> Result<bool, SimseError> {
 		self.ensure_initialized()?;
 
 		let deleted = {
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 			let (new_store, deleted) = taken.delete(id);
 			*store = new_store;
 			deleted
@@ -847,24 +847,24 @@ impl Library {
 		Ok(deleted)
 	}
 
-	/// Delete multiple volumes by ID. Returns the count actually removed.
+	/// Delete multiple entries by ID. Returns the count actually removed.
 	pub fn delete_batch(&self, ids: &[String]) -> Result<usize, SimseError> {
 		self.ensure_initialized()?;
 
 		let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-		let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+		let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 		let (new_store, count) = taken.delete_batch(ids);
 		*store = new_store;
 		Ok(count)
 	}
 
-	/// Remove all volumes and reset all indexes.
+	/// Remove all entries and reset all indexes.
 	pub fn clear(&self) -> Result<(), SimseError> {
 		self.ensure_initialized()?;
 
 		{
 			let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-			let taken = mem::replace(&mut *store, VolumeStore::new(StoreConfig::default()));
+			let taken = mem::replace(&mut *store, Store::new(StoreConfig::default()));
 			*store = taken.clear();
 		}
 
@@ -880,13 +880,13 @@ impl Library {
 	// Properties
 	// -----------------------------------------------------------------------
 
-	/// Get the patron learning profile, if learning is enabled.
-	pub fn patron_profile(&self) -> Option<PatronProfile> {
+	/// Get the learner profile, if learning is enabled.
+	pub fn learner_profile(&self) -> Option<LearnerProfile> {
 		let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
 		store.get_profile()
 	}
 
-	/// Number of volumes in the store.
+	/// Number of entries in the store.
 	pub fn size(&self) -> usize {
 		let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
 		store.size()
@@ -944,7 +944,7 @@ impl Library {
 	}
 
 	/// Get a reference to the underlying store (for advanced usage).
-	pub fn store(&self) -> &Arc<Mutex<VolumeStore>> {
+	pub fn store(&self) -> &Arc<Mutex<Store>> {
 		&self.store
 	}
 }

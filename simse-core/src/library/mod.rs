@@ -1,11 +1,11 @@
-//! Library orchestration layer wrapping `simse_adaptive_engine::store::VolumeStore`.
+//! Library orchestration layer wrapping `simse_adaptive_engine::store::Store`.
 //!
 //! Provides:
 //! - [`Library`] — high-level API with automatic embedding, event publishing, and shelf management
-//! - [`Shelf`] — agent-scoped partition that tags and filters volumes by shelf name
+//! - [`Shelf`] — agent-scoped partition that tags and filters entries by shelf name
 //! - Re-exports of [`query_dsl`] and [`prompt_inject`] from the vector engine
 //!
-//! The library wraps a `VolumeStore` behind `Arc<Mutex<_>>` so it can be shared
+//! The library wraps a `Store` behind `Arc<Mutex<_>>` so it can be shared
 //! safely across async tasks and passed to shelves.
 
 pub mod circulation;

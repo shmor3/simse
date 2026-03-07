@@ -208,7 +208,7 @@ impl TopicCatalog {
 				topic: topic.clone(),
 				parent,
 				children,
-				volume_count: vols.len(),
+				entry_count: vols.len(),
 			});
 		}
 		result
@@ -402,10 +402,10 @@ mod tests {
 
 		let sections = catalog.sections();
 		let rust_section = sections.iter().find(|s| s.topic == "rust").unwrap();
-		assert_eq!(rust_section.volume_count, 1);
+		assert_eq!(rust_section.entry_count, 1);
 
 		let go_section = sections.iter().find(|s| s.topic == "go").unwrap();
-		assert_eq!(go_section.volume_count, 2);
+		assert_eq!(go_section.entry_count, 2);
 	}
 
 	#[test]

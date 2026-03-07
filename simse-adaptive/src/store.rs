@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// VolumeStore — core state manager
+// Store — core state manager
 // ---------------------------------------------------------------------------
 //
 // Integrates all sub-modules (cosine, text_search, inverted_index, cataloging,
@@ -29,9 +29,9 @@ use crate::text_cache::TextCache;
 use crate::text_search::{self, matches_all_metadata_filters};
 use crate::topic_catalog::TopicCatalog;
 use crate::types::{
-	AdvancedLookup, DateRange, DuplicateCheckResult, DuplicateVolumes, Lookup,
+	AdvancedLookup, DateRange, DuplicateCheckResult, DuplicateCluster, Lookup,
 	MetadataFilter, Recommendation, RecommendOptions, RecommendationScores, ScoreBreakdown,
-	SearchOptions, TextLookup, TextSearchOptions, TopicCatalogSection, TopicInfo, Volume,
+	SearchOptions, TextLookup, TextSearchOptions, TopicCatalogSection, TopicInfo, Entry,
 };
 
 // ---------------------------------------------------------------------------
@@ -52,7 +52,7 @@ pub enum DuplicateBehavior {
 }
 
 
-/// Configuration for a `VolumeStore`.
+/// Configuration for a `Store`.
 #[derive(Clone)]
 pub struct StoreConfig {
 	pub storage_path: Option<String>,
@@ -94,13 +94,13 @@ pub struct AddEntry {
 }
 
 // ---------------------------------------------------------------------------
-// VolumeStore
+// Store
 // ---------------------------------------------------------------------------
 
 /// Central stateful store for volumes (vector entries).
 #[derive(Clone)]
-pub struct VolumeStore {
-	volumes: Vec<Volume>,
+pub struct Store {
+	volumes: Vec<Entry>,
 	topic_index: TopicIndex,
 	metadata_index: MetadataIndex,
 	magnitude_cache: MagnitudeCache,
@@ -142,10 +142,10 @@ macro_rules! ensure_initialized {
 // Implementation
 // ---------------------------------------------------------------------------
 
-impl VolumeStore {
+impl Store {
 	// -- Lifecycle -----------------------------------------------------------
 
-	/// Create a new `VolumeStore` with default empty state. Not yet initialized.
+	/// Create a new `Store` with default empty state. Not yet initialized.
 	pub fn new(config: StoreConfig) -> Self {
 		let learning_engine = if config.learning_enabled {
 			Some(LearningEngine::new(LearningOptions {
@@ -281,7 +281,7 @@ impl VolumeStore {
 
 	// -- Index management ----------------------------------------------------
 
-	fn index_volume(mut self, vol: &Volume) -> Self {
+	fn index_volume(mut self, vol: &Entry) -> Self {
 		self.topic_index = self.topic_index
 			.add_entry(&vol.id, &vol.text, &vol.metadata);
 		self.metadata_index = self.metadata_index
@@ -300,7 +300,7 @@ impl VolumeStore {
 		self
 	}
 
-	fn deindex_volume(mut self, vol: &Volume) -> Self {
+	fn deindex_volume(mut self, vol: &Entry) -> Self {
 		self.topic_index = self.topic_index
 			.remove_entry(&vol.id);
 		self.metadata_index = self.metadata_index
@@ -368,7 +368,7 @@ impl VolumeStore {
 		&self,
 		query_embedding: &[f32],
 		query_mag: f64,
-		vol: &Volume,
+		vol: &Entry,
 	) -> Option<f64> {
 		if vol.embedding.len() != query_embedding.len() {
 			return None;
@@ -420,7 +420,7 @@ impl VolumeStore {
 			if dup_result.is_duplicate {
 				match self.config.duplicate_behavior {
 					DuplicateBehavior::Skip | DuplicateBehavior::Warn => {
-						if let Some(ref existing) = dup_result.existing_volume {
+						if let Some(ref existing) = dup_result.existing_entry {
 							return Ok((self, existing.id.clone()));
 						}
 					}
@@ -436,7 +436,7 @@ impl VolumeStore {
 		let id = Uuid::new_v4().to_string();
 		let now = current_timestamp_ms();
 
-		let volume = Volume {
+		let volume = Entry {
 			id: id.clone(),
 			text,
 			embedding,
@@ -584,7 +584,7 @@ impl VolumeStore {
 			if let Some(score) = self.fast_cosine(query_embedding, query_mag, vol) {
 				if score >= threshold {
 					results.push(Lookup {
-						volume: vol.clone(),
+						entry: vol.clone(),
 						score,
 					});
 				}
@@ -600,7 +600,7 @@ impl VolumeStore {
 
 		// Track access and record query for learning
 		let selected_ids: Vec<String> =
-			results.iter().map(|r| r.volume.id.clone()).collect();
+			results.iter().map(|r| r.entry.id.clone()).collect();
 		for id in &selected_ids {
 			self = self.track_access(id);
 		}
@@ -648,7 +648,7 @@ impl VolumeStore {
 					if let Some(vol) = self.volumes.iter().find(|v| v.id == bm25_result.id)
 					{
 						results.push(TextLookup {
-							volume: vol.clone(),
+							entry: vol.clone(),
 							score: normalized,
 						});
 					}
@@ -664,7 +664,7 @@ impl VolumeStore {
 				text_search::score_text(&options.query, &vol.text, mode, threshold)
 			{
 				results.push(TextLookup {
-					volume: vol.clone(),
+					entry: vol.clone(),
 					score,
 				});
 			}
@@ -680,7 +680,7 @@ impl VolumeStore {
 	}
 
 	/// Filter volumes by metadata filters.
-	pub fn filter_by_metadata(&self, filters: &[MetadataFilter]) -> Vec<Volume> {
+	pub fn filter_by_metadata(&self, filters: &[MetadataFilter]) -> Vec<Entry> {
 		if !self.initialized || filters.is_empty() {
 			return Vec::new();
 		}
@@ -713,7 +713,7 @@ impl VolumeStore {
 	}
 
 	/// Filter volumes by timestamp range.
-	pub fn filter_by_date_range(&self, range: &DateRange) -> Vec<Volume> {
+	pub fn filter_by_date_range(&self, range: &DateRange) -> Vec<Entry> {
 		if !self.initialized {
 			return Vec::new();
 		}
@@ -915,7 +915,7 @@ impl VolumeStore {
 			let final_score = combined.unwrap_or(0.0);
 
 			results.push(AdvancedLookup {
-				volume: vol.clone(),
+				entry: vol.clone(),
 				score: final_score,
 				scores: ScoreBreakdown {
 					vector: vector_score,
@@ -929,10 +929,10 @@ impl VolumeStore {
 			if gb.enabled.unwrap_or(false) {
 				let weight = gb.weight.unwrap_or(self.graph_index.config().graph_boost_weight);
 				let result_ids: Vec<String> =
-					results.iter().map(|r| r.volume.id.clone()).collect();
+					results.iter().map(|r| r.entry.id.clone()).collect();
 				for item in &mut results {
 					let graph_score =
-						self.graph_index.compute_graph_score(&item.volume.id, &result_ids);
+						self.graph_index.compute_graph_score(&item.entry.id, &result_ids);
 					item.score = (1.0 - weight) * item.score + weight * graph_score;
 				}
 			}
@@ -947,7 +947,7 @@ impl VolumeStore {
 
 		// Track access
 		let selected_ids: Vec<String> =
-			results.iter().map(|r| r.volume.id.clone()).collect();
+			results.iter().map(|r| r.entry.id.clone()).collect();
 		for id in &selected_ids {
 			self = self.track_access(id);
 		}
@@ -981,7 +981,7 @@ impl VolumeStore {
 		};
 
 		// Pre-filter candidates
-		let candidates: Vec<&Volume> = self
+		let candidates: Vec<&Entry> = self
 			.volumes
 			.iter()
 			.filter(|vol| {
@@ -1122,7 +1122,7 @@ impl VolumeStore {
 
 			if final_score >= min_score {
 				results.push(Recommendation {
-					volume: (*vol).clone(),
+					entry: (*vol).clone(),
 					score: final_score,
 					scores: RecommendationScores {
 						vector: score_result.vector,
@@ -1151,7 +1151,7 @@ impl VolumeStore {
 	// -- Accessors -----------------------------------------------------------
 
 	/// Get a volume by ID, tracking access on hit.
-	pub fn get_by_id(self, id: &str) -> (Self, Option<Volume>) {
+	pub fn get_by_id(self, id: &str) -> (Self, Option<Entry>) {
 		if !self.initialized {
 			return (self, None);
 		}
@@ -1165,7 +1165,7 @@ impl VolumeStore {
 	}
 
 	/// Return clones of all volumes.
-	pub fn get_all(&self) -> Vec<Volume> {
+	pub fn get_all(&self) -> Vec<Entry> {
 		if !self.initialized {
 			return Vec::new();
 		}
@@ -1181,7 +1181,7 @@ impl VolumeStore {
 	}
 
 	/// Filter volumes by topic, returning those whose IDs match.
-	pub fn filter_by_topic(&self, topics: &[String]) -> Vec<Volume> {
+	pub fn filter_by_topic(&self, topics: &[String]) -> Vec<Entry> {
 		if !self.initialized || topics.is_empty() {
 			return Vec::new();
 		}
@@ -1201,7 +1201,7 @@ impl VolumeStore {
 	}
 
 	/// Find groups of near-duplicate volumes.
-	pub fn find_duplicates(&self, threshold: Option<f64>) -> Vec<DuplicateVolumes> {
+	pub fn find_duplicates(&self, threshold: Option<f64>) -> Vec<DuplicateCluster> {
 		if !self.initialized {
 			return Vec::new();
 		}
@@ -1214,7 +1214,7 @@ impl VolumeStore {
 		if !self.initialized {
 			return DuplicateCheckResult {
 				is_duplicate: false,
-				existing_volume: None,
+				existing_entry: None,
 				similarity: None,
 			};
 		}
@@ -1252,7 +1252,7 @@ impl VolumeStore {
 	}
 
 	/// Get the current learning profile snapshot.
-	pub fn get_profile(&self) -> Option<crate::types::PatronProfile> {
+	pub fn get_profile(&self) -> Option<crate::types::LearnerProfile> {
 		self.learning_engine.as_ref().map(|e| e.get_profile())
 	}
 
@@ -1285,7 +1285,7 @@ impl VolumeStore {
 	}
 
 	/// Get volume IDs under a specific topic in the catalog.
-	pub fn catalog_volumes(&self, topic: &str) -> Vec<String> {
+	pub fn catalog_entries(&self, topic: &str) -> Vec<String> {
 		self.topic_catalog.volumes(topic)
 	}
 
@@ -1297,7 +1297,7 @@ impl VolumeStore {
 		id: &str,
 		edge_types: Option<&[crate::graph::EdgeType]>,
 		max_results: usize,
-	) -> Vec<(&crate::graph::Edge, Option<&Volume>)> {
+	) -> Vec<(&crate::graph::Edge, Option<&Entry>)> {
 		let edges = match edge_types {
 			Some(types) => self.graph_index.neighbors_by_type(id, types),
 			None => self.graph_index.neighbors(id),
@@ -1319,7 +1319,7 @@ impl VolumeStore {
 		depth: usize,
 		edge_types: Option<&[crate::graph::EdgeType]>,
 		max_results: usize,
-	) -> Vec<(crate::graph::TraversalNode, Option<&Volume>)> {
+	) -> Vec<(crate::graph::TraversalNode, Option<&Entry>)> {
 		let nodes = self.graph_index.traverse(id, depth, edge_types, max_results);
 		nodes
 			.into_iter()
@@ -1419,8 +1419,8 @@ mod tests {
 		}
 	}
 
-	fn init_store(config: StoreConfig) -> VolumeStore {
-		let store = VolumeStore::new(config);
+	fn init_store(config: StoreConfig) -> Store {
+		let store = Store::new(config);
 		store.initialize(None).unwrap()
 	}
 
@@ -1438,7 +1438,7 @@ mod tests {
 	// 1. new + initialize lifecycle
 	#[test]
 	fn test_new_and_initialize() {
-		let store = VolumeStore::new(default_config());
+		let store = Store::new(default_config());
 		assert!(!store.initialized);
 		assert_eq!(store.size(), 0);
 
@@ -1644,7 +1644,7 @@ mod tests {
 			assert!(results[i - 1].score >= results[i].score);
 		}
 		// First result should be the exact match
-		assert_eq!(results[0].volume.text, "exact match");
+		assert_eq!(results[0].entry.text, "exact match");
 	}
 
 	// 10. text_search fuzzy mode
@@ -1683,7 +1683,7 @@ mod tests {
 			.unwrap();
 
 		assert!(!results.is_empty());
-		assert_eq!(results[0].volume.text, "hello world");
+		assert_eq!(results[0].entry.text, "hello world");
 	}
 
 	// 11. text_search bm25 mode
@@ -1716,7 +1716,7 @@ mod tests {
 
 		assert!(!results.is_empty());
 		// Both should appear but rust entry should score higher
-		assert_eq!(results[0].volume.text, "rust programming language systems");
+		assert_eq!(results[0].entry.text, "rust programming language systems");
 	}
 
 	// 12. filter_by_metadata with eq filter
@@ -1837,7 +1837,7 @@ mod tests {
 		assert!(!results.is_empty());
 		// The rust entry should score highest (both vector + text match)
 		assert_eq!(
-			results[0].volume.text,
+			results[0].entry.text,
 			"rust programming language"
 		);
 		assert!(results[0].scores.vector.is_some());
@@ -2084,7 +2084,7 @@ mod tests {
 		assert!(!store.is_dirty());
 
 		// Create a fresh store and load from disk
-		let store2 = VolumeStore::new(StoreConfig {
+		let store2 = Store::new(StoreConfig {
 			storage_path: Some(dir_path.clone()),
 			..Default::default()
 		});
@@ -2120,7 +2120,7 @@ mod tests {
 	// 25. not initialized errors
 	#[test]
 	fn test_not_initialized_errors() {
-		let store = VolumeStore::new(default_config());
+		let store = Store::new(default_config());
 
 		let result = store.clone().add("test".to_string(), make_embedding(&[1.0]), HashMap::new());
 		assert!(matches!(result, Err(AdaptiveError::NotInitialized)));
@@ -2213,7 +2213,7 @@ mod tests {
 			.unwrap();
 
 		assert_eq!(results.len(), 1);
-		assert_eq!(results[0].volume.text, "exact match text");
+		assert_eq!(results[0].entry.text, "exact match text");
 		assert!((results[0].score - 1.0).abs() < f64::EPSILON);
 	}
 
@@ -2258,7 +2258,7 @@ mod tests {
 			.unwrap();
 
 		assert_eq!(results.len(), 1);
-		assert_eq!(results[0].volume.text, "rust systems");
+		assert_eq!(results[0].entry.text, "rust systems");
 	}
 
 	// 29. recommend with topic filter
@@ -2294,10 +2294,10 @@ mod tests {
 			.unwrap();
 
 		assert_eq!(results.len(), 1);
-		assert_eq!(results[0].volume.text, "rust entry");
+		assert_eq!(results[0].entry.text, "rust entry");
 	}
 
-	// 30. catalog_relocate and catalog_volumes
+	// 30. catalog_relocate and catalog_entries
 	#[test]
 	fn test_catalog_relocate() {
 		let mut store = init_store(default_config());
@@ -2305,13 +2305,13 @@ mod tests {
 		store.topic_catalog = std::mem::take(&mut store.topic_catalog)
 			.register_volume("vol-1", "old-topic");
 		assert!(store
-			.catalog_volumes("old-topic")
+			.catalog_entries("old-topic")
 			.contains(&"vol-1".to_string()));
 
 		let store = store.catalog_relocate("vol-1", "new-topic");
-		assert!(store.catalog_volumes("old-topic").is_empty());
+		assert!(store.catalog_entries("old-topic").is_empty());
 		assert!(store
-			.catalog_volumes("new-topic")
+			.catalog_entries("new-topic")
 			.contains(&"vol-1".to_string()));
 	}
 
@@ -2327,10 +2327,10 @@ mod tests {
 
 		let store = store.catalog_merge("javascript", "typescript");
 
-		let ts_vols = store.catalog_volumes("typescript");
+		let ts_vols = store.catalog_entries("typescript");
 		assert!(ts_vols.contains(&"vol-1".to_string()));
 		assert!(ts_vols.contains(&"vol-2".to_string()));
-		assert!(store.catalog_volumes("javascript").is_empty());
+		assert!(store.catalog_entries("javascript").is_empty());
 	}
 
 	// 32. dispose saves dirty store
@@ -2356,7 +2356,7 @@ mod tests {
 		let _store = store.dispose().unwrap();
 
 		// Verify data was saved
-		let store2 = VolumeStore::new(StoreConfig {
+		let store2 = Store::new(StoreConfig {
 			storage_path: Some(dir_path),
 			..Default::default()
 		});

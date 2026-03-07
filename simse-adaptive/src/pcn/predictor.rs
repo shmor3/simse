@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use crate::snapshot::{ModelSnapshot, PredictionResult};
+use crate::pcn::snapshot::{ModelSnapshot, PredictionResult};
 
 /// Summary statistics about the current model state.
 pub struct ModelStats {
@@ -44,7 +44,7 @@ impl Predictor {
     /// Run inference on the current model snapshot and return a [`PredictionResult`].
     ///
     /// Returns `None` if the snapshot is empty (no trained model yet, i.e.
-    /// `input_dim == 0` or no layers).
+    /// `input_dim == 0` or no layers), or if the input dimension doesn't match.
     pub fn confidence(&self, input: &[f64]) -> Option<PredictionResult> {
         let snap = self.snapshot.read().unwrap();
 
@@ -52,11 +52,7 @@ impl Predictor {
             return None;
         }
 
-        if input.len() != snap.input_dim {
-            return None;
-        }
-
-        Some(snap.predict(input, self.inference_steps))
+        snap.predict(input, self.inference_steps)
     }
 
     /// Find the inputs with the highest prediction energy (most anomalous).
@@ -71,6 +67,9 @@ impl Predictor {
             return Vec::new();
         }
 
+        // Build one network for reuse across all inputs.
+        let mut net = snap.build_network(self.inference_steps);
+
         let mut scored: Vec<(usize, f64)> = inputs
             .iter()
             .enumerate()
@@ -78,8 +77,8 @@ impl Predictor {
                 if input.len() != snap.input_dim {
                     return None;
                 }
-                let result = snap.predict(input, self.inference_steps);
-                Some((i, result.energy))
+                let energy = net.infer(input, self.inference_steps);
+                Some((i, energy))
             })
             .collect();
 
@@ -127,9 +126,9 @@ impl Predictor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pcn_config::{Activation, LayerConfig, PcnConfig};
-    use crate::network::PredictiveCodingNetwork;
-    use crate::vocabulary::VocabularyManager;
+    use crate::pcn::config::{Activation, LayerConfig, PcnConfig};
+    use crate::pcn::network::PredictiveCodingNetwork;
+    use crate::pcn::vocabulary::VocabularyManager;
 
     fn test_config() -> PcnConfig {
         PcnConfig {

@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 
 use crate::error::AdaptiveError;
-use crate::vocabulary::VocabularyManager;
+use crate::pcn::vocabulary::VocabularyManager;
 
-/// A library event carrying an embedding vector and structured metadata,
+/// An input event carrying an embedding vector and structured metadata,
 /// ready to be encoded into a combined input vector for the PCN.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct LibraryEvent {
+pub struct InputEvent {
     pub embedding: Vec<f32>,
     pub topic: String,
     pub tags: Vec<String>,
@@ -18,7 +18,7 @@ pub struct LibraryEvent {
     pub action: String,
 }
 
-/// Encodes [`LibraryEvent`]s into combined input vectors for the predictive
+/// Encodes [`InputEvent`]s into combined input vectors for the predictive
 /// coding network.
 ///
 /// The output vector layout is:
@@ -71,7 +71,7 @@ impl InputEncoder {
         &mut self.vocab
     }
 
-    /// Encode a [`LibraryEvent`] into a combined input vector.
+    /// Encode a [`InputEvent`] into a combined input vector.
     ///
     /// Returns `(vector, grew)` where `grew` is `true` if the vocabulary
     /// registered any new topics or tags during this call.
@@ -83,18 +83,24 @@ impl InputEncoder {
     /// 4. Build the combined vector:
     ///    `[embedding_f64, topic_one_hot, tag_bitmap, entry_type_one_hot, temporal, action_one_hot]`
     /// 5. Pad the embedding with zeros if shorter than `embedding_dim`.
-    pub fn encode(&mut self, event: &LibraryEvent) -> Result<(Vec<f64>, bool), AdaptiveError> {
+    pub fn encode(&mut self, event: &InputEvent) -> Result<(Vec<f64>, bool), AdaptiveError> {
         // 1. Snapshot vocabulary sizes before registration.
         let topics_before = self.vocab.topic_count();
         let tags_before = self.vocab.tag_count();
 
         // 2. Register topic and tags (may grow vocabulary or return overflow error).
-        let (vocab, _) = std::mem::take(&mut self.vocab).register_topic(&event.topic)?;
-        self.vocab = vocab;
+        //    Clone the vocab first so that on error the encoder stays intact.
+        //    im:: persistent data structures make this clone cheap (structural sharing).
+        let mut vocab = self.vocab.clone();
+        let (v, _) = vocab.register_topic(&event.topic)?;
+        vocab = v;
         for tag in &event.tags {
-            let (v, _) = std::mem::take(&mut self.vocab).register_tag(tag)?;
-            self.vocab = v;
+            let (v, _) = vocab.register_tag(tag)?;
+            vocab = v;
         }
+
+        // All registrations succeeded — commit the new vocab.
+        self.vocab = vocab;
 
         // 3. Check if vocabulary grew.
         let grew =
@@ -148,8 +154,8 @@ impl InputEncoder {
 mod tests {
     use super::*;
 
-    fn make_event(embedding: Vec<f32>) -> LibraryEvent {
-        LibraryEvent {
+    fn make_event(embedding: Vec<f32>) -> InputEvent {
+        InputEvent {
             embedding,
             topic: "rust".to_string(),
             tags: vec!["important".to_string(), "core".to_string()],
@@ -273,7 +279,7 @@ mod tests {
         let max_tags = 4;
         let mut encoder = InputEncoder::new(embedding_dim, max_topics, max_tags);
 
-        let event = LibraryEvent {
+        let event = InputEvent {
             embedding: vec![0.5, 0.9],
             topic: "rust".to_string(),
             tags: vec!["core".to_string()],
@@ -281,7 +287,7 @@ mod tests {
             timestamp: 100.0,
             time_since_last: 10.0,
             session_ordinal: 2.0,
-            action: "compendium".to_string(),
+            action: "summarization".to_string(),
         };
 
         let (vec, _) = encoder.encode(&event).unwrap();
@@ -318,7 +324,7 @@ mod tests {
 
         let offset = offset + 3; // 15
 
-        // Action: "compendium" -> [0, 1, 0, 0]
+        // Action: "summarization" -> [0, 1, 0, 0]
         assert_eq!(vec[offset], 0.0);
         assert_eq!(vec[offset + 1], 1.0);
         assert_eq!(vec[offset + 2], 0.0);
@@ -343,7 +349,7 @@ mod tests {
         let mut encoder = InputEncoder::new(4, 1, 1);
 
         // First event fills the vocab.
-        let event1 = LibraryEvent {
+        let event1 = InputEvent {
             embedding: vec![1.0; 4],
             topic: "only_topic".to_string(),
             tags: vec!["only_tag".to_string()],
@@ -356,7 +362,7 @@ mod tests {
         encoder.encode(&event1).unwrap();
 
         // Second event with a new topic should overflow.
-        let event2 = LibraryEvent {
+        let event2 = InputEvent {
             embedding: vec![1.0; 4],
             topic: "second_topic".to_string(),
             tags: vec!["only_tag".to_string()],
@@ -369,5 +375,15 @@ mod tests {
         let result = encoder.encode(&event2);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), "PCN_VOCABULARY_OVERFLOW");
+
+        // After an overflow error, the encoder should still be usable
+        // with the previously registered vocabulary.
+        assert_eq!(encoder.vocab().topic_count(), 1);
+        assert_eq!(encoder.vocab().tag_count(), 1);
+
+        // Encoding the original event should still work.
+        let (vec, grew) = encoder.encode(&event1).unwrap();
+        assert!(!grew);
+        assert_eq!(vec.len(), encoder.current_input_dim());
     }
 }

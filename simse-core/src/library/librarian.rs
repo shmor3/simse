@@ -83,10 +83,10 @@ pub struct ClassificationResult {
 	pub confidence: f64,
 }
 
-/// A single volume move in a reorganization plan.
+/// A single entry move in a reorganization plan.
 #[derive(Debug, Clone)]
 pub struct ReorganizationMove {
-	pub volume_id: String,
+	pub entry_id: String,
 	pub new_topic: String,
 }
 
@@ -97,7 +97,7 @@ pub struct ReorganizationMerge {
 	pub target: String,
 }
 
-/// Plan for reorganizing volumes within a topic.
+/// Plan for reorganizing entries within a topic.
 #[derive(Debug, Clone)]
 pub struct ReorganizationPlan {
 	pub moves: Vec<ReorganizationMove>,
@@ -126,16 +126,16 @@ pub struct LibrarianBid {
 #[async_trait]
 pub trait LibrarianLibraryAccess: Send + Sync {
 	async fn search(&self, query: &str, max_results: Option<usize>)
-		-> Result<Vec<Volume>, SimseError>;
+		-> Result<Vec<Entry>, SimseError>;
 	async fn get_topics(&self) -> Result<Vec<String>, SimseError>;
-	async fn filter_by_topic(&self, topics: &[String]) -> Result<Vec<Volume>, SimseError>;
+	async fn filter_by_topic(&self, topics: &[String]) -> Result<Vec<Entry>, SimseError>;
 }
 
-/// Minimal volume representation for librarian operations.
-/// Uses the vector engine's Volume type directly where possible,
+/// Minimal entry representation for librarian operations.
+/// Uses the vector engine's Entry type directly where possible,
 /// but the librarian only needs id and text.
 #[derive(Debug, Clone)]
-pub struct Volume {
+pub struct Entry {
 	pub id: String,
 	pub text: String,
 }
@@ -192,8 +192,8 @@ struct ClassificationJson {
 
 #[derive(Deserialize)]
 struct ReorgMoveJson {
-	#[serde(rename = "volumeId")]
-	volume_id: Option<String>,
+	#[serde(rename = "entryId")]
+	entry_id: Option<String>,
 	#[serde(rename = "newTopic")]
 	new_topic: Option<String>,
 }
@@ -357,26 +357,26 @@ Respond with ONLY valid JSON, no other text."#,
 	// summarize
 	// -----------------------------------------------------------------------
 
-	/// Summarize multiple volumes into a single concise summary.
+	/// Summarize multiple entries into a single concise summary.
 	pub async fn summarize(
 		&self,
-		volumes: &[Volume],
+		entries: &[Entry],
 		topic: &str,
 	) -> Result<SummarizeResult, SimseError> {
-		let combined_text: String = volumes
+		let combined_text: String = entries
 			.iter()
 			.enumerate()
-			.map(|(i, v)| format!("--- Volume {} ---\n{}", i + 1, v.text))
+			.map(|(i, v)| format!("--- Entry {} ---\n{}", i + 1, v.text))
 			.collect::<Vec<_>>()
 			.join("\n\n");
 
 		let prompt = format!(
-			"Summarize the following volumes from topic \"{}\" into a single concise summary that preserves all key information:\n\n{}",
+			"Summarize the following entries from topic \"{}\" into a single concise summary that preserves all key information:\n\n{}",
 			topic, combined_text
 		);
 
 		let text = self.text_generator.generate(&prompt, None).await?;
-		let source_ids = volumes.iter().map(|v| v.id.clone()).collect();
+		let source_ids = entries.iter().map(|v| v.id.clone()).collect();
 
 		Ok(SummarizeResult { text, source_ids })
 	}
@@ -441,35 +441,35 @@ Respond with ONLY valid JSON."#,
 	// reorganize
 	// -----------------------------------------------------------------------
 
-	/// Suggest reorganization of volumes within a topic.
+	/// Suggest reorganization of entries within a topic.
 	///
 	/// Returns an empty plan on LLM or parse failure.
 	pub async fn reorganize(
 		&self,
 		topic: &str,
-		volumes: &[Volume],
+		entries: &[Entry],
 	) -> ReorganizationPlan {
-		let volume_list: String = volumes
+		let entry_list: String = entries
 			.iter()
 			.map(|v| format!("- [{}] {}", v.id, v.text))
 			.collect::<Vec<_>>()
 			.join("\n");
 
 		let prompt = format!(
-			r#"Review the following volumes in topic "{}" and suggest reorganization.
+			r#"Review the following entries in topic "{}" and suggest reorganization.
 
-Volumes:
+Entries:
 {}
 
 Return a JSON object:
 {{
-  "moves": [{{"volumeId": "id", "newTopic": "new/topic/path"}}],
+  "moves": [{{"entryId": "id", "newTopic": "new/topic/path"}}],
   "newSubtopics": ["new/subtopic"],
   "merges": [{{"source": "topic/a", "target": "topic/b"}}]
 }}
 
 Respond with ONLY valid JSON."#,
-			topic, volume_list
+			topic, entry_list
 		);
 
 		let response = match self.text_generator.generate(&prompt, None).await {
@@ -487,32 +487,32 @@ Respond with ONLY valid JSON."#,
 	// optimize
 	// -----------------------------------------------------------------------
 
-	/// Prune, summarize, and reorganize volumes using a (potentially more
+	/// Prune, summarize, and reorganize entries using a (potentially more
 	/// powerful) model.
 	///
 	/// Falls back to the default generator if no model-specific generator
 	/// is configured.
 	pub async fn optimize(
 		&self,
-		volumes: &[Volume],
+		entries: &[Entry],
 		topic: &str,
 		model_id: &str,
 	) -> OptimizationResult {
-		let volume_list: String = volumes
+		let entry_list: String = entries
 			.iter()
 			.map(|v| format!("- [{}] {}", v.id, v.text))
 			.collect::<Vec<_>>()
 			.join("\n");
 
 		let prompt = format!(
-			r#"You are a memory optimization agent. Analyze the following volumes in topic "{}" and perform maintenance.
+			r#"You are a memory optimization agent. Analyze the following entries in topic "{}" and perform maintenance.
 
-Volumes:
+Entries:
 {}
 
 Tasks:
-1. PRUNE: Identify volume IDs that are redundant, outdated, or low-value. List their IDs.
-2. SUMMARIZE: Write a single concise summary that preserves all important information from the remaining (non-pruned) volumes.
+1. PRUNE: Identify entry IDs that are redundant, outdated, or low-value. List their IDs.
+2. SUMMARIZE: Write a single concise summary that preserves all important information from the remaining (non-pruned) entries.
 3. REORGANIZE: Suggest any topic restructuring (moves, new subtopics, merges).
 
 Return a JSON object:
@@ -520,14 +520,14 @@ Return a JSON object:
   "pruned": ["id1", "id2"],
   "summary": "concise summary text",
   "reorganization": {{
-    "moves": [{{"volumeId": "id", "newTopic": "new/topic"}}],
+    "moves": [{{"entryId": "id", "newTopic": "new/topic"}}],
     "newSubtopics": ["new/subtopic"],
     "merges": [{{"source": "topic/a", "target": "topic/b"}}]
   }}
 }}
 
 Respond with ONLY valid JSON."#,
-			topic, volume_list
+			topic, entry_list
 		);
 
 		let response = if let Some(ref model_gen) = self.model_generator {
@@ -567,7 +567,7 @@ Respond with ONLY valid JSON."#,
 	/// Score confidence for managing a given topic/content pair.
 	///
 	/// The `_library` parameter is reserved for future use (enriching the
-	/// bid prompt with existing volume context). Currently unused.
+	/// bid prompt with existing entry context). Currently unused.
 	///
 	/// Returns a zero-confidence bid on LLM or parse failure.
 	pub async fn bid(
@@ -631,7 +631,7 @@ Return ONLY valid JSON:
 			.into_iter()
 			.filter_map(|m| {
 				Some(ReorganizationMove {
-					volume_id: m.volume_id?,
+					entry_id: m.entry_id?,
 					new_topic: m.new_topic?,
 				})
 			})

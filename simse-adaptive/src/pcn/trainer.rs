@@ -3,11 +3,11 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
 
-use crate::pcn_config::PcnConfig;
-use crate::encoder::{InputEncoder, LibraryEvent};
-use crate::network::PredictiveCodingNetwork;
+use crate::pcn::config::PcnConfig;
+use crate::pcn::encoder::{InputEncoder, InputEvent};
+use crate::pcn::network::PredictiveCodingNetwork;
 use crate::persistence::save_snapshot;
-use crate::snapshot::ModelSnapshot;
+use crate::pcn::snapshot::ModelSnapshot;
 
 /// Aggregate statistics from the background training loop.
 #[derive(Debug, Clone, Default)]
@@ -43,7 +43,7 @@ impl TrainingWorker {
     /// Returns the final [`TrainingStats`] when the channel is closed and all
     /// remaining events have been processed.
     pub async fn run_batch(
-        mut rx: mpsc::Receiver<LibraryEvent>,
+        mut rx: mpsc::Receiver<InputEvent>,
         snapshot: Arc<RwLock<ModelSnapshot>>,
         config: PcnConfig,
         embedding_dim: usize,
@@ -52,7 +52,7 @@ impl TrainingWorker {
         let input_dim = encoder.current_input_dim();
         let mut network = PredictiveCodingNetwork::new(input_dim, &config);
         let mut stats = TrainingStats::default();
-        let mut batch: Vec<LibraryEvent> = Vec::with_capacity(config.batch_size);
+        let mut batch: Vec<InputEvent> = Vec::with_capacity(config.batch_size);
 
         let batch_timeout = tokio::time::Duration::from_millis(config.max_batch_delay_ms);
 
@@ -128,7 +128,7 @@ impl TrainingWorker {
 
     /// Train a single batch of events, update stats, and swap the snapshot.
     fn train_batch(
-        batch: &mut Vec<LibraryEvent>,
+        batch: &mut Vec<InputEvent>,
         encoder: &mut InputEncoder,
         network: &mut PredictiveCodingNetwork,
         config: &PcnConfig,
@@ -201,7 +201,7 @@ impl TrainingWorker {
 
             // Auto-save before the RwLock swap to avoid re-locking.
             if config.auto_save_epochs > 0
-                && stats.epochs.is_multiple_of(config.auto_save_epochs)
+                && stats.epochs % config.auto_save_epochs == 0
             {
                 if let Some(ref storage_path) = config.storage_path {
                     let path = format!("{}/pcn-auto-{}.json.gz", storage_path, stats.epochs);
@@ -221,12 +221,7 @@ impl TrainingWorker {
                 Err(poisoned) => {
                     warn!("Snapshot RwLock was poisoned, recovering");
                     let mut guard = poisoned.into_inner();
-                    *guard = ModelSnapshot::from_network(
-                        network,
-                        encoder.vocab(),
-                        stats.epochs,
-                        stats.total_samples,
-                    );
+                    *guard = new_snapshot;
                 }
             }
         }
@@ -236,7 +231,7 @@ impl TrainingWorker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pcn_config::{Activation, LayerConfig, PcnConfig};
+    use crate::pcn::config::{Activation, LayerConfig, PcnConfig};
 
     fn test_config() -> PcnConfig {
         PcnConfig {
@@ -263,8 +258,8 @@ mod tests {
         }
     }
 
-    fn make_event(embedding: Vec<f32>, topic: &str) -> LibraryEvent {
-        LibraryEvent {
+    fn make_event(embedding: Vec<f32>, topic: &str) -> InputEvent {
+        InputEvent {
             embedding,
             topic: topic.to_string(),
             tags: vec!["test".to_string()],
@@ -281,7 +276,7 @@ mod tests {
         let config = test_config();
         let embedding_dim = 4;
         let snapshot = Arc::new(RwLock::new(ModelSnapshot::empty()));
-        let (tx, rx) = mpsc::channel::<LibraryEvent>(config.channel_capacity);
+        let (tx, rx) = mpsc::channel::<InputEvent>(config.channel_capacity);
 
         // Send 3 events (batch_size=2, so we get 1 full batch + 1 remainder).
         tx.send(make_event(vec![0.1, 0.2, 0.3, 0.4], "rust"))
@@ -338,7 +333,7 @@ mod tests {
         };
         let embedding_dim = 4;
         let snapshot = Arc::new(RwLock::new(ModelSnapshot::empty()));
-        let (tx, rx) = mpsc::channel::<LibraryEvent>(config.channel_capacity);
+        let (tx, rx) = mpsc::channel::<InputEvent>(config.channel_capacity);
 
         // Send 6 events with batch_size=2 → 3 epochs. Auto-save at epoch 2.
         for i in 0..6 {
@@ -376,7 +371,7 @@ mod tests {
         };
         let embedding_dim = 4;
         let snapshot = Arc::new(RwLock::new(ModelSnapshot::empty()));
-        let (tx, rx) = mpsc::channel::<LibraryEvent>(config.channel_capacity);
+        let (tx, rx) = mpsc::channel::<InputEvent>(config.channel_capacity);
 
         for i in 0..4 {
             tx.send(make_event(vec![0.1 * i as f32; 4], "rust"))
@@ -405,7 +400,7 @@ mod tests {
         };
         let embedding_dim = 4;
         let snapshot = Arc::new(RwLock::new(ModelSnapshot::empty()));
-        let (tx, rx) = mpsc::channel::<LibraryEvent>(config.channel_capacity);
+        let (tx, rx) = mpsc::channel::<InputEvent>(config.channel_capacity);
 
         tx.send(make_event(vec![0.1; 4], "rust")).await.unwrap();
         tx.send(make_event(vec![0.2; 4], "rust")).await.unwrap();

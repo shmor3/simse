@@ -1,5 +1,7 @@
-use crate::pcn_config::PcnConfig;
-use crate::layer::PcnLayer;
+use rand::RngExt;
+
+use crate::pcn::config::PcnConfig;
+use crate::pcn::layer::PcnLayer;
 
 /// A hierarchical predictive coding network (PCN) composed of multiple [`PcnLayer`] instances.
 ///
@@ -139,9 +141,12 @@ impl PredictiveCodingNetwork {
             self.input_dim
         );
 
-        // Randomize latent values to break symmetry.
+        // Randomize latent values to break symmetry, using a fresh
+        // non-deterministic seed so each infer() call starts from a
+        // different point.
+        let base_seed: u64 = rand::rng().random();
         for (i, layer) in self.layers.iter_mut().enumerate() {
-            layer.randomize_values(i as u64 + 1);
+            layer.randomize_values(base_seed.wrapping_add(i as u64));
         }
 
         self.run_inference(input, steps)
@@ -486,7 +491,7 @@ impl PredictiveCodingNetwork {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pcn_config::{Activation, LayerConfig, PcnConfig};
+    use crate::pcn::config::{Activation, LayerConfig, PcnConfig};
 
     fn test_config() -> PcnConfig {
         PcnConfig {

@@ -8,7 +8,7 @@ use crate::error::AdaptiveError;
 const ENTRY_TYPE_DIM: usize = 3;
 /// Dimensionality of temporal features: timestamp, time_since_last, session_ordinal.
 const TEMPORAL_DIM: usize = 3;
-/// Dimensionality of action one-hot encoding: extraction, compendium, reorganization, optimization.
+/// Dimensionality of action one-hot encoding: extraction, summarization, reorganization, optimization.
 const ACTION_DIM: usize = 4;
 /// Sum of all fixed (non-vocabulary) feature dimensions.
 const FIXED_DIM: usize = ENTRY_TYPE_DIM + TEMPORAL_DIM + ACTION_DIM; // 10
@@ -184,14 +184,14 @@ impl VocabularyManager {
     }
 
     /// Encode an action as a one-hot vector of length 4.
-    /// Recognized actions: "extraction" (0), "compendium" (1),
+    /// Recognized actions: "extraction" (0), "summarization" (1),
     /// "reorganization" (2), "optimization" (3).
     /// Unknown actions produce all zeros.
     pub fn encode_action(action: &str) -> Vec<f64> {
         let mut vec = vec![0.0; ACTION_DIM];
         match action {
             "extraction" => vec[0] = 1.0,
-            "compendium" => vec[1] = 1.0,
+            "summarization" => vec[1] = 1.0,
             "reorganization" => vec[2] = 1.0,
             "optimization" => vec[3] = 1.0,
             _ => {}
@@ -211,8 +211,12 @@ impl VocabularyManager {
 }
 
 impl Default for VocabularyManager {
+    /// Default vocabulary with reasonable capacity limits.
+    ///
+    /// Uses 100 topics and 200 tags, which matches typical usage. Prefer
+    /// `VocabularyManager::new(max_topics, max_tags)` for explicit control.
     fn default() -> Self {
-        Self::new(0, 0)
+        Self::new(100, 200)
     }
 }
 
@@ -394,8 +398,8 @@ mod tests {
         let extraction = VocabularyManager::encode_action("extraction");
         assert_eq!(extraction, vec![1.0, 0.0, 0.0, 0.0]);
 
-        let compendium = VocabularyManager::encode_action("compendium");
-        assert_eq!(compendium, vec![0.0, 1.0, 0.0, 0.0]);
+        let summarization = VocabularyManager::encode_action("summarization");
+        assert_eq!(summarization, vec![0.0, 1.0, 0.0, 0.0]);
 
         let reorg = VocabularyManager::encode_action("reorganization");
         assert_eq!(reorg, vec![0.0, 0.0, 1.0, 0.0]);

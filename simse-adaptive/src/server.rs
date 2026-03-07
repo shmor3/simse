@@ -2,7 +2,7 @@
 // AdaptiveServer — JSON-RPC dispatcher
 // ---------------------------------------------------------------------------
 //
-// Routes incoming JSON-RPC 2.0 requests (NDJSON over stdin) to VolumeStore
+// Routes incoming JSON-RPC 2.0 requests (NDJSON over stdin) to Store
 // operations.  Follows the same pattern as the VFS server: a main `run()` loop,
 // a `dispatch()` match, `with_store` / `with_store_mut` helpers, and
 // free-standing handler functions for each method.
@@ -17,17 +17,17 @@ use serde::Deserialize;
 use tokio::sync::mpsc;
 use tracing::info;
 
-use crate::encoder::LibraryEvent;
+use crate::pcn::encoder::InputEvent;
 use crate::error::AdaptiveError;
-use crate::pcn_config::PcnConfig;
+use crate::pcn::config::PcnConfig;
 use crate::persistence::{load_snapshot, save_snapshot};
-use crate::predictor::Predictor;
-use crate::prompt_injection::{format_memory_context, PromptInjectionOptions};
+use crate::pcn::predictor::Predictor;
+use crate::context_format::{format_context, ContextFormatOptions};
 use crate::protocol::*;
 use crate::query_dsl::parse_query;
-use crate::snapshot::ModelSnapshot;
-use crate::store::{AddEntry, DuplicateBehavior, StoreConfig, VolumeStore};
-use crate::trainer::TrainingWorker;
+use crate::pcn::snapshot::ModelSnapshot;
+use crate::store::{AddEntry, DuplicateBehavior, StoreConfig, Store};
+use crate::pcn::trainer::TrainingWorker;
 use crate::transport::NdjsonTransport;
 use crate::types::Lookup;
 
@@ -35,15 +35,15 @@ use crate::types::Lookup;
 // Server
 // ---------------------------------------------------------------------------
 
-/// JSON-RPC server that dispatches requests to a [`VolumeStore`] and PCN predictor.
+/// JSON-RPC server that dispatches requests to a [`Store`] and PCN predictor.
 pub struct AdaptiveServer {
 	transport: NdjsonTransport,
 	// Vector store
-	store: Option<VolumeStore>,
+	store: Option<Store>,
 	// PCN fields
 	snapshot: Arc<RwLock<ModelSnapshot>>,
 	predictor: Option<Predictor>,
-	event_tx: Option<mpsc::Sender<LibraryEvent>>,
+	event_tx: Option<mpsc::Sender<InputEvent>>,
 	pcn_initialized: bool,
 	pcn_config: Option<PcnConfig>,
 	embedding_dim: usize,
@@ -117,7 +117,7 @@ impl AdaptiveServer {
 			"store/getById" => self.with_state_transition(|s| handle_get_by_id(s, req.params)),
 			"store/getAll" => self.with_state(|s| {
 				let volumes = s.get_all();
-				Ok(serde_json::json!({ "volumes": volumes }))
+				Ok(serde_json::json!({ "entries": volumes }))
 			}),
 
 			// -- Search --------------------------------------------------
@@ -165,7 +165,7 @@ impl AdaptiveServer {
 				let sections = s.catalog_sections();
 				Ok(serde_json::json!({ "sections": sections }))
 			}),
-			"catalog/volumes" => self.with_state(|s| handle_catalog_volumes(s, req.params)),
+			"catalog/volumes" => self.with_state(|s| handle_catalog_entries(s, req.params)),
 
 			// -- Learning ------------------------------------------------
 			"learning/recordQuery" => {
@@ -183,7 +183,7 @@ impl AdaptiveServer {
 			"query/parse" => handle_query_parse(req.params),
 
 			// -- Prompt injection ----------------------------------------
-			"format/memoryContext" => handle_format_memory_context(req.params),
+			"format/memoryContext" => handle_format_context(req.params),
 
 			// -- Graph ---------------------------------------------------
 			"graph/neighbors" => self.with_state(|s| handle_graph_neighbors(s, req.params)),
@@ -234,7 +234,7 @@ impl AdaptiveServer {
 
 	fn with_state<F>(&self, f: F) -> Result<serde_json::Value, AdaptiveError>
 	where
-		F: FnOnce(&VolumeStore) -> Result<serde_json::Value, AdaptiveError>,
+		F: FnOnce(&Store) -> Result<serde_json::Value, AdaptiveError>,
 	{
 		match &self.store {
 			Some(s) => f(s),
@@ -244,7 +244,7 @@ impl AdaptiveServer {
 
 	fn with_state_transition<F>(&mut self, f: F) -> Result<serde_json::Value, AdaptiveError>
 	where
-		F: FnOnce(VolumeStore) -> Result<(VolumeStore, serde_json::Value), AdaptiveError>,
+		F: FnOnce(Store) -> Result<(Store, serde_json::Value), AdaptiveError>,
 	{
 		let state = self.store.take().ok_or(AdaptiveError::NotInitialized)?;
 		let backup = state.clone();
@@ -289,7 +289,7 @@ impl AdaptiveServer {
 			graph_config: Default::default(),
 		};
 
-		let store = VolumeStore::new(config);
+		let store = Store::new(config);
 		let store = store.initialize(p.storage_path.as_deref())?;
 		self.store = Some(store);
 
@@ -307,8 +307,13 @@ impl AdaptiveServer {
 		let config = p.config;
 		let embedding_dim = p.embedding_dim;
 
+		// Drop old event sender first to signal the existing training worker
+		// to shut down. Without this, re-initializing the PCN would leak the
+		// old worker task (it would block forever on the now-orphaned channel).
+		self.event_tx = None;
+
 		let snapshot = Arc::new(RwLock::new(ModelSnapshot::empty()));
-		let (tx, rx) = mpsc::channel::<LibraryEvent>(config.channel_capacity);
+		let (tx, rx) = mpsc::channel::<InputEvent>(config.channel_capacity);
 
 		let worker_snapshot = snapshot.clone();
 		let worker_config = config.clone();
@@ -474,7 +479,7 @@ fn parse_params<T: serde::de::DeserializeOwned>(
 	params: serde_json::Value,
 ) -> Result<T, AdaptiveError> {
 	serde_json::from_value(params)
-		.map_err(|e| AdaptiveError::Serialization(format!("Invalid params: {}", e)))
+		.map_err(|e| AdaptiveError::InvalidParams(e.to_string()))
 }
 
 #[derive(Deserialize)]
@@ -558,7 +563,7 @@ struct CatalogResolveParams {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CatalogRelocateParams {
-	volume_id: String,
+	entry_id: String,
 	new_topic: String,
 }
 
@@ -571,7 +576,7 @@ struct CatalogMergeParams {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct CatalogVolumesParams {
+struct CatalogEntriesParams {
 	topic: String,
 }
 
@@ -615,7 +620,7 @@ struct GraphTraverseParams {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct MemoryContextLookup {
-	volume: serde_json::Value,
+	entry: serde_json::Value,
 	score: f64,
 }
 
@@ -641,18 +646,18 @@ struct MemoryContextParams {
 // ---------------------------------------------------------------------------
 
 fn handle_add(
-	store: VolumeStore,
+	store: Store,
 	params: serde_json::Value,
-) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
 	let p: AddParams = parse_params(params)?;
 	let (store, id) = store.add(p.text, p.embedding, p.metadata.unwrap_or_default())?;
 	Ok((store, serde_json::json!({ "id": id })))
 }
 
 fn handle_add_batch(
-	store: VolumeStore,
+	store: Store,
 	params: serde_json::Value,
-) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
 	let p: AddBatchParams = parse_params(params)?;
 	let entries: Vec<AddEntry> = p
 		.entries
@@ -668,43 +673,43 @@ fn handle_add_batch(
 }
 
 fn handle_delete(
-	store: VolumeStore,
+	store: Store,
 	params: serde_json::Value,
-) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
 	let p: IdParams = parse_params(params)?;
 	let (store, deleted) = store.delete(&p.id);
 	Ok((store, serde_json::json!({ "deleted": deleted })))
 }
 
 fn handle_delete_batch(
-	store: VolumeStore,
+	store: Store,
 	params: serde_json::Value,
-) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
 	let p: IdsParams = parse_params(params)?;
 	let (store, count) = store.delete_batch(&p.ids);
 	Ok((store, serde_json::json!({ "count": count })))
 }
 
 fn handle_get_by_id(
-	store: VolumeStore,
+	store: Store,
 	params: serde_json::Value,
-) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
 	let p: IdParams = parse_params(params)?;
 	let (store, volume) = store.get_by_id(&p.id);
-	Ok((store, serde_json::json!({ "volume": volume })))
+	Ok((store, serde_json::json!({ "entry": volume })))
 }
 
 fn handle_search(
-	store: VolumeStore,
+	store: Store,
 	params: serde_json::Value,
-) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
 	let p: SearchParams = parse_params(params)?;
 	let (store, results) = store.search(&p.query_embedding, p.max_results.unwrap_or(10), p.threshold.unwrap_or(0.0))?;
 	Ok((store, serde_json::json!({ "results": results })))
 }
 
 fn handle_text_search(
-	store: &VolumeStore,
+	store: &Store,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, AdaptiveError> {
 	let options: crate::types::TextSearchOptions = parse_params(params)?;
@@ -713,16 +718,16 @@ fn handle_text_search(
 }
 
 fn handle_advanced_search(
-	store: VolumeStore,
+	store: Store,
 	params: serde_json::Value,
-) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
 	let options: crate::types::SearchOptions = parse_params(params)?;
 	let (store, results) = store.advanced_search(&options)?;
 	Ok((store, serde_json::json!({ "results": results })))
 }
 
 fn handle_filter_by_metadata(
-	store: &VolumeStore,
+	store: &Store,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, AdaptiveError> {
 	#[derive(Deserialize)]
@@ -731,29 +736,29 @@ fn handle_filter_by_metadata(
 	}
 	let p: P = parse_params(params)?;
 	let volumes = store.filter_by_metadata(&p.filters);
-	Ok(serde_json::json!({ "volumes": volumes }))
+	Ok(serde_json::json!({ "entries": volumes }))
 }
 
 fn handle_filter_by_date_range(
-	store: &VolumeStore,
+	store: &Store,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, AdaptiveError> {
 	let range: crate::types::DateRange = parse_params(params)?;
 	let volumes = store.filter_by_date_range(&range);
-	Ok(serde_json::json!({ "volumes": volumes }))
+	Ok(serde_json::json!({ "entries": volumes }))
 }
 
 fn handle_filter_by_topic(
-	store: &VolumeStore,
+	store: &Store,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, AdaptiveError> {
 	let p: FilterByTopicParams = parse_params(params)?;
 	let volumes = store.filter_by_topic(&p.topics);
-	Ok(serde_json::json!({ "volumes": volumes }))
+	Ok(serde_json::json!({ "entries": volumes }))
 }
 
 fn handle_recommend(
-	store: &VolumeStore,
+	store: &Store,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, AdaptiveError> {
 	let options: crate::types::RecommendOptions = parse_params(params)?;
@@ -762,7 +767,7 @@ fn handle_recommend(
 }
 
 fn handle_check_duplicate(
-	store: &VolumeStore,
+	store: &Store,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, AdaptiveError> {
 	let p: CheckDuplicateParams = parse_params(params)?;
@@ -773,7 +778,7 @@ fn handle_check_duplicate(
 }
 
 fn handle_find_duplicates(
-	store: &VolumeStore,
+	store: &Store,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, AdaptiveError> {
 	let p: FindDuplicatesParams = parse_params(params)?;
@@ -782,54 +787,54 @@ fn handle_find_duplicates(
 }
 
 fn handle_catalog_resolve(
-	store: VolumeStore,
+	store: Store,
 	params: serde_json::Value,
-) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
 	let p: CatalogResolveParams = parse_params(params)?;
 	let (store, resolved) = store.catalog_resolve(&p.topic);
 	Ok((store, serde_json::json!({ "resolved": resolved })))
 }
 
 fn handle_catalog_relocate(
-	store: VolumeStore,
+	store: Store,
 	params: serde_json::Value,
-) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
 	let p: CatalogRelocateParams = parse_params(params)?;
-	let store = store.catalog_relocate(&p.volume_id, &p.new_topic);
+	let store = store.catalog_relocate(&p.entry_id, &p.new_topic);
 	Ok((store, serde_json::json!({})))
 }
 
 fn handle_catalog_merge(
-	store: VolumeStore,
+	store: Store,
 	params: serde_json::Value,
-) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
 	let p: CatalogMergeParams = parse_params(params)?;
 	let store = store.catalog_merge(&p.source, &p.target);
 	Ok((store, serde_json::json!({})))
 }
 
-fn handle_catalog_volumes(
-	store: &VolumeStore,
+fn handle_catalog_entries(
+	store: &Store,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, AdaptiveError> {
-	let p: CatalogVolumesParams = parse_params(params)?;
-	let volume_ids = store.catalog_volumes(&p.topic);
-	Ok(serde_json::json!({ "volumeIds": volume_ids }))
+	let p: CatalogEntriesParams = parse_params(params)?;
+	let entry_ids = store.catalog_entries(&p.topic);
+	Ok(serde_json::json!({ "entryIds": entry_ids }))
 }
 
 fn handle_record_query(
-	store: VolumeStore,
+	store: Store,
 	params: serde_json::Value,
-) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
 	let p: RecordQueryParams = parse_params(params)?;
 	let store = store.record_query(&p.embedding, &p.selected_ids);
 	Ok((store, serde_json::json!({})))
 }
 
 fn handle_record_feedback(
-	store: VolumeStore,
+	store: Store,
 	params: serde_json::Value,
-) -> Result<(VolumeStore, serde_json::Value), AdaptiveError> {
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
 	let p: RecordFeedbackParams = parse_params(params)?;
 	let store = store.record_feedback(&p.entry_id, p.relevant);
 	Ok((store, serde_json::json!({})))
@@ -841,7 +846,7 @@ fn handle_query_parse(params: serde_json::Value) -> Result<serde_json::Value, Ad
 	serde_json::to_value(parsed).map_err(|e| AdaptiveError::Serialization(e.to_string()))
 }
 
-fn handle_format_memory_context(
+fn handle_format_context(
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, AdaptiveError> {
 	let p: MemoryContextParams = parse_params(params)?;
@@ -851,24 +856,24 @@ fn handle_format_memory_context(
 		.lookups
 		.into_iter()
 		.map(|l| {
-			let volume = serde_json::from_value(l.volume)
-				.map_err(|e| AdaptiveError::Serialization(format!("Invalid volume: {}", e)));
-			volume.map(|v| Lookup {
-				volume: v,
+			let parsed = serde_json::from_value(l.entry)
+				.map_err(|e| AdaptiveError::Serialization(format!("Invalid entry: {}", e)));
+			parsed.map(|v| Lookup {
+				entry: v,
 				score: l.score,
 			})
 		})
 		.collect::<Result<Vec<_>, _>>()?;
 
 	let options = match p.options {
-		Some(opts) => PromptInjectionOptions {
+		Some(opts) => ContextFormatOptions {
 			max_results: opts.max_results,
 			min_score: opts.min_score,
 			format: opts.format,
 			tag: opts.tag,
 			max_chars: opts.max_chars,
 		},
-		None => PromptInjectionOptions::default(),
+		None => ContextFormatOptions::default(),
 	};
 
 	let now = SystemTime::now()
@@ -876,7 +881,7 @@ fn handle_format_memory_context(
 		.unwrap_or_default()
 		.as_millis() as u64;
 
-	let text = format_memory_context(&lookups, &options, now);
+	let text = format_context(&lookups, &options, now);
 	Ok(serde_json::json!({ "text": text }))
 }
 
@@ -900,7 +905,7 @@ fn parse_edge_types(raw: &[String]) -> Vec<crate::graph::EdgeType> {
 }
 
 fn handle_graph_neighbors(
-	store: &VolumeStore,
+	store: &Store,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, AdaptiveError> {
 	let p: GraphNeighborsParams = parse_params(params)?;
@@ -911,7 +916,7 @@ fn handle_graph_neighbors(
 		.iter()
 		.map(|(edge, vol)| {
 			serde_json::json!({
-				"volume": vol,
+				"entry": vol,
 				"edge": {
 					"edgeType": format!("{:?}", edge.edge_type),
 					"weight": edge.weight,
@@ -924,7 +929,7 @@ fn handle_graph_neighbors(
 }
 
 fn handle_graph_traverse(
-	store: &VolumeStore,
+	store: &Store,
 	params: serde_json::Value,
 ) -> Result<serde_json::Value, AdaptiveError> {
 	let p: GraphTraverseParams = parse_params(params)?;
@@ -936,7 +941,7 @@ fn handle_graph_traverse(
 		.iter()
 		.map(|(node, vol)| {
 			serde_json::json!({
-				"volume": vol,
+				"entry": vol,
 				"depth": node.depth,
 				"path": node.path,
 			})

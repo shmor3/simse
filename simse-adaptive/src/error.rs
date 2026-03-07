@@ -7,9 +7,9 @@ pub enum AdaptiveError {
 	NotInitialized,
 	#[error("Empty text: cannot add empty text")]
 	EmptyText,
-	#[error("Empty embedding: cannot add volume with empty embedding")]
+	#[error("Empty embedding: cannot add entry with empty embedding")]
 	EmptyEmbedding,
-	#[error("Volume not found: {0}")]
+	#[error("Entry not found: {0}")]
 	NotFound(String),
 	#[error("Duplicate detected: similarity {0:.4}")]
 	Duplicate(f64),
@@ -42,22 +42,22 @@ pub enum AdaptiveError {
 impl AdaptiveError {
 	pub fn code(&self) -> &str {
 		match self {
-			Self::NotInitialized => "STACKS_NOT_LOADED",
-			Self::EmptyText => "STACKS_EMPTY_TEXT",
-			Self::EmptyEmbedding => "STACKS_EMPTY_EMBEDDING",
-			Self::NotFound(_) => "MEMORY_ENTRY_NOT_FOUND",
-			Self::Duplicate(_) => "STACKS_DUPLICATE",
-			Self::InvalidRegex(_) => "STACKS_INVALID_REGEX",
-			Self::Io(_) => "STACKS_IO",
-			Self::Serialization(_) => "STACKS_SERIALIZATION",
-			Self::Corruption(_) => "STACKS_CORRUPT",
+			Self::NotInitialized => "STORE_NOT_INITIALIZED",
+			Self::EmptyText => "STORE_EMPTY_TEXT",
+			Self::EmptyEmbedding => "STORE_EMPTY_EMBEDDING",
+			Self::NotFound(_) => "STORE_NOT_FOUND",
+			Self::Duplicate(_) => "STORE_DUPLICATE",
+			Self::InvalidRegex(_) => "STORE_INVALID_REGEX",
+			Self::Io(_) => "STORE_IO",
+			Self::Serialization(_) => "STORE_SERIALIZATION",
+			Self::Corruption(_) => "STORE_CORRUPT",
 			Self::InvalidConfig(_) => "PCN_INVALID_CONFIG",
 			Self::TrainingFailed(_) => "PCN_TRAINING_FAILED",
 			Self::InferenceTimeout => "PCN_INFERENCE_TIMEOUT",
 			Self::ModelCorrupt(_) => "PCN_MODEL_CORRUPT",
 			Self::VocabularyOverflow(_) => "PCN_VOCABULARY_OVERFLOW",
 			Self::InvalidParams(_) => "PCN_INVALID_PARAMS",
-			Self::Json(_) => "PCN_JSON_ERROR",
+			Self::Json(_) => "ADAPTIVE_JSON_ERROR",
 		}
 	}
 

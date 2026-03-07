@@ -887,7 +887,7 @@ mod tests {
 	use std::sync::Mutex as StdMutex;
 
 	// -----------------------------------------------------------------------
-	// Retry tests (MCP-specific wrapper over simse-resilience)
+	// Retry tests (MCP-specific resilience wrapper)
 	// -----------------------------------------------------------------------
 
 	#[tokio::test]

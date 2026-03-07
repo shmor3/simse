@@ -8,6 +8,7 @@
 use crate::config::AppConfig;
 use crate::events::EventBus;
 use crate::hooks::HookSystem;
+#[cfg(feature = "adaptive")]
 use crate::library::Library;
 use crate::logger::Logger;
 use crate::server::session::SessionManager;
@@ -39,6 +40,7 @@ pub struct CoreContext {
 	pub hook_system: HookSystem,
 	pub session_manager: SessionManager,
 	pub tool_registry: ToolRegistry,
+	#[cfg(feature = "adaptive")]
 	pub library: Option<Library>,
 }
 
@@ -61,11 +63,13 @@ impl CoreContext {
 			hook_system: HookSystem::new(),
 			session_manager: SessionManager::new(),
 			tool_registry: ToolRegistry::new(ToolRegistryOptions::default()),
+			#[cfg(feature = "adaptive")]
 			library: None,
 		}
 	}
 
 	/// Attach a library to the context.
+	#[cfg(feature = "adaptive")]
 	pub fn with_library(mut self, library: Library) -> Self {
 		self.library = Some(library);
 		self

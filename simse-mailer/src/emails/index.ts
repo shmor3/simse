@@ -17,6 +17,9 @@ import TeamInvite from './team-invite';
 import TwoFactor from './two-factor';
 import UsageWarning from './usage-warning';
 import Verify from './verify';
+import WaitlistEarlyPreview from './waitlist-early-preview';
+import WaitlistInvite from './waitlist-invite';
+import WaitlistWelcome from './waitlist-welcome';
 import WeeklyDigest from './weekly-digest';
 
 interface TemplateEntry {
@@ -99,7 +102,21 @@ const templates: Record<string, TemplateEntry> = {
 		component: InviteFriend,
 		subject: (p) => `${p.referrerName} thinks you'd like simse`,
 	},
+	'waitlist-welcome': {
+		component: WaitlistWelcome,
+		subject: () => "You're on the simse waitlist",
+	},
+	'waitlist-early-preview': {
+		component: WaitlistEarlyPreview,
+		subject: () => 'An early look at simse',
+	},
+	'waitlist-invite': {
+		component: WaitlistInvite,
+		subject: () => 'Your simse invite is ready',
+	},
 };
+
+export const templateNames = Object.keys(templates);
 
 export async function renderEmail(
 	template: string,

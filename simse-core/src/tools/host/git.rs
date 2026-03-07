@@ -106,7 +106,7 @@ pub fn register_git_tools(registry: &mut ToolRegistry, options: GitToolOptions) 
 			Box::pin(async move { run_git(&["status"], &wd).await })
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -148,18 +148,17 @@ pub fn register_git_tools(registry: &mut ToolRegistry, options: GitToolOptions) 
 				if args.get("staged").and_then(|v| v.as_bool()).unwrap_or(false) {
 					git_args.push("--cached".to_string());
 				}
-				if let Some(path) = args.get("path").and_then(|v| v.as_str()) {
-					if !path.is_empty() {
+				if let Some(path) = args.get("path").and_then(|v| v.as_str())
+					&& !path.is_empty() {
 						git_args.push("--".to_string());
 						git_args.push(path.to_string());
 					}
-				}
 				let arg_refs: Vec<&str> = git_args.iter().map(|s| s.as_str()).collect();
 				run_git(&arg_refs, &wd).await
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -213,7 +212,7 @@ pub fn register_git_tools(registry: &mut ToolRegistry, options: GitToolOptions) 
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -260,7 +259,7 @@ pub fn register_git_tools(registry: &mut ToolRegistry, options: GitToolOptions) 
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -316,7 +315,7 @@ pub fn register_git_tools(registry: &mut ToolRegistry, options: GitToolOptions) 
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -380,7 +379,7 @@ pub fn register_git_tools(registry: &mut ToolRegistry, options: GitToolOptions) 
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -451,7 +450,7 @@ pub fn register_git_tools(registry: &mut ToolRegistry, options: GitToolOptions) 
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -510,18 +509,17 @@ pub fn register_git_tools(registry: &mut ToolRegistry, options: GitToolOptions) 
 
 				git_args.push(remote.to_string());
 
-				if let Some(branch) = args.get("branch").and_then(|v| v.as_str()) {
-					if !branch.is_empty() {
+				if let Some(branch) = args.get("branch").and_then(|v| v.as_str())
+					&& !branch.is_empty() {
 						git_args.push(branch.to_string());
 					}
-				}
 
 				let arg_refs: Vec<&str> = git_args.iter().map(|s| s.as_str()).collect();
 				run_git(&arg_refs, &wd).await
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// -------------------------------------------------------------------
@@ -562,17 +560,16 @@ pub fn register_git_tools(registry: &mut ToolRegistry, options: GitToolOptions) 
 
 				let mut git_args: Vec<String> = vec!["pull".to_string(), remote.to_string()];
 
-				if let Some(branch) = args.get("branch").and_then(|v| v.as_str()) {
-					if !branch.is_empty() {
+				if let Some(branch) = args.get("branch").and_then(|v| v.as_str())
+					&& !branch.is_empty() {
 						git_args.push(branch.to_string());
 					}
-				}
 
 				let arg_refs: Vec<&str> = git_args.iter().map(|s| s.as_str()).collect();
 				run_git(&arg_refs, &wd).await
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 }

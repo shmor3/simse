@@ -7,23 +7,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Rust crate builds
 bun run build:adaptive-engine # cd simse-adaptive && cargo build --release
-bun run build:vfs-engine     # cd simse-vfs && cargo build --release
 bun run build:acp-engine     # cd simse-acp && cargo build --release
 bun run build:mcp-engine     # cd simse-mcp && cargo build --release
 bun run build:core           # cd simse-core && cargo build --release
 bun run build:tui            # cd simse-tui && cargo build --release
-bun run build:vsh-engine     # cd simse-vsh && cargo build --release
-bun run build:vnet-engine    # cd simse-vnet && cargo build --release
 bun run build:sandbox-engine # cd simse-sandbox && cargo build --release
 bun run build:remote-engine  # cd simse-remote && cargo build --release
 
 # Rust tests
 cd simse-adaptive && cargo test # Rust adaptive engine tests
-cd simse-vfs && cargo test     # Rust VFS engine tests
 cd simse-acp && cargo test     # Rust ACP engine tests
 cd simse-mcp && cargo test     # Rust MCP engine tests
-cd simse-vsh && cargo test     # Rust VSH engine tests
-cd simse-vnet && cargo test    # Rust vnet engine tests
 cd simse-core && cargo test    # Rust core orchestration tests
 cd simse-ui-core && cargo test # Rust UI core tests
 cd simse-sandbox && cargo test # Rust sandbox engine tests
@@ -35,11 +29,10 @@ cd simse-api && npm run lint       # API gateway lint
 cd simse-auth && npm run lint      # Auth service lint
 cd simse-payments && npm run lint  # Payments service lint
 cd simse-cdn && npm run lint       # CDN worker lint
-cd simse-relay && npm run lint     # Relay worker lint
 
 # TypeScript tests
-cd simse-cdn && npm run test   # CDN worker tests (Vitest + @cloudflare/vitest-pool-workers)
-cd simse-relay && npm run test # Relay worker tests (Vitest + @cloudflare/vitest-pool-workers)
+cd simse-cdn && npm run test    # CDN worker tests (Vitest + @cloudflare/vitest-pool-workers)
+cd simse-mailer && npm run test # Mailer tests (Vitest + @cloudflare/vitest-pool-workers)
 ```
 
 ## Architecture
@@ -53,24 +46,21 @@ The entire core is implemented in **Rust**. Each crate is a standalone binary co
 ```tree
 simse-core/                 # Pure Rust crate — orchestration library + JSON-RPC binary server
 simse-adaptive/             # Pure Rust crate — adaptive engine (vector store + PCN, JSON-RPC over stdio)
-simse-vfs/                  # Pure Rust crate — virtual filesystem engine (vfs:// in-memory + file:// disk, JSON-RPC over stdio)
 simse-acp/                  # Pure Rust crate — ACP engine (JSON-RPC over stdio)
 simse-mcp/                  # Pure Rust crate — MCP engine (JSON-RPC over stdio)
-simse-vsh/                  # Pure Rust crate — virtual shell engine (JSON-RPC over stdio)
-simse-vnet/                 # Pure Rust crate — virtual network engine (JSON-RPC over stdio)
-simse-sandbox/              # Pure Rust crate — unified sandbox engine (JSON-RPC over stdio)
+simse-sandbox/              # Pure Rust crate — unified sandbox engine (VFS + VSH + VNet, JSON-RPC over stdio)
 simse-ui-core/              # Pure Rust crate — platform-agnostic UI logic (no I/O)
 simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Architecture)
 simse-remote/               # Pure Rust crate — remote access engine (JSON-RPC over stdio)
 simse-engine/               # Pure Rust crate — core engine
-simse-relay/                # TypeScript — Relay worker (WebSocket tunnel, Cloudflare Worker + Durable Objects)
 simse-cdn/                  # TypeScript — CDN worker (R2 + KV, Cloudflare Worker)
-simse-cloud/                # TypeScript — SaaS web app (React Router + Cloudflare Pages)
+simse-app/                  # TypeScript — SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects)
 simse-api/                  # TypeScript — API gateway (Cloudflare Worker, proxies to backend services)
 simse-auth/                 # TypeScript — Auth service (Cloudflare Worker, D1, users/sessions/teams/API keys)
 simse-payments/             # TypeScript — Payments service (Cloudflare Worker, Stripe)
 simse-landing/              # TypeScript — Landing page (React Router + Cloudflare)
 simse-mailer/               # TypeScript — Email templates + notifications
+simse-status/               # TypeScript — Status page (React Router v7 + Cloudflare Pages + D1 + Cron)
 simse-brand/                # Brand assets (logos, screenshots, guidelines, copy)
 ```
 
@@ -152,14 +142,6 @@ simse-adaptive/             # Pure Rust crate — vector store + predictive codi
     trainer.rs              # Model training (async background worker)
     snapshot.rs             # Model snapshots (serializable weights)
 
-simse-vfs/                  # Pure Rust crate — virtual filesystem
-  src/
-    vfs.rs                  # Core VFS implementation (vfs:// in-memory backend)
-    disk.rs                 # DiskFs: real filesystem operations (file:// backend, shadow history)
-    diff.rs                 # Diff generation (Myers algorithm, shared by both backends)
-    glob.rs                 # Glob pattern matching
-    search.rs               # File search implementation
-
 simse-acp/                  # Pure Rust crate — ACP engine
   src/
     client.rs               # AcpClient: multi-server pool, sessions, agents
@@ -176,47 +158,48 @@ simse-mcp/                  # Pure Rust crate — MCP engine
     stdio_transport.rs      # Stdio transport for MCP server connections
     http_transport.rs       # HTTP transport for remote MCP servers
 
-simse-vsh/                  # Pure Rust crate — virtual shell engine
-  src/
-    error.rs                # VshError enum with VSH_ code prefixes
-    protocol.rs             # JSON-RPC request/response types (19 methods)
-    transport.rs            # NdjsonTransport for JSON-RPC over stdio
-    sandbox.rs              # SandboxConfig: path validation, command filtering
-    executor.rs             # Command execution via tokio::process with timeouts
-    shell.rs                # VirtualShell: session management, env, aliases, history
-    server.rs               # VshServer: JSON-RPC dispatcher (async)
-
-simse-vnet/                 # Pure Rust crate — virtual network engine
-  src/
-    error.rs                # VnetError enum with VNET_ code prefixes
-    protocol.rs             # JSON-RPC request/response types (19 methods)
-    transport.rs            # NdjsonTransport for JSON-RPC over stdio
-    sandbox.rs              # NetSandboxConfig: host/port/protocol allowlist validation
-    mock_store.rs           # MockStore: mock registry + glob pattern matching
-    session.rs              # SessionManager: persistent connection tracking (WS, TCP)
-    network.rs              # VirtualNetwork: core logic, mock HTTP, sandbox, metrics
-    server.rs               # VnetServer: 19-method JSON-RPC dispatch
-
-simse-sandbox/              # Pure Rust crate — unified sandbox engine
+simse-sandbox/              # Pure Rust crate — unified sandbox engine (VFS + VSH + VNet merged)
   src/
     lib.rs                  # Module declarations, re-exports
     main.rs                 # Binary entry point (simse-sandbox-engine)
-    error.rs                # SandboxError enum (SANDBOX_ prefix)
+    error.rs                # SandboxError enum (SANDBOX_ prefix, all VFS/VSH/VNet variants)
     protocol.rs             # JSON-RPC param/result types
     transport.rs            # NdjsonTransport (same pattern as other crates)
     server.rs               # SandboxServer: JSON-RPC dispatcher (63 methods across 7 domains)
     sandbox.rs              # Sandbox: unified orchestrator, backend switching
     config.rs               # BackendConfig, SshConfig, SshAuth
+    vfs_store.rs            # VirtualFs: in-memory filesystem (vfs:// backend)
+    vfs_disk.rs             # DiskFs: real filesystem with shadow history (file:// backend)
+    vfs_diff.rs             # Myers diff algorithm
+    vfs_glob.rs             # Glob pattern matching
+    vfs_search.rs           # File search implementation
+    vfs_path.rs             # Path utilities, VfsLimits
+    vfs_types.rs            # Shared VFS types: DirEntry, HistoryEntry, ReadFileResult, etc.
+    vfs_backend.rs          # FsImpl enum { Local(DiskFs), Ssh(SshFs) }
+    vsh_shell.rs            # VirtualShell: session management, env, aliases, history
+    vsh_executor.rs         # Command execution via tokio::process with timeouts
+    vsh_sandbox.rs          # SandboxConfig: path validation, command filtering
+    vsh_backend.rs          # ShellImpl enum { Local(LocalShell), Ssh(SshShell) }
+    vnet_network.rs         # VirtualNetwork: core logic, mock HTTP, sandbox, metrics
+    vnet_sandbox.rs         # NetSandboxConfig: host/port/protocol allowlist validation
+    vnet_mock_store.rs      # MockStore: mock registry + glob pattern matching
+    vnet_session.rs         # SessionManager: persistent connection tracking (WS, TCP)
+    vnet_types.rs           # Shared VNet types: HttpResponseResult, MetricsResult, etc.
+    vnet_local.rs           # LocalNet: reqwest HTTP + DNS resolution
+    vnet_backend.rs         # NetImpl enum { Local(LocalNet), Ssh(SshNet) }
     ssh/
       mod.rs                # SSH module root
       pool.rs               # SshPool: multiplexed russh connection manager
       channel.rs            # ExecOutput, channel read with timeout
-      fs_backend.rs         # FsBackend impl over SFTP
-      shell_backend.rs      # ShellBackend impl over exec channel
-      net_backend.rs        # NetBackend impl over exec channel (curl/getent)
+      fs.rs                 # SshFs: SFTP-backed filesystem
+      shell.rs              # SshShell: exec channel command execution
+      net.rs                # SshNet: exec channel network operations (curl/getent)
   tests/
     integration.rs          # 10 integration tests (local backend)
     ssh_integration.rs      # SSH integration tests (feature-gated)
+    vfs.rs                  # 60 VFS unit tests (VirtualFs + DiskFs)
+    vsh.rs                  # 24 VSH unit tests (VirtualShell)
+    vnet.rs                 # 42 VNet unit tests (VirtualNetwork)
 
 simse-remote/              # Pure Rust crate — remote access engine
   src/
@@ -340,20 +323,18 @@ simse-payments/             # Payments service — Stripe subscriptions, credits
     middleware/
       auth.ts               # Service-to-service auth (X-User-Id)
 
-simse-relay/                # Relay service — WebSocket tunnel (Durable Objects)
-  src/
-    index.ts                # Hono app entry, health + analytics + secrets middleware
-    types.ts                # Env interface (DurableObjectNamespace, SecretsStore, AnalyticsEngine)
-    tunnel.ts               # Durable Object: TunnelSession (WebSocket pair management)
-    routes/
-      ws.ts                 # WebSocket upgrade handlers (/ws/tunnel, /ws/client)
-      tunnels.ts            # REST endpoint for listing active tunnels
-  wrangler.toml             # Durable Object + Analytics Engine bindings
+simse-cloud/                # SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects)
+  worker.ts                 # CF Pages worker entry (React Router + relay routing)
+  app/
+    relay/
+      tunnel.ts             # TunnelSession Durable Object (WebSocket pair management)
+      handler.ts            # Relay request handler (/ws/tunnel, /ws/client, /tunnels)
+  wrangler.toml             # Pages + Durable Object + Analytics Engine bindings
 ```
 
 ### Key Patterns
 
-- **Rust-first architecture**: All core logic is in Rust. TS packages are application/service layers (simse-cloud, simse-api, simse-auth, simse-payments, simse-cdn, simse-landing, simse-mailer).
+- **Rust-first architecture**: All core logic is in Rust. TS packages are application/service layers (simse-app (includes relay), simse-api, simse-auth, simse-payments, simse-cdn, simse-landing, simse-mailer).
 - **JSON-RPC 2.0 / NDJSON stdio**: All Rust crates expose their APIs via JSON-RPC over newline-delimited JSON on stdin/stdout. Tracing/logs go to stderr.
 - **Callback pattern**: Tools, hooks, chains, and loops registered from external callers use oneshot channels + JSON-RPC notifications for async callback execution.
 - **CoreContext wiring**: `CoreContext` ties together EventBus, Logger, AppConfig, TaskList, HookSystem, SessionManager, ToolRegistry, and optional Library.
@@ -363,8 +344,8 @@ simse-relay/                # Relay service — WebSocket tunnel (Durable Object
 - **Session forking**: `SessionManager.fork(id)` clones conversation state, creates fresh event bus and new ID.
 - **Structured compaction**: Auto-compaction requests 6 sections (Goal, Progress, Current State, Key Decisions, Relevant Files, Next Steps).
 - **Arc<AtomicBool> for health flags**: Connection health shared between spawned reader tasks and main struct.
-- **Backend trait abstraction**: Each engine crate (VFS, VSH, VNet) defines a backend trait (`FsBackend`, `ShellBackend`, `NetBackend`). LocalBackend wraps existing logic, SshBackend in simse-sandbox uses russh multiplexed SSH connections.
-- **Workers Analytics Engine**: All 7 Cloudflare Workers write to a shared `simse-analytics` dataset via `ANALYTICS: AnalyticsEngineDataset` binding. Data points include method, path, status, latency, userId, geo (country/city/continent), userAgent, and cfRay. Hono workers use an analytics middleware; CDN wraps its fetch handler; Pages workers wrap worker.ts with `ctx.waitUntil`.
+- **Backend enum dispatch**: simse-sandbox uses enum dispatch (`FsImpl`, `ShellImpl`, `NetImpl`) instead of trait objects. Each enum has `Local` and `Ssh` variants. Local wraps in-crate logic, Ssh uses russh multiplexed SSH connections.
+- **Workers Analytics Engine**: All Cloudflare Workers write to a shared `simse-analytics` dataset via `ANALYTICS: AnalyticsEngineDataset` binding. Data points include method, path, status, latency, userId, geo (country/city/continent), userAgent, and cfRay. Hono workers use an analytics middleware; CDN wraps its fetch handler; Pages workers wrap worker.ts with `ctx.waitUntil`.
 
 ### ACP Protocol
 

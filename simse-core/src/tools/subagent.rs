@@ -292,11 +292,10 @@ pub fn register_subagent_tools(
 				};
 
 				// Fire on_start callback
-				if let Some(ref cbs) = callbacks {
-					if let Some(ref on_start) = cbs.on_start {
+				if let Some(ref cbs) = callbacks
+					&& let Some(ref on_start) = cbs.on_start {
 						on_start(&info);
 					}
-				}
 
 				match loop_runner
 					.run_subagent(
@@ -309,27 +308,25 @@ pub fn register_subagent_tools(
 				{
 					Ok(result) => {
 						// Fire on_complete callback
-						if let Some(ref cbs) = callbacks {
-							if let Some(ref on_complete) = cbs.on_complete {
+						if let Some(ref cbs) = callbacks
+							&& let Some(ref on_complete) = cbs.on_complete {
 								on_complete(&id, &result);
 							}
-						}
 						Ok(result.text)
 					}
 					Err(err) => {
 						// Fire on_error callback
-						if let Some(ref cbs) = callbacks {
-							if let Some(ref on_error) = cbs.on_error {
+						if let Some(ref cbs) = callbacks
+							&& let Some(ref on_error) = cbs.on_error {
 								on_error(&id, &err);
 							}
-						}
 						Err(err)
 					}
 				}
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 
 	// 2. subagent_delegate
@@ -397,11 +394,10 @@ pub fn register_subagent_tools(
 				};
 
 				// Fire on_start callback
-				if let Some(ref cbs) = callbacks {
-					if let Some(ref on_start) = cbs.on_start {
+				if let Some(ref cbs) = callbacks
+					&& let Some(ref on_start) = cbs.on_start {
 						on_start(&info);
 					}
-				}
 
 				match delegate_runner
 					.delegate(task, server_name, agent_id)
@@ -415,27 +411,25 @@ pub fn register_subagent_tools(
 						};
 
 						// Fire on_complete callback
-						if let Some(ref cbs) = callbacks {
-							if let Some(ref on_complete) = cbs.on_complete {
+						if let Some(ref cbs) = callbacks
+							&& let Some(ref on_complete) = cbs.on_complete {
 								on_complete(&id, &result);
 							}
-						}
 
 						Ok(text)
 					}
 					Err(err) => {
 						// Fire on_error callback
-						if let Some(ref cbs) = callbacks {
-							if let Some(ref on_error) = cbs.on_error {
+						if let Some(ref cbs) = callbacks
+							&& let Some(ref on_error) = cbs.on_error {
 								on_error(&id, &err);
 							}
-						}
 						Err(err)
 					}
 				}
 			})
 		});
 
-		registry.register(definition, handler);
+		registry.register_mut(definition, handler);
 	}
 }

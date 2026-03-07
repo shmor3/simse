@@ -148,8 +148,8 @@ impl LibrarianRegistry {
 		&self,
 		definition: LibrarianDefinition,
 	) -> Result<ManagedLibrarian, SimseError> {
-		if definition.acp.is_some() {
-			if let Some(ref factory) = self.connection_factory {
+		if definition.acp.is_some()
+			&& let Some(ref factory) = self.connection_factory {
 				let (connection, provider) = factory.create_connection(&definition).await?;
 				let librarian = Librarian::new(
 					Arc::clone(&provider),
@@ -165,7 +165,6 @@ impl LibrarianRegistry {
 					connection: Some(connection),
 				});
 			}
-		}
 
 		let librarian = Librarian::new(
 			Arc::clone(&self.default_provider),
@@ -304,11 +303,10 @@ impl LibrarianRegistry {
 			libs.remove(name)
 		};
 
-		if let Some(managed) = managed {
-			if let Some(ref conn) = managed.connection {
+		if let Some(managed) = managed
+			&& let Some(ref conn) = managed.connection {
 				let _ = conn.close().await;
 			}
-		}
 
 		// Delete file from disk (ignore errors)
 		let file_path = self.librarians_dir.join(format!("{}.json", name));
@@ -447,10 +445,10 @@ Choose the best librarian. Return ONLY valid JSON:
 			topic, preview, bids_description
 		);
 
-		if let Ok(response) = self.default_provider.generate(&prompt, None).await {
-			if let Ok(parsed) = serde_json::from_str::<ArbitrationJson>(&response) {
-				if let Some(ref winner) = parsed.winner {
-					if candidate_names.contains(winner) {
+		if let Ok(response) = self.default_provider.generate(&prompt, None).await
+			&& let Ok(parsed) = serde_json::from_str::<ArbitrationJson>(&response)
+				&& let Some(ref winner) = parsed.winner
+					&& candidate_names.contains(winner) {
 						return ArbitrationResult {
 							winner: winner.clone(),
 							reason: parsed
@@ -459,9 +457,6 @@ Choose the best librarian. Return ONLY valid JSON:
 							bids,
 						};
 					}
-				}
-			}
-		}
 
 		// Fallback: highest bidder wins
 		ArbitrationResult {

@@ -9,6 +9,18 @@ pub enum BackendConfig {
     Ssh(SshConfig),
 }
 
+/// Policy for verifying SSH server host keys.
+#[derive(Debug, Clone, Default)]
+pub enum HostKeyPolicy {
+    /// Accept all host keys without verification (INSECURE).
+    /// Suitable only for trusted/internal networks.
+    #[default]
+    AcceptAll,
+    /// Accept only a server whose public key matches this SHA256 fingerprint.
+    /// Format: `"SHA256:<base64>"` (same as `ssh-keygen -lf`).
+    Fingerprint(String),
+}
+
 #[derive(Debug, Clone)]
 pub struct SshConfig {
     pub host: String,
@@ -17,6 +29,7 @@ pub struct SshConfig {
     pub auth: SshAuth,
     pub max_channels: usize,
     pub keepalive_interval_ms: u64,
+    pub host_key_policy: HostKeyPolicy,
 }
 
 #[derive(Debug, Clone)]
@@ -97,6 +110,11 @@ impl SshConfig {
             }
         };
 
+        let host_key_policy = match &params.host_key_fingerprint {
+            Some(fp) => HostKeyPolicy::Fingerprint(fp.clone()),
+            None => HostKeyPolicy::AcceptAll,
+        };
+
         Ok(SshConfig {
             host: params.host.clone(),
             port: params.port.unwrap_or(22),
@@ -104,6 +122,7 @@ impl SshConfig {
             auth,
             max_channels: params.max_channels.unwrap_or(10),
             keepalive_interval_ms: params.keepalive_interval_ms.unwrap_or(15_000),
+            host_key_policy,
         })
     }
 }

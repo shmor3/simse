@@ -101,6 +101,11 @@ impl ToolHandler for CallbackToolHandler {
 // ---------------------------------------------------------------------------
 
 /// JSON-RPC server that dispatches requests to an [`McpClient`] and [`McpServer`].
+///
+/// Uses `with_state` / `with_state_transition` for FP-style state access:
+/// - `with_state`: borrows client/server immutably for read-only operations
+/// - `with_state_transition`: takes owned state via `Option::take()` for mutations,
+///   clones backup on error to preserve state safety
 pub struct McpRpcServer {
 	transport: NdjsonTransport,
 	client: Option<McpClient>,
@@ -185,22 +190,108 @@ impl McpRpcServer {
 		}
 	}
 
-	// ── Client accessor ──────────────────────────────────────────────────
+	// ── State access helpers (FP pattern) ────────────────────────────────
 
-	fn require_client(&self) -> Option<&McpClient> {
-		self.client.as_ref()
+	/// Borrow server immutably for synchronous read-only operations.
+	/// Returns `None` and writes an error if not initialized.
+	fn with_server<F, R>(&self, req_id: u64, f: F) -> Option<R>
+	where
+		F: FnOnce(&McpServer) -> R,
+	{
+		match self.server.as_ref() {
+			Some(s) => Some(f(s)),
+			None => {
+				self.transport.write_error(
+					req_id,
+					MCP_ERROR,
+					"Server not initialized".to_string(),
+					None,
+				);
+				None
+			}
+		}
 	}
 
-	fn require_client_mut(&mut self) -> Option<&mut McpClient> {
-		self.client.as_mut()
+	/// Take owned server state for mutation (owned-return pattern).
+	/// On success, the callback returns the new server state.
+	/// Returns `false` and writes an error if not initialized.
+	fn with_server_transition<F>(&mut self, req_id: u64, f: F) -> bool
+	where
+		F: FnOnce(McpServer) -> McpServer,
+	{
+		match self.server.take() {
+			Some(server) => {
+				self.server = Some(f(server));
+				true
+			}
+			None => {
+				self.transport.write_error(
+					req_id,
+					MCP_ERROR,
+					"Server not initialized".to_string(),
+					None,
+				);
+				false
+			}
+		}
 	}
 
-	fn require_server(&self) -> Option<&McpServer> {
-		self.server.as_ref()
+	/// Take owned client state for mutation (owned-return pattern).
+	/// On success, the callback returns the new client state.
+	/// Returns `false` and writes an error if not initialized.
+	fn with_client_transition<F>(&mut self, req_id: u64, f: F) -> bool
+	where
+		F: FnOnce(McpClient) -> McpClient,
+	{
+		match self.client.take() {
+			Some(client) => {
+				self.client = Some(f(client));
+				true
+			}
+			None => {
+				self.transport.write_error(
+					req_id,
+					MCP_ERROR,
+					"Not initialized".to_string(),
+					None,
+				);
+				false
+			}
+		}
 	}
 
-	fn require_server_mut(&mut self) -> Option<&mut McpServer> {
-		self.server.as_mut()
+	/// Check that client is initialized, writing an error if not.
+	/// Returns a reference to the client for async operations.
+	fn require_client(&self, req_id: u64) -> Option<&McpClient> {
+		match self.client.as_ref() {
+			Some(c) => Some(c),
+			None => {
+				self.transport.write_error(
+					req_id,
+					MCP_ERROR,
+					"Not initialized".to_string(),
+					None,
+				);
+				None
+			}
+		}
+	}
+
+	/// Check that client is initialized, writing an error if not.
+	/// Returns a mutable reference to the client for async I/O operations.
+	fn require_client_mut(&mut self, req_id: u64) -> Option<&mut McpClient> {
+		match self.client.as_mut() {
+			Some(c) => Some(c),
+			None => {
+				self.transport.write_error(
+					req_id,
+					MCP_ERROR,
+					"Not initialized".to_string(),
+					None,
+				);
+				None
+			}
+		}
 	}
 
 	// ── Initialize ───────────────────────────────────────────────────────
@@ -296,19 +387,6 @@ impl McpRpcServer {
 	// ── Connect ──────────────────────────────────────────────────────────
 
 	async fn handle_connect(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client_mut() {
-			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
 		let params: ConnectParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(e) => {
@@ -316,6 +394,12 @@ impl McpRpcServer {
 					.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
 				return;
 			}
+		};
+
+		// Connection management is I/O — use require_client_mut
+		let client = match self.require_client_mut(req.id) {
+			Some(c) => c,
+			None => return,
 		};
 
 		match client.connect(&params.server).await {
@@ -337,17 +421,9 @@ impl McpRpcServer {
 	// ── Connect all ──────────────────────────────────────────────────────
 
 	async fn handle_connect_all(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client_mut() {
+		let client = match self.require_client_mut(req.id) {
 			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
+			None => return,
 		};
 
 		match client.connect_all().await {
@@ -371,19 +447,6 @@ impl McpRpcServer {
 	// ── Disconnect ───────────────────────────────────────────────────────
 
 	async fn handle_disconnect(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client_mut() {
-			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
 		let params: ConnectParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(e) => {
@@ -391,6 +454,11 @@ impl McpRpcServer {
 					.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
 				return;
 			}
+		};
+
+		let client = match self.require_client_mut(req.id) {
+			Some(c) => c,
+			None => return,
 		};
 
 		match client.disconnect(&params.server).await {
@@ -411,23 +479,15 @@ impl McpRpcServer {
 
 	// ── List tools ───────────────────────────────────────────────────────
 
-	async fn handle_list_tools(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client() {
-			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
+	async fn handle_list_tools(&self, req: JsonRpcRequest) {
 		let params: OptionalServerParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(_) => OptionalServerParams { server: None },
+		};
+
+		let client = match self.require_client(req.id) {
+			Some(c) => c,
+			None => return,
 		};
 
 		match client.list_tools(params.server.as_deref()).await {
@@ -450,20 +510,7 @@ impl McpRpcServer {
 
 	// ── Call tool ────────────────────────────────────────────────────────
 
-	async fn handle_call_tool(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client() {
-			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
+	async fn handle_call_tool(&self, req: JsonRpcRequest) {
 		let params: CallToolParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(e) => {
@@ -471,6 +518,11 @@ impl McpRpcServer {
 					.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
 				return;
 			}
+		};
+
+		let client = match self.require_client(req.id) {
+			Some(c) => c,
+			None => return,
 		};
 
 		match client
@@ -496,23 +548,15 @@ impl McpRpcServer {
 
 	// ── List resources ───────────────────────────────────────────────────
 
-	async fn handle_list_resources(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client() {
-			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
+	async fn handle_list_resources(&self, req: JsonRpcRequest) {
 		let params: OptionalServerParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(_) => OptionalServerParams { server: None },
+		};
+
+		let client = match self.require_client(req.id) {
+			Some(c) => c,
+			None => return,
 		};
 
 		match client.list_resources(params.server.as_deref()).await {
@@ -535,20 +579,7 @@ impl McpRpcServer {
 
 	// ── Read resource ────────────────────────────────────────────────────
 
-	async fn handle_read_resource(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client() {
-			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
+	async fn handle_read_resource(&self, req: JsonRpcRequest) {
 		let params: ReadResourceRpcParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(e) => {
@@ -556,6 +587,11 @@ impl McpRpcServer {
 					.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
 				return;
 			}
+		};
+
+		let client = match self.require_client(req.id) {
+			Some(c) => c,
+			None => return,
 		};
 
 		match client.read_resource(&params.server, &params.uri).await {
@@ -578,23 +614,15 @@ impl McpRpcServer {
 
 	// ── List resource templates ──────────────────────────────────────────
 
-	async fn handle_list_resource_templates(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client() {
-			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
+	async fn handle_list_resource_templates(&self, req: JsonRpcRequest) {
 		let params: OptionalServerParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(_) => OptionalServerParams { server: None },
+		};
+
+		let client = match self.require_client(req.id) {
+			Some(c) => c,
+			None => return,
 		};
 
 		match client
@@ -620,23 +648,15 @@ impl McpRpcServer {
 
 	// ── List prompts ─────────────────────────────────────────────────────
 
-	async fn handle_list_prompts(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client() {
-			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
+	async fn handle_list_prompts(&self, req: JsonRpcRequest) {
 		let params: OptionalServerParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(_) => OptionalServerParams { server: None },
+		};
+
+		let client = match self.require_client(req.id) {
+			Some(c) => c,
+			None => return,
 		};
 
 		match client.list_prompts(params.server.as_deref()).await {
@@ -659,20 +679,7 @@ impl McpRpcServer {
 
 	// ── Get prompt ───────────────────────────────────────────────────────
 
-	async fn handle_get_prompt(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client() {
-			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
+	async fn handle_get_prompt(&self, req: JsonRpcRequest) {
 		let params: GetPromptRpcParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(e) => {
@@ -680,6 +687,11 @@ impl McpRpcServer {
 					.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
 				return;
 			}
+		};
+
+		let client = match self.require_client(req.id) {
+			Some(c) => c,
+			None => return,
 		};
 
 		match client
@@ -705,20 +717,7 @@ impl McpRpcServer {
 
 	// ── Set logging level ────────────────────────────────────────────────
 
-	async fn handle_set_logging_level(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client() {
-			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
+	async fn handle_set_logging_level(&self, req: JsonRpcRequest) {
 		let params: SetLoggingLevelParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(e) => {
@@ -726,6 +725,11 @@ impl McpRpcServer {
 					.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
 				return;
 			}
+		};
+
+		let client = match self.require_client(req.id) {
+			Some(c) => c,
+			None => return,
 		};
 
 		match client
@@ -749,20 +753,7 @@ impl McpRpcServer {
 
 	// ── Complete ─────────────────────────────────────────────────────────
 
-	async fn handle_complete(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client() {
-			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
+	async fn handle_complete(&self, req: JsonRpcRequest) {
 		let params: CompleteParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(e) => {
@@ -770,6 +761,11 @@ impl McpRpcServer {
 					.write_error(req.id, INVALID_PARAMS, e.to_string(), None);
 				return;
 			}
+		};
+
+		let client = match self.require_client(req.id) {
+			Some(c) => c,
+			None => return,
 		};
 
 		match client
@@ -793,22 +789,9 @@ impl McpRpcServer {
 		}
 	}
 
-	// ── Set roots ────────────────────────────────────────────────────────
+	// ── Set roots (owned-return via with_client_transition) ──────────────
 
 	async fn handle_set_roots(&mut self, req: JsonRpcRequest) {
-		let client = match self.require_client_mut() {
-			Some(c) => c,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
 		let params: SetRootsParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(e) => {
@@ -818,54 +801,37 @@ impl McpRpcServer {
 			}
 		};
 
-		client.set_roots(params.roots);
-		self.transport
-			.write_response(req.id, serde_json::json!({}));
+		if self.with_client_transition(req.id, |client| client.set_roots(params.roots)) {
+			self.transport
+				.write_response(req.id, serde_json::json!({}));
+		}
 	}
 
 	// ── Server start ─────────────────────────────────────────────────────
 
-	async fn handle_server_start(&mut self, req: JsonRpcRequest) {
-		let server = match self.require_server() {
-			Some(s) => s,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Server not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
-		server.set_running(true);
-		self.transport
-			.write_response(req.id, serde_json::json!({}));
+	async fn handle_server_start(&self, req: JsonRpcRequest) {
+		self.with_server(req.id, |server| {
+			server.set_running(true);
+		});
+		if self.server.is_some() {
+			self.transport
+				.write_response(req.id, serde_json::json!({}));
+		}
 	}
 
 	// ── Server stop ──────────────────────────────────────────────────────
 
-	async fn handle_server_stop(&mut self, req: JsonRpcRequest) {
-		let server = match self.require_server() {
-			Some(s) => s,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Server not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
-		server.set_running(false);
-		self.transport
-			.write_response(req.id, serde_json::json!({}));
+	async fn handle_server_stop(&self, req: JsonRpcRequest) {
+		self.with_server(req.id, |server| {
+			server.set_running(false);
+		});
+		if self.server.is_some() {
+			self.transport
+				.write_response(req.id, serde_json::json!({}));
+		}
 	}
 
-	// ── Register tool ────────────────────────────────────────────────────
+	// ── Register tool (owned-return via with_server_transition) ──────────
 
 	async fn handle_register_tool(&mut self, req: JsonRpcRequest) {
 		let params: RegisterToolParams = match parse_params(req.params) {
@@ -883,7 +849,7 @@ impl McpRpcServer {
 			input_schema: params.input_schema,
 		};
 
-		// Clone the Arc before taking mutable borrow on self.server
+		// Clone the Arc before the transition closure
 		let pending = Arc::clone(&self.pending_tool_calls);
 
 		let handler = CallbackToolHandler {
@@ -892,26 +858,13 @@ impl McpRpcServer {
 			pending,
 		};
 
-		let server = match self.require_server_mut() {
-			Some(s) => s,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Server not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
-
-		server.register_tool(definition, handler);
-
-		self.transport
-			.write_response(req.id, serde_json::json!({}));
+		if self.with_server_transition(req.id, |server| server.register_tool(definition, handler)) {
+			self.transport
+				.write_response(req.id, serde_json::json!({}));
+		}
 	}
 
-	// ── Unregister tool ──────────────────────────────────────────────────
+	// ── Unregister tool (owned-return via with_server_transition) ────────
 
 	async fn handle_unregister_tool(&mut self, req: JsonRpcRequest) {
 		let params: UnregisterToolParams = match parse_params(req.params) {
@@ -923,30 +876,24 @@ impl McpRpcServer {
 			}
 		};
 
-		let server = match self.require_server_mut() {
-			Some(s) => s,
-			None => {
-				self.transport.write_error(
-					req.id,
-					MCP_ERROR,
-					"Server not initialized".to_string(),
-					None,
-				);
-				return;
-			}
-		};
+		let mut removed = false;
+		let transitioned = self.with_server_transition(req.id, |server| {
+			let (server, was_removed) = server.unregister_tool(&params.name);
+			removed = was_removed;
+			server
+		});
 
-		let removed = server.unregister_tool(&params.name);
-
-		self.transport.write_response(
-			req.id,
-			serde_json::json!({ "removed": removed }),
-		);
+		if transitioned {
+			self.transport.write_response(
+				req.id,
+				serde_json::json!({ "removed": removed }),
+			);
+		}
 	}
 
 	// ── Tool result ──────────────────────────────────────────────────────
 
-	async fn handle_tool_result(&mut self, req: JsonRpcRequest) {
+	async fn handle_tool_result(&self, req: JsonRpcRequest) {
 		let params: ToolResultParams = match parse_params(req.params) {
 			Ok(p) => p,
 			Err(e) => {

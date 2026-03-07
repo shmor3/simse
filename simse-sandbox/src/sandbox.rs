@@ -1,25 +1,22 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use simse_vfs_engine::backend::FsBackend;
-use simse_vfs_engine::disk::DiskFs;
-use simse_vfs_engine::local_backend::LocalFsBackend;
-use simse_vfs_engine::path::VfsLimits;
-use simse_vfs_engine::vfs::VirtualFs;
-use simse_vnet_engine::backend::NetBackend;
-use simse_vnet_engine::local_backend::LocalNetBackend;
-use simse_vnet_engine::network::{SandboxInit as VnetSandboxInit, VirtualNetwork};
-use simse_vsh_engine::backend::ShellBackend;
-use simse_vsh_engine::local_backend::LocalShellBackend;
-use simse_vsh_engine::sandbox::SandboxConfig as VshSandboxConfig;
-use simse_vsh_engine::shell::VirtualShell;
-
 use crate::config::BackendConfig;
 use crate::error::SandboxError;
-use crate::ssh::fs_backend::SshFsBackend;
-use crate::ssh::net_backend::SshNetBackend;
+use crate::ssh::fs::SshFs;
+use crate::ssh::net::SshNet;
 use crate::ssh::pool::SshPool;
-use crate::ssh::shell_backend::SshShellBackend;
+use crate::ssh::shell::SshShell;
+use crate::vfs_backend::FsImpl;
+use crate::vfs_disk::DiskFs;
+use crate::vfs_path::VfsLimits;
+use crate::vfs_store::VirtualFs;
+use crate::vnet_backend::NetImpl;
+use crate::vnet_local::LocalNet;
+use crate::vnet_network::{SandboxInit as VnetSandboxInit, VirtualNetwork};
+use crate::vsh_backend::{LocalShell, ShellImpl};
+use crate::vsh_sandbox::SandboxConfig as VshSandboxConfig;
+use crate::vsh_shell::VirtualShell;
 
 // ── Init config types ──────────────────────────────────────────────────────
 
@@ -115,7 +112,7 @@ impl Default for VnetInitConfig {
 /// Unified sandbox orchestrator.
 ///
 /// Creates and manages VFS, VSH, and VNet engines behind backend-agnostic
-/// traits. Supports both local execution and remote execution over SSH.
+/// enum dispatch. Supports both local execution and remote execution over SSH.
 /// Provides methods for health checks, disposal, and live backend switching.
 pub struct Sandbox {
     backend_config: Option<BackendConfig>,
@@ -123,12 +120,13 @@ pub struct Sandbox {
 
     // VFS: in-memory VFS + separate disk/SSH backend for file:// paths
     vfs: Option<VirtualFs>,
-    fs_backend: Option<Box<dyn FsBackend>>,
+    fs_backend: Option<FsImpl>,
 
-    // VSH: owns its backend internally
+    // VSH: pure state + separate backend for I/O
     vsh: Option<VirtualShell>,
+    shell_backend: Option<ShellImpl>,
 
-    // VNet: owns its backend internally
+    // VNet: owns its backend internally (backend stored inside VirtualNetwork)
     vnet: Option<VirtualNetwork>,
 
     // State
@@ -149,6 +147,7 @@ impl Sandbox {
             vfs: None,
             fs_backend: None,
             vsh: None,
+            shell_backend: None,
             vnet: None,
             initialized: false,
             vfs_init: None,
@@ -240,7 +239,8 @@ impl Sandbox {
         // Recreate VSH with new backend
         if let Some(ref vsh_cfg) = self.vsh_init {
             let shell_backend = Self::create_shell_backend(&new_config, &ssh_pool)?;
-            self.vsh = Some(Self::build_vsh(vsh_cfg, shell_backend));
+            self.vsh = Some(Self::build_vsh(vsh_cfg));
+            self.shell_backend = Some(shell_backend);
         }
 
         // Recreate VNet with new backend
@@ -296,6 +296,7 @@ impl Sandbox {
         self.vfs = None;
         self.fs_backend = None;
         self.vsh = None;
+        self.shell_backend = None;
         self.vnet = None;
         self.vfs_init = None;
         self.vsh_init = None;
@@ -313,26 +314,47 @@ impl Sandbox {
         self.vfs.as_ref().ok_or(SandboxError::NotInitialized)
     }
 
-    /// Mutably access the in-memory VFS.
-    pub fn vfs_mut(&mut self) -> Result<&mut VirtualFs, SandboxError> {
-        self.vfs.as_mut().ok_or(SandboxError::NotInitialized)
+    /// Take ownership of the in-memory VFS for a state transition.
+    ///
+    /// The caller must put the updated VFS back via [`vfs_set`].
+    pub fn vfs_take(&mut self) -> Result<VirtualFs, SandboxError> {
+        self.vfs.take().ok_or(SandboxError::NotInitialized)
+    }
+
+    /// Put an updated VFS back after a state transition.
+    pub fn vfs_set(&mut self, vfs: VirtualFs) {
+        self.vfs = Some(vfs);
     }
 
     /// Access the filesystem backend (for `file://` paths).
-    pub fn fs_backend(&self) -> Result<&dyn FsBackend, SandboxError> {
+    pub fn fs_backend(&self) -> Result<&FsImpl, SandboxError> {
         self.fs_backend
-            .as_deref()
+            .as_ref()
             .ok_or(SandboxError::NotInitialized)
     }
 
-    /// Access the virtual shell.
+    /// Access the virtual shell (read-only).
     pub fn vsh(&self) -> Result<&VirtualShell, SandboxError> {
         self.vsh.as_ref().ok_or(SandboxError::NotInitialized)
     }
 
-    /// Mutably access the virtual shell.
-    pub fn vsh_mut(&mut self) -> Result<&mut VirtualShell, SandboxError> {
-        self.vsh.as_mut().ok_or(SandboxError::NotInitialized)
+    /// Take ownership of the virtual shell for a state transition.
+    ///
+    /// The caller must put the updated shell back via [].
+    pub fn vsh_take(&mut self) -> Result<VirtualShell, SandboxError> {
+        self.vsh.take().ok_or(SandboxError::NotInitialized)
+    }
+
+    /// Put an updated virtual shell back after a state transition.
+    pub fn vsh_set(&mut self, vsh: VirtualShell) {
+        self.vsh = Some(vsh);
+    }
+
+    /// Access the shell backend (for I/O execution).
+    pub fn shell_backend(&self) -> Result<&ShellImpl, SandboxError> {
+        self.shell_backend
+            .as_ref()
+            .ok_or(SandboxError::NotInitialized)
     }
 
     /// Access the virtual network.
@@ -340,7 +362,21 @@ impl Sandbox {
         self.vnet.as_ref().ok_or(SandboxError::NotInitialized)
     }
 
-    /// Mutably access the virtual network.
+    /// Take ownership of the virtual network for a state transition.
+    ///
+    /// The caller must put the updated network back via [`vnet_set`].
+    pub fn vnet_take(&mut self) -> Result<VirtualNetwork, SandboxError> {
+        self.vnet.take().ok_or(SandboxError::NotInitialized)
+    }
+
+    /// Put an updated virtual network back after a state transition.
+    pub fn vnet_set(&mut self, vnet: VirtualNetwork) {
+        self.vnet = Some(vnet);
+    }
+
+    /// Mutably access the virtual network for I/O hot-path methods
+    /// (e.g. `net_http_request`) that require `&mut self` on VirtualNetwork.
+    // PERF: hot-path I/O -- needed for backend-delegated async methods
     pub fn vnet_mut(&mut self) -> Result<&mut VirtualNetwork, SandboxError> {
         self.vnet.as_mut().ok_or(SandboxError::NotInitialized)
     }
@@ -375,27 +411,28 @@ impl Sandbox {
         // VSH
         if let Some(ref vsh_cfg) = config.vsh {
             let shell_backend = Self::create_shell_backend(&config.backend, ssh_pool)?;
-            self.vsh = Some(Self::build_vsh(vsh_cfg, shell_backend));
+            self.vsh = Some(Self::build_vsh(vsh_cfg));
+            self.shell_backend = Some(shell_backend);
         }
 
         Ok(())
     }
 
-    /// Create the appropriate FsBackend from init config.
+    /// Create the appropriate FsImpl from init config.
     fn create_fs_backend(
         config: &InitConfig,
         ssh_pool: &Option<Arc<SshPool>>,
-    ) -> Result<Box<dyn FsBackend>, SandboxError> {
+    ) -> Result<FsImpl, SandboxError> {
         let vfs_cfg = config.vfs.as_ref().cloned().unwrap_or_default();
         Self::create_fs_backend_from_cfg(&vfs_cfg, &config.backend, ssh_pool)
     }
 
-    /// Create the appropriate FsBackend from explicit config.
+    /// Create the appropriate FsImpl from explicit config.
     fn create_fs_backend_from_cfg(
         vfs_cfg: &VfsInitConfig,
         backend: &BackendConfig,
         ssh_pool: &Option<Arc<SshPool>>,
-    ) -> Result<Box<dyn FsBackend>, SandboxError> {
+    ) -> Result<FsImpl, SandboxError> {
         match backend {
             BackendConfig::Local => {
                 let disk = DiskFs::new(
@@ -407,39 +444,39 @@ impl Sandbox {
                         .collect(),
                     vfs_cfg.max_history,
                 );
-                Ok(Box::new(LocalFsBackend::new(disk)))
+                Ok(FsImpl::Local(disk))
             }
             BackendConfig::Ssh(_) => {
                 let pool = Self::require_ssh_pool(ssh_pool)?;
-                Ok(Box::new(SshFsBackend::new(pool, vfs_cfg.root_directory.clone())))
+                Ok(FsImpl::Ssh(SshFs::new(pool, vfs_cfg.root_directory.clone())))
             }
         }
     }
 
-    /// Create the appropriate ShellBackend based on the backend config.
+    /// Create the appropriate ShellImpl based on the backend config.
     fn create_shell_backend(
         backend: &BackendConfig,
         ssh_pool: &Option<Arc<SshPool>>,
-    ) -> Result<Box<dyn ShellBackend>, SandboxError> {
+    ) -> Result<ShellImpl, SandboxError> {
         match backend {
-            BackendConfig::Local => Ok(Box::new(LocalShellBackend)),
+            BackendConfig::Local => Ok(ShellImpl::Local(LocalShell)),
             BackendConfig::Ssh(_) => {
                 let pool = Self::require_ssh_pool(ssh_pool)?;
-                Ok(Box::new(SshShellBackend::new(pool)))
+                Ok(ShellImpl::Ssh(SshShell::new(pool)))
             }
         }
     }
 
-    /// Create the appropriate NetBackend based on the backend config.
+    /// Create the appropriate NetImpl based on the backend config.
     fn create_net_backend(
         backend: &BackendConfig,
         ssh_pool: &Option<Arc<SshPool>>,
-    ) -> Result<Box<dyn NetBackend>, SandboxError> {
+    ) -> Result<NetImpl, SandboxError> {
         match backend {
-            BackendConfig::Local => Ok(Box::new(LocalNetBackend::new())),
+            BackendConfig::Local => Ok(NetImpl::Local(LocalNet::new())),
             BackendConfig::Ssh(_) => {
                 let pool = Self::require_ssh_pool(ssh_pool)?;
-                Ok(Box::new(SshNetBackend::new(pool)))
+                Ok(NetImpl::Ssh(SshNet::new(pool)))
             }
         }
     }
@@ -454,8 +491,8 @@ impl Sandbox {
             .ok_or_else(|| SandboxError::InvalidParams("SSH pool not available".into()))
     }
 
-    /// Build a VirtualShell from init config and a backend.
-    fn build_vsh(cfg: &VshInitConfig, backend: Box<dyn ShellBackend>) -> VirtualShell {
+    /// Build a VirtualShell from init config (pure state, no backend).
+    fn build_vsh(cfg: &VshInitConfig) -> VirtualShell {
         let sandbox_config = VshSandboxConfig {
             root_directory: PathBuf::from(&cfg.root_directory),
             allowed_paths: cfg.allowed_paths.iter().map(PathBuf::from).collect(),
@@ -464,11 +501,11 @@ impl Sandbox {
             max_output_bytes: cfg.max_output_bytes,
             ..VshSandboxConfig::default()
         };
-        VirtualShell::new(sandbox_config, cfg.shell.clone(), backend)
+        VirtualShell::new(sandbox_config, cfg.shell.clone())
     }
 
     /// Build a VirtualNetwork from init config and a backend.
-    fn build_vnet(cfg: &VnetInitConfig, net_backend: Box<dyn NetBackend>) -> VirtualNetwork {
+    fn build_vnet(cfg: &VnetInitConfig, net_backend: NetImpl) -> VirtualNetwork {
         let sandbox_init = VnetSandboxInit {
             allowed_hosts: cfg.allowed_hosts.clone(),
             allowed_ports: cfg.allowed_ports.clone(),
@@ -477,9 +514,7 @@ impl Sandbox {
             max_response_bytes: cfg.max_response_bytes,
             max_connections: cfg.max_connections,
         };
-        let mut vnet = VirtualNetwork::new();
-        vnet.initialize(Some(sandbox_init), Some(net_backend));
-        vnet
+        VirtualNetwork::new().initialize(Some(sandbox_init), Some(net_backend))
     }
 }
 

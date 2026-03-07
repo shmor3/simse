@@ -50,7 +50,7 @@ fn tool_registry_register_and_list() {
 		max_output_chars: None,
 	};
 
-	registry.register(definition, handler);
+	registry.register_mut(definition, handler);
 	assert!(registry.is_registered("test_tool"));
 	assert_eq!(registry.tool_count(), 1);
 	assert_eq!(registry.tool_names(), vec!["test_tool"]);
@@ -70,14 +70,14 @@ fn tool_registry_unregister() {
 		max_output_chars: None,
 	};
 
-	registry.register(definition, handler);
+	registry.register_mut(definition, handler);
 	assert!(registry.is_registered("tool_to_remove"));
 
-	let removed = registry.unregister("tool_to_remove");
+	let removed = registry.unregister_mut("tool_to_remove");
 	assert!(removed);
 	assert!(!registry.is_registered("tool_to_remove"));
 
-	let removed_again = registry.unregister("tool_to_remove");
+	let removed_again = registry.unregister_mut("tool_to_remove");
 	assert!(!removed_again);
 }
 
@@ -103,7 +103,7 @@ async fn tool_registry_execute_success() {
 		max_output_chars: None,
 	};
 
-	registry.register(definition, handler);
+	registry.register_mut(definition, handler);
 
 	let call = simse_core::tools::types::ToolCallRequest {
 		id: "call_1".to_string(),
@@ -168,7 +168,7 @@ fn tool_registry_format_for_system_prompt_with_tools() {
 		timeout_ms: None,
 		max_output_chars: None,
 	};
-	registry.register(definition, handler);
+	registry.register_mut(definition, handler);
 
 	let prompt = registry.format_for_system_prompt();
 	assert!(prompt.contains("my_tool"));
@@ -189,7 +189,7 @@ async fn tool_registry_metrics() {
 		timeout_ms: None,
 		max_output_chars: None,
 	};
-	registry.register(definition, handler);
+	registry.register_mut(definition, handler);
 
 	// Before any calls, no metrics
 	assert!(registry.get_all_tool_metrics().is_empty());

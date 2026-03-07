@@ -26,14 +26,15 @@ accelerate = [
 embed-weights = []
 
 [dependencies]
+im = { version = "15", features = ["serde"] }
 # Candle ML framework
-candle-core = "0.8"
-candle-nn = "0.8"
-candle-transformers = "0.8"
+candle-core = "0.9"
+candle-nn = "0.9"
+candle-transformers = "0.9"
 
 # HuggingFace model hub
-hf-hub = { version = "0.4", features = ["tokio"] }
-tokenizers = { version = "0.21", default-features = false, features = ["onig"] }
+hf-hub = { version = "0.5", features = ["tokio"] }
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -54,7 +55,7 @@ thiserror = "2"
 anyhow = "1"
 
 # PRNG for sampling
-rand = "0.9"
+rand = "0.10"
 
 # HTTP client (for TEI bridge)
 ureq = { version = "3", features = ["json"] }

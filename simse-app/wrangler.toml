@@ -1,0 +1,34 @@
+name = "simse-app"
+compatibility_date = "2025-04-01"
+pages_build_output_dir = "./build/client"
+
+[vars]
+APP_URL = "https://app.simse.dev"
+
+routes = [{ pattern = "app.simse.dev", custom_domain = true }]
+
+[durable_objects]
+bindings = [{ name = "TUNNEL_SESSION", class_name = "TunnelSession" }]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["TunnelSession"]
+
+[analytics_engine]
+dataset = "simse-analytics"
+binding = "ANALYTICS"
+
+# --- Environments ---
+
+[env.staging]
+name = "simse-app-staging"
+
+[env.staging.vars]
+APP_URL = "https://simse-app-staging.pages.dev"
+
+[env.production]
+name = "simse-app"
+routes = [{ pattern = "app.simse.dev", custom_domain = true }]
+
+[env.production.vars]
+APP_URL = "https://app.simse.dev"

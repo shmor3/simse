@@ -10,7 +10,7 @@ use simse_core::context::CoreContext;
 use simse_core::rpc_protocol::JsonRpcRequest;
 use simse_core::rpc_server::CoreRpcServer;
 use simse_core::rpc_transport::NdjsonTransport;
-use simse_core::tasks::{TaskCreateInput, TaskListOptions, TaskStatus, TaskUpdateInput};
+use simse_core::tasks::{TaskCreateInput, TaskList, TaskListOptions, TaskStatus, TaskUpdateInput};
 
 // ---------------------------------------------------------------------------
 // Helper: build an initialized server
@@ -40,13 +40,15 @@ async fn make_initialized_server() -> CoreRpcServer {
 #[test]
 fn task_create_returns_auto_id() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	let task = ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, task) = task_list.create(TaskCreateInput {
 		subject: "Fix bug".to_string(),
 		description: "Fix the login bug".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
+	ctx.task_list = new_list;
 	assert_eq!(task.id, "1");
 	assert_eq!(task.subject, "Fix bug");
 	assert_eq!(task.description, "Fix the login bug");
@@ -63,13 +65,15 @@ fn task_create_with_all_fields() {
 	let mut meta = HashMap::new();
 	meta.insert("priority".to_string(), serde_json::json!("high"));
 
-	let task = ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, task) = task_list.create(TaskCreateInput {
 		subject: "Deploy".to_string(),
 		description: "Deploy to prod".to_string(),
 		active_form: Some("Deploying".to_string()),
 		owner: Some("alice".to_string()),
 		metadata: Some(meta),
 	});
+	ctx.task_list = new_list;
 
 	assert_eq!(task.id, "1");
 	assert_eq!(task.active_form, Some("Deploying".to_string()));
@@ -83,20 +87,22 @@ fn task_create_with_all_fields() {
 #[test]
 fn task_create_increments_ids() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	let t1 = ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, t1) = task_list.create(TaskCreateInput {
 		subject: "Task 1".to_string(),
 		description: "First".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
-	let t2 = ctx.task_list.create(TaskCreateInput {
+	let (new_list, t2) = new_list.create(TaskCreateInput {
 		subject: "Task 2".to_string(),
 		description: "Second".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
+	ctx.task_list = new_list;
 	assert_eq!(t1.id, "1");
 	assert_eq!(t2.id, "2");
 }
@@ -104,13 +110,15 @@ fn task_create_increments_ids() {
 #[test]
 fn task_get_existing() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	let task = ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, task) = task_list.create(TaskCreateInput {
 		subject: "Test".to_string(),
 		description: "Desc".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
+	ctx.task_list = new_list;
 	let found = ctx.task_list.get(&task.id).expect("task should exist");
 	assert_eq!(found.subject, "Test");
 }
@@ -130,20 +138,22 @@ fn task_list_empty() {
 #[test]
 fn task_list_multiple() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list.create(TaskCreateInput {
 		subject: "A".to_string(),
 		description: "".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
-	ctx.task_list.create(TaskCreateInput {
+	let (new_list, _) = new_list.create(TaskCreateInput {
 		subject: "B".to_string(),
 		description: "".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
+	ctx.task_list = new_list;
 	assert_eq!(ctx.task_list.list().len(), 2);
 }
 
@@ -152,7 +162,8 @@ fn task_list_available_filters_correctly() {
 	let mut ctx = CoreContext::new(AppConfig::default());
 
 	// Task 1: pending, no owner => available
-	ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list.create(TaskCreateInput {
 		subject: "Available".to_string(),
 		description: "".to_string(),
 		active_form: None,
@@ -161,7 +172,7 @@ fn task_list_available_filters_correctly() {
 	});
 
 	// Task 2: pending, has owner => NOT available
-	ctx.task_list.create(TaskCreateInput {
+	let (new_list, _) = new_list.create(TaskCreateInput {
 		subject: "Owned".to_string(),
 		description: "".to_string(),
 		active_form: None,
@@ -170,14 +181,14 @@ fn task_list_available_filters_correctly() {
 	});
 
 	// Task 3: in_progress => NOT available
-	ctx.task_list.create(TaskCreateInput {
+	let (new_list, _) = new_list.create(TaskCreateInput {
 		subject: "Working".to_string(),
 		description: "".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
-	ctx.task_list
+	let (new_list, _) = new_list
 		.update(
 			"3",
 			TaskUpdateInput {
@@ -186,6 +197,7 @@ fn task_list_available_filters_correctly() {
 			},
 		)
 		.unwrap();
+	ctx.task_list = new_list;
 
 	let available = ctx.task_list.list_available();
 	assert_eq!(available.len(), 1);
@@ -195,7 +207,8 @@ fn task_list_available_filters_correctly() {
 #[test]
 fn task_update_status() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list.create(TaskCreateInput {
 		subject: "Work".to_string(),
 		description: "".to_string(),
 		active_form: None,
@@ -203,8 +216,7 @@ fn task_update_status() {
 		metadata: None,
 	});
 
-	let updated = ctx
-		.task_list
+	let (new_list, updated) = new_list
 		.update(
 			"1",
 			TaskUpdateInput {
@@ -212,16 +224,17 @@ fn task_update_status() {
 				..Default::default()
 			},
 		)
-		.unwrap()
 		.unwrap();
+	ctx.task_list = new_list;
 
-	assert_eq!(updated.status, TaskStatus::InProgress);
+	assert_eq!(updated.unwrap().status, TaskStatus::InProgress);
 }
 
 #[test]
 fn task_update_fields() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list.create(TaskCreateInput {
 		subject: "Original".to_string(),
 		description: "Old desc".to_string(),
 		active_form: None,
@@ -229,8 +242,7 @@ fn task_update_fields() {
 		metadata: None,
 	});
 
-	let updated = ctx
-		.task_list
+	let (new_list, updated) = new_list
 		.update(
 			"1",
 			TaskUpdateInput {
@@ -241,9 +253,10 @@ fn task_update_fields() {
 				..Default::default()
 			},
 		)
-		.unwrap()
 		.unwrap();
+	ctx.task_list = new_list;
 
+	let updated = updated.unwrap();
 	assert_eq!(updated.subject, "Updated");
 	assert_eq!(updated.description, "New desc");
 	assert_eq!(updated.active_form, Some("Working on it".to_string()));
@@ -257,7 +270,8 @@ fn task_update_metadata_merge() {
 	initial_meta.insert("key1".to_string(), serde_json::json!("val1"));
 	initial_meta.insert("key2".to_string(), serde_json::json!("val2"));
 
-	ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list.create(TaskCreateInput {
 		subject: "Meta".to_string(),
 		description: "".to_string(),
 		active_form: None,
@@ -271,8 +285,7 @@ fn task_update_metadata_merge() {
 	update_meta.insert("key2".to_string(), serde_json::Value::Null);
 	update_meta.insert("key3".to_string(), serde_json::json!("new"));
 
-	let updated = ctx
-		.task_list
+	let (new_list, updated) = new_list
 		.update(
 			"1",
 			TaskUpdateInput {
@@ -280,10 +293,10 @@ fn task_update_metadata_merge() {
 				..Default::default()
 			},
 		)
-		.unwrap()
 		.unwrap();
+	ctx.task_list = new_list;
 
-	let meta = updated.metadata.unwrap();
+	let meta = updated.unwrap().metadata.unwrap();
 	assert_eq!(meta.get("key1").unwrap(), &serde_json::json!("updated"));
 	assert!(meta.get("key2").is_none());
 	assert_eq!(meta.get("key3").unwrap(), &serde_json::json!("new"));
@@ -292,8 +305,8 @@ fn task_update_metadata_merge() {
 #[test]
 fn task_update_nonexistent() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	let result = ctx
-		.task_list
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, result) = task_list
 		.update(
 			"999",
 			TaskUpdateInput {
@@ -302,20 +315,22 @@ fn task_update_nonexistent() {
 			},
 		)
 		.unwrap();
+	ctx.task_list = new_list;
 	assert!(result.is_none());
 }
 
 #[test]
 fn task_update_add_dependencies() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list.create(TaskCreateInput {
 		subject: "Blocker".to_string(),
 		description: "".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
-	ctx.task_list.create(TaskCreateInput {
+	let (new_list, _) = new_list.create(TaskCreateInput {
 		subject: "Blocked".to_string(),
 		description: "".to_string(),
 		active_form: None,
@@ -324,8 +339,7 @@ fn task_update_add_dependencies() {
 	});
 
 	// Task 2 is blocked by task 1
-	let updated = ctx
-		.task_list
+	let (new_list, updated) = new_list
 		.update(
 			"2",
 			TaskUpdateInput {
@@ -333,10 +347,10 @@ fn task_update_add_dependencies() {
 				..Default::default()
 			},
 		)
-		.unwrap()
 		.unwrap();
+	ctx.task_list = new_list;
 
-	assert!(updated.blocked_by.contains(&"1".to_string()));
+	assert!(updated.unwrap().blocked_by.contains(&"1".to_string()));
 
 	// Task 1 should now have "2" in its blocks (reciprocal)
 	let blocker = ctx.task_list.get("1").unwrap();
@@ -346,14 +360,15 @@ fn task_update_add_dependencies() {
 #[test]
 fn task_update_circular_dependency_error() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list.create(TaskCreateInput {
 		subject: "A".to_string(),
 		description: "".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
-	ctx.task_list.create(TaskCreateInput {
+	let (new_list, _) = new_list.create(TaskCreateInput {
 		subject: "B".to_string(),
 		description: "".to_string(),
 		active_form: None,
@@ -362,7 +377,7 @@ fn task_update_circular_dependency_error() {
 	});
 
 	// A blocks B
-	ctx.task_list
+	let (new_list, _) = new_list
 		.update(
 			"1",
 			TaskUpdateInput {
@@ -373,7 +388,7 @@ fn task_update_circular_dependency_error() {
 		.unwrap();
 
 	// B blocks A => circular dependency
-	let result = ctx.task_list.update(
+	let result = new_list.update(
 		"2",
 		TaskUpdateInput {
 			add_blocks: Some(vec!["1".to_string()]),
@@ -389,14 +404,17 @@ fn task_update_circular_dependency_error() {
 #[test]
 fn task_delete_existing() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list.create(TaskCreateInput {
 		subject: "Deleteme".to_string(),
 		description: "".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
-	assert!(ctx.task_list.delete("1"));
+	let (new_list, deleted) = new_list.delete("1");
+	ctx.task_list = new_list;
+	assert!(deleted);
 	assert!(ctx.task_list.get("1").is_none());
 	assert_eq!(ctx.task_list.list().len(), 0);
 }
@@ -404,20 +422,24 @@ fn task_delete_existing() {
 #[test]
 fn task_delete_nonexistent() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	assert!(!ctx.task_list.delete("999"));
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, deleted) = task_list.delete("999");
+	ctx.task_list = new_list;
+	assert!(!deleted);
 }
 
 #[test]
 fn task_delete_cleans_up_dependencies() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list.create(TaskCreateInput {
 		subject: "A".to_string(),
 		description: "".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
-	ctx.task_list.create(TaskCreateInput {
+	let (new_list, _) = new_list.create(TaskCreateInput {
 		subject: "B".to_string(),
 		description: "".to_string(),
 		active_form: None,
@@ -426,7 +448,7 @@ fn task_delete_cleans_up_dependencies() {
 	});
 
 	// A blocks B
-	ctx.task_list
+	let (new_list, _) = new_list
 		.update(
 			"1",
 			TaskUpdateInput {
@@ -437,7 +459,8 @@ fn task_delete_cleans_up_dependencies() {
 		.unwrap();
 
 	// Delete A — B's blocked_by should be cleaned up
-	ctx.task_list.delete("1");
+	let (new_list, _) = new_list.delete("1");
+	ctx.task_list = new_list;
 	let b = ctx.task_list.get("2").unwrap();
 	assert!(b.blocked_by.is_empty());
 }
@@ -446,18 +469,24 @@ fn task_delete_cleans_up_dependencies() {
 fn task_create_checked_limit_reached() {
 	let mut ctx = CoreContext::new(AppConfig::default());
 	// Replace task_list with a limited one
-	ctx.task_list = simse_core::tasks::TaskList::new(Some(TaskListOptions {
+	ctx.task_list = TaskList::new(Some(TaskListOptions {
 		max_tasks: Some(2),
 	}));
 
-	ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(
+		&mut ctx.task_list,
+		TaskList::new(Some(TaskListOptions {
+			max_tasks: Some(2),
+		})),
+	);
+	let (new_list, _) = task_list.create(TaskCreateInput {
 		subject: "1".to_string(),
 		description: "".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
-	ctx.task_list.create(TaskCreateInput {
+	let (new_list, _) = new_list.create(TaskCreateInput {
 		subject: "2".to_string(),
 		description: "".to_string(),
 		active_form: None,
@@ -465,7 +494,7 @@ fn task_create_checked_limit_reached() {
 		metadata: None,
 	});
 
-	let result = ctx.task_list.create_checked(TaskCreateInput {
+	let result = new_list.create_checked(TaskCreateInput {
 		subject: "3".to_string(),
 		description: "".to_string(),
 		active_form: None,
@@ -481,13 +510,15 @@ fn task_create_checked_limit_reached() {
 #[test]
 fn task_item_serialization_camel_case() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	let task = ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, task) = task_list.create(TaskCreateInput {
 		subject: "Test".to_string(),
 		description: "Desc".to_string(),
 		active_form: Some("Testing".to_string()),
 		owner: Some("user1".to_string()),
 		metadata: None,
 	});
+	ctx.task_list = new_list;
 
 	let json = serde_json::to_value(&task).unwrap();
 	// Verify camelCase field names
@@ -532,14 +563,15 @@ fn task_status_serialization() {
 #[test]
 fn task_completing_unblocks_dependents() {
 	let mut ctx = CoreContext::new(AppConfig::default());
-	ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list.create(TaskCreateInput {
 		subject: "Blocker".to_string(),
 		description: "".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
-	ctx.task_list.create(TaskCreateInput {
+	let (new_list, _) = new_list.create(TaskCreateInput {
 		subject: "Blocked".to_string(),
 		description: "".to_string(),
 		active_form: None,
@@ -548,7 +580,7 @@ fn task_completing_unblocks_dependents() {
 	});
 
 	// Task 1 blocks task 2
-	ctx.task_list
+	let (new_list, _) = new_list
 		.update(
 			"1",
 			TaskUpdateInput {
@@ -557,12 +589,14 @@ fn task_completing_unblocks_dependents() {
 			},
 		)
 		.unwrap();
+	ctx.task_list = new_list;
 
 	// Task 2 should NOT be available (blocked by task 1)
 	assert!(ctx.task_list.list_available().iter().all(|t| t.id != "2"));
 
 	// Complete task 1 — should unblock task 2
-	ctx.task_list
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list
 		.update(
 			"1",
 			TaskUpdateInput {
@@ -571,6 +605,7 @@ fn task_completing_unblocks_dependents() {
 			},
 		)
 		.unwrap();
+	ctx.task_list = new_list;
 
 	let task2 = ctx.task_list.get("2").unwrap();
 	assert!(task2.blocked_by.is_empty());
@@ -1103,20 +1138,23 @@ fn core_context_task_list_is_functional() {
 	let mut ctx = CoreContext::new(AppConfig::default());
 
 	// Full lifecycle through the context's task list
-	let task = ctx.task_list.create(TaskCreateInput {
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, task) = task_list.create(TaskCreateInput {
 		subject: "Wiring test".to_string(),
 		description: "Verify task list wiring".to_string(),
 		active_form: None,
 		owner: None,
 		metadata: None,
 	});
+	ctx.task_list = new_list;
 	assert_eq!(task.id, "1");
 
 	assert!(ctx.task_list.get("1").is_some());
 	assert_eq!(ctx.task_list.list().len(), 1);
 	assert_eq!(ctx.task_list.list_available().len(), 1);
 
-	ctx.task_list
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list
 		.update(
 			"1",
 			TaskUpdateInput {
@@ -1126,6 +1164,7 @@ fn core_context_task_list_is_functional() {
 			},
 		)
 		.unwrap();
+	ctx.task_list = new_list;
 
 	let updated = ctx.task_list.get("1").unwrap();
 	assert_eq!(updated.status, TaskStatus::InProgress);
@@ -1134,6 +1173,8 @@ fn core_context_task_list_is_functional() {
 	// No longer available (in_progress)
 	assert!(ctx.task_list.list_available().is_empty());
 
-	ctx.task_list.delete("1");
+	let task_list = std::mem::replace(&mut ctx.task_list, TaskList::new(None));
+	let (new_list, _) = task_list.delete("1");
+	ctx.task_list = new_list;
 	assert!(ctx.task_list.list().is_empty());
 }

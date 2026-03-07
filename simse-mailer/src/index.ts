@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { renderTemplate } from './render';
 import notificationsRoute from './routes/notifications';
 import { sendEmail } from './send';
+import type { SecretsStoreNamespace } from './types';
 
 type CommsMessage =
 	| {
@@ -35,6 +36,9 @@ const app = new Hono<{
 	Variables: { secrets: MailerSecrets };
 }>();
 
+// Health check — before any middleware
+app.get('/health', (c) => c.json({ ok: true }));
+
 // Analytics middleware
 app.use('*', async (c, next) => {
 	const start = Date.now();
@@ -44,7 +48,7 @@ app.use('*', async (c, next) => {
 	// biome-ignore lint/suspicious/noExplicitAny: Cloudflare cf object not typed on Request
 	const cf = (c.req.raw as any).cf;
 
-	c.env.ANALYTICS.writeDataPoint({
+	c.env.ANALYTICS?.writeDataPoint({
 		indexes: ['simse-mailer'],
 		blobs: [
 			c.req.method,
@@ -73,9 +77,13 @@ app.use('*', async (c, next) => {
 
 // Secrets middleware
 app.use('*', async (c, next) => {
+	const secrets = c.env.SECRETS;
+	if (!secrets) {
+		return c.json({ error: 'Service misconfigured' }, 500);
+	}
 	const [resendApiKey, mailerApiSecret] = await Promise.all([
-		c.env.SECRETS.get('RESEND_API_KEY'),
-		c.env.SECRETS.get('MAILER_API_SECRET'),
+		secrets.get('RESEND_API_KEY'),
+		secrets.get('MAILER_API_SECRET'),
 	]);
 	if (!resendApiKey || !mailerApiSecret) {
 		return c.json({ error: 'Service misconfigured' }, 500);
@@ -83,8 +91,6 @@ app.use('*', async (c, next) => {
 	c.set('secrets', { resendApiKey, mailerApiSecret });
 	await next();
 });
-
-app.get('/health', (c) => c.json({ ok: true }));
 
 app.post('/send', async (c) => {
 	const authHeader = c.req.header('Authorization');
@@ -118,10 +124,8 @@ export default {
 		return app.fetch(request, env);
 	},
 	async queue(batch: MessageBatch<CommsMessage>, env: Env): Promise<void> {
-		// Fetch secrets once for the whole batch
-		const [resendApiKey] = await Promise.all([
-			env.SECRETS.get('RESEND_API_KEY'),
-		]);
+		const batchStart = Date.now();
+		const resendApiKey = await env.SECRETS.get('RESEND_API_KEY');
 		if (!resendApiKey) {
 			console.error(
 				'RESEND_API_KEY not configured — acking all messages to avoid poison pill',
@@ -132,6 +136,7 @@ export default {
 
 		for (const message of batch.messages) {
 			const msg = message.body;
+			const msgStart = Date.now();
 			try {
 				if (msg.type === 'email') {
 					const { subject, html } = await renderTemplate(
@@ -139,6 +144,19 @@ export default {
 						msg.props ?? {},
 					);
 					await sendEmail(resendApiKey, { to: msg.to, subject, html });
+
+					env.ANALYTICS.writeDataPoint({
+						indexes: ['simse-mailer'],
+						blobs: [
+							'queue',
+							'email',
+							'success',
+							msg.template,
+							msg.to,
+							batch.queue,
+						],
+						doubles: [Date.now() - msgStart],
+					});
 				} else if (msg.type === 'notification') {
 					const id = crypto.randomUUID();
 					await env.DB.prepare(
@@ -153,12 +171,57 @@ export default {
 							msg.link ?? null,
 						)
 						.run();
+
+					env.ANALYTICS.writeDataPoint({
+						indexes: ['simse-mailer'],
+						blobs: [
+							'queue',
+							'notification',
+							'success',
+							msg.kind ?? 'info',
+							msg.userId,
+							batch.queue,
+						],
+						doubles: [Date.now() - msgStart],
+					});
 				}
 				message.ack();
 			} catch (e) {
-				console.error('Queue processing error:', e);
-				message.retry();
+				const errorMsg = e instanceof Error ? e.message : 'Unknown error';
+				const label = msg.type === 'email' ? msg.template : msg.type;
+
+				// Permanent failures: don't retry, just ack and log
+				if (errorMsg.includes('Unknown email template')) {
+					console.error(
+						`Permanent failure for ${msg.type} (${label}): ${errorMsg}`,
+					);
+					message.ack();
+				} else {
+					console.error(
+						`Transient failure for ${msg.type} (${label}): ${errorMsg}`,
+					);
+					message.retry();
+				}
+
+				env.ANALYTICS.writeDataPoint({
+					indexes: ['simse-mailer'],
+					blobs: [
+						'queue',
+						msg.type,
+						'error',
+						label,
+						errorMsg.slice(0, 256),
+						batch.queue,
+					],
+					doubles: [Date.now() - msgStart],
+				});
 			}
 		}
+
+		env.ANALYTICS.writeDataPoint({
+			indexes: ['simse-mailer'],
+			blobs: ['queue', 'batch', 'complete', '', '', batch.queue],
+			doubles: [Date.now() - batchStart, batch.messages.length],
+		});
 	},
 };

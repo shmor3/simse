@@ -54,7 +54,10 @@ async function handleRequest(request: Request, env: Env): Promise<Response> {
 	const path = url.pathname;
 
 	if (path === '/health') {
-		return new Response('ok', { status: 200 });
+		return new Response(JSON.stringify({ ok: true }), {
+			status: 200,
+			headers: { 'Content-Type': 'application/json' },
+		});
 	}
 
 	const mediaMatch = path.match(/^\/media\/(.+)$/);

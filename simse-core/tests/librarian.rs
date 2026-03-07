@@ -211,8 +211,8 @@ impl TextGenerationWithModel for ModelGenerator {
 
 #[tokio::test]
 async fn extract_parses_valid_json() {
-	let gen = Arc::new(ExtractionGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(ExtractionGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let turn = TurnContext {
 		user_input: "Tell me about Rust".to_string(),
@@ -231,8 +231,8 @@ async fn extract_parses_valid_json() {
 
 #[tokio::test]
 async fn extract_returns_empty_on_failure() {
-	let gen = Arc::new(FailingGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(FailingGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let turn = TurnContext {
 		user_input: "Hello".to_string(),
@@ -245,8 +245,8 @@ async fn extract_returns_empty_on_failure() {
 
 #[tokio::test]
 async fn extract_returns_empty_on_invalid_json() {
-	let gen = Arc::new(InvalidJsonGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(InvalidJsonGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let turn = TurnContext {
 		user_input: "Hello".to_string(),
@@ -259,8 +259,8 @@ async fn extract_returns_empty_on_invalid_json() {
 
 #[tokio::test]
 async fn summarize_returns_text_and_source_ids() {
-	let gen = Arc::new(SummarizeGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(SummarizeGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let volumes = vec![
 		Volume {
@@ -280,8 +280,8 @@ async fn summarize_returns_text_and_source_ids() {
 
 #[tokio::test]
 async fn summarize_propagates_errors() {
-	let gen = Arc::new(FailingGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(FailingGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let result = librarian.summarize(&[], "topic").await;
 	assert!(result.is_err());
@@ -289,8 +289,8 @@ async fn summarize_propagates_errors() {
 
 #[tokio::test]
 async fn classify_topic_parses_valid_json() {
-	let gen = Arc::new(ClassificationGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(ClassificationGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let result = librarian
 		.classify_topic("Some text about Rust", &["programming/rust".to_string()])
@@ -301,8 +301,8 @@ async fn classify_topic_parses_valid_json() {
 
 #[tokio::test]
 async fn classify_topic_returns_fallback_on_failure() {
-	let gen = Arc::new(FailingGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(FailingGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let result = librarian.classify_topic("text", &[]).await;
 	assert_eq!(result.topic, "uncategorized");
@@ -311,8 +311,8 @@ async fn classify_topic_returns_fallback_on_failure() {
 
 #[tokio::test]
 async fn classify_topic_returns_fallback_on_invalid_json() {
-	let gen = Arc::new(InvalidJsonGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(InvalidJsonGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let result = librarian.classify_topic("text", &[]).await;
 	assert_eq!(result.topic, "uncategorized");
@@ -321,8 +321,8 @@ async fn classify_topic_returns_fallback_on_invalid_json() {
 
 #[tokio::test]
 async fn reorganize_parses_valid_json() {
-	let gen = Arc::new(ReorgGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(ReorgGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let volumes = vec![Volume {
 		id: "vol-1".to_string(),
@@ -341,8 +341,8 @@ async fn reorganize_parses_valid_json() {
 
 #[tokio::test]
 async fn reorganize_returns_empty_on_failure() {
-	let gen = Arc::new(FailingGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(FailingGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let result = librarian.reorganize("topic", &[]).await;
 	assert!(result.moves.is_empty());
@@ -352,8 +352,8 @@ async fn reorganize_returns_empty_on_failure() {
 
 #[tokio::test]
 async fn optimize_parses_valid_json() {
-	let gen = Arc::new(OptimizeGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(OptimizeGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let volumes = vec![
 		Volume {
@@ -374,8 +374,8 @@ async fn optimize_parses_valid_json() {
 
 #[tokio::test]
 async fn optimize_returns_empty_on_failure() {
-	let gen = Arc::new(FailingGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(FailingGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let result = librarian.optimize(&[], "topic", "model-1").await;
 	assert!(result.pruned.is_empty());
@@ -385,10 +385,10 @@ async fn optimize_returns_empty_on_failure() {
 
 #[tokio::test]
 async fn optimize_with_model_generator() {
-	let gen = Arc::new(ModelGenerator);
+	let generator = Arc::new(ModelGenerator);
 	let model_gen = Arc::new(ModelGenerator);
 	let librarian =
-		Librarian::new(gen, None).with_model_generator(model_gen as Arc<dyn TextGenerationWithModel>);
+		Librarian::new(generator, None).with_model_generator(model_gen as Arc<dyn TextGenerationWithModel>);
 
 	let volumes = vec![Volume {
 		id: "v1".to_string(),
@@ -403,9 +403,9 @@ async fn optimize_with_model_generator() {
 
 #[tokio::test]
 async fn bid_parses_valid_json() {
-	let gen = Arc::new(BidGenerator { confidence: 0.75 });
+	let generator = Arc::new(BidGenerator { confidence: 0.75 });
 	let librarian = Librarian::new(
-		gen,
+		generator,
 		Some(LibrarianOptions {
 			name: Some("rust-expert".to_string()),
 			purpose: Some("Manages Rust topics".to_string()),
@@ -421,8 +421,8 @@ async fn bid_parses_valid_json() {
 
 #[tokio::test]
 async fn bid_clamps_confidence() {
-	let gen = Arc::new(BidGenerator { confidence: 1.5 });
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(BidGenerator { confidence: 1.5 });
+	let librarian = Librarian::new(generator, None);
 
 	let lib_access = MockLibraryAccess;
 	let result = librarian.bid("content", "topic", &lib_access).await;
@@ -431,8 +431,8 @@ async fn bid_clamps_confidence() {
 
 #[tokio::test]
 async fn bid_returns_zero_on_failure() {
-	let gen = Arc::new(FailingGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(FailingGenerator);
+	let librarian = Librarian::new(generator, None);
 
 	let lib_access = MockLibraryAccess;
 	let result = librarian.bid("content", "topic", &lib_access).await;
@@ -442,9 +442,9 @@ async fn bid_returns_zero_on_failure() {
 
 #[tokio::test]
 async fn librarian_name_and_purpose() {
-	let gen = Arc::new(FailingGenerator);
+	let generator = Arc::new(FailingGenerator);
 	let librarian = Librarian::new(
-		gen,
+		generator,
 		Some(LibrarianOptions {
 			name: Some("my-lib".to_string()),
 			purpose: Some("My purpose".to_string()),
@@ -456,8 +456,8 @@ async fn librarian_name_and_purpose() {
 
 #[tokio::test]
 async fn librarian_defaults() {
-	let gen = Arc::new(FailingGenerator);
-	let librarian = Librarian::new(gen, None);
+	let generator = Arc::new(FailingGenerator);
+	let librarian = Librarian::new(generator, None);
 	assert_eq!(librarian.name(), "default");
 	assert_eq!(librarian.purpose(), "General-purpose librarian");
 }
@@ -798,13 +798,13 @@ fn definition_with_acp_serde_roundtrip() {
 #[tokio::test]
 async fn registry_initialize_creates_default() {
 	let dir = tempfile::tempdir().unwrap();
-	let gen = Arc::new(FailingGenerator);
+	let generator = Arc::new(FailingGenerator);
 	let lib_access = Arc::new(MockLibraryAccess);
 
 	let registry = LibrarianRegistry::new(LibrarianRegistryOptions::new(
 		dir.path().to_path_buf(),
 		lib_access,
-		gen,
+		generator,
 	));
 
 	registry.initialize().await.unwrap();
@@ -817,13 +817,13 @@ async fn registry_initialize_creates_default() {
 #[tokio::test]
 async fn registry_initialize_is_idempotent() {
 	let dir = tempfile::tempdir().unwrap();
-	let gen = Arc::new(FailingGenerator);
+	let generator = Arc::new(FailingGenerator);
 	let lib_access = Arc::new(MockLibraryAccess);
 
 	let registry = LibrarianRegistry::new(LibrarianRegistryOptions::new(
 		dir.path().to_path_buf(),
 		lib_access,
-		gen,
+		generator,
 	));
 
 	registry.initialize().await.unwrap();
@@ -833,13 +833,13 @@ async fn registry_initialize_is_idempotent() {
 #[tokio::test]
 async fn registry_register_and_list() {
 	let dir = tempfile::tempdir().unwrap();
-	let gen = Arc::new(FailingGenerator);
+	let generator = Arc::new(FailingGenerator);
 	let lib_access = Arc::new(MockLibraryAccess);
 
 	let registry = LibrarianRegistry::new(LibrarianRegistryOptions::new(
 		dir.path().to_path_buf(),
 		lib_access,
-		gen,
+		generator,
 	));
 	registry.initialize().await.unwrap();
 
@@ -854,13 +854,13 @@ async fn registry_register_and_list() {
 #[tokio::test]
 async fn registry_register_persists_to_disk() {
 	let dir = tempfile::tempdir().unwrap();
-	let gen = Arc::new(FailingGenerator);
+	let generator = Arc::new(FailingGenerator);
 	let lib_access = Arc::new(MockLibraryAccess);
 
 	let registry = LibrarianRegistry::new(LibrarianRegistryOptions::new(
 		dir.path().to_path_buf(),
 		lib_access,
-		gen,
+		generator,
 	));
 	registry.initialize().await.unwrap();
 
@@ -875,13 +875,13 @@ async fn registry_register_persists_to_disk() {
 #[tokio::test]
 async fn registry_register_rejects_invalid() {
 	let dir = tempfile::tempdir().unwrap();
-	let gen = Arc::new(FailingGenerator);
+	let generator = Arc::new(FailingGenerator);
 	let lib_access = Arc::new(MockLibraryAccess);
 
 	let registry = LibrarianRegistry::new(LibrarianRegistryOptions::new(
 		dir.path().to_path_buf(),
 		lib_access,
-		gen,
+		generator,
 	));
 	registry.initialize().await.unwrap();
 
@@ -894,13 +894,13 @@ async fn registry_register_rejects_invalid() {
 #[tokio::test]
 async fn registry_register_rejects_duplicate() {
 	let dir = tempfile::tempdir().unwrap();
-	let gen = Arc::new(FailingGenerator);
+	let generator = Arc::new(FailingGenerator);
 	let lib_access = Arc::new(MockLibraryAccess);
 
 	let registry = LibrarianRegistry::new(LibrarianRegistryOptions::new(
 		dir.path().to_path_buf(),
 		lib_access,
-		gen,
+		generator,
 	));
 	registry.initialize().await.unwrap();
 
@@ -913,13 +913,13 @@ async fn registry_register_rejects_duplicate() {
 #[tokio::test]
 async fn registry_unregister() {
 	let dir = tempfile::tempdir().unwrap();
-	let gen = Arc::new(FailingGenerator);
+	let generator = Arc::new(FailingGenerator);
 	let lib_access = Arc::new(MockLibraryAccess);
 
 	let registry = LibrarianRegistry::new(LibrarianRegistryOptions::new(
 		dir.path().to_path_buf(),
 		lib_access,
-		gen,
+		generator,
 	));
 	registry.initialize().await.unwrap();
 
@@ -933,13 +933,13 @@ async fn registry_unregister() {
 #[tokio::test]
 async fn registry_cannot_unregister_default() {
 	let dir = tempfile::tempdir().unwrap();
-	let gen = Arc::new(FailingGenerator);
+	let generator = Arc::new(FailingGenerator);
 	let lib_access = Arc::new(MockLibraryAccess);
 
 	let registry = LibrarianRegistry::new(LibrarianRegistryOptions::new(
 		dir.path().to_path_buf(),
 		lib_access,
-		gen,
+		generator,
 	));
 	registry.initialize().await.unwrap();
 
@@ -955,13 +955,13 @@ async fn registry_loads_from_disk_on_init() {
 	let def = valid_definition();
 	save_definition(dir.path(), &def).await.unwrap();
 
-	let gen = Arc::new(FailingGenerator);
+	let generator = Arc::new(FailingGenerator);
 	let lib_access = Arc::new(MockLibraryAccess);
 
 	let registry = LibrarianRegistry::new(LibrarianRegistryOptions::new(
 		dir.path().to_path_buf(),
 		lib_access,
-		gen,
+		generator,
 	));
 	registry.initialize().await.unwrap();
 
@@ -972,13 +972,13 @@ async fn registry_loads_from_disk_on_init() {
 #[tokio::test]
 async fn registry_resolve_no_match_returns_default() {
 	let dir = tempfile::tempdir().unwrap();
-	let gen = Arc::new(BidGenerator { confidence: 0.5 });
+	let generator = Arc::new(BidGenerator { confidence: 0.5 });
 	let lib_access = Arc::new(MockLibraryAccess);
 
 	let registry = LibrarianRegistry::new(LibrarianRegistryOptions::new(
 		dir.path().to_path_buf(),
 		lib_access,
-		gen,
+		generator,
 	));
 	registry.initialize().await.unwrap();
 
@@ -996,13 +996,13 @@ async fn registry_resolve_no_match_returns_default() {
 #[tokio::test]
 async fn registry_resolve_single_match() {
 	let dir = tempfile::tempdir().unwrap();
-	let gen = Arc::new(BidGenerator { confidence: 0.8 });
+	let generator = Arc::new(BidGenerator { confidence: 0.8 });
 	let lib_access = Arc::new(MockLibraryAccess);
 
 	let mut opts = LibrarianRegistryOptions::new(
 		dir.path().to_path_buf(),
 		lib_access,
-		gen,
+		generator,
 	);
 	// Use a very high gap so self-resolution triggers easily
 	opts.self_resolution_gap = 0.1;
@@ -1021,13 +1021,13 @@ async fn registry_resolve_single_match() {
 #[tokio::test]
 async fn registry_dispose() {
 	let dir = tempfile::tempdir().unwrap();
-	let gen = Arc::new(FailingGenerator);
+	let generator = Arc::new(FailingGenerator);
 	let lib_access = Arc::new(MockLibraryAccess);
 
 	let registry = LibrarianRegistry::new(LibrarianRegistryOptions::new(
 		dir.path().to_path_buf(),
 		lib_access,
-		gen,
+		generator,
 	));
 	registry.initialize().await.unwrap();
 
@@ -1106,8 +1106,8 @@ async fn circulation_desk_requires_librarian_or_registry() {
 
 #[tokio::test]
 async fn circulation_desk_enqueue_and_drain() {
-	let gen = Arc::new(ExtractionGenerator);
-	let librarian = Arc::new(Librarian::new(gen, None));
+	let generator = Arc::new(ExtractionGenerator);
+	let librarian = Arc::new(Librarian::new(generator, None));
 	let ops = Arc::new(MockLibraryOps::new());
 	let ops_trait: Arc<dyn CirculationLibraryOps> = Arc::clone(&ops) as Arc<dyn CirculationLibraryOps>;
 
@@ -1139,8 +1139,8 @@ async fn circulation_desk_enqueue_and_drain() {
 
 #[tokio::test]
 async fn circulation_desk_dispose_prevents_enqueue() {
-	let gen = Arc::new(ExtractionGenerator);
-	let librarian = Arc::new(Librarian::new(gen, None));
+	let generator = Arc::new(ExtractionGenerator);
+	let librarian = Arc::new(Librarian::new(generator, None));
 	let ops: Arc<dyn CirculationLibraryOps> = Arc::new(MockLibraryOps::new());
 
 	let desk = CirculationDesk::new(CirculationDeskOptions {
@@ -1165,8 +1165,8 @@ async fn circulation_desk_dispose_prevents_enqueue() {
 
 #[tokio::test]
 async fn circulation_desk_flush_clears_queue() {
-	let gen = Arc::new(ExtractionGenerator);
-	let librarian = Arc::new(Librarian::new(gen, None));
+	let generator = Arc::new(ExtractionGenerator);
+	let librarian = Arc::new(Librarian::new(generator, None));
 	let ops: Arc<dyn CirculationLibraryOps> = Arc::new(MockLibraryOps::new());
 
 	let desk = CirculationDesk::new(CirculationDeskOptions {
@@ -1187,8 +1187,8 @@ async fn circulation_desk_flush_clears_queue() {
 
 #[tokio::test]
 async fn circulation_desk_multiple_job_types() {
-	let gen = Arc::new(SummarizeGenerator);
-	let librarian = Arc::new(Librarian::new(gen, None));
+	let generator = Arc::new(SummarizeGenerator);
+	let librarian = Arc::new(Librarian::new(generator, None));
 	let ops: Arc<dyn CirculationLibraryOps> = Arc::new(MockLibraryOps::new());
 
 	let desk = CirculationDesk::new(CirculationDeskOptions {
@@ -1388,8 +1388,8 @@ async fn services_uses_circulation_desk() {
 	let library = create_test_library();
 	library.initialize(None).unwrap();
 
-	let gen = Arc::new(ExtractionGenerator);
-	let librarian = Arc::new(Librarian::new(gen, None));
+	let generator = Arc::new(ExtractionGenerator);
+	let librarian = Arc::new(Librarian::new(generator, None));
 	let ops: Arc<dyn CirculationLibraryOps> = Arc::new(MockLibraryOps::new());
 
 	let desk = Arc::new(

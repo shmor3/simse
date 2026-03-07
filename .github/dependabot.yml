@@ -1,0 +1,86 @@
+version: 2
+
+updates:
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Rust — workspace root (simse-core, simse-ui-core, simse-tui)
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+
+  # Rust — standalone crates
+  - package-ecosystem: cargo
+    directory: /simse-adaptive
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: cargo
+    directory: /simse-acp
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: cargo
+    directory: /simse-mcp
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: cargo
+    directory: /simse-engine
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: cargo
+    directory: /simse-sandbox
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: cargo
+    directory: /simse-remote
+    schedule:
+      interval: weekly
+
+  # TypeScript — npm projects
+  - package-ecosystem: npm
+    directory: /simse-api
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /simse-auth
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /simse-payments
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /simse-cdn
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /simse-mailer
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /simse-app
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /simse-landing
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: npm
+    directory: /simse-status
+    schedule:
+      interval: weekly

@@ -21,7 +21,7 @@ Per-worker inline analytics — no shared package. Each worker writes a data poi
 | simse-payments | Hono | Worker |
 | simse-mailer | Hono | Worker |
 | simse-landing | React Router | Pages |
-| simse-cloud | React Router | Pages |
+| simse-app | React Router | Pages |
 
 ## Changes per worker type
 
@@ -33,7 +33,7 @@ Per-worker inline analytics — no shared package. Each worker writes a data poi
 - Add `ANALYTICS` binding to `wrangler.toml` and `Env` type
 - Wrap existing fetch handler to capture timing and write data point after response
 
-**Pages workers** (simse-cloud, simse-landing):
+**Pages workers** (simse-app, simse-landing):
 - Add `ANALYTICS` binding to `wrangler.toml` and env type
 - Add `onRequest` middleware in worker/server entry that writes data point
 

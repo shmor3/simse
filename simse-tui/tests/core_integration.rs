@@ -21,9 +21,9 @@ fn conversation_type_unification() {
 
 #[test]
 fn conversation_add_messages_and_count() {
-	let mut conv = Conversation::new(None);
-	conv.add_user("Hello");
-	conv.add_assistant("Hi there!");
+	let conv = Conversation::new(None);
+	let conv = conv.add_user("Hello");
+	let conv = conv.add_assistant("Hi there!");
 	assert_eq!(conv.message_count(), 2);
 }
 

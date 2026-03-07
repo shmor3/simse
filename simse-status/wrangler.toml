@@ -1,0 +1,17 @@
+name = "simse-status"
+compatibility_date = "2026-03-01"
+pages_build_output_dir = "./build/client"
+
+routes = [{ pattern = "status.simse.dev", custom_domain = true }]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "simse-status-db"
+database_id = "placeholder-create-via-wrangler"
+
+[analytics_engine]
+dataset = "simse-analytics"
+binding = "ANALYTICS"
+
+[triggers]
+crons = ["* * * * *"]

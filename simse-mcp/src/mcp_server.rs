@@ -14,9 +14,8 @@
 // the server transport-agnostic and testable in isolation.
 // ---------------------------------------------------------------------------
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use serde_json::json;
@@ -108,22 +107,25 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// Registered handler containers
+// Registered handler containers (Arc-wrapped for im::HashMap cloneability)
 // ---------------------------------------------------------------------------
 
+#[derive(Clone)]
 struct RegisteredTool {
 	definition: ToolDefinition,
-	handler: Box<dyn ToolHandler>,
+	handler: Arc<dyn ToolHandler>,
 }
 
+#[derive(Clone)]
 struct RegisteredResource {
 	definition: ResourceDefinition,
-	handler: Box<dyn ResourceHandler>,
+	handler: Arc<dyn ResourceHandler>,
 }
 
+#[derive(Clone)]
 struct RegisteredPrompt {
 	definition: PromptDefinition,
-	handler: Box<dyn PromptHandler>,
+	handler: Arc<dyn PromptHandler>,
 }
 
 // ---------------------------------------------------------------------------
@@ -141,11 +143,14 @@ const PROTOCOL_VERSION: &str = "2025-03-26";
 /// The server is transport-agnostic: it exposes a `handle_request` method that
 /// processes incoming JSON-RPC method calls and returns JSON-RPC results. The
 /// actual transport (stdio, HTTP) is managed externally.
+///
+/// Uses persistent data structures (`im::HashMap`) for registries and
+/// owned-return methods for state transitions (FP pattern).
 pub struct McpServer {
 	config: McpServerConfig,
-	tools: HashMap<String, RegisteredTool>,
-	resources: HashMap<String, RegisteredResource>,
-	prompts: HashMap<String, RegisteredPrompt>,
+	tools: im::HashMap<String, RegisteredTool>,
+	resources: im::HashMap<String, RegisteredResource>,
+	prompts: im::HashMap<String, RegisteredPrompt>,
 	running: AtomicBool,
 	roots: Vec<Root>,
 	logging_level: Mutex<String>,
@@ -156,9 +161,9 @@ impl McpServer {
 	pub fn new(config: McpServerConfig) -> Self {
 		Self {
 			config,
-			tools: HashMap::new(),
-			resources: HashMap::new(),
-			prompts: HashMap::new(),
+			tools: im::HashMap::new(),
+			resources: im::HashMap::new(),
+			prompts: im::HashMap::new(),
 			running: AtomicBool::new(false),
 			roots: Vec::new(),
 			logging_level: Mutex::new("info".to_string()),
@@ -166,44 +171,51 @@ impl McpServer {
 	}
 
 	// -----------------------------------------------------------------------
-	// Tool registration
+	// Tool registration (owned-return pattern)
 	// -----------------------------------------------------------------------
 
 	/// Register a tool with a trait-object handler.
+	/// Consumes self, returns the updated server.
 	pub fn register_tool(
-		&mut self,
+		mut self,
 		definition: ToolDefinition,
 		handler: impl ToolHandler + 'static,
-	) {
+	) -> Self {
 		let name = definition.name.clone();
-		self.tools.insert(
+		self.tools = self.tools.update(
 			name,
 			RegisteredTool {
 				definition,
-				handler: Box::new(handler),
+				handler: Arc::new(handler),
 			},
 		);
+		self
 	}
 
 	/// Register a tool with an async closure handler.
+	/// Consumes self, returns the updated server.
 	///
 	/// # Example
 	/// ```ignore
-	/// server.register_tool_fn(def, |args| async move {
+	/// let server = server.register_tool_fn(def, |args| async move {
 	///     Ok(ToolCallResult { content: vec![ContentItem::Text { text: "done".into() }], is_error: None })
 	/// });
 	/// ```
-	pub fn register_tool_fn<F, Fut>(&mut self, definition: ToolDefinition, handler: F)
+	pub fn register_tool_fn<F, Fut>(self, definition: ToolDefinition, handler: F) -> Self
 	where
 		F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
 		Fut: std::future::Future<Output = Result<ToolCallResult, McpError>> + Send + 'static,
 	{
-		self.register_tool(definition, FnToolHandler(handler));
+		self.register_tool(definition, FnToolHandler(handler))
 	}
 
-	/// Unregister a tool by name. Returns `true` if the tool was found and removed.
-	pub fn unregister_tool(&mut self, name: &str) -> bool {
-		self.tools.remove(name).is_some()
+	/// Unregister a tool by name. Consumes self, returns `(updated_server, was_removed)`.
+	pub fn unregister_tool(mut self, name: &str) -> (Self, bool) {
+		let existed = self.tools.contains_key(name);
+		if existed {
+			self.tools = self.tools.without(name);
+		}
+		(self, existed)
 	}
 
 	/// Returns the number of registered tools.
@@ -219,37 +231,44 @@ impl McpServer {
 	}
 
 	// -----------------------------------------------------------------------
-	// Resource registration
+	// Resource registration (owned-return pattern)
 	// -----------------------------------------------------------------------
 
 	/// Register a resource with a trait-object handler.
+	/// Consumes self, returns the updated server.
 	pub fn register_resource(
-		&mut self,
+		mut self,
 		definition: ResourceDefinition,
 		handler: impl ResourceHandler + 'static,
-	) {
+	) -> Self {
 		let uri = definition.uri.clone();
-		self.resources.insert(
+		self.resources = self.resources.update(
 			uri,
 			RegisteredResource {
 				definition,
-				handler: Box::new(handler),
+				handler: Arc::new(handler),
 			},
 		);
+		self
 	}
 
 	/// Register a resource with an async closure handler.
-	pub fn register_resource_fn<F, Fut>(&mut self, definition: ResourceDefinition, handler: F)
+	/// Consumes self, returns the updated server.
+	pub fn register_resource_fn<F, Fut>(self, definition: ResourceDefinition, handler: F) -> Self
 	where
 		F: Fn(String) -> Fut + Send + Sync + 'static,
 		Fut: std::future::Future<Output = Result<String, McpError>> + Send + 'static,
 	{
-		self.register_resource(definition, FnResourceHandler(handler));
+		self.register_resource(definition, FnResourceHandler(handler))
 	}
 
-	/// Unregister a resource by URI. Returns `true` if the resource was found and removed.
-	pub fn unregister_resource(&mut self, uri: &str) -> bool {
-		self.resources.remove(uri).is_some()
+	/// Unregister a resource by URI. Consumes self, returns `(updated_server, was_removed)`.
+	pub fn unregister_resource(mut self, uri: &str) -> (Self, bool) {
+		let existed = self.resources.contains_key(uri);
+		if existed {
+			self.resources = self.resources.without(uri);
+		}
+		(self, existed)
 	}
 
 	/// Returns the number of registered resources.
@@ -258,37 +277,44 @@ impl McpServer {
 	}
 
 	// -----------------------------------------------------------------------
-	// Prompt registration
+	// Prompt registration (owned-return pattern)
 	// -----------------------------------------------------------------------
 
 	/// Register a prompt with a trait-object handler.
+	/// Consumes self, returns the updated server.
 	pub fn register_prompt(
-		&mut self,
+		mut self,
 		definition: PromptDefinition,
 		handler: impl PromptHandler + 'static,
-	) {
+	) -> Self {
 		let name = definition.name.clone();
-		self.prompts.insert(
+		self.prompts = self.prompts.update(
 			name,
 			RegisteredPrompt {
 				definition,
-				handler: Box::new(handler),
+				handler: Arc::new(handler),
 			},
 		);
+		self
 	}
 
 	/// Register a prompt with an async closure handler.
-	pub fn register_prompt_fn<F, Fut>(&mut self, definition: PromptDefinition, handler: F)
+	/// Consumes self, returns the updated server.
+	pub fn register_prompt_fn<F, Fut>(self, definition: PromptDefinition, handler: F) -> Self
 	where
 		F: Fn(serde_json::Value) -> Fut + Send + Sync + 'static,
 		Fut: std::future::Future<Output = Result<Vec<PromptMessage>, McpError>> + Send + 'static,
 	{
-		self.register_prompt(definition, FnPromptHandler(handler));
+		self.register_prompt(definition, FnPromptHandler(handler))
 	}
 
-	/// Unregister a prompt by name. Returns `true` if the prompt was found and removed.
-	pub fn unregister_prompt(&mut self, name: &str) -> bool {
-		self.prompts.remove(name).is_some()
+	/// Unregister a prompt by name. Consumes self, returns `(updated_server, was_removed)`.
+	pub fn unregister_prompt(mut self, name: &str) -> (Self, bool) {
+		let existed = self.prompts.contains_key(name);
+		if existed {
+			self.prompts = self.prompts.without(name);
+		}
+		(self, existed)
 	}
 
 	/// Returns the number of registered prompts.
@@ -297,12 +323,13 @@ impl McpServer {
 	}
 
 	// -----------------------------------------------------------------------
-	// Roots
+	// Roots (owned-return pattern)
 	// -----------------------------------------------------------------------
 
-	/// Set the workspace roots.
-	pub fn set_roots(&mut self, roots: Vec<Root>) {
+	/// Set the workspace roots. Consumes self, returns the updated server.
+	pub fn set_roots(mut self, roots: Vec<Root>) -> Self {
 		self.roots = roots;
+		self
 	}
 
 	/// Returns a reference to the current workspace roots.
@@ -609,14 +636,14 @@ mod tests {
 		}
 	}
 
-	// -- Tool registration --
+	// -- Tool registration (owned-return) --
 
 	#[test]
 	fn test_register_tool_increments_count() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 		assert_eq!(server.tool_count(), 0);
 
-		server.register_tool_fn(test_tool_def("search"), |_args| async move {
+		let server = server.register_tool_fn(test_tool_def("search"), |_args| async move {
 			Ok(ToolCallResult {
 				content: vec![ContentItem::Text {
 					text: "found".into(),
@@ -631,21 +658,21 @@ mod tests {
 
 	#[test]
 	fn test_register_multiple_tools() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
-		server.register_tool_fn(test_tool_def("alpha"), |_| async move {
+		let server = server.register_tool_fn(test_tool_def("alpha"), |_| async move {
 			Ok(ToolCallResult {
 				content: vec![],
 				is_error: None,
 			})
 		});
-		server.register_tool_fn(test_tool_def("beta"), |_| async move {
+		let server = server.register_tool_fn(test_tool_def("beta"), |_| async move {
 			Ok(ToolCallResult {
 				content: vec![],
 				is_error: None,
 			})
 		});
-		server.register_tool_fn(test_tool_def("gamma"), |_| async move {
+		let server = server.register_tool_fn(test_tool_def("gamma"), |_| async move {
 			Ok(ToolCallResult {
 				content: vec![],
 				is_error: None,
@@ -665,9 +692,9 @@ mod tests {
 
 	#[test]
 	fn test_unregister_tool() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
-		server.register_tool_fn(test_tool_def("search"), |_| async move {
+		let server = server.register_tool_fn(test_tool_def("search"), |_| async move {
 			Ok(ToolCallResult {
 				content: vec![],
 				is_error: None,
@@ -675,25 +702,27 @@ mod tests {
 		});
 		assert_eq!(server.tool_count(), 1);
 
-		assert!(server.unregister_tool("search"));
+		let (server, removed) = server.unregister_tool("search");
+		assert!(removed);
 		assert_eq!(server.tool_count(), 0);
 		assert!(server.tool_names().is_empty());
 	}
 
 	#[test]
 	fn test_unregister_nonexistent_tool() {
-		let mut server = McpServer::new(test_config());
-		assert!(!server.unregister_tool("nonexistent"));
+		let server = McpServer::new(test_config());
+		let (_server, removed) = server.unregister_tool("nonexistent");
+		assert!(!removed);
 	}
 
-	// -- Resource registration --
+	// -- Resource registration (owned-return) --
 
 	#[test]
 	fn test_register_resource_increments_count() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 		assert_eq!(server.resource_count(), 0);
 
-		server.register_resource_fn(
+		let server = server.register_resource_fn(
 			test_resource_def("file:///config.json", "Config"),
 			|_uri| async move { Ok("{}".to_string()) },
 		);
@@ -703,32 +732,34 @@ mod tests {
 
 	#[test]
 	fn test_unregister_resource() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
-		server.register_resource_fn(
+		let server = server.register_resource_fn(
 			test_resource_def("file:///config.json", "Config"),
 			|_uri| async move { Ok("{}".to_string()) },
 		);
 		assert_eq!(server.resource_count(), 1);
 
-		assert!(server.unregister_resource("file:///config.json"));
+		let (server, removed) = server.unregister_resource("file:///config.json");
+		assert!(removed);
 		assert_eq!(server.resource_count(), 0);
 	}
 
 	#[test]
 	fn test_unregister_nonexistent_resource() {
-		let mut server = McpServer::new(test_config());
-		assert!(!server.unregister_resource("file:///nope"));
+		let server = McpServer::new(test_config());
+		let (_server, removed) = server.unregister_resource("file:///nope");
+		assert!(!removed);
 	}
 
-	// -- Prompt registration --
+	// -- Prompt registration (owned-return) --
 
 	#[test]
 	fn test_register_prompt_increments_count() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 		assert_eq!(server.prompt_count(), 0);
 
-		server.register_prompt_fn(test_prompt_def("summarize"), |_args| async move {
+		let server = server.register_prompt_fn(test_prompt_def("summarize"), |_args| async move {
 			Ok(vec![PromptMessage {
 				role: "user".into(),
 				content: json!("Please summarize"),
@@ -740,31 +771,33 @@ mod tests {
 
 	#[test]
 	fn test_unregister_prompt() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
-		server.register_prompt_fn(test_prompt_def("summarize"), |_args| async move {
+		let server = server.register_prompt_fn(test_prompt_def("summarize"), |_args| async move {
 			Ok(vec![])
 		});
 		assert_eq!(server.prompt_count(), 1);
 
-		assert!(server.unregister_prompt("summarize"));
+		let (server, removed) = server.unregister_prompt("summarize");
+		assert!(removed);
 		assert_eq!(server.prompt_count(), 0);
 	}
 
 	#[test]
 	fn test_unregister_nonexistent_prompt() {
-		let mut server = McpServer::new(test_config());
-		assert!(!server.unregister_prompt("nonexistent"));
+		let server = McpServer::new(test_config());
+		let (_server, removed) = server.unregister_prompt("nonexistent");
+		assert!(!removed);
 	}
 
-	// -- Roots --
+	// -- Roots (owned-return) --
 
 	#[test]
 	fn test_set_roots() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 		assert!(server.roots().is_empty());
 
-		server.set_roots(vec![
+		let server = server.set_roots(vec![
 			Root {
 				uri: "file:///workspace".into(),
 				name: Some("workspace".into()),
@@ -784,10 +817,10 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_handle_initialize() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
 		// Register a tool so capabilities include "tools"
-		server.register_tool_fn(test_tool_def("test"), |_| async move {
+		let server = server.register_tool_fn(test_tool_def("test"), |_| async move {
 			Ok(ToolCallResult {
 				content: vec![],
 				is_error: None,
@@ -831,15 +864,15 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_handle_tools_list() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
-		server.register_tool_fn(test_tool_def("search"), |_| async move {
+		let server = server.register_tool_fn(test_tool_def("search"), |_| async move {
 			Ok(ToolCallResult {
 				content: vec![],
 				is_error: None,
 			})
 		});
-		server.register_tool_fn(test_tool_def("generate"), |_| async move {
+		let server = server.register_tool_fn(test_tool_def("generate"), |_| async move {
 			Ok(ToolCallResult {
 				content: vec![],
 				is_error: None,
@@ -876,9 +909,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_handle_tools_call_success() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
-		server.register_tool_fn(test_tool_def("echo"), |args| async move {
+		let server = server.register_tool_fn(test_tool_def("echo"), |args| async move {
 			let input = args
 				.get("input")
 				.and_then(|v| v.as_str())
@@ -907,9 +940,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_handle_tools_call_handler_error() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
-		server.register_tool_fn(test_tool_def("fail"), |_args| async move {
+		let server = server.register_tool_fn(test_tool_def("fail"), |_args| async move {
 			Err(McpError::ToolError {
 				tool: "fail".into(),
 				message: "intentional failure".into(),
@@ -950,9 +983,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_handle_resources_list() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
-		server.register_resource_fn(
+		let server = server.register_resource_fn(
 			test_resource_def("file:///config.json", "Config"),
 			|_uri| async move { Ok("{}".to_string()) },
 		);
@@ -972,9 +1005,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_handle_resources_read() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
-		server.register_resource_fn(
+		let server = server.register_resource_fn(
 			test_resource_def("file:///data.txt", "Data"),
 			|_uri| async move { Ok("file content here".to_string()) },
 		);
@@ -1029,9 +1062,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_handle_prompts_list() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
-		server.register_prompt_fn(test_prompt_def("summarize"), |_args| async move {
+		let server = server.register_prompt_fn(test_prompt_def("summarize"), |_args| async move {
 			Ok(vec![PromptMessage {
 				role: "user".into(),
 				content: json!("Please summarize"),
@@ -1052,9 +1085,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_handle_prompts_get() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
-		server.register_prompt_fn(test_prompt_def("greet"), |args| async move {
+		let server = server.register_prompt_fn(test_prompt_def("greet"), |args| async move {
 			let name = args
 				.get("name")
 				.and_then(|v| v.as_str())
@@ -1128,8 +1161,8 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_handle_roots_list() {
-		let mut server = McpServer::new(test_config());
-		server.set_roots(vec![Root {
+		let server = McpServer::new(test_config());
+		let server = server.set_roots(vec![Root {
 			uri: "file:///workspace".into(),
 			name: Some("workspace".into()),
 		}]);
@@ -1209,9 +1242,9 @@ mod tests {
 
 	#[tokio::test]
 	async fn test_tool_reregistration_replaces_handler() {
-		let mut server = McpServer::new(test_config());
+		let server = McpServer::new(test_config());
 
-		server.register_tool_fn(test_tool_def("echo"), |_| async move {
+		let server = server.register_tool_fn(test_tool_def("echo"), |_| async move {
 			Ok(ToolCallResult {
 				content: vec![ContentItem::Text {
 					text: "v1".into(),
@@ -1221,7 +1254,7 @@ mod tests {
 		});
 
 		// Re-register with same name but different handler
-		server.register_tool_fn(test_tool_def("echo"), |_| async move {
+		let server = server.register_tool_fn(test_tool_def("echo"), |_| async move {
 			Ok(ToolCallResult {
 				content: vec![ContentItem::Text {
 					text: "v2".into(),

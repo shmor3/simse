@@ -2,24 +2,44 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use base64::Engine;
 use russh::client::{self, Handle, Msg};
+use russh::keys::PublicKeyBase64;
 use russh::{Channel, Disconnect};
 use russh_sftp::client::SftpSession;
+use sha2::{Digest, Sha256};
 
-use crate::config::{SshAuth, SshConfig};
+use crate::config::{HostKeyPolicy, SshAuth, SshConfig};
 use crate::error::SandboxError;
 
-/// SSH client handler that tracks connection health.
+/// Compute the SHA256 fingerprint of an SSH public key.
 ///
-/// Accepts all host keys (suitable for trusted/internal environments).
-/// Sets the health flag to `false` on disconnect.
+/// Returns a string in the format `SHA256:<base64>` (matching `ssh-keygen -lf`).
+fn ssh_key_fingerprint(key: &russh::keys::PublicKey) -> String {
+    let key_bytes = key.public_key_bytes();
+    let hash = Sha256::digest(key_bytes);
+    let b64 = base64::engine::general_purpose::STANDARD_NO_PAD.encode(hash);
+    format!("SHA256:{b64}")
+}
+
+/// SSH client handler that tracks connection health and verifies host keys.
+///
+/// Host key verification is controlled by [`HostKeyPolicy`]:
+/// - `AcceptAll` — accepts any key (for trusted/internal networks)
+/// - `Fingerprint(expected)` — accepts only if the SHA256 fingerprint matches
 pub struct SshHandler {
     healthy: Arc<AtomicBool>,
+    host_key_policy: HostKeyPolicy,
+    host: String,
 }
 
 impl SshHandler {
-    fn new(healthy: Arc<AtomicBool>) -> Self {
-        Self { healthy }
+    fn new(healthy: Arc<AtomicBool>, host_key_policy: HostKeyPolicy, host: String) -> Self {
+        Self {
+            healthy,
+            host_key_policy,
+            host,
+        }
     }
 }
 
@@ -28,10 +48,38 @@ impl client::Handler for SshHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::PublicKey,
+        server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
-        // Accept all host keys for now (TODO: known_hosts verification)
-        Ok(true)
+        let fingerprint = ssh_key_fingerprint(server_public_key);
+
+        match &self.host_key_policy {
+            HostKeyPolicy::AcceptAll => {
+                tracing::debug!(
+                    host = %self.host,
+                    fingerprint = %fingerprint,
+                    "Accepted server key (policy: AcceptAll)"
+                );
+                Ok(true)
+            }
+            HostKeyPolicy::Fingerprint(expected) => {
+                if fingerprint == *expected {
+                    tracing::debug!(
+                        host = %self.host,
+                        fingerprint = %fingerprint,
+                        "Server key fingerprint verified"
+                    );
+                    Ok(true)
+                } else {
+                    tracing::error!(
+                        host = %self.host,
+                        expected = %expected,
+                        actual = %fingerprint,
+                        "Server key fingerprint mismatch — possible MITM attack"
+                    );
+                    Ok(false)
+                }
+            }
+        }
     }
 
     async fn disconnected(
@@ -66,7 +114,11 @@ impl SshPool {
     /// and authenticates using the method specified in `SshConfig`.
     pub async fn connect(config: &SshConfig) -> Result<Self, SandboxError> {
         let healthy = Arc::new(AtomicBool::new(true));
-        let handler = SshHandler::new(Arc::clone(&healthy));
+        let handler = SshHandler::new(
+            Arc::clone(&healthy),
+            config.host_key_policy.clone(),
+            format!("{}:{}", config.host, config.port),
+        );
 
         let russh_config = Arc::new(client::Config {
             keepalive_interval: if config.keepalive_interval_ms > 0 {

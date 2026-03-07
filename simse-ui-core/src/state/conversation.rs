@@ -3,6 +3,9 @@
 //! Types are re-exported from `simse-core`. `ConversationBuffer` is a thin
 //! wrapper around `simse_core::Conversation` that provides backward-compatible
 //! APIs for the UI layer.
+//!
+//! All mutating methods use owned-return (`self -> Self`) for functional-style
+//! state transitions. The inner `simse_core::Conversation` also uses this pattern.
 
 // Re-export core conversation types as the single source of truth.
 pub use simse_core::conversation::{ConversationMessage, ConversationOptions, Role};
@@ -20,8 +23,9 @@ pub type Message = ConversationMessage;
 /// Conversation buffer with auto-compaction and trimming support.
 ///
 /// Thin wrapper around `simse_core::Conversation` that provides the same
-/// API surface used by the UI layer.
-#[derive(Debug)]
+/// API surface used by the UI layer. All mutating methods take `self` by
+/// value and return the updated `Self` (owned-return pattern).
+#[derive(Debug, Clone)]
 pub struct ConversationBuffer {
 	inner: simse_core::Conversation,
 }
@@ -35,23 +39,31 @@ impl ConversationBuffer {
 	}
 
 	/// Add a user message to the conversation.
-	pub fn add_user(&mut self, content: &str) {
-		self.inner.add_user(content);
+	pub fn add_user(self, content: &str) -> Self {
+		Self {
+			inner: self.inner.add_user(content),
+		}
 	}
 
 	/// Add an assistant message to the conversation.
-	pub fn add_assistant(&mut self, content: &str) {
-		self.inner.add_assistant(content);
+	pub fn add_assistant(self, content: &str) -> Self {
+		Self {
+			inner: self.inner.add_assistant(content),
+		}
 	}
 
 	/// Add a tool result message to the conversation.
-	pub fn add_tool_result(&mut self, tool_call_id: &str, tool_name: &str, content: &str) {
-		self.inner.add_tool_result(tool_call_id, tool_name, content);
+	pub fn add_tool_result(self, tool_call_id: &str, tool_name: &str, content: &str) -> Self {
+		Self {
+			inner: self.inner.add_tool_result(tool_call_id, tool_name, content),
+		}
 	}
 
 	/// Set the system prompt (replaces any existing system prompt).
-	pub fn set_system_prompt(&mut self, prompt: &str) {
-		self.inner.set_system_prompt(prompt.to_string());
+	pub fn set_system_prompt(self, prompt: &str) -> Self {
+		Self {
+			inner: self.inner.set_system_prompt(prompt.to_string()),
+		}
 	}
 
 	/// Load messages from a saved session.
@@ -59,17 +71,21 @@ impl ConversationBuffer {
 	/// Clears existing messages and replays the provided list.
 	/// System-role messages are extracted and used to set the system prompt.
 	/// All other messages are pushed into the buffer.
-	pub fn load_messages(&mut self, msgs: &[ConversationMessage]) {
-		// Extract system prompt from system-role messages, load the rest
+	pub fn load_messages(self, msgs: &[ConversationMessage]) -> Self {
+		let mut inner = self.inner;
+
+		// Extract system prompt from system-role messages, load the rest.
 		let mut non_system = Vec::new();
 		for msg in msgs {
 			if msg.role == Role::System {
-				self.inner.set_system_prompt(msg.content.clone());
+				inner = inner.set_system_prompt(msg.content.clone());
 			} else {
 				non_system.push(msg.clone());
 			}
 		}
-		self.inner.load_messages(non_system);
+		Self {
+			inner: inner.load_messages(non_system),
+		}
 	}
 
 	/// Return all messages with the system prompt prepended (if set).
@@ -86,13 +102,17 @@ impl ConversationBuffer {
 	}
 
 	/// Clear all messages but preserve the system prompt.
-	pub fn clear(&mut self) {
-		self.inner.clear();
+	pub fn clear(self) -> Self {
+		Self {
+			inner: self.inner.clear(),
+		}
 	}
 
 	/// Replace all messages with a single user message containing the summary.
-	pub fn compact(&mut self, summary: &str) {
-		self.inner.compact(summary);
+	pub fn compact(self, summary: &str) -> Self {
+		Self {
+			inner: self.inner.compact(summary),
+		}
 	}
 
 	/// Count of non-system messages in the buffer.
@@ -118,7 +138,9 @@ impl ConversationBuffer {
 	}
 
 	/// Get a reference to the conversation messages (excludes system prompt).
-	pub fn messages(&self) -> &[ConversationMessage] {
+	///
+	/// Returns `&im::Vector<ConversationMessage>` (persistent data structure).
+	pub fn messages(&self) -> &im::Vector<ConversationMessage> {
 		self.inner.messages()
 	}
 }
@@ -127,7 +149,7 @@ impl ConversationBuffer {
 pub type Conversation = ConversationBuffer;
 
 // ---------------------------------------------------------------------------
-// Backward-compatible free functions
+// Backward-compatible free functions (owned-return style)
 // ---------------------------------------------------------------------------
 
 /// Create a new conversation (backward-compatible free function).
@@ -145,23 +167,23 @@ pub fn new_conversation(
 }
 
 /// Add a user message (backward-compatible free function).
-pub fn add_user(conv: &mut ConversationBuffer, content: String) {
-	conv.add_user(&content);
+pub fn add_user(conv: ConversationBuffer, content: String) -> ConversationBuffer {
+	conv.add_user(&content)
 }
 
 /// Add an assistant message (backward-compatible free function).
-pub fn add_assistant(conv: &mut ConversationBuffer, content: String) {
-	conv.add_assistant(&content);
+pub fn add_assistant(conv: ConversationBuffer, content: String) -> ConversationBuffer {
+	conv.add_assistant(&content)
 }
 
 /// Add a tool result (backward-compatible free function).
 pub fn add_tool_result(
-	conv: &mut ConversationBuffer,
+	conv: ConversationBuffer,
 	tool_call_id: String,
 	tool_name: String,
 	content: String,
-) {
-	conv.add_tool_result(&tool_call_id, &tool_name, &content);
+) -> ConversationBuffer {
+	conv.add_tool_result(&tool_call_id, &tool_name, &content)
 }
 
 /// Get all messages including system prompt (backward-compatible free function).
@@ -180,13 +202,13 @@ pub fn needs_compaction(conv: &ConversationBuffer) -> bool {
 }
 
 /// Clear messages (backward-compatible free function).
-pub fn clear(conv: &mut ConversationBuffer) {
-	conv.clear();
+pub fn clear(conv: ConversationBuffer) -> ConversationBuffer {
+	conv.clear()
 }
 
 /// Compact with summary (backward-compatible free function).
-pub fn compact(conv: &mut ConversationBuffer, summary: String) {
-	conv.compact(&summary);
+pub fn compact(conv: ConversationBuffer, summary: String) -> ConversationBuffer {
+	conv.compact(&summary)
 }
 
 // ---------------------------------------------------------------------------
@@ -211,8 +233,8 @@ mod tests {
 	// 2. add_user_and_count -- add user message, count is 1
 	#[test]
 	fn add_user_and_count() {
-		let mut buf = ConversationBuffer::new(ConversationOptions::default());
-		buf.add_user("Hello world");
+		let buf = ConversationBuffer::new(ConversationOptions::default());
+		let buf = buf.add_user("Hello world");
 		assert_eq!(buf.message_count(), 1);
 		assert_eq!(buf.messages()[0].role, Role::User);
 		assert_eq!(buf.messages()[0].content, "Hello world");
@@ -221,8 +243,8 @@ mod tests {
 	// 3. add_assistant -- adds assistant message
 	#[test]
 	fn add_assistant_message() {
-		let mut buf = ConversationBuffer::new(ConversationOptions::default());
-		buf.add_assistant("I can help with that");
+		let buf = ConversationBuffer::new(ConversationOptions::default());
+		let buf = buf.add_assistant("I can help with that");
 		assert_eq!(buf.message_count(), 1);
 		assert_eq!(buf.messages()[0].role, Role::Assistant);
 		assert_eq!(buf.messages()[0].content, "I can help with that");
@@ -231,8 +253,8 @@ mod tests {
 	// 4. add_tool_result_with_fields -- tool_call_id and tool_name preserved
 	#[test]
 	fn add_tool_result_with_fields() {
-		let mut buf = ConversationBuffer::new(ConversationOptions::default());
-		buf.add_tool_result("call_123", "read_file", "file contents here");
+		let buf = ConversationBuffer::new(ConversationOptions::default());
+		let buf = buf.add_tool_result("call_123", "read_file", "file contents here");
 		assert_eq!(buf.message_count(), 1);
 		let msg = &buf.messages()[0];
 		assert_eq!(msg.role, Role::ToolResult);
@@ -244,13 +266,13 @@ mod tests {
 	// 5. serialize_format -- verify serialize produces correct [Role]\ncontent\n\n... format
 	#[test]
 	fn serialize_format() {
-		let mut buf = ConversationBuffer::new(ConversationOptions {
+		let buf = ConversationBuffer::new(ConversationOptions {
 			system_prompt: Some("You are helpful.".to_string()),
 			..ConversationOptions::default()
 		});
-		buf.add_user("Hello");
-		buf.add_assistant("Hi there");
-		buf.add_tool_result("tc1", "bash", "output");
+		let buf = buf.add_user("Hello");
+		let buf = buf.add_assistant("Hi there");
+		let buf = buf.add_tool_result("tc1", "bash", "output");
 
 		let serialized = buf.serialize();
 		let expected = "[System]\nYou are helpful.\n\n\
@@ -263,11 +285,11 @@ mod tests {
 	// 6. compact_replaces_messages -- compact clears and inserts summary
 	#[test]
 	fn compact_replaces_messages() {
-		let mut buf = ConversationBuffer::new(ConversationOptions::default());
-		buf.add_user("msg1");
-		buf.add_assistant("msg2");
-		buf.add_user("msg3");
-		buf.compact("This is a summary of the conversation.");
+		let buf = ConversationBuffer::new(ConversationOptions::default());
+		let buf = buf.add_user("msg1");
+		let buf = buf.add_assistant("msg2");
+		let buf = buf.add_user("msg3");
+		let buf = buf.compact("This is a summary of the conversation.");
 
 		assert_eq!(buf.message_count(), 1);
 		assert_eq!(buf.messages()[0].role, Role::User);
@@ -280,26 +302,26 @@ mod tests {
 	// 7. needs_compaction_threshold -- returns true when chars exceed threshold
 	#[test]
 	fn needs_compaction_threshold() {
-		let mut buf = ConversationBuffer::new(ConversationOptions {
+		let buf = ConversationBuffer::new(ConversationOptions {
 			auto_compact_chars: Some(10),
 			..ConversationOptions::default()
 		});
 		assert!(!buf.needs_compaction());
 
-		buf.add_user(&"a".repeat(20));
+		let buf = buf.add_user(&"a".repeat(20));
 		assert!(buf.needs_compaction());
 	}
 
 	// 8. trim_oldest_when_max_exceeded -- with max_messages=2, adding 3 messages trims oldest
 	#[test]
 	fn trim_oldest_when_max_exceeded() {
-		let mut buf = ConversationBuffer::new(ConversationOptions {
+		let buf = ConversationBuffer::new(ConversationOptions {
 			max_messages: Some(2),
 			..ConversationOptions::default()
 		});
-		buf.add_user("first");
-		buf.add_user("second");
-		buf.add_user("third");
+		let buf = buf.add_user("first");
+		let buf = buf.add_user("second");
+		let buf = buf.add_user("third");
 
 		assert_eq!(buf.message_count(), 2);
 		assert_eq!(buf.messages()[0].content, "second");
@@ -309,7 +331,7 @@ mod tests {
 	// 9. load_messages_extracts_system -- system messages become system_prompt
 	#[test]
 	fn load_messages_extracts_system() {
-		let mut buf = ConversationBuffer::new(ConversationOptions::default());
+		let buf = ConversationBuffer::new(ConversationOptions::default());
 
 		let msgs = vec![
 			ConversationMessage {
@@ -335,7 +357,7 @@ mod tests {
 			},
 		];
 
-		buf.load_messages(&msgs);
+		let buf = buf.load_messages(&msgs);
 
 		assert_eq!(buf.system_prompt(), Some("Be helpful"));
 		assert_eq!(buf.message_count(), 2);
@@ -346,15 +368,15 @@ mod tests {
 	// 10. clear_preserves_system_prompt -- clear removes messages but keeps system_prompt
 	#[test]
 	fn clear_preserves_system_prompt() {
-		let mut buf = ConversationBuffer::new(ConversationOptions {
+		let buf = ConversationBuffer::new(ConversationOptions {
 			system_prompt: Some("System prompt here".to_string()),
 			..ConversationOptions::default()
 		});
-		buf.add_user("hello");
-		buf.add_assistant("hi");
+		let buf = buf.add_user("hello");
+		let buf = buf.add_assistant("hi");
 
 		assert_eq!(buf.message_count(), 2);
-		buf.clear();
+		let buf = buf.clear();
 
 		assert_eq!(buf.message_count(), 0);
 		assert_eq!(buf.system_prompt(), Some("System prompt here"));
@@ -363,11 +385,11 @@ mod tests {
 	// 11. to_messages_includes_system -- system prompt prepended to output
 	#[test]
 	fn to_messages_includes_system() {
-		let mut buf = ConversationBuffer::new(ConversationOptions {
+		let buf = ConversationBuffer::new(ConversationOptions {
 			system_prompt: Some("You are an AI.".to_string()),
 			..ConversationOptions::default()
 		});
-		buf.add_user("Hello");
+		let buf = buf.add_user("Hello");
 
 		let msgs = buf.to_messages();
 		assert_eq!(msgs.len(), 2);
@@ -380,11 +402,11 @@ mod tests {
 	// 12. set_system_prompt -- replaces existing system prompt
 	#[test]
 	fn set_system_prompt_replaces() {
-		let mut buf = ConversationBuffer::new(ConversationOptions {
+		let buf = ConversationBuffer::new(ConversationOptions {
 			system_prompt: Some("Old prompt".to_string()),
 			..ConversationOptions::default()
 		});
-		buf.set_system_prompt("New prompt");
+		let buf = buf.set_system_prompt("New prompt");
 		assert_eq!(buf.system_prompt(), Some("New prompt"));
 
 		let msgs = buf.to_messages();
@@ -394,11 +416,11 @@ mod tests {
 	// 13. estimated_chars_includes_system -- system prompt counted in estimated chars
 	#[test]
 	fn estimated_chars_includes_system() {
-		let mut buf = ConversationBuffer::new(ConversationOptions {
+		let buf = ConversationBuffer::new(ConversationOptions {
 			system_prompt: Some("12345".to_string()),
 			..ConversationOptions::default()
 		});
-		buf.add_user("abc"); // 3 chars
+		let buf = buf.add_user("abc"); // 3 chars
 
 		assert_eq!(buf.estimated_chars(), 8); // 5 + 3
 	}
@@ -406,9 +428,9 @@ mod tests {
 	// 14. serialize_tool_result_fallback -- tool result uses tool_call_id when tool_name is None
 	#[test]
 	fn serialize_tool_result_fallback() {
-		let mut buf = ConversationBuffer::new(ConversationOptions::default());
+		let buf = ConversationBuffer::new(ConversationOptions::default());
 		// Use load_messages to add a message with tool_name = None
-		buf.load_messages(&[ConversationMessage {
+		let buf = buf.load_messages(&[ConversationMessage {
 			role: Role::ToolResult,
 			content: "result data".to_string(),
 			tool_call_id: Some("tc_abc".to_string()),
@@ -423,10 +445,10 @@ mod tests {
 	// 15. backward compat -- old free functions still work
 	#[test]
 	fn backward_compat_free_functions() {
-		let mut conv = new_conversation(Some("sys".into()), None, None);
-		add_user(&mut conv, "hello".into());
-		add_assistant(&mut conv, "hi".into());
-		add_tool_result(&mut conv, "tc1".into(), "bash".into(), "output".into());
+		let conv = new_conversation(Some("sys".into()), None, None);
+		let conv = add_user(conv, "hello".into());
+		let conv = add_assistant(conv, "hi".into());
+		let conv = add_tool_result(conv, "tc1".into(), "bash".into(), "output".into());
 
 		let msgs = to_messages(&conv);
 		assert_eq!(msgs.len(), 4); // system + 3 messages
@@ -435,16 +457,16 @@ mod tests {
 		assert_eq!(estimated_chars(&conv), 3 + 5 + 2 + 6); // sys + hello + hi + output
 		assert!(!needs_compaction(&conv));
 
-		clear(&mut conv);
+		let conv = clear(conv);
 		assert_eq!(conv.message_count(), 0);
 	}
 
 	// 16. compact_backward_compat -- old compact function
 	#[test]
 	fn compact_backward_compat() {
-		let mut conv = new_conversation(None, None, None);
-		add_user(&mut conv, "msg1".into());
-		compact(&mut conv, "summary".into());
+		let conv = new_conversation(None, None, None);
+		let conv = add_user(conv, "msg1".into());
+		let conv = compact(conv, "summary".into());
 
 		let msgs = to_messages(&conv);
 		assert_eq!(msgs.len(), 1);
@@ -462,23 +484,23 @@ mod tests {
 	// 18. trim does not affect count when below max
 	#[test]
 	fn trim_no_op_when_below_max() {
-		let mut buf = ConversationBuffer::new(ConversationOptions {
+		let buf = ConversationBuffer::new(ConversationOptions {
 			max_messages: Some(5),
 			..ConversationOptions::default()
 		});
-		buf.add_user("one");
-		buf.add_user("two");
+		let buf = buf.add_user("one");
+		let buf = buf.add_user("two");
 		assert_eq!(buf.message_count(), 2);
 	}
 
 	// 19. load_messages clears existing messages
 	#[test]
 	fn load_messages_clears_existing() {
-		let mut buf = ConversationBuffer::new(ConversationOptions::default());
-		buf.add_user("old message");
+		let buf = ConversationBuffer::new(ConversationOptions::default());
+		let buf = buf.add_user("old message");
 		assert_eq!(buf.message_count(), 1);
 
-		buf.load_messages(&[ConversationMessage {
+		let buf = buf.load_messages(&[ConversationMessage {
 			role: Role::User,
 			content: "new message".to_string(),
 			tool_call_id: None,
@@ -493,11 +515,23 @@ mod tests {
 	// 20. needs_compaction false when equal to threshold
 	#[test]
 	fn needs_compaction_false_at_threshold() {
-		let mut buf = ConversationBuffer::new(ConversationOptions {
+		let buf = ConversationBuffer::new(ConversationOptions {
 			auto_compact_chars: Some(5),
 			..ConversationOptions::default()
 		});
-		buf.add_user("12345"); // exactly 5 chars
+		let buf = buf.add_user("12345"); // exactly 5 chars
 		assert!(!buf.needs_compaction()); // not strictly greater
+	}
+
+	// 21. clone produces independent copy (im::Vector structural sharing)
+	#[test]
+	fn clone_is_independent() {
+		let buf1 = ConversationBuffer::new(ConversationOptions::default());
+		let buf1 = buf1.add_user("hello");
+		let buf2 = buf1.clone();
+		let buf1 = buf1.add_user("world");
+
+		assert_eq!(buf1.message_count(), 2);
+		assert_eq!(buf2.message_count(), 1);
 	}
 }

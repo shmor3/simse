@@ -827,7 +827,8 @@ async fn delegation_error_propagation() {
 
 #[tokio::test]
 async fn delegation_unique_id_generation() {
-	reset_delegation_counter();
+	// Don't reset the counter — other tests run in parallel and race on it.
+	// We only need two consecutive IDs to differ, which atomic increment guarantees.
 	let ids = Arc::new(Mutex::new(Vec::<String>::new()));
 	let ids_clone = Arc::clone(&ids);
 

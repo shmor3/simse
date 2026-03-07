@@ -1,15 +1,16 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::AtomicU64;
 
 use crate::error::RemoteError;
 
 /// Routes JSON-RPC requests to a local simse-core process.
+///
+/// This struct holds I/O handles (child process, pipe reader) that are
+/// inherently mutable and non-clonable. Methods that perform I/O use
+/// `&mut self` with `// PERF: async I/O` annotations.
 pub struct LocalRouter {
     child: Option<Child>,
     reader: Option<BufReader<std::process::ChildStdout>>,
-    #[allow(dead_code)]
-    next_id: AtomicU64,
 }
 
 impl Default for LocalRouter {
@@ -23,12 +24,12 @@ impl LocalRouter {
         Self {
             child: None,
             reader: None,
-            next_id: AtomicU64::new(1),
         }
     }
 
     /// Spawn a local simse-core-engine process.
     pub fn spawn(&mut self, binary_path: &str) -> Result<(), RemoteError> {
+        // PERF: async I/O — spawns child process with piped stdin/stdout
         let mut child = Command::new(binary_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -51,6 +52,7 @@ impl LocalRouter {
 
     /// Forward a raw JSON-RPC request string to the local process and return the response.
     pub fn forward(&mut self, request: &str) -> Result<String, RemoteError> {
+        // PERF: async I/O — writes to child stdin, reads from child stdout
         let child = self
             .child
             .as_mut()
@@ -100,6 +102,7 @@ impl LocalRouter {
 
     /// Stop the local process.
     pub fn stop(&mut self) {
+        // PERF: async I/O — closes child stdin, waits for process exit
         if let Some(mut child) = self.child.take() {
             drop(child.stdin.take());
             let _ = child.wait();

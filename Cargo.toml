@@ -4,14 +4,12 @@ members = [
     "simse-ui-core",
     "simse-tui",
     "simse-core",
+    "simse-resilience",
 ]
 exclude = [
-    "simse-vfs",
     "simse-adaptive",
     "simse-acp",
     "simse-mcp",
-    "simse-vsh",
-    "simse-vnet",
     "simse-engine",
     "simse-sandbox",
     "simse-remote",
@@ -33,8 +31,8 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 flate2 = "1"
 dirs = "6"
-ratatui = "0.29"
-crossterm = { version = "0.28", features = ["event-stream"] }
+ratatui = "0.30"
+crossterm = { version = "0.29", features = ["event-stream"] }
 futures = "0.3"
 tui-textarea = "0.7"
 clap = { version = "4", features = ["derive"] }

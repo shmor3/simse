@@ -1,16 +1,9 @@
 import { createRequestHandler } from 'react-router';
 
-declare module 'react-router' {
-	export interface AppLoadContext {
-		cloudflare: {
-			env: {
-				DB: D1Database;
-				COMMS_QUEUE: Queue;
-				ANALYTICS: AnalyticsEngineDataset;
-			};
-			ctx: ExecutionContext;
-		};
-	}
+interface Env {
+	DB: D1Database;
+	COMMS_QUEUE: Queue;
+	ANALYTICS: AnalyticsEngineDataset;
 }
 
 const requestHandler = createRequestHandler(
@@ -19,7 +12,15 @@ const requestHandler = createRequestHandler(
 );
 
 export default {
-	async fetch(request, env, ctx) {
+	async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+		const url = new URL(request.url);
+
+		if (url.pathname === '/health') {
+			return new Response(JSON.stringify({ ok: true }), {
+				headers: { 'Content-Type': 'application/json' },
+			});
+		}
+
 		const start = Date.now();
 		const response = await requestHandler(request, {
 			cloudflare: { env, ctx },
@@ -28,7 +29,6 @@ export default {
 
 		// biome-ignore lint/suspicious/noExplicitAny: Cloudflare cf object not typed on Request
 		const cf = (request as any).cf;
-		const url = new URL(request.url);
 
 		ctx.waitUntil(
 			Promise.resolve(
@@ -62,4 +62,4 @@ export default {
 
 		return response;
 	},
-} satisfies ExportedHandler;
+} satisfies ExportedHandler<Env>;

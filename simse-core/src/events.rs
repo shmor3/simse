@@ -90,7 +90,7 @@ impl EventBus {
 	///
 	/// Returns an unsubscribe closure. Calling it removes the handler.
 	/// The unsubscribe closure is idempotent.
-	pub fn subscribe<F>(&self, event_type: &str, handler: F) -> impl Fn()
+	pub fn subscribe<F>(&self, event_type: &str, handler: F) -> impl Fn() + 'static
 	where
 		F: Fn(&Value) + Send + Sync + 'static,
 	{
@@ -120,7 +120,7 @@ impl EventBus {
 	///
 	/// The handler receives `(event_type, payload)`.
 	/// Returns an unsubscribe closure. The unsubscribe closure is idempotent.
-	pub fn subscribe_all<F>(&self, handler: F) -> impl Fn()
+	pub fn subscribe_all<F>(&self, handler: F) -> impl Fn() + 'static
 	where
 		F: Fn(&str, &Value) + Send + Sync + 'static,
 	{

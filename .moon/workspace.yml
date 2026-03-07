@@ -1,6 +1,5 @@
 projects:
   - 'simse-*'
-  - '!simse-code'
 
 vcs:
   hooks:

@@ -1,0 +1,40 @@
+{
+	"$schema": "https://docs.renovatebot.com/renovate-schema.json",
+	"extends": ["config:recommended"],
+	"labels": ["dependencies"],
+	"rangeStrategy": "bump",
+	"packageRules": [
+		{
+			"description": "Group Rust workspace dependencies",
+			"matchManagers": ["cargo"],
+			"groupName": "rust dependencies"
+		},
+		{
+			"description": "Group Cloudflare Worker dependencies",
+			"matchPackagePatterns": ["^@cloudflare/", "^wrangler$", "^miniflare$"],
+			"groupName": "cloudflare dependencies"
+		},
+		{
+			"description": "Group Biome tooling",
+			"matchPackagePatterns": ["^@biomejs/"],
+			"groupName": "biome"
+		},
+		{
+			"description": "Group GitHub Actions",
+			"matchManagers": ["github-actions"],
+			"groupName": "github actions"
+		},
+		{
+			"description": "Auto-merge patch updates for dev dependencies",
+			"matchDepTypes": ["devDependencies"],
+			"matchUpdateTypes": ["patch"],
+			"automerge": true
+		},
+		{
+			"description": "Auto-merge Rust patch updates",
+			"matchManagers": ["cargo"],
+			"matchUpdateTypes": ["patch"],
+			"automerge": true
+		}
+	]
+}

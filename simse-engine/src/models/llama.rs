@@ -92,6 +92,7 @@ impl LlamaGenerator {
 }
 
 impl TextGenerator for LlamaGenerator {
+    // PERF: hot-path neural network forward pass — &mut self required for KV cache state in ModelWeights
     fn generate(
         &mut self,
         prompt: &str,
@@ -244,6 +245,7 @@ impl TextGenerator for LlamaGenerator {
         })
     }
 
+    // PERF: hot-path model state reset — &mut self for KV cache management
     fn reset(&mut self) {
         // Re-create model to clear KV cache
         // Note: candle's quantized_llama doesn't expose a cache clear method,

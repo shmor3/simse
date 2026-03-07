@@ -18,6 +18,9 @@ use crate::layer::PcnLayer;
 ///
 /// **Learning** (Hebbian weight update after inference):
 /// - `W(l) += lr_learn * (f'(a(l)) . e(l)) * x_above^T`
+// PERF: All fields are inner-loop numeric computation (layers with Vec<f64>
+// weights/values/errors); kept as Vec for cache-friendly iteration in
+// inference and learning hot paths.
 #[derive(Debug, Clone)]
 pub struct PredictiveCodingNetwork {
     /// Dimensionality of the clamped input.

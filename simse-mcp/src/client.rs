@@ -18,10 +18,8 @@
 //   - Retry: exponential backoff with deterministic jitter (2 attempts, 500ms)
 // ---------------------------------------------------------------------------
 
-use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex as StdMutex, RwLock};
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use tokio::sync::{broadcast, Mutex};
 
@@ -34,280 +32,13 @@ use crate::protocol::{
 	ToolInfo, TransportType,
 };
 use crate::stdio_transport::{NotificationHandler, StdioTransport, StdioTransportConfig, SubscriptionHandle, Transport};
+use simse_resilience::{CircuitBreaker, HealthMonitor, HealthSnapshot, HealthStatus};
 
 // ===========================================================================
-// Resilience — Circuit Breaker
+// Resilience — MCP-specific retry configuration and helpers
 // ===========================================================================
 
-/// Configuration for a [`CircuitBreaker`].
-#[derive(Debug, Clone)]
-pub struct CircuitBreakerConfig {
-	/// Number of consecutive failures before opening the circuit. Default 5.
-	pub failure_threshold: u32,
-	/// Time in ms to wait before transitioning from Open to HalfOpen. Default 30,000.
-	pub reset_timeout_ms: u64,
-	/// Max attempts allowed in HalfOpen state before re-opening. Default 1.
-	pub half_open_max_attempts: u32,
-}
-
-impl Default for CircuitBreakerConfig {
-	fn default() -> Self {
-		Self {
-			failure_threshold: 5,
-			reset_timeout_ms: 30_000,
-			half_open_max_attempts: 1,
-		}
-	}
-}
-
-/// The three states of the circuit breaker.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CircuitState {
-	/// Normal operation — all requests pass through.
-	Closed,
-	/// Tripped — requests are rejected. Stores the instant the circuit opened.
-	Open(Instant),
-	/// Probing — a limited number of test requests are allowed through.
-	HalfOpen,
-}
-
-/// A circuit breaker that prevents cascading failures.
-///
-/// Thread-safe: all mutation goes through a `Mutex<CircuitState>` plus atomics.
-pub struct CircuitBreaker {
-	state: StdMutex<CircuitState>,
-	config: CircuitBreakerConfig,
-	failure_count: AtomicU32,
-	half_open_attempts: AtomicU32,
-}
-
-impl CircuitBreaker {
-	/// Create a new circuit breaker with the given configuration.
-	pub fn new(config: CircuitBreakerConfig) -> Self {
-		Self {
-			state: StdMutex::new(CircuitState::Closed),
-			config,
-			failure_count: AtomicU32::new(0),
-			half_open_attempts: AtomicU32::new(0),
-		}
-	}
-
-	/// Check whether a request should be allowed through.
-	pub fn allow_request(&self) -> bool {
-		let mut state = self.state.lock().unwrap();
-
-		match &*state {
-			CircuitState::Closed => true,
-			CircuitState::Open(opened_at) => {
-				let elapsed = opened_at.elapsed();
-				if elapsed >= Duration::from_millis(self.config.reset_timeout_ms) {
-					*state = CircuitState::HalfOpen;
-					self.half_open_attempts.store(0, Ordering::SeqCst);
-					self.half_open_attempts.fetch_add(1, Ordering::SeqCst);
-					true
-				} else {
-					false
-				}
-			}
-			CircuitState::HalfOpen => {
-				let current = self.half_open_attempts.fetch_add(1, Ordering::SeqCst);
-				current < self.config.half_open_max_attempts
-			}
-		}
-	}
-
-	/// Record a successful request. Resets failure count and transitions to Closed.
-	pub fn record_success(&self) {
-		let mut state = self.state.lock().unwrap();
-		self.failure_count.store(0, Ordering::SeqCst);
-		self.half_open_attempts.store(0, Ordering::SeqCst);
-		*state = CircuitState::Closed;
-	}
-
-	/// Record a failed request. Increments failure count; if the threshold is
-	/// reached the circuit transitions to Open.
-	pub fn record_failure(&self) {
-		let mut state = self.state.lock().unwrap();
-		let failures = self.failure_count.fetch_add(1, Ordering::SeqCst) + 1;
-
-		match &*state {
-			CircuitState::HalfOpen => {
-				*state = CircuitState::Open(Instant::now());
-			}
-			CircuitState::Closed => {
-				if failures >= self.config.failure_threshold {
-					*state = CircuitState::Open(Instant::now());
-				}
-			}
-			CircuitState::Open(_) => {}
-		}
-	}
-
-	/// Return the current circuit state (lazy check for Open → HalfOpen).
-	pub fn state(&self) -> CircuitState {
-		let state = self.state.lock().unwrap();
-		match &*state {
-			CircuitState::Open(opened_at) => {
-				if opened_at.elapsed() >= Duration::from_millis(self.config.reset_timeout_ms) {
-					CircuitState::HalfOpen
-				} else {
-					state.clone()
-				}
-			}
-			other => other.clone(),
-		}
-	}
-
-	/// Return the current failure count.
-	pub fn failure_count(&self) -> u32 {
-		self.failure_count.load(Ordering::SeqCst)
-	}
-
-	/// Reset the circuit breaker to Closed with zero failures.
-	pub fn reset(&self) {
-		let mut state = self.state.lock().unwrap();
-		*state = CircuitState::Closed;
-		self.failure_count.store(0, Ordering::SeqCst);
-		self.half_open_attempts.store(0, Ordering::SeqCst);
-	}
-}
-
-impl Default for CircuitBreaker {
-	fn default() -> Self {
-		Self::new(CircuitBreakerConfig::default())
-	}
-}
-
-// ===========================================================================
-// Resilience — Health Monitor
-// ===========================================================================
-
-/// Overall service health assessment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum HealthStatus {
-	/// Service is operating normally.
-	Healthy,
-	/// 3+ consecutive failures — service is showing signs of trouble.
-	Degraded,
-	/// 5+ consecutive failures — service should be considered down.
-	Unhealthy,
-}
-
-/// Point-in-time snapshot of health statistics.
-#[derive(Debug, Clone)]
-pub struct HealthSnapshot {
-	/// Number of failures in a row without any intervening success.
-	pub consecutive_failures: u32,
-	/// Total calls recorded since creation/reset.
-	pub total_calls: u64,
-	/// Total failures recorded since creation/reset.
-	pub total_failures: u64,
-	/// Failure rate within the sliding window (0.0 - 1.0).
-	pub window_failure_rate: f64,
-}
-
-/// Sliding-window health monitor that tracks request outcomes.
-pub struct HealthMonitor {
-	consecutive_failures: AtomicU32,
-	total_calls: AtomicU64,
-	total_failures: AtomicU64,
-	window: StdMutex<VecDeque<(Instant, bool)>>,
-	window_duration: Duration,
-}
-
-impl HealthMonitor {
-	/// Create a new health monitor with the given sliding-window duration.
-	pub fn new(window_duration: Duration) -> Self {
-		Self {
-			consecutive_failures: AtomicU32::new(0),
-			total_calls: AtomicU64::new(0),
-			total_failures: AtomicU64::new(0),
-			window: StdMutex::new(VecDeque::new()),
-			window_duration,
-		}
-	}
-
-	/// Record a successful request. Resets consecutive failure counter.
-	pub fn record_success(&self) {
-		self.consecutive_failures.store(0, Ordering::SeqCst);
-		self.total_calls.fetch_add(1, Ordering::SeqCst);
-
-		let mut window = self.window.lock().unwrap();
-		window.push_back((Instant::now(), true));
-	}
-
-	/// Record a failed request.
-	pub fn record_failure(&self, _error: &str) {
-		self.consecutive_failures.fetch_add(1, Ordering::SeqCst);
-		self.total_calls.fetch_add(1, Ordering::SeqCst);
-		self.total_failures.fetch_add(1, Ordering::SeqCst);
-
-		let mut window = self.window.lock().unwrap();
-		window.push_back((Instant::now(), false));
-	}
-
-	/// Return a snapshot of the current health statistics.
-	pub fn snapshot(&self) -> HealthSnapshot {
-		let mut window = self.window.lock().unwrap();
-		let cutoff = Instant::now() - self.window_duration;
-
-		while let Some(&(ts, _)) = window.front() {
-			if ts < cutoff {
-				window.pop_front();
-			} else {
-				break;
-			}
-		}
-
-		let window_total = window.len() as f64;
-		let window_failures = window.iter().filter(|(_, success)| !success).count() as f64;
-		let window_failure_rate = if window_total > 0.0 {
-			window_failures / window_total
-		} else {
-			0.0
-		};
-
-		HealthSnapshot {
-			consecutive_failures: self.consecutive_failures.load(Ordering::SeqCst),
-			total_calls: self.total_calls.load(Ordering::SeqCst),
-			total_failures: self.total_failures.load(Ordering::SeqCst),
-			window_failure_rate,
-		}
-	}
-
-	/// Compute the current health status based on consecutive failures.
-	pub fn status(&self) -> HealthStatus {
-		let failures = self.consecutive_failures.load(Ordering::SeqCst);
-		if failures >= 5 {
-			HealthStatus::Unhealthy
-		} else if failures >= 3 {
-			HealthStatus::Degraded
-		} else {
-			HealthStatus::Healthy
-		}
-	}
-
-	/// Reset all counters and clear the window.
-	pub fn reset(&self) {
-		self.consecutive_failures.store(0, Ordering::SeqCst);
-		self.total_calls.store(0, Ordering::SeqCst);
-		self.total_failures.store(0, Ordering::SeqCst);
-		let mut window = self.window.lock().unwrap();
-		window.clear();
-	}
-}
-
-impl Default for HealthMonitor {
-	fn default() -> Self {
-		Self::new(Duration::from_secs(60))
-	}
-}
-
-// ===========================================================================
-// Resilience — Retry with Exponential Backoff
-// ===========================================================================
-
-/// Configuration for the [`retry`] function.
+/// MCP retry configuration with MCP-specific defaults (2 attempts, 5s max).
 #[derive(Debug, Clone)]
 pub struct RetryConfig {
 	/// Maximum number of attempts (including the first). Default 2.
@@ -334,6 +65,18 @@ impl Default for RetryConfig {
 	}
 }
 
+impl RetryConfig {
+	fn to_shared(&self) -> simse_resilience::RetryConfig {
+		simse_resilience::RetryConfig {
+			max_attempts: self.max_attempts,
+			base_delay_ms: self.base_delay_ms,
+			max_delay_ms: self.max_delay_ms,
+			backoff_multiplier: self.backoff_multiplier,
+			jitter_factor: self.jitter_factor,
+		}
+	}
+}
+
 /// Returns `true` if the error is likely transient and worth retrying.
 pub fn is_transient(error: &McpError) -> bool {
 	matches!(
@@ -351,45 +94,7 @@ where
 	F: Fn() -> Fut,
 	Fut: std::future::Future<Output = Result<T, McpError>>,
 {
-	let max_attempts = config.max_attempts.max(1);
-	let mut last_error: Option<McpError> = None;
-
-	for attempt in 1..=max_attempts {
-		match f().await {
-			Ok(value) => return Ok(value),
-			Err(err) => {
-				if attempt >= max_attempts {
-					last_error = Some(err);
-					break;
-				}
-
-				if !is_transient(&err) {
-					return Err(err);
-				}
-
-				last_error = Some(err);
-
-				let exponential =
-					config.base_delay_ms as f64 * config.backoff_multiplier.powi(attempt as i32 - 1);
-				let capped = exponential.min(config.max_delay_ms as f64);
-				let jitter_frac = deterministic_jitter_fraction(attempt);
-				let jitter = capped * config.jitter_factor * jitter_frac;
-				let delay_ms = (capped + jitter).max(0.0).round() as u64;
-
-				tokio::time::sleep(Duration::from_millis(delay_ms)).await;
-			}
-		}
-	}
-
-	Err(last_error.unwrap_or_else(|| {
-		McpError::ConnectionFailed("retry exhausted with no error captured".into())
-	}))
-}
-
-/// Produce a deterministic fraction in [0.0, 1.0) from an attempt number.
-fn deterministic_jitter_fraction(attempt: u32) -> f64 {
-	let hash = (attempt as u64).wrapping_mul(2_654_435_761);
-	(hash % 1_000_000) as f64 / 1_000_000.0
+	simse_resilience::retry(&config.to_shared(), is_transient, f).await
 }
 
 // ===========================================================================
@@ -1085,10 +790,12 @@ impl McpClient {
 		Ok(result.completion)
 	}
 
-	/// Set the workspace roots. Does not notify servers — call
-	/// `send_roots_list_changed()` separately if needed.
-	pub fn set_roots(&mut self, roots: Vec<Root>) {
+	/// Set the workspace roots. Consumes self, returns the updated client.
+	/// Does not notify servers — call `send_roots_list_changed()` separately
+	/// if needed.
+	pub fn set_roots(mut self, roots: Vec<Root>) -> Self {
 		self.roots = roots;
+		self
 	}
 
 	/// Get the current workspace roots.
@@ -1174,179 +881,11 @@ struct CompletionResponse {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use std::sync::atomic::{AtomicU32, Ordering};
+	use std::sync::Mutex as StdMutex;
 
 	// -----------------------------------------------------------------------
-	// CircuitBreaker tests
-	// -----------------------------------------------------------------------
-
-	#[test]
-	fn circuit_breaker_starts_closed() {
-		let cb = CircuitBreaker::default();
-		assert_eq!(cb.state(), CircuitState::Closed);
-		assert!(cb.allow_request());
-	}
-
-	#[test]
-	fn circuit_breaker_opens_after_threshold() {
-		let cb = CircuitBreaker::new(CircuitBreakerConfig {
-			failure_threshold: 3,
-			..Default::default()
-		});
-
-		cb.record_failure();
-		cb.record_failure();
-		assert_eq!(cb.state(), CircuitState::Closed);
-		assert!(cb.allow_request());
-
-		cb.record_failure();
-		assert!(matches!(cb.state(), CircuitState::Open(_)));
-	}
-
-	#[test]
-	fn circuit_breaker_open_rejects_requests() {
-		let cb = CircuitBreaker::new(CircuitBreakerConfig {
-			failure_threshold: 1,
-			reset_timeout_ms: 60_000,
-			..Default::default()
-		});
-
-		cb.record_failure();
-		assert!(!cb.allow_request());
-	}
-
-	#[test]
-	fn circuit_breaker_half_open_after_timeout() {
-		let cb = CircuitBreaker::new(CircuitBreakerConfig {
-			failure_threshold: 1,
-			reset_timeout_ms: 0,
-			..Default::default()
-		});
-
-		cb.record_failure();
-		assert_eq!(cb.state(), CircuitState::HalfOpen);
-		assert!(cb.allow_request());
-	}
-
-	#[test]
-	fn circuit_breaker_success_closes_from_half_open() {
-		let cb = CircuitBreaker::new(CircuitBreakerConfig {
-			failure_threshold: 1,
-			reset_timeout_ms: 0,
-			half_open_max_attempts: 1,
-		});
-
-		cb.record_failure();
-		assert!(cb.allow_request());
-		cb.record_success();
-		assert_eq!(cb.state(), CircuitState::Closed);
-		assert_eq!(cb.failure_count(), 0);
-	}
-
-	#[test]
-	fn circuit_breaker_reset_returns_to_closed() {
-		let cb = CircuitBreaker::new(CircuitBreakerConfig {
-			failure_threshold: 1,
-			reset_timeout_ms: 60_000,
-			..Default::default()
-		});
-
-		cb.record_failure();
-		assert!(matches!(cb.state(), CircuitState::Open(_)));
-
-		cb.reset();
-		assert_eq!(cb.state(), CircuitState::Closed);
-		assert_eq!(cb.failure_count(), 0);
-	}
-
-	// -----------------------------------------------------------------------
-	// HealthMonitor tests
-	// -----------------------------------------------------------------------
-
-	#[test]
-	fn health_monitor_starts_healthy() {
-		let hm = HealthMonitor::default();
-		assert_eq!(hm.status(), HealthStatus::Healthy);
-		let snap = hm.snapshot();
-		assert_eq!(snap.consecutive_failures, 0);
-		assert_eq!(snap.total_calls, 0);
-	}
-
-	#[test]
-	fn health_monitor_degrades_after_3_failures() {
-		let hm = HealthMonitor::default();
-		hm.record_failure("err1");
-		hm.record_failure("err2");
-		assert_eq!(hm.status(), HealthStatus::Healthy);
-
-		hm.record_failure("err3");
-		assert_eq!(hm.status(), HealthStatus::Degraded);
-	}
-
-	#[test]
-	fn health_monitor_unhealthy_after_5_failures() {
-		let hm = HealthMonitor::default();
-		for i in 0..5 {
-			hm.record_failure(&format!("err{i}"));
-		}
-		assert_eq!(hm.status(), HealthStatus::Unhealthy);
-	}
-
-	#[test]
-	fn health_monitor_success_resets_consecutive_failures() {
-		let hm = HealthMonitor::default();
-		hm.record_failure("err1");
-		hm.record_failure("err2");
-		hm.record_failure("err3");
-		assert_eq!(hm.status(), HealthStatus::Degraded);
-
-		hm.record_success();
-		assert_eq!(hm.status(), HealthStatus::Healthy);
-		assert_eq!(hm.snapshot().consecutive_failures, 0);
-	}
-
-	#[test]
-	fn health_monitor_window_prunes_old_entries() {
-		let hm = HealthMonitor::new(Duration::from_millis(0));
-		hm.record_failure("err1");
-		hm.record_failure("err2");
-
-		let snap = hm.snapshot();
-		assert_eq!(snap.window_failure_rate, 0.0);
-		assert_eq!(snap.total_calls, 2);
-		assert_eq!(snap.total_failures, 2);
-	}
-
-	#[test]
-	fn health_monitor_snapshot_failure_rate() {
-		let hm = HealthMonitor::new(Duration::from_secs(60));
-		hm.record_success();
-		hm.record_failure("err");
-		hm.record_success();
-		hm.record_failure("err");
-
-		let snap = hm.snapshot();
-		assert_eq!(snap.total_calls, 4);
-		assert_eq!(snap.total_failures, 2);
-		assert!((snap.window_failure_rate - 0.5).abs() < f64::EPSILON);
-	}
-
-	#[test]
-	fn health_monitor_reset_clears_everything() {
-		let hm = HealthMonitor::default();
-		hm.record_failure("err");
-		hm.record_failure("err");
-		hm.record_failure("err");
-		assert_eq!(hm.status(), HealthStatus::Degraded);
-
-		hm.reset();
-		assert_eq!(hm.status(), HealthStatus::Healthy);
-		let snap = hm.snapshot();
-		assert_eq!(snap.total_calls, 0);
-		assert_eq!(snap.total_failures, 0);
-	}
-
-	// -----------------------------------------------------------------------
-	// Retry tests
+	// Retry tests (MCP-specific wrapper over simse-resilience)
 	// -----------------------------------------------------------------------
 
 	#[tokio::test]
@@ -1466,17 +1005,6 @@ mod tests {
 		assert!(!is_transient(&McpError::TransportConfigError("x".into())));
 	}
 
-	#[test]
-	fn deterministic_jitter_produces_valid_fraction() {
-		for attempt in 1..=100 {
-			let frac = deterministic_jitter_fraction(attempt);
-			assert!(
-				(0.0..1.0).contains(&frac),
-				"attempt {attempt} produced {frac}"
-			);
-		}
-	}
-
 	// -----------------------------------------------------------------------
 	// McpClient tests
 	// -----------------------------------------------------------------------
@@ -1536,10 +1064,10 @@ mod tests {
 			client_version: Some("1.0.0".into()),
 		};
 
-		let mut client = McpClient::new(config);
+		let client = McpClient::new(config);
 		assert!(client.roots().is_empty());
 
-		client.set_roots(vec![
+		let client = client.set_roots(vec![
 			Root {
 				uri: "file:///workspace".into(),
 				name: Some("workspace".into()),
@@ -1741,32 +1269,14 @@ mod tests {
 		assert!(client.get_server_health_status("unknown").is_none());
 	}
 
-	// -----------------------------------------------------------------------
-	// Default config tests
-	// -----------------------------------------------------------------------
-
 	#[test]
-	fn default_circuit_breaker_config() {
-		let cfg = CircuitBreakerConfig::default();
-		assert_eq!(cfg.failure_threshold, 5);
-		assert_eq!(cfg.reset_timeout_ms, 30_000);
-		assert_eq!(cfg.half_open_max_attempts, 1);
-	}
-
-	#[test]
-	fn default_retry_config() {
+	fn default_retry_config_has_mcp_specific_defaults() {
 		let cfg = RetryConfig::default();
 		assert_eq!(cfg.max_attempts, 2);
 		assert_eq!(cfg.base_delay_ms, 500);
 		assert_eq!(cfg.max_delay_ms, 5_000);
 		assert!((cfg.backoff_multiplier - 2.0).abs() < f64::EPSILON);
 		assert!((cfg.jitter_factor - 0.25).abs() < f64::EPSILON);
-	}
-
-	#[test]
-	fn default_health_monitor_uses_60s_window() {
-		let hm = HealthMonitor::default();
-		assert_eq!(hm.window_duration, Duration::from_secs(60));
 	}
 
 	#[tokio::test]

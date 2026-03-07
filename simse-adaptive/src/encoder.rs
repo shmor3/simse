@@ -30,6 +30,7 @@ pub struct LibraryEvent {
 /// The `encode` method returns a boolean indicating whether the vocabulary
 /// grew (new topics or tags were registered), which is useful for downstream
 /// bookkeeping even though the vector length remains stable.
+#[derive(Clone)]
 pub struct InputEncoder {
     embedding_dim: usize,
     vocab: VocabularyManager,
@@ -88,9 +89,11 @@ impl InputEncoder {
         let tags_before = self.vocab.tag_count();
 
         // 2. Register topic and tags (may grow vocabulary or return overflow error).
-        self.vocab.register_topic(&event.topic)?;
+        let (vocab, _) = std::mem::take(&mut self.vocab).register_topic(&event.topic)?;
+        self.vocab = vocab;
         for tag in &event.tags {
-            self.vocab.register_tag(tag)?;
+            let (v, _) = std::mem::take(&mut self.vocab).register_tag(tag)?;
+            self.vocab = v;
         }
 
         // 3. Check if vocabulary grew.
@@ -324,9 +327,9 @@ mod tests {
 
     #[test]
     fn from_vocab_preserves_state() {
-        let mut vocab = VocabularyManager::new(10, 10);
-        vocab.register_topic("existing").unwrap();
-        vocab.register_tag("old_tag").unwrap();
+        let vocab = VocabularyManager::new(10, 10);
+        let (vocab, _) = vocab.register_topic("existing").unwrap();
+        let (vocab, _) = vocab.register_tag("old_tag").unwrap();
 
         let encoder = InputEncoder::from_vocab(8, vocab);
 

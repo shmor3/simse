@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import type { SecretsStoreNamespace } from '../types';
 
 interface Env {
 	DB: D1Database;

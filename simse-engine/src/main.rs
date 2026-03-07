@@ -32,12 +32,12 @@ fn main() -> Result<()> {
 
     tracing::info!(device = ?device, "Compute device selected");
 
-    // Initialize model registry
-    let mut registry = ModelRegistry::new(device);
+    // Initialize model registry (owned-return pattern — each load returns new registry)
+    let registry = ModelRegistry::new(device);
 
     // Load text generation model
     tracing::info!(model = %args.model, "Loading text generation model");
-    registry.load_generator(
+    let registry = registry.load_generator(
         &args.model,
         &ModelConfig {
             filename: args.model_file,
@@ -48,13 +48,13 @@ fn main() -> Result<()> {
 
     // Load embedding model
     tracing::info!(model = %args.embedding_model, "Loading embedding model");
-    registry.load_embedder(
+    let registry = registry.load_embedder(
         &args.embedding_model,
         &ModelConfig::default(),
     )?;
 
     // Load TEI bridge if configured
-    if let Some(ref tei_url) = args.tei_url {
+    let registry = if let Some(ref tei_url) = args.tei_url {
         tracing::info!(url = %tei_url, "Loading TEI bridge embedder");
         registry.load_tei_embedder(
             "tei://default",
@@ -62,8 +62,10 @@ fn main() -> Result<()> {
                 base_url: tei_url.clone(),
                 ..Default::default()
             },
-        )?;
-    }
+        )?
+    } else {
+        registry
+    };
 
     // Create server config
     let config = ServerConfig {

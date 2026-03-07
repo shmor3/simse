@@ -1,14 +1,24 @@
 import { z } from 'zod/v4';
 
+const passwordSchema = z
+	.string()
+	.min(8)
+	.max(128)
+	.refine(
+		(p) => /[a-zA-Z]/.test(p),
+		'Password must contain at least one letter',
+	)
+	.refine((p) => /[0-9]/.test(p), 'Password must contain at least one digit');
+
 export const registerSchema = z.object({
 	name: z.string().min(2),
 	email: z.email(),
-	password: z.string().min(8),
+	password: passwordSchema,
 });
 
 export const loginSchema = z.object({
 	email: z.email(),
-	password: z.string(),
+	password: z.string().max(128),
 });
 
 export const resetPasswordSchema = z.object({
@@ -17,12 +27,16 @@ export const resetPasswordSchema = z.object({
 
 export const newPasswordSchema = z.object({
 	token: z.string(),
-	password: z.string().min(8),
+	password: passwordSchema,
 });
 
 export const twoFactorSchema = z.object({
 	code: z.string().length(6),
 	pendingToken: z.string(),
+});
+
+export const verifyEmailSchema = z.object({
+	code: z.string().length(6),
 });
 
 export const inviteSchema = z.object({
@@ -35,8 +49,8 @@ export const updateNameSchema = z.object({
 });
 
 export const changePasswordSchema = z.object({
-	currentPassword: z.string(),
-	newPassword: z.string().min(8),
+	currentPassword: z.string().max(128),
+	newPassword: passwordSchema,
 });
 
 export const deleteAccountSchema = z.object({
@@ -45,4 +59,16 @@ export const deleteAccountSchema = z.object({
 
 export const createApiKeySchema = z.object({
 	name: z.string().min(1).max(64),
+});
+
+export const refreshSchema = z.object({
+	refreshToken: z.string().startsWith('rt_'),
+});
+
+export const revokeSchema = z.object({
+	refreshToken: z.string().startsWith('rt_'),
+});
+
+export const updateRoleSchema = z.object({
+	role: z.enum(['admin', 'member']),
 });

@@ -28,6 +28,7 @@ struct JsonRpcNotification<'a> {
     params: Option<serde_json::Value>,
 }
 
+#[derive(Clone)]
 pub struct NdjsonTransport;
 
 impl Default for NdjsonTransport {

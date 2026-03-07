@@ -119,9 +119,10 @@ fn session_fork_clones_conversation() {
 	let id = ctx.session_manager.create();
 
 	// Add messages to the original session
-	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.add_user("hello");
-		session.conversation.add_assistant("world");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		let conv = conv.add_user("hello");
+		let conv = conv.add_assistant("world");
+		(conv, ())
 	});
 
 	let forked_id = ctx.session_manager.fork(&id).expect("fork should succeed");
@@ -147,15 +148,15 @@ fn session_fork_independent() {
 	let ctx = CoreContext::new(AppConfig::default());
 	let id = ctx.session_manager.create();
 
-	ctx.session_manager.with_session(&id, |session| {
-		session.conversation.add_user("original");
+	ctx.session_manager.with_state_transition(&id, |conv| {
+		(conv.add_user("original"), ())
 	});
 
 	let forked_id = ctx.session_manager.fork(&id).unwrap();
 
 	// Mutate forked conversation
-	ctx.session_manager.with_session(&forked_id, |session| {
-		session.conversation.add_assistant("forked reply");
+	ctx.session_manager.with_state_transition(&forked_id, |conv| {
+		(conv.add_assistant("forked reply"), ())
 	});
 
 	// Original should be unchanged

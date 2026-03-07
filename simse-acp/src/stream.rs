@@ -24,12 +24,85 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use futures::Stream;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::protocol::{
-	StreamChunk, ToolCall, ToolCallKind, ToolCallStatus, ToolCallUpdate,
-};
+use crate::client::TokenUsage;
+
+// ---------------------------------------------------------------------------
+// Streaming types (previously in protocol.rs)
+// ---------------------------------------------------------------------------
+
+/// Kind of tool call action.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallKind {
+	Read,
+	Edit,
+	Delete,
+	Move,
+	Search,
+	Execute,
+	Think,
+	Fetch,
+	Other,
+}
+
+/// Status of a tool call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolCallStatus {
+	Pending,
+	InProgress,
+	Completed,
+	Failed,
+	Cancelled,
+}
+
+/// A tool call from a session/update notification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCall {
+	pub tool_call_id: String,
+	pub title: String,
+	pub kind: ToolCallKind,
+	pub status: ToolCallStatus,
+}
+
+/// A tool call progress update from a session/update notification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallUpdate {
+	pub tool_call_id: String,
+	pub status: ToolCallStatus,
+	#[serde(default, skip_serializing_if = "Option::is_none")]
+	pub content: Option<serde_json::Value>,
+}
+
+/// Discriminated union of streaming chunk types.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum StreamChunk {
+	/// Incremental text delta.
+	Delta {
+		text: String,
+	},
+	/// Stream completed with optional usage.
+	Complete {
+		#[serde(default, skip_serializing_if = "Option::is_none")]
+		usage: Option<TokenUsage>,
+	},
+	/// A new tool call started.
+	ToolCall {
+		#[serde(rename = "toolCall")]
+		tool_call: self::ToolCall,
+	},
+	/// Progress update on an existing tool call.
+	ToolCallUpdate {
+		update: self::ToolCallUpdate,
+	},
+}
 
 // ---------------------------------------------------------------------------
 // AcpStream
@@ -323,7 +396,6 @@ fn parse_tool_call_status(s: &str) -> ToolCallStatus {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::protocol::TokenUsage;
 	use futures::StreamExt;
 
 	#[tokio::test]

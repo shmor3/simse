@@ -1,5 +1,4 @@
 use simse_acp_engine::server::AcpServer;
-use simse_acp_engine::transport::NdjsonTransport;
 
 #[tokio::main]
 async fn main() {
@@ -11,8 +10,7 @@ async fn main() {
 		)
 		.init();
 
-	let transport = NdjsonTransport::new();
-	let mut server = AcpServer::new(transport);
+	let mut server = AcpServer::new();
 
 	tracing::info!("simse-acp-engine ready");
 

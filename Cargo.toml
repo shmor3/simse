@@ -5,12 +5,6 @@ members = [
     "simse-tui",
     "simse-core",
 ]
-exclude = [
-    "simse-code/adaptive",
-    "simse-code/engine",
-    "simse-code/sandbox",
-    "simse-code/remote",
-]
 
 [workspace.package]
 version = "0.1.0"

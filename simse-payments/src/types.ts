@@ -5,5 +5,5 @@ export interface Env {
 	API_SECRET: string;
 	MAILER_API_URL: string;
 	MAILER_API_SECRET: string;
-	ANALYTICS: AnalyticsEngineDataset;
+	ANALYTICS_QUEUE: Queue;
 }

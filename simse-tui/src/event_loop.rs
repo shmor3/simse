@@ -17,10 +17,12 @@ use async_trait::async_trait;
 use futures::StreamExt;
 
 // simse-core types
-use simse_core::acp::client::{
+use simse_core::engine::acp::client::{
 	AcpClient as AcpEngine, AcpConfig as AcpEngineConfig, ServerEntry, StreamOptions,
 };
-use simse_core::acp::protocol::{PermissionPolicy, StreamChunk};
+use simse_core::engine::acp::error::AcpError;
+use simse_core::engine::acp::permission::PermissionPolicy;
+use simse_core::engine::acp::stream::StreamChunk;
 use simse_core::agentic_loop::{
 	self, AcpClient as AcpClientTrait, AgenticLoopOptions, CancellationToken, GenerateResponse,
 	LoopCallbacks, Message, MessageRole, TokenUsage,
@@ -90,7 +92,7 @@ impl AcpClientTrait for AcpAdapter {
 			.engine
 			.generate_stream(&prompt, options)
 			.await
-			.map_err(|e| SimseError::other(e.to_string()))?;
+			.map_err(|e: AcpError| SimseError::other(e.to_string()))?;
 
 		// Collect all streaming deltas into the full response text.
 		let mut text = String::new();
@@ -218,7 +220,7 @@ impl TuiRuntime {
 
 		let engine = AcpEngine::new(acp_config)
 			.await
-			.map_err(|e| RuntimeError::Acp(e.to_string()))?;
+			.map_err(|e: AcpError| RuntimeError::Acp(e.to_string()))?;
 
 		self.acp_engine = Some(Arc::new(engine));
 
@@ -247,7 +249,7 @@ impl TuiRuntime {
 
 		let engine = AcpEngine::new(acp_config)
 			.await
-			.map_err(|e| RuntimeError::Acp(e.to_string()))?;
+			.map_err(|e: AcpError| RuntimeError::Acp(e.to_string()))?;
 
 		self.acp_engine = Some(Arc::new(engine));
 

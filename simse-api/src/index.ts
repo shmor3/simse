@@ -41,14 +41,7 @@ app.use('*', requestValidationMiddleware);
 app.use('*', rateLimitMiddleware);
 
 app.get('/health', (c) => {
-	return c.json({
-		ok: true,
-		services: {
-			auth: breakers.auth.getStatus(),
-			payments: breakers.payments.getStatus(),
-			mailer: breakers.mailer.getStatus(),
-		},
-	});
+	return c.json({ ok: true });
 });
 
 app.use('*', secretsMiddleware);

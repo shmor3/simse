@@ -10,23 +10,18 @@ let lastPrune = Date.now();
 interface RateLimitRule {
 	pattern: RegExp;
 	limit: number;
-	keyType: 'ip' | 'user';
 }
 
 const rules: RateLimitRule[] = [
-	// Public routes — per-IP
-	{ pattern: /^\/auth\/(login|register)$/, limit: 10, keyType: 'ip' },
-	{
-		pattern: /^\/auth\/(reset-password|new-password)$/,
-		limit: 5,
-		keyType: 'ip',
-	},
-	{ pattern: /^\/auth\/(2fa|verify-email)$/, limit: 10, keyType: 'ip' },
-	{ pattern: /^\/auth\/refresh$/, limit: 30, keyType: 'ip' },
-	// Protected routes — per-user
-	{ pattern: /^\/(users|teams|api-keys)(\/|$)/, limit: 60, keyType: 'user' },
-	{ pattern: /^\/payments(\/|$)/, limit: 30, keyType: 'user' },
-	{ pattern: /^\/notifications(\/|$)/, limit: 20, keyType: 'user' },
+	// Public routes
+	{ pattern: /^\/auth\/(login|register)$/, limit: 10 },
+	{ pattern: /^\/auth\/(reset-password|new-password)$/, limit: 5 },
+	{ pattern: /^\/auth\/(2fa|verify-email)$/, limit: 10 },
+	{ pattern: /^\/auth\/refresh$/, limit: 30 },
+	// Protected routes
+	{ pattern: /^\/(users|teams|api-keys)(\/|$)/, limit: 60 },
+	{ pattern: /^\/payments(\/|$)/, limit: 30 },
+	{ pattern: /^\/notifications(\/|$)/, limit: 20 },
 ];
 
 function getClientIp(
@@ -56,10 +51,8 @@ export const rateLimitMiddleware = createMiddleware<{
 		return;
 	}
 
-	const key =
-		rule.keyType === 'ip'
-			? `ip:${getClientIp(c)}:${rule.pattern.source}`
-			: `user:${c.req.header('X-User-Id') ?? getClientIp(c)}:${rule.pattern.source}`;
+	// Always key on IP — X-User-Id is not yet validated at this stage
+	const key = `ip:${getClientIp(c)}:${rule.pattern.source}`;
 
 	const result = limiter.check(key, rule.limit);
 

@@ -62,6 +62,7 @@ export async function resilientFetch(
 			const response = await fetch(url, {
 				...init,
 				signal: controller.signal,
+				redirect: 'manual',
 			});
 
 			clearTimeout(timeoutId);

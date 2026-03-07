@@ -47,7 +47,7 @@ export default function TwoFactor({ actionData }: Route.ComponentProps) {
 	const error = (actionData as { error?: string } | undefined)?.error;
 
 	return (
-		<>
+		<div className="animate-fade-in">
 			<h1 className="text-2xl font-bold tracking-tight text-white">
 				Two-factor <span className="text-emerald-400">auth</span>.
 			</h1>
@@ -72,6 +72,6 @@ export default function TwoFactor({ actionData }: Route.ComponentProps) {
 					try again
 				</a>
 			</p>
-		</>
+		</div>
 	);
 }

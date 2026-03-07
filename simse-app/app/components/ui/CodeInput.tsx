@@ -73,7 +73,7 @@ export default function CodeInput({
 
 	return (
 		<div className="space-y-2">
-			<div className="flex justify-center gap-2">
+			<div className="flex justify-center gap-2.5">
 				{values.map((v, i) => (
 					<input
 						key={i}
@@ -88,15 +88,18 @@ export default function CodeInput({
 						onKeyDown={(e) => handleKeyDown(i, e)}
 						onPaste={i === 0 ? handlePaste : undefined}
 						className={clsx(
-							'h-14 w-11 rounded-lg border bg-zinc-900 text-center font-mono text-xl font-bold text-white transition-colors focus:border-emerald-400/50 focus:outline-none focus:ring-1 focus:ring-emerald-400/25',
+							'h-14 w-12 rounded-xl border bg-zinc-900 text-center font-mono text-xl font-bold text-white transition-all focus:border-emerald-400/50 focus:outline-none focus:ring-2 focus:ring-emerald-400/20 focus:shadow-[0_0_12px_rgba(52,211,153,0.1)]',
 							error
 								? 'border-red-500/50'
-								: 'border-zinc-800 hover:border-zinc-700',
+								: v
+									? 'border-emerald-400/30 bg-emerald-400/5'
+									: 'border-zinc-800 hover:border-zinc-700',
 						)}
 						aria-label={`Digit ${i + 1}`}
 					/>
 				))}
 			</div>
+			{/* Separator between groups of 3 */}
 			<input type="hidden" name={name} value={code} />
 			{error && (
 				<p className="text-center text-[13px] text-red-400/80">{error}</p>

@@ -50,7 +50,7 @@ export default function Register({ actionData }: Route.ComponentProps) {
 	const values = actionData?.values as Record<string, string> | undefined;
 
 	return (
-		<>
+		<div className="animate-fade-in">
 			<h1 className="text-2xl font-bold tracking-tight text-white">
 				Create <span className="text-emerald-400">account</span>.
 			</h1>
@@ -97,6 +97,6 @@ export default function Register({ actionData }: Route.ComponentProps) {
 					Sign in
 				</Link>
 			</p>
-		</>
+		</div>
 	);
 }

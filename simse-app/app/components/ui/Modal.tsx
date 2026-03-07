@@ -52,27 +52,31 @@ export default function Modal({
 		>
 			<div
 				className={clsx(
-					'w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 p-6 shadow-2xl animate-fade-in-up',
+					'w-full max-w-md rounded-xl border border-zinc-800 bg-zinc-900 shadow-2xl shadow-black/40 animate-scale-in',
 				)}
 			>
-				<h2 className="text-lg font-bold text-white">{title}</h2>
-				{description && (
-					<p className="mt-2 text-sm text-zinc-400">{description}</p>
-				)}
-				{children && <div className="mt-4">{children}</div>}
-				<div className="mt-6 flex justify-end gap-3">
-					<Button variant="ghost" onClick={onClose} disabled={loading}>
-						Cancel
-					</Button>
-					{onConfirm && (
-						<Button
-							variant={confirmVariant}
-							onClick={onConfirm}
-							loading={loading}
-						>
-							{confirmLabel}
-						</Button>
+				{/* Gradient accent top */}
+				<div className="h-px bg-gradient-to-r from-transparent via-emerald-400/30 to-transparent" />
+				<div className="p-6">
+					<h2 className="text-lg font-bold text-white">{title}</h2>
+					{description && (
+						<p className="mt-2 text-sm text-zinc-400">{description}</p>
 					)}
+					{children && <div className="mt-4">{children}</div>}
+					<div className="mt-6 flex justify-end gap-3">
+						<Button variant="ghost" onClick={onClose} disabled={loading}>
+							Cancel
+						</Button>
+						{onConfirm && (
+							<Button
+								variant={confirmVariant}
+								onClick={onConfirm}
+								loading={loading}
+							>
+								{confirmLabel}
+							</Button>
+						)}
+					</div>
 				</div>
 			</div>
 		</div>

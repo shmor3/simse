@@ -51,7 +51,7 @@ export default function NewPassword({
 
 	if (data?.success) {
 		return (
-			<>
+			<div className="animate-fade-in">
 				<h1 className="text-2xl font-bold tracking-tight text-white">
 					Password <span className="text-emerald-400">updated</span>.
 				</h1>
@@ -65,12 +65,12 @@ export default function NewPassword({
 				>
 					Sign in
 				</Link>
-			</>
+			</div>
 		);
 	}
 
 	return (
-		<>
+		<div className="animate-fade-in">
 			<h1 className="text-2xl font-bold tracking-tight text-white">
 				New <span className="text-emerald-400">password</span>.
 			</h1>
@@ -99,6 +99,6 @@ export default function NewPassword({
 					Reset password
 				</Button>
 			</Form>
-		</>
+		</div>
 	);
 }

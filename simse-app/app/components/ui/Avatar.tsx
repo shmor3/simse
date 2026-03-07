@@ -25,7 +25,7 @@ export default function Avatar({ name, size = 'md', className }: AvatarProps) {
 	return (
 		<div
 			className={clsx(
-				'inline-flex items-center justify-center rounded-full bg-emerald-400/10 font-mono font-bold text-emerald-400',
+				'inline-flex items-center justify-center rounded-full bg-emerald-400/10 font-mono font-bold text-emerald-400 ring-1 ring-emerald-400/10 transition-all hover:ring-emerald-400/30',
 				sizes[size],
 				className,
 			)}

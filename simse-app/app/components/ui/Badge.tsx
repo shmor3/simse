@@ -12,23 +12,38 @@ const variants: Record<BadgeVariant, string> = {
 
 interface BadgeProps {
 	variant?: BadgeVariant;
+	dot?: boolean;
 	children: React.ReactNode;
 	className?: string;
 }
 
+const dotColors: Record<BadgeVariant, string> = {
+	default: 'bg-zinc-400',
+	emerald: 'bg-emerald-400',
+	warning: 'bg-amber-400',
+	danger: 'bg-red-400',
+	info: 'bg-blue-400',
+};
+
 export default function Badge({
 	variant = 'default',
+	dot,
 	children,
 	className,
 }: BadgeProps) {
 	return (
 		<span
 			className={clsx(
-				'inline-flex items-center rounded-md border px-2 py-0.5 font-mono text-[11px] font-bold uppercase tracking-wider',
+				'inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 font-mono text-[11px] font-bold uppercase tracking-wider',
 				variants[variant],
 				className,
 			)}
 		>
+			{dot && (
+				<span
+					className={clsx('h-1.5 w-1.5 rounded-full', dotColors[variant])}
+				/>
+			)}
 			{children}
 		</span>
 	);

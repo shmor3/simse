@@ -34,7 +34,7 @@ export default function ResetPassword({ actionData }: Route.ComponentProps) {
 
 	if (data?.success) {
 		return (
-			<>
+			<div className="animate-fade-in">
 				<h1 className="text-2xl font-bold tracking-tight text-white">
 					Check your <span className="text-emerald-400">email</span>.
 				</h1>
@@ -48,12 +48,12 @@ export default function ResetPassword({ actionData }: Route.ComponentProps) {
 				>
 					Back to sign in
 				</Link>
-			</>
+			</div>
 		);
 	}
 
 	return (
-		<>
+		<div className="animate-fade-in">
 			<h1 className="text-2xl font-bold tracking-tight text-white">
 				Reset <span className="text-emerald-400">password</span>.
 			</h1>
@@ -83,6 +83,6 @@ export default function ResetPassword({ actionData }: Route.ComponentProps) {
 			>
 				Back to sign in
 			</Link>
-		</>
+		</div>
 	);
 }

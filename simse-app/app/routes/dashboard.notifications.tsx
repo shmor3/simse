@@ -3,7 +3,23 @@ import PageHeader from '~/components/layout/PageHeader';
 
 import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
+import EmptyState from '~/components/ui/EmptyState';
 import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
+
+function relativeTime(dateStr: string): string {
+	const now = Date.now();
+	const then = new Date(dateStr).getTime();
+	const diff = Math.max(0, now - then);
+	const mins = Math.floor(diff / 60000);
+	if (mins < 1) return 'just now';
+	if (mins < 60) return `${mins}m ago`;
+	const hrs = Math.floor(mins / 60);
+	if (hrs < 24) return `${hrs}h ago`;
+	const days = Math.floor(hrs / 24);
+	if (days < 7) return `${days}d ago`;
+	return new Date(dateStr).toLocaleDateString();
+}
+
 import type { Route } from './+types/dashboard.notifications';
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -150,36 +166,20 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
 			/>
 
 			{notifications.length === 0 ? (
-				<Card className="mt-8 p-10 text-center">
-					<div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-zinc-800">
-						<svg
-							className="h-6 w-6 text-zinc-600"
-							fill="none"
-							viewBox="0 0 24 24"
-							stroke="currentColor"
-							strokeWidth={1.5}
-						>
-							<path
-								strokeLinecap="round"
-								strokeLinejoin="round"
-								d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
-							/>
-						</svg>
-					</div>
-					<p className="mt-4 text-sm font-medium text-zinc-400">
-						All caught up
-					</p>
-					<p className="mt-1 text-[13px] text-zinc-600">
-						We'll let you know when something important happens.
-					</p>
-				</Card>
+				<div className="mt-8 animate-fade-in-up">
+					<EmptyState
+						type="notifications"
+						title="All caught up"
+						description="We'll let you know when something important happens."
+					/>
+				</div>
 			) : (
-				<Card className="mt-8 overflow-hidden">
+				<Card className="mt-8 overflow-hidden animate-fade-in-up">
 					<div className="divide-y divide-zinc-800/50">
 						{notifications.map((n) => (
 							<div
 								key={n.id}
-								className={`flex items-start gap-4 px-6 py-4 ${!n.read ? 'bg-zinc-800/20' : ''}`}
+								className={`flex items-start gap-4 px-6 py-4 transition-colors hover:bg-zinc-800/20 ${!n.read ? 'bg-zinc-800/15' : ''}`}
 							>
 								{typeIcon(n.type)}
 								<div className="min-w-0 flex-1">
@@ -190,8 +190,8 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
 										)}
 									</div>
 									<p className="mt-0.5 text-[13px] text-zinc-500">{n.body}</p>
-									<p className="mt-1 text-[12px] text-zinc-700">
-										{new Date(n.created_at).toLocaleString()}
+									<p className="mt-1 font-mono text-[11px] text-zinc-700">
+										{relativeTime(n.created_at)}
 									</p>
 								</div>
 								{!n.read && (
@@ -200,7 +200,7 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
 										<input type="hidden" name="id" value={n.id} />
 										<button
 											type="submit"
-											className="text-[12px] text-zinc-600 transition-colors hover:text-zinc-400"
+											className="shrink-0 rounded-md border border-zinc-800 bg-zinc-900/50 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-zinc-500 transition-colors hover:border-zinc-700 hover:text-zinc-300"
 										>
 											Mark read
 										</button>

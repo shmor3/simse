@@ -50,7 +50,7 @@ export default function TeamInvite({ actionData }: Route.ComponentProps) {
 				}
 			/>
 
-			<Card className="mt-8 p-6">
+			<Card className="mt-8 card-hover p-6 animate-fade-in-up">
 				<Form method="post" className="space-y-5">
 					<Input
 						name="email"

@@ -45,11 +45,14 @@ export default function Credit({ loaderData }: Route.ComponentProps) {
 			/>
 
 			{/* Balance */}
-			<Card accent className="mt-8 p-8 text-center">
+			<Card
+				accent="gradient"
+				className="mt-8 p-8 text-center animate-fade-in-up"
+			>
 				<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
 					Available credit
 				</p>
-				<p className="mt-4 font-mono text-5xl font-bold text-white">
+				<p className="mt-4 font-mono text-5xl font-bold gradient-text">
 					${balance.toFixed(2)}
 				</p>
 			</Card>
@@ -61,11 +64,14 @@ export default function Credit({ loaderData }: Route.ComponentProps) {
 				</h2>
 
 				{history.length === 0 ? (
-					<Card className="mt-4 p-8 text-center">
+					<Card className="mt-4 p-8 text-center animate-stagger-3">
 						<p className="text-sm text-zinc-500">No transactions yet.</p>
+						<p className="mt-1 text-[13px] text-zinc-700">
+							Your credit history will appear here.
+						</p>
 					</Card>
 				) : (
-					<Card className="mt-4 overflow-hidden">
+					<Card className="mt-4 overflow-hidden animate-stagger-3">
 						<table className="w-full">
 							<thead>
 								<tr className="border-b border-zinc-800">
@@ -84,7 +90,7 @@ export default function Credit({ loaderData }: Route.ComponentProps) {
 								{history.map((tx) => (
 									<tr
 										key={tx.id}
-										className="border-b border-zinc-800/50 last:border-0"
+										className="border-b border-zinc-800/50 transition-colors last:border-0 hover:bg-zinc-800/20"
 									>
 										<td className="px-5 py-3 text-sm text-zinc-300">
 											{tx.description}

@@ -17,6 +17,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
 			<head>
 				<meta charSet="utf-8" />
 				<meta name="viewport" content="width=device-width, initial-scale=1" />
+				<title>simse</title>
+				<meta name="theme-color" content="#0a0a0b" />
 				<link
 					rel="icon"
 					type="image/svg+xml"
@@ -50,8 +52,17 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
 	}
 
 	return (
-		<div className="flex min-h-screen items-center justify-center bg-[#0a0a0b]">
-			<div className="max-w-md text-center">
+		<div className="relative flex min-h-screen items-center justify-center bg-[#0a0a0b]">
+			{/* Background glow */}
+			<div
+				className="pointer-events-none fixed inset-0"
+				aria-hidden="true"
+				style={{
+					background:
+						'radial-gradient(ellipse 50% 30% at 50% 50%, rgba(239, 68, 68, 0.04) 0%, transparent 70%)',
+				}}
+			/>
+			<div className="relative z-10 max-w-md text-center animate-fade-in-up">
 				<div className="flex items-center justify-center gap-2.5">
 					<svg
 						viewBox="0 0 100 100"
@@ -94,14 +105,33 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
 						SIMSE
 					</p>
 				</div>
-				<h1 className="mt-8 text-4xl font-bold tracking-tight text-white">
+				{/* Error code */}
+				{isRouteErrorResponse(error) && (
+					<p className="mt-8 font-mono text-6xl font-bold text-zinc-800">
+						{error.status}
+					</p>
+				)}
+				<h1 className="mt-4 text-2xl font-bold tracking-tight text-white">
 					{heading}
 				</h1>
-				<p className="mt-4 text-zinc-400">{message}</p>
+				<p className="mt-3 text-sm leading-relaxed text-zinc-500">{message}</p>
 				<a
 					href="/"
-					className="mt-8 inline-block rounded-lg bg-emerald-400 px-6 py-3 font-mono text-sm font-bold text-zinc-950 no-underline transition-colors hover:bg-emerald-300"
+					className="mt-8 inline-flex items-center gap-2 rounded-lg bg-emerald-400 px-6 py-3 font-mono text-sm font-bold text-zinc-950 no-underline shadow-lg shadow-emerald-400/10 transition-all hover:bg-emerald-300 hover:shadow-emerald-400/20"
 				>
+					<svg
+						className="h-4 w-4"
+						fill="none"
+						viewBox="0 0 24 24"
+						stroke="currentColor"
+						strokeWidth={2}
+					>
+						<path
+							strokeLinecap="round"
+							strokeLinejoin="round"
+							d="M10 19l-7-7m0 0l7-7m-7 7h18"
+						/>
+					</svg>
 					Go home
 				</a>
 			</div>

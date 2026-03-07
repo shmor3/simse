@@ -13,6 +13,8 @@ interface NavItem {
 	to: string;
 	end?: boolean;
 	icon: React.ReactNode;
+	badge?: number;
+	shortcut?: string;
 }
 
 const homeNav: NavItem[] = [
@@ -20,6 +22,7 @@ const homeNav: NavItem[] = [
 		label: 'Overview',
 		to: '/dashboard',
 		end: true,
+		shortcut: '1',
 		icon: (
 			<svg
 				className="h-4 w-4"
@@ -39,6 +42,7 @@ const homeNav: NavItem[] = [
 	{
 		label: 'Usage',
 		to: '/dashboard/usage',
+		shortcut: '2',
 		icon: (
 			<svg
 				className="h-4 w-4"
@@ -58,6 +62,7 @@ const homeNav: NavItem[] = [
 	{
 		label: 'Library',
 		to: '/dashboard/library',
+		shortcut: '3',
 		icon: (
 			<svg
 				className="h-4 w-4"
@@ -81,6 +86,7 @@ function remoteNav(remoteId: string): NavItem[] {
 		{
 			label: 'Chat',
 			to: `/dashboard/chat/${remoteId}`,
+			shortcut: '1',
 			icon: (
 				<svg
 					className="h-4 w-4"
@@ -100,6 +106,7 @@ function remoteNav(remoteId: string): NavItem[] {
 		{
 			label: 'Files',
 			to: `/dashboard/remote/${remoteId}/files`,
+			shortcut: '2',
 			icon: (
 				<svg
 					className="h-4 w-4"
@@ -119,6 +126,7 @@ function remoteNav(remoteId: string): NavItem[] {
 		{
 			label: 'Shell',
 			to: `/dashboard/remote/${remoteId}/shell`,
+			shortcut: '3',
 			icon: (
 				<svg
 					className="h-4 w-4"
@@ -138,6 +146,7 @@ function remoteNav(remoteId: string): NavItem[] {
 		{
 			label: 'Network',
 			to: `/dashboard/remote/${remoteId}/network`,
+			shortcut: '4',
 			icon: (
 				<svg
 					className="h-4 w-4"
@@ -170,7 +179,7 @@ export default function NavPanel({
 			: `/dashboard/remote/${remoteId}/settings`;
 
 	return (
-		<aside className="flex w-55 flex-col border-r border-zinc-800/50 bg-zinc-950">
+		<aside className="flex h-full w-55 flex-col border-r border-zinc-800/50 bg-zinc-950">
 			{/* Header */}
 			<div className="flex items-center justify-between px-5 pt-6 pb-4">
 				<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
@@ -209,53 +218,83 @@ export default function NavPanel({
 						onClick={() => onClose?.()}
 						className={({ isActive }) =>
 							clsx(
-								'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+								'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all',
 								isActive
 									? 'bg-zinc-800/80 text-white'
 									: 'text-zinc-500 hover:bg-zinc-800/40 hover:text-zinc-300',
 							)
 						}
 					>
-						{item.icon}
-						<span>{item.label}</span>
+						{({ isActive }) => (
+							<>
+								{/* Active indicator bar */}
+								{isActive && (
+									<div className="absolute -left-3 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r-full bg-emerald-400" />
+								)}
+								{item.icon}
+								<span className="flex-1">{item.label}</span>
+								{item.badge && item.badge > 0 && (
+									<span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-400/15 px-1 font-mono text-[9px] font-bold text-emerald-400">
+										{item.badge}
+									</span>
+								)}
+								{item.shortcut && (
+									<span className="hidden font-mono text-[10px] text-zinc-700 group-hover:inline">
+										{item.shortcut}
+									</span>
+								)}
+							</>
+						)}
 					</NavLink>
 				))}
 			</nav>
 
-			{/* Settings */}
-			<div className="border-t border-zinc-800 p-3">
+			{/* Bottom section */}
+			<div className="border-t border-zinc-800 p-3 space-y-0.5">
 				<NavLink
 					to={settingsTo}
 					onClick={() => onClose?.()}
 					className={({ isActive }) =>
 						clsx(
-							'flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors',
+							'group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all',
 							isActive
 								? 'bg-zinc-800/80 text-white'
 								: 'text-zinc-500 hover:bg-zinc-800/40 hover:text-zinc-300',
 						)
 					}
 				>
-					<svg
-						className="h-4 w-4"
-						fill="none"
-						viewBox="0 0 24 24"
-						stroke="currentColor"
-						strokeWidth={2}
-					>
-						<path
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-						/>
-						<path
-							strokeLinecap="round"
-							strokeLinejoin="round"
-							d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-						/>
-					</svg>
-					<span>Settings</span>
+					{({ isActive }) => (
+						<>
+							{isActive && (
+								<div className="absolute -left-3 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r-full bg-emerald-400" />
+							)}
+							<svg
+								className="h-4 w-4"
+								fill="none"
+								viewBox="0 0 24 24"
+								stroke="currentColor"
+								strokeWidth={2}
+							>
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+								/>
+								<path
+									strokeLinecap="round"
+									strokeLinejoin="round"
+									d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+								/>
+							</svg>
+							<span>Settings</span>
+						</>
+					)}
 				</NavLink>
+
+				{/* Version */}
+				<div className="px-3 pt-2">
+					<p className="font-mono text-[10px] text-zinc-800">v0.1.0-alpha</p>
+				</div>
 			</div>
 		</aside>
 	);

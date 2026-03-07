@@ -35,7 +35,7 @@ use ratatui::{
 	widgets::{Block, Borders, Clear, Paragraph},
 	Frame,
 };
-use simse_ui_core::commands::registry::CommandDefinition;
+use crate::ui_core::commands::registry::CommandDefinition;
 
 // ── Constants ───────────────────────────────────────────
 
@@ -442,7 +442,7 @@ pub fn render_inline_completions<'a>(
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use simse_ui_core::commands::registry::all_commands;
+	use crate::ui_core::commands::registry::all_commands;
 
 	/// Helper: build a small set of test commands.
 	fn test_commands() -> Vec<CommandDefinition> {
@@ -452,7 +452,7 @@ mod tests {
 				description: "Show help information".into(),
 				usage: "help [command]".into(),
 				aliases: vec!["?".into()],
-				category: simse_ui_core::commands::registry::CommandCategory::Meta,
+				category: crate::ui_core::commands::registry::CommandCategory::Meta,
 				hidden: false,
 			},
 			CommandDefinition {
@@ -460,7 +460,7 @@ mod tests {
 				description: "Show command history".into(),
 				usage: "history".into(),
 				aliases: vec![],
-				category: simse_ui_core::commands::registry::CommandCategory::Meta,
+				category: crate::ui_core::commands::registry::CommandCategory::Meta,
 				hidden: false,
 			},
 			CommandDefinition {
@@ -468,7 +468,7 @@ mod tests {
 				description: "Clear the screen".into(),
 				usage: "clear".into(),
 				aliases: vec![],
-				category: simse_ui_core::commands::registry::CommandCategory::Meta,
+				category: crate::ui_core::commands::registry::CommandCategory::Meta,
 				hidden: false,
 			},
 			CommandDefinition {
@@ -476,7 +476,7 @@ mod tests {
 				description: "Exit the application".into(),
 				usage: "exit".into(),
 				aliases: vec!["quit".into(), "q".into()],
-				category: simse_ui_core::commands::registry::CommandCategory::Meta,
+				category: crate::ui_core::commands::registry::CommandCategory::Meta,
 				hidden: false,
 			},
 			CommandDefinition {
@@ -484,7 +484,7 @@ mod tests {
 				description: "Search the library".into(),
 				usage: "search <query>".into(),
 				aliases: vec!["s".into(), "find".into()],
-				category: simse_ui_core::commands::registry::CommandCategory::Library,
+				category: crate::ui_core::commands::registry::CommandCategory::Library,
 				hidden: false,
 			},
 			CommandDefinition {
@@ -492,7 +492,7 @@ mod tests {
 				description: "Hidden debug command".into(),
 				usage: "secret".into(),
 				aliases: vec![],
-				category: simse_ui_core::commands::registry::CommandCategory::Meta,
+				category: crate::ui_core::commands::registry::CommandCategory::Meta,
 				hidden: true,
 			},
 		]

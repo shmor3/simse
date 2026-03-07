@@ -8,19 +8,19 @@
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
-use simse_tui::app::{update, view, App, AppMessage, LoopStatus, Screen};
-use simse_tui::autocomplete::CommandAutocompleteState;
-use simse_tui::cli_args::parse_cli_args;
-use simse_tui::dialogs::confirm::ConfirmDialogState;
-use simse_tui::dispatch::{dispatch_command, parse_command_line, DispatchContext};
-use simse_tui::commands::{BridgeAction, CommandContext, CommandOutput, OverlayAction};
-use simse_tui::overlays::settings::render_settings_form;
-use simse_ui_core::config::settings_state::{SettingsFormState, SettingsLevel, SettingsAction};
-use simse_ui_core::app::{
+use simse_cli::app::{update, view, App, AppMessage, LoopStatus, Screen};
+use simse_cli::autocomplete::CommandAutocompleteState;
+use simse_cli::cli_args::parse_cli_args;
+use simse_cli::dialogs::confirm::ConfirmDialogState;
+use simse_cli::dispatch::{dispatch_command, parse_command_line, DispatchContext};
+use simse_cli::commands::{BridgeAction, CommandContext, CommandOutput, OverlayAction};
+use simse_cli::overlays::settings::render_settings_form;
+use simse_cli::ui_core::config::settings_state::{SettingsFormState, SettingsLevel, SettingsAction};
+use simse_cli::ui_core::app::{
     OutputItem, PermissionOption, PermissionRequest, ToolCallState, ToolCallStatus,
 };
-use simse_ui_core::commands::registry::all_commands;
-use simse_ui_core::input::state as input;
+use simse_cli::ui_core::commands::registry::all_commands;
+use simse_cli::ui_core::input::state as input;
 
 // ═══════════════════════════════════════════════════════════════
 // 1. Submit text -> appears in output
@@ -829,7 +829,7 @@ fn confirm_dialog_renders_without_panic() {
     terminal
         .draw(|frame| {
             let area = frame.area();
-            simse_tui::dialogs::confirm::render_confirm_dialog(frame, area, &state);
+            simse_cli::dialogs::confirm::render_confirm_dialog(frame, area, &state);
         })
         .unwrap();
 
@@ -842,7 +842,7 @@ fn confirm_dialog_renders_without_panic() {
     terminal
         .draw(|frame| {
             let area = frame.area();
-            simse_tui::dialogs::confirm::render_confirm_dialog(frame, area, &state2);
+            simse_cli::dialogs::confirm::render_confirm_dialog(frame, area, &state2);
         })
         .unwrap();
 }

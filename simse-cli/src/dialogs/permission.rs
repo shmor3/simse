@@ -25,7 +25,7 @@ use ratatui::{
 	widgets::{Block, Borders, Clear, Paragraph, Wrap},
 	Frame,
 };
-use simse_ui_core::app::PermissionRequest;
+use crate::ui_core::app::PermissionRequest;
 
 // ── Constants ───────────────────────────────────────────
 
@@ -279,7 +279,7 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use simse_ui_core::app::PermissionOption;
+	use crate::ui_core::app::PermissionOption;
 
 	fn make_request(tool: &str, args: serde_json::Value) -> PermissionRequest {
 		PermissionRequest {

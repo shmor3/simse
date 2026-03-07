@@ -28,9 +28,9 @@ use simse_core::agentic_loop::{
 use simse_core::tools::{ToolCallRequest, ToolRegistry, ToolRegistryOptions};
 use simse_core::SimseError;
 
-use simse_ui_core::state::conversation::{ConversationBuffer, ConversationOptions};
-use simse_ui_core::state::permission_manager::PermissionManager;
-use simse_ui_core::state::permissions::PermissionMode;
+use crate::ui_core::state::conversation::{ConversationBuffer, ConversationOptions};
+use crate::ui_core::state::permission_manager::PermissionManager;
+use crate::ui_core::state::permissions::PermissionMode;
 
 use crate::app::AppMessage;
 use crate::commands::{
@@ -39,7 +39,7 @@ use crate::commands::{
 use crate::config::{AcpFileConfig, AcpServerConfig, FileConfigStorage, LoadedConfig};
 use crate::session_store::SessionStore;
 
-use simse_ui_core::config::storage::ConfigStorage;
+use crate::ui_core::config::storage::ConfigStorage;
 
 // ---------------------------------------------------------------------------
 // ACP Adapter — bridges simse-acp's AcpClient with simse-core's AcpClient trait
@@ -581,7 +581,7 @@ impl TuiRuntime {
 
 			// ── Config ──────────────────────────────────
 			BridgeAction::InitConfig { force } => {
-				use simse_ui_core::config::storage::ConfigScope;
+				use crate::ui_core::config::storage::ConfigScope;
 				let exists = self
 					.config_storage
 					.file_exists("settings.json", ConfigScope::Project)
@@ -599,7 +599,7 @@ impl TuiRuntime {
 				Ok(format!("Initialized project config at {}", dir.display()))
 			}
 			BridgeAction::FactoryReset => {
-				use simse_ui_core::config::storage::ConfigScope;
+				use crate::ui_core::config::storage::ConfigScope;
 				self.config_storage
 					.delete_all(ConfigScope::Global)
 					.await
@@ -643,7 +643,7 @@ impl TuiRuntime {
 				Ok(format!("ACP server '{name}' configured. Ready to connect."))
 			}
 			BridgeAction::FactoryResetProject => {
-				use simse_ui_core::config::storage::ConfigScope;
+				use crate::ui_core::config::storage::ConfigScope;
 				self.config_storage
 					.delete_all(ConfigScope::Project)
 					.await
@@ -868,7 +868,7 @@ impl TuiRuntime {
 					Err(e) => {
 						if matches!(
 							e,
-							simse_ui_core::config::storage::ConfigError::NotFound { .. }
+							crate::ui_core::config::storage::ConfigError::NotFound { .. }
 						) {
 							return AppMessage::SettingsFileLoaded(serde_json::json!({}));
 						}
@@ -887,7 +887,7 @@ impl TuiRuntime {
 					.load_file(filename, *scope)
 					.await
 					.unwrap_or(serde_json::json!({}));
-				simse_ui_core::config::storage::set_field(&mut data, key, value.clone());
+				crate::ui_core::config::storage::set_field(&mut data, key, value.clone());
 				match self.config_storage.save_file(filename, *scope, &data).await {
 					Ok(()) => {
 						return AppMessage::SettingsFieldSaved {

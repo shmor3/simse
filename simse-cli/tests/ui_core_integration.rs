@@ -7,18 +7,18 @@
 
 use std::collections::HashSet;
 
-use simse_ui_core::commands::registry::{
+use simse_cli::ui_core::commands::registry::{
 	all_commands, filter_commands, find_command, CommandCategory,
 };
-use simse_ui_core::config::settings_schema::all_config_schemas;
-use simse_ui_core::input::keybindings::{KeyCombo, KeybindingRegistry};
-use simse_ui_core::input::state::{self as input_state, InputState};
-use simse_ui_core::state::conversation::{ConversationBuffer, ConversationOptions};
-use simse_ui_core::state::permission_manager::PermissionManager;
-use simse_ui_core::state::permissions::{PermissionDecision, PermissionMode, PermissionRule};
-use simse_ui_core::text::file_mentions::{extract_at_query, extract_mentions, fuzzy_match};
-use simse_ui_core::tools::parser::parse_tool_calls;
-use simse_ui_core::tools::{truncate_output, ToolDefinition, ToolParameter};
+use simse_cli::ui_core::config::settings_schema::all_config_schemas;
+use simse_cli::ui_core::input::keybindings::{KeyCombo, KeybindingRegistry};
+use simse_cli::ui_core::input::state::{self as input_state, InputState};
+use simse_cli::ui_core::state::conversation::{ConversationBuffer, ConversationOptions};
+use simse_cli::ui_core::state::permission_manager::PermissionManager;
+use simse_cli::ui_core::state::permissions::{PermissionDecision, PermissionMode, PermissionRule};
+use simse_cli::ui_core::text::file_mentions::{extract_at_query, extract_mentions, fuzzy_match};
+use simse_cli::ui_core::tools::parser::parse_tool_calls;
+use simse_cli::ui_core::tools::{truncate_output, ToolDefinition, ToolParameter};
 
 // ---------------------------------------------------------------------------
 // 1. All command names and aliases are globally unique
@@ -393,14 +393,14 @@ fn tool_definition_format_truncate_and_conversation_flow() {
 		name: "file_read".into(),
 		description: "Read a file from disk".into(),
 		parameters: params,
-		category: simse_ui_core::tools::ToolCategory::default(),
+		category: simse_cli::ui_core::tools::ToolCategory::default(),
 		annotations: None,
 		timeout_ms: None,
 		max_output_chars: Some(100),
 	};
 
 	// Format for system prompt
-	let formatted = simse_ui_core::tools::format_tool_definition(&tool);
+	let formatted = simse_cli::ui_core::tools::format_tool_definition(&tool);
 	assert!(formatted.contains("### file_read"));
 	assert!(formatted.contains("path (string, required)"));
 
@@ -413,7 +413,7 @@ fn tool_definition_format_truncate_and_conversation_flow() {
 
 	// Add the truncated output as a tool result in the conversation
 	let conv = ConversationBuffer::new(ConversationOptions {
-		system_prompt: Some(simse_ui_core::tools::format_tools_for_system_prompt(&[
+		system_prompt: Some(simse_cli::ui_core::tools::format_tools_for_system_prompt(&[
 			tool,
 		])),
 		..ConversationOptions::default()

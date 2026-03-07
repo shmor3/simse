@@ -2,7 +2,7 @@
 
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use simse_ui_core::app::{OutputItem, ToolCallState, ToolCallStatus};
+use crate::ui_core::app::{OutputItem, ToolCallState, ToolCallStatus};
 
 /// Convert output items to renderable Lines.
 pub fn render_output_items(items: &[OutputItem], _width: u16) -> Vec<Line<'static>> {

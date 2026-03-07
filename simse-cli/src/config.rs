@@ -22,7 +22,7 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use simse_ui_core::config::storage::{ConfigError, ConfigResult, ConfigScope, ConfigStorage};
+use crate::ui_core::config::storage::{ConfigError, ConfigResult, ConfigScope, ConfigStorage};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};

@@ -1,26 +1,4 @@
-//! SimSE TUI — Terminal interface for SimSE.
-
-mod app;
-pub mod at_mention;
-pub mod autocomplete;
-mod banner;
-pub mod cli_args;
-pub mod commands;
-pub mod config;
-pub mod dialogs;
-pub mod dispatch;
-pub mod error_box;
-pub mod event_loop;
-pub mod json_io;
-pub mod levenshtein;
-pub mod markdown;
-mod output;
-pub mod onboarding;
-pub mod overlays;
-pub mod session_store;
-pub mod spinner;
-pub mod status_bar;
-pub mod tool_call_box;
+//! SimSE CLI — Terminal interface for SimSE.
 
 use std::io;
 use std::path::PathBuf;
@@ -35,8 +13,10 @@ use futures::StreamExt;
 use ratatui::{backend::CrosstermBackend, Terminal};
 use tokio::sync::{mpsc, Mutex};
 
-use app::{update, view, App, AppMessage};
-use cli_args::parse_cli_args;
+use simse_cli::app::{update, view, App, AppMessage};
+use simse_cli::cli_args::parse_cli_args;
+use simse_cli::config;
+use simse_cli::event_loop;
 
 /// Create `LoopCallbacks` that forward agentic loop events to the TUI as
 /// `AppMessage`s via an unbounded channel.
@@ -88,15 +68,15 @@ async fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::R
 	let args: Vec<String> = std::env::args().collect();
 	let cli = parse_cli_args(&args);
 
-	let config_options = crate::config::ConfigOptions {
+	let config_options = config::ConfigOptions {
 		data_dir: cli.data_dir.map(PathBuf::from),
 		work_dir: None,
 		default_agent: cli.agent.clone(),
 		log_level: None,
 		server_name: cli.server.clone(),
 	};
-	let config = crate::config::load_config(&config_options);
-	let mut rt = event_loop::TuiRuntime::new(config);
+	let cfg = config::load_config(&config_options);
+	let mut rt = event_loop::TuiRuntime::new(cfg);
 	rt.verbose = cli.verbose;
 	let runtime = Arc::new(Mutex::new(rt));
 

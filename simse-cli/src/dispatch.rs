@@ -6,7 +6,7 @@
 //! - [`DispatchContext`]: carries UI state so meta commands (`/help`, `/verbose`,
 //!   `/plan`, `/context`) can receive the current values they need.
 
-use simse_ui_core::commands::registry::{all_commands, CommandDefinition};
+use crate::ui_core::commands::registry::{all_commands, CommandDefinition};
 
 use crate::commands::{self, CommandContext, CommandOutput};
 
@@ -143,7 +143,7 @@ fn dispatch_inner(command: &str, args: &str, ctx: &DispatchContext) -> Vec<Comma
 
 		// ── Unknown ──────────────────────────────────────────
 		other => {
-			let all = simse_ui_core::commands::registry::all_commands();
+			let all = crate::ui_core::commands::registry::all_commands();
 			let mut suggestions: Vec<&str> = all
 				.iter()
 				.filter(|cmd| crate::levenshtein::levenshtein(other, &cmd.name) <= 2)

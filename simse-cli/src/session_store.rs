@@ -14,7 +14,7 @@
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use simse_ui_core::state::session::SessionMeta;
+use crate::ui_core::state::session::SessionMeta;
 use std::io;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;

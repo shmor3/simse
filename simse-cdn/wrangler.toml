@@ -14,9 +14,9 @@ bucket_name = "simse-cdn"
 binding = "VERSION_STORE"
 id = "PLACEHOLDER_REPLACE_WITH_KV_ID"
 
-[analytics_engine]
-dataset = "simse-analytics"
-binding = "ANALYTICS"
+[[queues.producers]]
+queue = "simse-cdn-analytics"
+binding = "ANALYTICS_QUEUE"
 
 # --- Environments ---
 
@@ -33,6 +33,10 @@ bucket_name = "simse-cdn-staging"
 binding = "VERSION_STORE"
 id = "PLACEHOLDER_STAGING_KV_ID"
 
+[[env.staging.queues.producers]]
+queue = "simse-cdn-analytics-staging"
+binding = "ANALYTICS_QUEUE"
+
 [env.production]
 name = "simse-cdn"
 routes = [{ pattern = "cdn.simse.dev", custom_domain = true }]
@@ -44,3 +48,7 @@ bucket_name = "simse-cdn"
 [[env.production.kv_namespaces]]
 binding = "VERSION_STORE"
 id = "PLACEHOLDER_REPLACE_WITH_KV_ID"
+
+[[env.production.queues.producers]]
+queue = "simse-cdn-analytics"
+binding = "ANALYTICS_QUEUE"

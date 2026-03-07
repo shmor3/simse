@@ -20,8 +20,8 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use serde_json::json;
 
-use crate::error::McpError;
-use crate::protocol::{
+use crate::mcp::error::McpError;
+use crate::mcp::protocol::{
 	CompletionResult, ContentItem, GetPromptParams, GetPromptResult, McpServerConfig,
 	PromptDefinition, PromptInfo, PromptMessage, ReadResourceParams, ReadResourceResult,
 	ResourceContent, ResourceDefinition, ResourceInfo, ResourceTemplateInfo, Root, ToolCallParams,
@@ -596,7 +596,7 @@ impl McpServer {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use crate::protocol::{McpServerConfig, TransportType};
+	use crate::mcp::protocol::{McpServerConfig, TransportType};
 
 	fn test_config() -> McpServerConfig {
 		McpServerConfig {

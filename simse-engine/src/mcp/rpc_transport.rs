@@ -2,7 +2,7 @@ use std::io::{self, Write};
 
 use serde::Serialize;
 
-use crate::protocol::{JsonRpcNotification, JsonRpcResponse};
+use crate::mcp::protocol::{JsonRpcNotification, JsonRpcResponse};
 
 pub struct NdjsonTransport;
 

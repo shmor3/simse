@@ -20,11 +20,11 @@ use tokio::sync::{Mutex, broadcast};
 
 use serde::{Deserialize, Serialize};
 
-use crate::connection::{ConnectionConfig, ConnectionWrapper};
-use crate::error::AcpError;
-use crate::permission::PermissionPolicy;
-use crate::resilience::{CircuitBreaker, CircuitBreakerConfig, HealthMonitor, RetryConfig, retry};
-use crate::stream::{AcpStream, StreamChunk, create_stream, parse_session_update};
+use crate::acp::connection::{ConnectionConfig, ConnectionWrapper};
+use crate::acp::error::AcpError;
+use crate::acp::permission::PermissionPolicy;
+use crate::acp::resilience::{CircuitBreaker, CircuitBreakerConfig, HealthMonitor, RetryConfig, retry};
+use crate::acp::stream::{AcpStream, StreamChunk, create_stream, parse_session_update};
 
 // ---------------------------------------------------------------------------
 // ACP domain types (previously in protocol.rs)

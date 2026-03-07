@@ -21,11 +21,11 @@ use serde::Deserialize;
 use tokio::io::AsyncBufReadExt;
 use tokio::sync::{oneshot, Mutex};
 
-use crate::client::McpClient;
-use crate::error::McpError;
-use crate::mcp_server::{McpServer, ToolHandler};
-use crate::protocol::*;
-use crate::rpc_transport::NdjsonTransport;
+use crate::mcp::client::McpClient;
+use crate::mcp::error::McpError;
+use crate::mcp::mcp_server::{McpServer, ToolHandler};
+use crate::mcp::protocol::*;
+use crate::mcp::rpc_transport::NdjsonTransport;
 
 // ---------------------------------------------------------------------------
 // Callback tool handler

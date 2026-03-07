@@ -23,8 +23,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::{oneshot, Mutex};
 
-use crate::error::McpError;
-use crate::protocol::{
+use crate::mcp::error::McpError;
+use crate::mcp::protocol::{
 	ClientCapabilities, ImplementationInfo, JsonRpcNotification, McpInitializeParams,
 	McpInitializeResult, RootCapabilities,
 };

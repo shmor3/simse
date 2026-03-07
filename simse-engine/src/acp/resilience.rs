@@ -8,7 +8,7 @@ pub use simse_resilience::{
 	RetryConfig,
 };
 
-use crate::error::AcpError;
+use crate::acp::error::AcpError;
 
 /// Returns `true` if the error is likely transient and worth retrying.
 ///

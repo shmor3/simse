@@ -4,13 +4,12 @@ members = [
     "simse-ui-core",
     "simse-tui",
     "simse-core",
-    "simse-resilience",
 ]
 exclude = [
-    "simse-adaptive",
-    "simse-engine",
-    "simse-sandbox",
-    "simse-remote",
+    "simse-code/adaptive",
+    "simse-code/engine",
+    "simse-code/sandbox",
+    "simse-code/remote",
 ]
 
 [workspace.package]

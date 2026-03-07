@@ -6,23 +6,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Rust crate builds
-bun run build:adaptive-engine # cd simse-adaptive && cargo build --release
-bun run build:acp-engine     # cd simse-acp && cargo build --release
-bun run build:mcp-engine     # cd simse-mcp && cargo build --release
+bun run build:adaptive-engine # cd simse-code/adaptive && cargo build --release
+bun run build:acp-engine     # cd simse-code/engine && cargo build --release (ACP binary)
+bun run build:mcp-engine     # cd simse-code/engine && cargo build --release (MCP binary)
 bun run build:core           # cd simse-core && cargo build --release
 bun run build:tui            # cd simse-tui && cargo build --release
-bun run build:sandbox-engine # cd simse-sandbox && cargo build --release
-bun run build:remote-engine  # cd simse-remote && cargo build --release
+bun run build:sandbox-engine # cd simse-code/sandbox && cargo build --release
+bun run build:remote-engine  # cd simse-code/remote && cargo build --release
 
 # Rust tests
-cd simse-adaptive && cargo test # Rust adaptive engine tests
-cd simse-acp && cargo test     # Rust ACP engine tests
-cd simse-mcp && cargo test     # Rust MCP engine tests
-cd simse-core && cargo test    # Rust core orchestration tests
-cd simse-ui-core && cargo test # Rust UI core tests
-cd simse-sandbox && cargo test # Rust sandbox engine tests
-cd simse-remote && cargo test  # Rust remote engine tests
-cd simse-tui && cargo test     # Rust TUI tests (unit + integration)
+cd simse-code/adaptive && cargo test # Rust adaptive engine tests
+cd simse-code/engine && cargo test   # Rust unified engine tests
+cd simse-core && cargo test          # Rust core orchestration tests
+cd simse-ui-core && cargo test       # Rust UI core tests
+cd simse-code/sandbox && cargo test  # Rust sandbox engine tests
+cd simse-code/remote && cargo test   # Rust remote engine tests
+cd simse-tui && cargo test           # Rust TUI tests (unit + integration)
 
 # TypeScript lint (all TS services use Biome)
 cd simse-api && npm run lint       # API gateway lint
@@ -45,14 +44,13 @@ The entire core is implemented in **Rust**. Each crate is a standalone binary co
 
 ```tree
 simse-core/                 # Pure Rust crate — orchestration library + JSON-RPC binary server
-simse-adaptive/             # Pure Rust crate — adaptive engine (vector store + PCN, JSON-RPC over stdio)
-simse-acp/                  # Pure Rust crate — ACP engine (JSON-RPC over stdio)
-simse-mcp/                  # Pure Rust crate — MCP engine (JSON-RPC over stdio)
-simse-sandbox/              # Pure Rust crate — unified sandbox engine (VFS + VSH + VNet, JSON-RPC over stdio)
+simse-code/
+  engine/                   # Pure Rust crate — unified engine: ACP + MCP + ML inference (JSON-RPC over stdio)
+  adaptive/                 # Pure Rust crate — adaptive engine (vector store + PCN, JSON-RPC over stdio)
+  sandbox/                  # Pure Rust crate — unified sandbox engine (VFS + VSH + VNet, JSON-RPC over stdio)
+  remote/                   # Pure Rust crate — remote access engine (JSON-RPC over stdio)
 simse-ui-core/              # Pure Rust crate — platform-agnostic UI logic (no I/O)
 simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Architecture)
-simse-remote/               # Pure Rust crate — remote access engine (JSON-RPC over stdio)
-simse-engine/               # Pure Rust crate — core engine
 simse-analytics/            # TypeScript — Analytics + audit service (Cloudflare Worker, D1, Queues, Analytics Engine)
 simse-cdn/                  # TypeScript — CDN worker (R2 + KV, Cloudflare Worker)
 simse-app/                  # TypeScript — SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects)
@@ -126,7 +124,7 @@ simse-core/
 ### Other Rust Crates
 
 ```tree
-simse-adaptive/             # Pure Rust crate — adaptive engine (vector store + PCN, JSON-RPC over stdio)
+simse-code/adaptive/        # Pure Rust crate — adaptive engine (vector store + PCN, JSON-RPC over stdio)
   src/                      # Key deps: rayon (parallel search), hnsw_rs (approximate NN)
     store.rs                # Store: core state manager (CRUD, search, indexing, persistence)
     distance.rs             # Distance metrics (Cosine, Euclidean, DotProduct, Manhattan) with SIMD acceleration (AVX2, NEON)
@@ -156,23 +154,14 @@ simse-adaptive/             # Pure Rust crate — adaptive engine (vector store 
       trainer.rs            # Model training (async background worker)
       snapshot.rs           # Model snapshots (serializable weights)
 
-simse-acp/                  # Pure Rust crate — ACP engine
+simse-code/engine/          # Pure Rust crate — unified engine (ACP + MCP + ML inference)
   src/
-    client.rs               # AcpClient: multi-server pool, sessions, agents
-    connection.rs           # Child process management, request/response tracking
-    stream.rs               # Streaming state machine (futures::Stream)
-    permission.rs           # Permission policy resolution
-    resilience.rs           # Circuit breaker, health monitor, retry
+    acp/                    # ACP client/server (uses agent-client-protocol SDK)
+    mcp/                    # MCP client/server (stdio + HTTP transports)
+    inference/              # Local ML inference (embeddings + text generation)
+    models/                 # Model implementations (BERT, Llama, NomicBERT, TEI, sampling)
 
-simse-mcp/                  # Pure Rust crate — MCP engine
-  src/
-    client.rs               # McpClient: multi-server connections, tools, resources
-    mcp_server.rs           # McpServer: tool/resource/prompt hosting
-    rpc_server.rs           # JSON-RPC dispatcher wrapping client + server
-    stdio_transport.rs      # Stdio transport for MCP server connections
-    http_transport.rs       # HTTP transport for remote MCP servers
-
-simse-sandbox/              # Pure Rust crate — unified sandbox engine (VFS + VSH + VNet merged)
+simse-code/sandbox/         # Pure Rust crate — unified sandbox engine (VFS + VSH + VNet merged)
   src/
     lib.rs                  # Module declarations, re-exports
     main.rs                 # Binary entry point (simse-sandbox-engine)
@@ -215,7 +204,7 @@ simse-sandbox/              # Pure Rust crate — unified sandbox engine (VFS + 
     vsh.rs                  # 24 VSH unit tests (VirtualShell)
     vnet.rs                 # 42 VNet unit tests (VirtualNetwork)
 
-simse-remote/              # Pure Rust crate — remote access engine
+simse-code/remote/         # Pure Rust crate — remote access engine
   src/
     error.rs               # RemoteError enum with REMOTE_ code prefixes
     protocol.rs            # JSON-RPC request/response types (7 methods)
@@ -371,7 +360,7 @@ simse-cloud/                # SaaS web app + relay (React Router + Cloudflare Pa
 
 ### ACP Protocol
 
-The ACP engine (`simse-acp/`) exposes the [Agent Client Protocol](https://agentclientprotocol.com) over JSON-RPC 2.0 / NDJSON stdio.
+The ACP engine (`simse-code/engine/src/acp/`) exposes the [Agent Client Protocol](https://agentclientprotocol.com) over JSON-RPC 2.0 / NDJSON stdio.
 
 **Protocol details:**
 - **Protocol version**: 1
@@ -383,7 +372,7 @@ The ACP engine (`simse-acp/`) exposes the [Agent Client Protocol](https://agentc
 
 ### MCP Protocol
 
-The MCP engine (`simse-mcp/`) implements the [Model Context Protocol](https://modelcontextprotocol.io) over JSON-RPC 2.0 / NDJSON stdio.
+The MCP engine (`simse-code/engine/src/mcp/`) implements the [Model Context Protocol](https://modelcontextprotocol.io) over JSON-RPC 2.0 / NDJSON stdio.
 
 **Protocol details:**
 - **Client**: Connects to external MCP servers via stdio or HTTP transport
@@ -392,9 +381,9 @@ The MCP engine (`simse-mcp/`) implements the [Model Context Protocol](https://mo
 
 ### Adaptive Store System
 
-The adaptive store has two layers: the storage engine in Rust (`simse-adaptive/`), with orchestration in `simse-core/src/library/`.
+The adaptive store has two layers: the storage engine in Rust (`simse-code/adaptive/`), with orchestration in `simse-core/src/library/`.
 
-**Rust engine** (`simse-adaptive/src/`) — all vector + PCN operations via JSON-RPC:
+**Rust engine** (`simse-code/adaptive/src/`) — all vector + PCN operations via JSON-RPC:
 - Store (entries, CRUD, search), distance metrics (SIMD-accelerated), SoA vector storage, index backends (Flat/HNSW), quantization (Scalar/Binary), fusion (MMR/RRF), persistence, cataloging, deduplication, recommendation, text search, BM25, topic classification, adaptive learning, context formatting, graph index, predictive coding network (`pcn/`)
 
 **simse-core orchestration layer** (`simse-core/src/library/`) — high-level operations:

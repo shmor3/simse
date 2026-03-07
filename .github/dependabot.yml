@@ -15,32 +15,22 @@ updates:
 
   # Rust — standalone crates
   - package-ecosystem: cargo
-    directory: /simse-adaptive
+    directory: /simse-code/adaptive
     schedule:
       interval: weekly
 
   - package-ecosystem: cargo
-    directory: /simse-acp
+    directory: /simse-code/engine
     schedule:
       interval: weekly
 
   - package-ecosystem: cargo
-    directory: /simse-mcp
+    directory: /simse-code/sandbox
     schedule:
       interval: weekly
 
   - package-ecosystem: cargo
-    directory: /simse-engine
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: cargo
-    directory: /simse-sandbox
-    schedule:
-      interval: weekly
-
-  - package-ecosystem: cargo
-    directory: /simse-remote
+    directory: /simse-code/remote
     schedule:
       interval: weekly
 

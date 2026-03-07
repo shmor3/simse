@@ -18,15 +18,15 @@ The entire core is implemented in **Rust**. Each crate is a standalone binary co
 
 ### Rust Crates
 
-| Crate | Description |
-|-------|-------------|
-| `simse-engine` | Unified engine — ACP, MCP, and ML inference over JSON-RPC 2.0 / NDJSON stdio |
-| `simse-core` | Orchestration library — agentic loop, chains, tools, hooks, sessions, library |
-| `simse-adaptive` | Adaptive engine — vector store, PCN, cataloging, deduplication, graph index |
-| `simse-sandbox` | Sandbox engine — VFS + VSH + VNet, local and SSH backends |
-| `simse-remote` | Remote access engine — auth, WebSocket tunnel, request routing |
-| `simse-ui-core` | Platform-agnostic UI logic — state, input, commands, config (no I/O) |
-| `simse-tui` | Terminal UI — ratatui + crossterm, Elm Architecture |
+| Crate | Path | Description |
+|-------|------|-------------|
+| `simse-engine` | `simse-code/engine` | Unified engine — ACP, MCP, and ML inference over JSON-RPC 2.0 / NDJSON stdio |
+| `simse-core` | `simse-core` | Orchestration library — agentic loop, chains, tools, hooks, sessions, library |
+| `simse-adaptive` | `simse-code/adaptive` | Adaptive engine — vector store, PCN, cataloging, deduplication, graph index |
+| `simse-sandbox` | `simse-code/sandbox` | Sandbox engine — VFS + VSH + VNet, local and SSH backends |
+| `simse-remote` | `simse-code/remote` | Remote access engine — auth, WebSocket tunnel, request routing |
+| `simse-ui-core` | `simse-ui-core` | Platform-agnostic UI logic — state, input, commands, config (no I/O) |
+| `simse-tui` | `simse-tui` | Terminal UI — ratatui + crossterm, Elm Architecture |
 
 ### TypeScript Services (Cloudflare Workers)
 
@@ -102,13 +102,13 @@ bun run build:remote-engine    # simse-remote
 bun run build:tui              # simse-tui
 
 # Or directly with cargo
-cd simse-engine && cargo build --release
+cd simse-code/engine && cargo build --release
 cd simse-core && cargo build --release
 
 # Hardware-accelerated inference
-cd simse-engine && cargo build --release --features cuda    # NVIDIA GPU
-cd simse-engine && cargo build --release --features metal   # Apple GPU
-cd simse-engine && cargo build --release --features mkl     # Intel CPU
+cd simse-code/engine && cargo build --release --features cuda    # NVIDIA GPU
+cd simse-code/engine && cargo build --release --features metal   # Apple GPU
+cd simse-code/engine && cargo build --release --features mkl     # Intel CPU
 ```
 
 ### TypeScript Services
@@ -131,10 +131,10 @@ cd simse-status && npm install && npm run build
 
 ```bash
 cd simse-core && cargo test
-cd simse-engine && cargo test
-cd simse-adaptive && cargo test
-cd simse-sandbox && cargo test
-cd simse-remote && cargo test
+cd simse-code/engine && cargo test
+cd simse-code/adaptive && cargo test
+cd simse-code/sandbox && cargo test
+cd simse-code/remote && cargo test
 cd simse-ui-core && cargo test
 cd simse-tui && cargo test
 ```

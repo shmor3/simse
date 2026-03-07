@@ -13,8 +13,8 @@ path = "src/main.rs"
 
 [dependencies]
 im = "15"
-simse-engine = { path = "../simse-engine" }
-simse-adaptive-engine = { path = "../simse-adaptive" }
+simse-engine = { path = "../simse-code/engine" }
+simse-adaptive-engine = { path = "../simse-code/adaptive" }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json.workspace = true

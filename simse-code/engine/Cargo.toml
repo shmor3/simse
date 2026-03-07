@@ -1,0 +1,88 @@
+[package]
+name = "simse-engine"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Unified engine: ACP, MCP, and ML inference over JSON-RPC 2.0 / NDJSON stdio"
+
+[lib]
+name = "simse_engine"
+path = "src/lib.rs"
+
+[[bin]]
+name = "simse-engine"
+path = "src/main.rs"
+
+[[bin]]
+name = "simse-acp-engine"
+path = "src/bin/acp.rs"
+
+[[bin]]
+name = "simse-mcp-engine"
+path = "src/bin/mcp.rs"
+
+[features]
+default = []
+cuda = ["candle-core/cuda", "candle-nn/cuda", "candle-transformers/cuda"]
+metal = ["candle-core/metal", "candle-nn/metal", "candle-transformers/metal"]
+mkl = ["candle-core/mkl", "candle-nn/mkl", "candle-transformers/mkl"]
+accelerate = [
+    "candle-core/accelerate",
+    "candle-nn/accelerate",
+    "candle-transformers/accelerate",
+]
+embed-weights = []
+
+[dependencies]
+# ACP SDK
+agent-client-protocol = { git = "https://github.com/agentclientprotocol/rust-sdk", features = ["unstable"] }
+
+# Shared resilience utilities
+simse-resilience = { path = "../../simse-resilience" }
+
+# Immutable data structures
+im = { version = "15", features = ["serde"] }
+
+# Candle ML framework
+candle-core = "0.9"
+candle-nn = "0.9"
+candle-transformers = "0.9"
+
+# HuggingFace model hub
+hf-hub = { version = "0.5", features = ["tokio"] }
+tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive", "env"] }
+
+# Logging to stderr
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# HTTP client
+reqwest = { version = "0.13", features = ["json"] }
+ureq = { version = "3", features = ["json"] }
+
+# PRNG for sampling
+rand = "0.10"
+
+# Unique session IDs
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
+tokio-test = "0.4"

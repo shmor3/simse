@@ -22,7 +22,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use crate::cosine::cosine_similarity;
+use crate::distance::cosine_similarity;
 use crate::types::{LearnerProfile, QueryRecord, RequiredWeightProfile};
 
 // ---------------------------------------------------------------------------

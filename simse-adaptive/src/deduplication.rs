@@ -6,7 +6,7 @@
 // no external dependencies beyond cosine similarity.
 // ---------------------------------------------------------------------------
 
-use crate::cosine::cosine_similarity;
+use crate::distance::cosine_similarity;
 use crate::types::{DuplicateCheckResult, DuplicateCluster, Entry};
 
 // ---------------------------------------------------------------------------

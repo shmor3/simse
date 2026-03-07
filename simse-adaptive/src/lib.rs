@@ -4,7 +4,7 @@ pub mod error;
 pub mod types;
 pub mod transport;
 pub mod protocol;
-pub mod cosine;
+pub mod distance;
 pub mod text_search;
 pub mod inverted_index;
 pub mod cataloging;

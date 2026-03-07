@@ -2,7 +2,7 @@
 // Store — core state manager
 // ---------------------------------------------------------------------------
 //
-// Integrates all sub-modules (cosine, text_search, inverted_index, cataloging,
+// Integrates all sub-modules (distance, text_search, inverted_index, cataloging,
 // deduplication, recommendation, learning, topic_catalog, persistence,
 // text_cache) into a single stateful struct with full CRUD, search,
 // recommendation, and persistence capabilities.
@@ -14,7 +14,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::cataloging::{MagnitudeCache, MetadataIndex, TopicIndex};
-use crate::cosine::compute_magnitude;
+use crate::distance::compute_magnitude;
 use crate::deduplication;
 use crate::error::AdaptiveError;
 use crate::graph::{GraphConfig, GraphIndex};
@@ -221,7 +221,7 @@ impl Store {
 		// Rebuild implicit similarity edges for the graph
 		for i in 0..self.volumes.len() {
 			for j in (i + 1)..self.volumes.len() {
-				let sim = crate::cosine::cosine_similarity(
+				let sim = crate::distance::cosine_similarity(
 					&self.volumes[i].embedding,
 					&self.volumes[j].embedding,
 				);
@@ -463,7 +463,7 @@ impl Store {
 				.magnitude_cache
 				.get(&self.volumes[i].id)
 				.unwrap_or_else(|| compute_magnitude(&self.volumes[i].embedding));
-			let sim = crate::cosine::cosine_similarity_with_magnitude(
+			let sim = crate::distance::cosine_similarity_with_magnitude(
 				&self.volumes[new_idx].embedding,
 				&self.volumes[i].embedding,
 				new_mag,

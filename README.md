@@ -169,4 +169,4 @@ Rust crates use standard `rustfmt` and `clippy -D warnings`.
 
 ## License
 
-[MIT](LICENSE)
+[Elastic License 2.0 (ELv2)](LICENSE)

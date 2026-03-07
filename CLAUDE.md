@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Rust crate builds
 bun run build:core           # cd simse-core && cargo build --release
-bun run build:tui            # cd simse-tui && cargo build --release
+bun run build:cli            # cd simse-cli && cargo build --release
 
 # Rust tests
 cd simse-core && cargo test                          # All tests (default features: engine, adaptive, sandbox, remote)
@@ -15,42 +15,41 @@ cd simse-core && cargo test --features engine         # Engine module tests only
 cd simse-core && cargo test --features adaptive       # Adaptive module tests only
 cd simse-core && cargo test --features sandbox        # Sandbox module tests only
 cd simse-core && cargo test --features remote         # Remote module tests only
-cd simse-ui-core && cargo test                        # Rust UI core tests
-cd simse-tui && cargo test                            # Rust TUI tests (unit + integration)
+cd simse-cli && cargo test                            # CLI tests (TUI + UI core)
 
-# TypeScript lint (all TS services use Biome)
-cd simse-api && npm run lint       # API gateway lint
-cd simse-auth && npm run lint      # Auth service lint
-cd simse-payments && npm run lint  # Payments service lint
-cd simse-cdn && npm run lint       # CDN worker lint
+# TypeScript lint (all TS services use Biome, paths inside simse-cloud/)
+cd simse-cloud/simse-api && npm run lint       # API gateway lint
+cd simse-cloud/simse-auth && npm run lint      # Auth service lint
+cd simse-cloud/simse-payments && npm run lint  # Payments service lint
+cd simse-cloud/simse-cdn && npm run lint       # CDN worker lint
 
 # TypeScript tests
-cd simse-cdn && npm run test    # CDN worker tests (Vitest + @cloudflare/vitest-pool-workers)
-cd simse-mailer && npm run test # Mailer tests (Vitest + @cloudflare/vitest-pool-workers)
+cd simse-cloud/simse-cdn && npm run test    # CDN worker tests (Vitest + @cloudflare/vitest-pool-workers)
+cd simse-cloud/simse-mailer && npm run test # Mailer tests (Vitest + @cloudflare/vitest-pool-workers)
 ```
 
 ## Architecture
 
-simse is a modular pipeline framework for orchestrating multi-step AI workflows. It connects to AI backends via **ACP** (Agent Client Protocol), exposes tools via **MCP** (Model Context Protocol), and provides a file-backed **adaptive store** (vector store + PCN) with compression, cataloging, deduplication, recommendation, and summarization.
+simse is a modular pipeline framework for orchestrating multi-step AI workflows. It connects to AI backends via **ACP** (Agent Client Protocol), exposes tools via **MCP** (Model Context Protocol), and provides a file-backed **adaptive store** (vector store + PCN) with SIMD-accelerated distance metrics, HNSW indexing, vector quantization, MMR/RRF fusion, cataloging, deduplication, and recommendation.
 
 The entire core is implemented in **Rust** in a single `simse-core` crate with feature-gated modules (`engine`, `adaptive`, `sandbox`, `remote`).
 
 ### Repository Layout
 
 ```tree
-simse-core/                 # Pure Rust crate — orchestration library with feature-gated engine/adaptive/sandbox/remote modules
-simse-ui-core/              # Pure Rust crate — platform-agnostic UI logic (no I/O)
-simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Architecture)
-simse-analytics/            # TypeScript — Analytics + audit service (Cloudflare Worker, D1, Queues, Analytics Engine)
-simse-cdn/                  # TypeScript — CDN worker (R2 + KV, Cloudflare Worker)
-simse-app/                  # TypeScript — SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects)
-simse-api/                  # TypeScript — API gateway (Cloudflare Worker, proxies to backend services)
-simse-auth/                 # TypeScript — Auth service (Cloudflare Worker, D1, users/sessions/teams/API keys)
-simse-payments/             # TypeScript — Payments service (Cloudflare Worker, Stripe)
-simse-landing/              # TypeScript — Landing page (React Router + Cloudflare)
-simse-mailer/               # TypeScript — Email templates + notifications
-simse-status/               # TypeScript — Status page (React Router v7 + Cloudflare Pages + D1 + Cron)
-simse-brand/                # Brand assets (logos, screenshots, guidelines, copy)
+simse-core/                 # [submodule] Pure Rust crate — orchestration + feature-gated engine/adaptive/sandbox/remote
+simse-cli/                  # [submodule] Pure Rust crate — TUI + UI core (ratatui, Elm Architecture)
+simse-cloud/                # [submodule] TypeScript — all Cloudflare Workers (nested submodules)
+  simse-app/                #   SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects)
+  simse-api/                #   API gateway (Cloudflare Worker, proxies to backend services)
+  simse-auth/               #   Auth service (Cloudflare Worker, D1, users/sessions/teams/API keys)
+  simse-payments/           #   Payments service (Cloudflare Worker, Stripe)
+  simse-bi/                 #   Analytics + audit (Cloudflare Worker, D1, Queues, Analytics Engine)
+  simse-cdn/                #   CDN worker (R2 + KV, Cloudflare Worker)
+  simse-landing/            #   Landing page (React Router + Cloudflare)
+  simse-mailer/             #   Email templates + notifications
+  simse-status/             #   Status page (React Router v7 + Cloudflare Pages + D1 + Cron)
+simse-brand/                # [submodule] Brand assets (logos, screenshots, guidelines, copy)
 ```
 
 ### simse-core Module Layout
@@ -132,43 +131,9 @@ simse-core/
 | `remote` | yes | tokio-tungstenite, reqwest | Remote access tunneling |
 | `cuda`/`metal`/`mkl`/`accelerate` | no | (implies engine) | Hardware-accelerated inference |
 
-### TUI Crates (CLI Application)
+### CLI Crate (simse-cli)
 
-```tree
-simse-ui-core/              # Platform-agnostic UI logic (no I/O, no async)
-  src/
-    cli.rs                  # Non-interactive mode arg parsing
-    state/
-      conversation.rs       # ConversationBuffer with auto-compaction
-      permission_manager.rs # Permission modes, rules, glob matching
-      permissions.rs        # Permission mode/decision types
-    input/
-      keybindings.rs        # KeyCombo registry and matching
-    tools/
-      mod.rs                # Tool types, formatting, truncation
-      parser.rs             # Tool call parser (XML blocks from LLM responses)
-    commands/                # Command registry (34 commands)
-    config/                  # Settings schemas
-
-simse-tui/                  # Terminal UI (ratatui + crossterm + tokio)
-  src/
-    app.rs                  # App model (Elm Architecture: Model/Update/View)
-    event_loop.rs           # TuiRuntime: main event loop
-    cli_args.rs             # CLI argument parsing
-    onboarding.rs           # First-run setup detection
-    dispatch.rs             # Command dispatch routing
-    markdown.rs             # Markdown->ratatui with syntax highlighting
-    spinner.rs              # Animated thinking spinner
-    autocomplete.rs         # /command autocomplete
-    at_mention.rs           # @file path autocomplete
-    status_bar.rs           # Status bar rendering
-    tool_call_box.rs        # Tool call display with diff
-    error_box.rs            # Error display
-    dialogs/                # Permission + confirm dialogs
-    overlays/               # Settings, librarian, setup, ollama wizard
-    commands/               # Feature command handlers (library, session, config, files, ai, tools, meta)
-
-```
+`simse-cli/` is a submodule containing the merged TUI + UI core (formerly `simse-tui` + `simse-ui-core`). Elm Architecture with ratatui + crossterm + tokio. Includes platform-agnostic UI logic, state management, keybindings, command registry, markdown rendering, tool call display, permission dialogs, and settings overlays.
 
 ### CDN Worker
 
@@ -196,71 +161,24 @@ simse-cdn/                  # TypeScript — Cloudflare Worker at cdn.simse.dev
 
 ### TypeScript Services (Cloudflare Workers)
 
-```tree
-simse-analytics/            # Analytics + audit — centralized queue consumer
-  src/
-    index.ts                # Hono app, queue handler (datapoint + audit), HTTP routes (/health, /audit/:userId)
-    types.ts                # Env (D1, AnalyticsEngine), DatapointMessage, AuditMessage
-  migrations/
-    0001_initial.sql        # audit_events table + indexes
-  wrangler.toml             # D1, Analytics Engine, 8 queue consumers (one per service)
+All TS services live in the `simse-cloud/` submodule as nested submodules. Each is a separate repo:
 
-simse-api/                  # API gateway — proxies to backend services
-  src/
-    index.ts                # Hono app, health + secrets middleware + gateway routes
-    routes/gateway.ts       # Route map, auth validation, proxy helpers
-    middleware/secrets.ts    # Cloudflare Secrets Store middleware
-    types.ts                # Env (Queue, SecretsStore), ApiSecrets, ValidateResponse
-
-simse-auth/                 # Auth service — users, sessions, teams, API keys
-  src/
-    index.ts                # Hono app entry
-    schemas.ts              # Zod validation schemas
-    types.ts                # Env (D1, Queue, SecretsStore)
-    routes/
-      auth.ts               # Register, login, 2FA, reset, verify
-      users.ts              # Profile update, password change, delete
-      teams.ts              # Team CRUD, invites, member roles
-      api-keys.ts           # API key CRUD
-    lib/
-      db.ts                 # D1 query helpers
-      password.ts           # Argon2 hashing
-      session.ts            # Session token management
-      token.ts              # Verification/reset token management
-      api-key.ts            # API key generation + validation
-      comms.ts              # Queue message helpers (emails, notifications)
-
-simse-payments/             # Payments service — Stripe subscriptions, credits, usage
-  src/
-    index.ts                # Hono app entry
-    types.ts                # Env (D1, SecretsStore)
-    routes/
-      checkout.ts           # Stripe checkout session creation
-      subscriptions.ts      # Plan management
-      credits.ts            # Credit balance + top-ups
-      customers.ts          # Stripe customer sync
-      portal.ts             # Stripe billing portal
-      webhooks.ts           # Stripe webhook handler
-    lib/
-      stripe.ts             # Stripe client wrapper
-      db.ts                 # D1 query helpers
-      mailer.ts             # Email trigger helpers
-    middleware/
-      auth.ts               # Service-to-service auth (X-User-Id)
-
-simse-cloud/                # SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects)
-  worker.ts                 # CF Pages worker entry (React Router + relay routing)
-  app/
-    relay/
-      tunnel.ts             # TunnelSession Durable Object (WebSocket pair management)
-      handler.ts            # Relay request handler (/ws/tunnel, /ws/client, /tunnels)
-  wrangler.toml             # Pages + Durable Object + Analytics Engine bindings
-```
+| Service | Description |
+|---------|-------------|
+| `simse-cloud/simse-app` | SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects) |
+| `simse-cloud/simse-api` | API gateway — route proxying, auth validation, secrets middleware |
+| `simse-cloud/simse-auth` | Auth service — users, sessions, teams, API keys (D1) |
+| `simse-cloud/simse-payments` | Payments service — Stripe subscriptions, credits, usage (D1) |
+| `simse-cloud/simse-bi` | Analytics + audit — centralized queue consumer (D1 + Analytics Engine) |
+| `simse-cloud/simse-cdn` | CDN worker — media and versioned downloads (R2 + KV) |
+| `simse-cloud/simse-landing` | Landing page (React Router + Cloudflare) |
+| `simse-cloud/simse-mailer` | Email templates + notifications |
+| `simse-cloud/simse-status` | Status page (React Router v7 + Cloudflare Pages + D1 + Cron) |
 
 ### Key Patterns
 
-- **Rust-first architecture**: All core logic is in Rust. TS packages are application/service layers (simse-app (includes relay), simse-api, simse-auth, simse-payments, simse-cdn, simse-landing, simse-mailer).
-- **Single-crate Rust core**: `simse-core` is a pure library crate with four feature-gated modules (`engine`, `adaptive`, `sandbox`, `remote`). No standalone binaries or JSON-RPC transports — consumers link `simse-core` as a library dependency.
+- **Rust-first architecture**: All core logic is in Rust (`simse-core` submodule). TS services are in `simse-cloud/` submodule. CLI is `simse-cli/` submodule.
+- **Single-crate Rust core**: `simse-core` has four feature-gated modules (`engine`, `adaptive`, `sandbox`, `remote`). Consumers link `simse-core` as a library dependency.
 - **Callback pattern**: Tools, hooks, chains, and loops registered from external callers use oneshot channels for async callback execution.
 - **CoreContext wiring**: `CoreContext` ties together EventBus, Logger, AppConfig, TaskList, HookSystem, SessionManager, ToolRegistry, and optional Library (requires `adaptive` feature).
 - **Error format**: `{ code: -32000, message: "...", data: { coreCode: "NOT_INITIALIZED" | "SESSION_NOT_FOUND" | ... } }`
@@ -270,7 +188,7 @@ simse-cloud/                # SaaS web app + relay (React Router + Cloudflare Pa
 - **Structured compaction**: Auto-compaction requests 6 sections (Goal, Progress, Current State, Key Decisions, Relevant Files, Next Steps).
 - **Arc<AtomicBool> for health flags**: Connection health shared between spawned reader tasks and main struct.
 - **Backend enum dispatch**: The sandbox module uses enum dispatch (`FsImpl`, `ShellImpl`, `NetImpl`) instead of trait objects. Each enum has `Local` and `Ssh` variants. Local wraps in-crate logic, Ssh uses russh multiplexed SSH connections.
-- **Centralized Analytics**: All 8 services produce analytics/audit events to per-service `ANALYTICS_QUEUE` queues consumed by `simse-analytics`, which is the sole writer to the Analytics Engine dataset (`simse-analytics`) and D1 audit store. Data points include method, path, status, latency, userId, geo (country/city/continent), userAgent, and cfRay. Audit events are persisted in D1 `audit_events` table and also written to Analytics Engine with `indexes: ['audit']`.
+- **Centralized Analytics**: All services produce analytics/audit events to per-service `ANALYTICS_QUEUE` queues consumed by `simse-bi`, which is the sole writer to the Analytics Engine dataset and D1 audit store. Data points include method, path, status, latency, userId, geo (country/city/continent), userAgent, and cfRay.
 
 ### ACP Protocol
 

@@ -354,10 +354,10 @@ pub enum SimseError {
 
 	// Passthrough from engine crates
 	#[error(transparent)]
-	Acp(#[from] simse_acp_engine::error::AcpError),
+	Acp(#[from] simse_engine::acp::error::AcpError),
 
 	#[error(transparent)]
-	McpEngine(#[from] simse_mcp_engine::error::McpError),
+	McpEngine(#[from] simse_engine::mcp::error::McpError),
 
 	#[error(transparent)]
 	Adaptive(#[from] simse_adaptive_engine::error::AdaptiveError),

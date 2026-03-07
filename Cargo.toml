@@ -8,8 +8,6 @@ members = [
 ]
 exclude = [
     "simse-adaptive",
-    "simse-acp",
-    "simse-mcp",
     "simse-engine",
     "simse-sandbox",
     "simse-remote",

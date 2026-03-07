@@ -13,8 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 im = "15"
-simse-acp-engine = { path = "../simse-acp" }
-simse-mcp-engine = { path = "../simse-mcp" }
+simse-engine = { path = "../simse-engine" }
 simse-adaptive-engine = { path = "../simse-adaptive" }
 tokio = { workspace = true }
 serde = { workspace = true }

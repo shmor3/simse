@@ -23,15 +23,15 @@ use std::sync::{Arc, RwLock};
 
 use tokio::sync::{broadcast, Mutex};
 
-use crate::error::McpError;
-use crate::http_transport::{HttpTransport, HttpTransportConfig};
-use crate::protocol::{
+use crate::mcp::error::McpError;
+use crate::mcp::http_transport::{HttpTransport, HttpTransportConfig};
+use crate::mcp::protocol::{
 	CompletionArg, CompletionRef, CompletionResult, GetPromptParams, GetPromptResult,
 	LoggingMessage, McpClientConfig, PromptInfo, ReadResourceParams, ReadResourceResult,
 	ResourceInfo, ResourceTemplateInfo, Root, ServerConnection, ToolCallParams, ToolCallResult,
 	ToolInfo, TransportType,
 };
-use crate::stdio_transport::{NotificationHandler, StdioTransport, StdioTransportConfig, SubscriptionHandle, Transport};
+use crate::mcp::stdio_transport::{NotificationHandler, StdioTransport, StdioTransportConfig, SubscriptionHandle, Transport};
 use simse_resilience::{CircuitBreaker, HealthMonitor, HealthSnapshot, HealthStatus};
 
 // ===========================================================================
@@ -120,7 +120,7 @@ impl std::fmt::Debug for TransportKind {
 
 impl TransportKind {
 	/// Establish the connection and perform the MCP handshake.
-	async fn connect(&mut self) -> Result<crate::protocol::McpInitializeResult, McpError> {
+	async fn connect(&mut self) -> Result<crate::mcp::protocol::McpInitializeResult, McpError> {
 		match self {
 			Self::Stdio(t) => t.connect().await,
 			Self::Http(t) => t.connect().await,
@@ -1132,7 +1132,7 @@ mod tests {
 
 		// Simulate calling handlers
 		let msg = LoggingMessage {
-			level: crate::protocol::LoggingLevel::Info,
+			level: crate::mcp::protocol::LoggingLevel::Info,
 			logger: Some("test-logger".into()),
 			data: serde_json::json!("test message"),
 		};
@@ -1143,7 +1143,7 @@ mod tests {
 
 		let guard = received.lock().unwrap();
 		assert_eq!(guard.len(), 1);
-		assert_eq!(guard[0].level, crate::protocol::LoggingLevel::Info);
+		assert_eq!(guard[0].level, crate::mcp::protocol::LoggingLevel::Info);
 	}
 
 	#[tokio::test]

@@ -1,5 +1,5 @@
-use simse_mcp_engine::rpc_server::McpRpcServer;
-use simse_mcp_engine::rpc_transport::NdjsonTransport;
+use simse_engine::mcp::rpc_server::McpRpcServer;
+use simse_engine::mcp::rpc_transport::NdjsonTransport;
 
 #[tokio::main]
 async fn main() {

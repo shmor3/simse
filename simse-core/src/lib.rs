@@ -21,8 +21,8 @@ pub mod tasks;
 pub mod tools;
 pub mod utils;
 
-// Re-export engine crates for consumers
-pub use simse_acp_engine as acp;
+// Re-export engine crate for consumers
+pub use simse_engine;
 
 // Re-export key types at the crate root for convenience
 pub use config::AppConfig;

@@ -1,4 +1,4 @@
-use simse_acp_engine::server::AcpServer;
+use simse_engine::acp::server::AcpServer;
 
 #[tokio::main]
 async fn main() {

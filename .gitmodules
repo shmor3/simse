@@ -1,0 +1,12 @@
+[submodule "simse-core"]
+	path = simse-core
+	url = https://github.com/shmor3/simse-core.git
+[submodule "simse-cli"]
+	path = simse-cli
+	url = https://github.com/shmor3/simse-cli.git
+[submodule "simse-brand"]
+	path = simse-brand
+	url = https://github.com/shmor3/simse-brand.git
+[submodule "simse-cloud"]
+	path = simse-cloud
+	url = https://github.com/shmor3/simse-cloud.git

@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
+import { sendAuditEvent } from '../lib/audit';
 import { sendEmail } from '../lib/comms';
 import { generateId } from '../lib/db';
+import { checkRateLimit } from '../lib/rate-limit';
 import { inviteSchema, updateRoleSchema } from '../schemas';
 import type { Env } from '../types';
 
@@ -70,7 +72,15 @@ teams.post('/me/invite', async (c) => {
 			401,
 		);
 
-	const body = await c.req.json();
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json(
+			{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+			400,
+		);
+	}
 	const parsed = inviteSchema.safeParse(body);
 	if (!parsed.success) {
 		return c.json(
@@ -87,12 +97,26 @@ teams.post('/me/invite', async (c) => {
 	const db = c.env.DB;
 	const normalizedEmail = parsed.data.email.toLowerCase();
 
+	// Rate limit invites — 10 per hour per user
+	const rl = await checkRateLimit(db, `invite:${userId}`, 3600, 10);
+	if (!rl.allowed) {
+		return c.json(
+			{
+				error: {
+					code: 'RATE_LIMITED',
+					message: 'Too many invites. Please try again later.',
+				},
+			},
+			429,
+		);
+	}
+
 	const membership = await db
 		.prepare(
-			"SELECT t.id as team_id, t.name as team_name FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role IN ('owner', 'admin') LIMIT 1",
+			"SELECT t.id as team_id, t.name as team_name, tm.role as caller_role FROM teams t JOIN team_members tm ON t.id = tm.team_id WHERE tm.user_id = ? AND tm.role IN ('owner', 'admin') LIMIT 1",
 		)
 		.bind(userId)
-		.first<{ team_id: string; team_name: string }>();
+		.first<{ team_id: string; team_name: string; caller_role: string }>();
 
 	if (!membership) {
 		return c.json(
@@ -145,6 +169,19 @@ teams.post('/me/invite', async (c) => {
 		);
 	}
 
+	// Only owners can invite as admin (consistent with role update rules)
+	if (parsed.data.role === 'admin' && membership.caller_role !== 'owner') {
+		return c.json(
+			{
+				error: {
+					code: 'FORBIDDEN',
+					message: 'Only the team owner can invite as admin',
+				},
+			},
+			403,
+		);
+	}
+
 	const inviteId = generateId();
 	const expiresAt = new Date(
 		Date.now() + 7 * 24 * 60 * 60 * 1000,
@@ -169,10 +206,15 @@ teams.post('/me/invite', async (c) => {
 		.bind(userId)
 		.first<{ name: string }>();
 
-	await sendEmail(c.env.COMMS_QUEUE, 'team-invite', parsed.data.email, {
+	await sendEmail(c.env.ANALYTICS_QUEUE, 'team-invite', normalizedEmail, {
 		inviterName: inviter?.name ?? 'A team member',
 		teamName: membership.team_name,
 		inviteUrl: `https://app.simse.dev/invite/${inviteId}`,
+	});
+
+	sendAuditEvent(c.env.ANALYTICS_QUEUE, 'team.invited', userId, {
+		email: normalizedEmail,
+		teamId: membership.team_id,
 	});
 
 	return c.json({ data: { id: inviteId } }, 201);
@@ -188,7 +230,15 @@ teams.put('/me/members/:userId/role', async (c) => {
 		);
 
 	const targetUserId = c.req.param('userId');
-	const body = await c.req.json();
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json(
+			{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+			400,
+		);
+	}
 	const parsed = updateRoleSchema.safeParse(body);
 
 	if (!parsed.success) {
@@ -249,7 +299,19 @@ teams.put('/me/members/:userId/role', async (c) => {
 		.bind(membership.team_id, targetUserId)
 		.first<{ role: string }>();
 
-	if (targetMember?.role === 'owner') {
+	if (!targetMember) {
+		return c.json(
+			{
+				error: {
+					code: 'NOT_FOUND',
+					message: 'User is not a member of this team',
+				},
+			},
+			404,
+		);
+	}
+
+	if (targetMember.role === 'owner') {
 		return c.json(
 			{ error: { code: 'FORBIDDEN', message: 'Cannot change the owner role' } },
 			403,
@@ -262,6 +324,12 @@ teams.put('/me/members/:userId/role', async (c) => {
 		)
 		.bind(parsed.data.role, membership.team_id, targetUserId)
 		.run();
+
+	sendAuditEvent(c.env.ANALYTICS_QUEUE, 'role.changed', userId, {
+		targetUserId,
+		newRole: parsed.data.role,
+		teamId: membership.team_id,
+	});
 
 	return c.json({ data: { ok: true } });
 });
@@ -296,6 +364,11 @@ teams.delete('/me/invites/:inviteId', async (c) => {
 		.prepare('DELETE FROM team_invites WHERE id = ? AND team_id = ?')
 		.bind(inviteId, membership.team_id)
 		.run();
+
+	sendAuditEvent(c.env.ANALYTICS_QUEUE, 'team.invite_deleted', userId, {
+		inviteId,
+		teamId: membership.team_id,
+	});
 
 	return c.json({ data: { ok: true } });
 });

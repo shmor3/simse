@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { createApiKey } from '../lib/api-key';
+import { sendAuditEvent } from '../lib/audit';
 import { createApiKeySchema } from '../schemas';
 import type { Env } from '../types';
 
@@ -16,7 +17,15 @@ apiKeys.post('/', async (c) => {
 			401,
 		);
 
-	const body = await c.req.json();
+	let body: unknown;
+	try {
+		body = await c.req.json();
+	} catch {
+		return c.json(
+			{ error: { code: 'INVALID_BODY', message: 'Invalid JSON body' } },
+			400,
+		);
+	}
 	const parsed = createApiKeySchema.safeParse(body);
 	if (!parsed.success) {
 		return c.json(
@@ -50,6 +59,12 @@ apiKeys.post('/', async (c) => {
 	}
 
 	const result = await createApiKey(c.env.DB, userId, parsed.data.name);
+
+	sendAuditEvent(c.env.ANALYTICS_QUEUE, 'api_key.created', userId, {
+		keyId: result.id,
+		name: parsed.data.name,
+	});
+
 	return c.json(
 		{
 			data: {
@@ -100,6 +115,11 @@ apiKeys.delete('/:id', async (c) => {
 	await c.env.DB.prepare('DELETE FROM api_keys WHERE id = ? AND user_id = ?')
 		.bind(id, userId)
 		.run();
+
+	sendAuditEvent(c.env.ANALYTICS_QUEUE, 'api_key.deleted', userId, {
+		keyId: id,
+	});
+
 	return c.json({ data: { ok: true } });
 });
 

@@ -1,7 +1,7 @@
 export interface Env {
 	DB: D1Database;
 	COMMS_QUEUE: Queue;
-	ANALYTICS: AnalyticsEngineDataset;
+	ANALYTICS_QUEUE: Queue;
 	SECRETS: SecretsStoreNamespace;
 }
 

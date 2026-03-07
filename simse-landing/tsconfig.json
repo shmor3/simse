@@ -17,5 +17,5 @@
 		},
 		"rootDirs": [".", "./.react-router/types"]
 	},
-	"include": ["app", ".react-router/types/**/*"]
+	"include": ["app", "worker.ts", ".react-router/types/**/*"]
 }

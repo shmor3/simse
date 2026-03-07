@@ -11,8 +11,8 @@
 
 use std::time::Instant;
 
-use crate::config::settings_schema::{get_config_schema, ConfigFileSchema, FieldType};
-use crate::config::storage::ConfigScope;
+use crate::ui_core::config::settings_schema::{get_config_schema, ConfigFileSchema, FieldType};
+use crate::ui_core::config::storage::ConfigScope;
 
 // ── Constants ───────────────────────────────────────────────
 

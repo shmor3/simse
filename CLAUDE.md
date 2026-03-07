@@ -6,22 +6,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 # Rust crate builds
-bun run build:adaptive-engine # cd simse-code/adaptive && cargo build --release
-bun run build:acp-engine     # cd simse-code/engine && cargo build --release (ACP binary)
-bun run build:mcp-engine     # cd simse-code/engine && cargo build --release (MCP binary)
 bun run build:core           # cd simse-core && cargo build --release
 bun run build:tui            # cd simse-tui && cargo build --release
-bun run build:sandbox-engine # cd simse-code/sandbox && cargo build --release
-bun run build:remote-engine  # cd simse-code/remote && cargo build --release
 
 # Rust tests
-cd simse-code/adaptive && cargo test # Rust adaptive engine tests
-cd simse-code/engine && cargo test   # Rust unified engine tests
-cd simse-core && cargo test          # Rust core orchestration tests
-cd simse-ui-core && cargo test       # Rust UI core tests
-cd simse-code/sandbox && cargo test  # Rust sandbox engine tests
-cd simse-code/remote && cargo test   # Rust remote engine tests
-cd simse-tui && cargo test           # Rust TUI tests (unit + integration)
+cd simse-core && cargo test                          # All tests (default features: engine, adaptive, sandbox, remote)
+cd simse-core && cargo test --features engine         # Engine module tests only
+cd simse-core && cargo test --features adaptive       # Adaptive module tests only
+cd simse-core && cargo test --features sandbox        # Sandbox module tests only
+cd simse-core && cargo test --features remote         # Remote module tests only
+cd simse-ui-core && cargo test                        # Rust UI core tests
+cd simse-tui && cargo test                            # Rust TUI tests (unit + integration)
 
 # TypeScript lint (all TS services use Biome)
 cd simse-api && npm run lint       # API gateway lint
@@ -38,17 +33,12 @@ cd simse-mailer && npm run test # Mailer tests (Vitest + @cloudflare/vitest-pool
 
 simse is a modular pipeline framework for orchestrating multi-step AI workflows. It connects to AI backends via **ACP** (Agent Client Protocol), exposes tools via **MCP** (Model Context Protocol), and provides a file-backed **adaptive store** (vector store + PCN) with compression, cataloging, deduplication, recommendation, and summarization.
 
-The entire core is implemented in **Rust**. Each crate is a standalone binary communicating over JSON-RPC 2.0 / NDJSON stdio.
+The entire core is implemented in **Rust** in a single `simse-core` crate with feature-gated modules (`engine`, `adaptive`, `sandbox`, `remote`).
 
 ### Repository Layout
 
 ```tree
-simse-core/                 # Pure Rust crate — orchestration library + JSON-RPC binary server
-simse-code/
-  engine/                   # Pure Rust crate — unified engine: ACP + MCP + ML inference (JSON-RPC over stdio)
-  adaptive/                 # Pure Rust crate — adaptive engine (vector store + PCN, JSON-RPC over stdio)
-  sandbox/                  # Pure Rust crate — unified sandbox engine (VFS + VSH + VNet, JSON-RPC over stdio)
-  remote/                   # Pure Rust crate — remote access engine (JSON-RPC over stdio)
+simse-core/                 # Pure Rust crate — orchestration library with feature-gated engine/adaptive/sandbox/remote modules
 simse-ui-core/              # Pure Rust crate — platform-agnostic UI logic (no I/O)
 simse-tui/                  # Pure Rust crate — terminal UI (ratatui, Elm Architecture)
 simse-analytics/            # TypeScript — Analytics + audit service (Cloudflare Worker, D1, Queues, Analytics Engine)
@@ -70,7 +60,6 @@ simse-core/
   Cargo.toml
   src/
     lib.rs                  # Module declarations + crate-root re-exports
-    main.rs                 # Binary entry point (simse-core-engine, JSON-RPC server)
     context.rs              # CoreContext: top-level wiring struct
     error.rs                # SimseError enum with domain variants
     config.rs               # AppConfig + typed config structs
@@ -79,144 +68,69 @@ simse-core/
     conversation.rs         # Conversation: message management, JSON serialization
     tasks.rs                # TaskList: CRUD, dependencies, blocking
     prompts/                # SystemPromptBuilder, environment, provider
-    agentic_loop.rs         # run_agentic_loop: generate→parse→execute→repeat
+    agentic_loop.rs         # run_agentic_loop: generate->parse->execute->repeat
     agent.rs                # Agent executor (dispatch steps)
     hooks.rs                # HookSystem: 6 hook types with chaining/blocking
-    rpc_server.rs           # JSON-RPC dispatcher (48 methods across 9 domains)
-    rpc_protocol.rs         # JSON-RPC 2.0 framing types
-    rpc_transport.rs        # NDJSON stdio transport
     chain/                  # Chain execution (run_chain, ChainStep)
     tools/                  # ToolRegistry, builtin/host/subagent/delegation tools
-    library/                # Library, Stacks, Shelf, Librarian, Registry, CirculationDesk
+    library/                # Library, Stacks, Shelf, Librarian, Registry, CirculationDesk (requires adaptive feature)
     server/                 # SessionManager with fork support
     utils/                  # retry, circuit_breaker, timeout
-  tests/                    # Integration tests (779+ tests)
+
+    # Feature-gated modules:
+    engine/                 # [feature = "engine"] ACP + MCP + ML inference
+      acp/                  # ACP client/server (uses agent-client-protocol SDK)
+      mcp/                  # MCP client/server (stdio + HTTP transports)
+      inference/            # Local ML inference (embeddings + text generation)
+      models/               # Model implementations (BERT, Llama, NomicBERT, TEI, sampling)
+
+    adaptive/               # [feature = "adaptive"] Vector store + PCN
+      store.rs              # Store: core state manager (CRUD, search, indexing, persistence)
+      distance.rs           # Distance metrics (Cosine, Euclidean, DotProduct, Manhattan) with SIMD acceleration
+      vector_storage.rs     # SoA contiguous embedding storage for cache-friendly scans
+      index.rs              # IndexBackend trait, FlatIndex (brute force), HnswIndex (approximate NN)
+      quantization.rs       # Scalar (f32->u8, 4x) and Binary (sign-bit, 32x) vector quantization
+      fusion.rs             # MMR diversity reranking, Reciprocal Rank Fusion for hybrid search
+      persistence.rs        # Binary codec + gzip compression for entries/learning/graph state
+      cataloging.rs         # TopicIndex, MetadataIndex, MagnitudeCache
+      deduplication.rs      # Duplicate detection & clustering
+      recommendation.rs     # Scoring with recency/frequency
+      text_search.rs        # Exact/substring/fuzzy/regex/token search
+      inverted_index.rs     # BM25 text search indexing
+      topic_catalog.rs      # Hierarchical topic classification
+      learning.rs           # Adaptive learning engine
+      graph.rs              # Graph index with explicit/similarity/correlation edges
+      pcn/                  # Predictive coding network subsystem
+
+    sandbox/                # [feature = "sandbox"] VFS + VSH + VNet
+      vfs_store.rs          # VirtualFs: in-memory filesystem (vfs:// backend)
+      vfs_disk.rs           # DiskFs: real filesystem with shadow history (file:// backend)
+      vfs_backend.rs        # FsImpl enum { Local(DiskFs), Ssh(SshFs) }
+      vsh_shell.rs          # VirtualShell: session management, env, aliases, history
+      vsh_executor.rs       # Command execution via tokio::process with timeouts
+      vsh_backend.rs        # ShellImpl enum { Local(LocalShell), Ssh(SshShell) }
+      vnet_network.rs       # VirtualNetwork: core logic, mock HTTP, sandbox, metrics
+      vnet_backend.rs       # NetImpl enum { Local(LocalNet), Ssh(SshNet) }
+      ssh/                  # SSH module: SshPool, SshFs, SshShell, SshNet
+
+    remote/                 # [feature = "remote"] Remote access
+      auth.rs               # Auth client (login/logout, token validation via simse-api)
+      tunnel.rs             # WebSocket tunnel client (connect, reconnect, multiplex)
+      router.rs             # Local router (forward relayed requests to simse-core)
+      heartbeat.rs          # Backoff config, keepalive ping interval
+
+  tests/                    # Integration tests
 ```
 
-### simse-core JSON-RPC Methods
+### simse-core Features
 
-| Domain | Methods |
-|--------|---------|
-| `core/` | `initialize`, `dispose`, `health` |
-| `session/` | `create`, `get`, `list`, `delete`, `updateStatus`, `fork` |
-| `conversation/` | `addUser`, `addAssistant`, `addToolResult`, `setSystemPrompt`, `getMessages`, `compact`, `clear`, `stats`, `toJson`, `fromJson` |
-| `task/` | `create`, `get`, `list`, `listAvailable`, `update`, `delete` |
-| `event/` | `subscribe`, `unsubscribe`, `publish` |
-| `hook/` | `registerBefore`, `registerAfter`, `registerValidate`, `registerTransform`, `unregister`, `result` |
-| `tool/` | `register`, `unregister`, `list`, `execute`, `batchExecute`, `parse`, `formatSystemPrompt`, `metrics`, `result` |
-| `chain/` | `run`, `runNamed`, `stepResult` |
-| `loop/` | `run`, `cancel` |
-
-### simse-remote JSON-RPC Methods
-
-| Domain | Methods |
-|--------|---------|
-| `auth/` | `login`, `logout`, `status` |
-| `tunnel/` | `connect`, `disconnect`, `status` |
-| `remote/` | `health` |
-
-### simse-adaptive JSON-RPC Methods
-
-| Domain | Methods |
-|--------|---------|
-| `store/` | `add`, `get`, `remove`, `search`, `searchWithOptions`, `list`, `clear`, `save`, `load`, `setIndexStrategy`, `setQuantization`, `getIndexStats` |
-
-### Other Rust Crates
-
-```tree
-simse-code/adaptive/        # Pure Rust crate — adaptive engine (vector store + PCN, JSON-RPC over stdio)
-  src/                      # Key deps: rayon (parallel search), hnsw_rs (approximate NN)
-    store.rs                # Store: core state manager (CRUD, search, indexing, persistence)
-    distance.rs             # Distance metrics (Cosine, Euclidean, DotProduct, Manhattan) with SIMD acceleration (AVX2, NEON)
-    vector_storage.rs       # SoA contiguous embedding storage for cache-friendly scans
-    index.rs                # IndexBackend trait, FlatIndex (brute force), HnswIndex (approximate NN via hnsw_rs)
-    quantization.rs         # Scalar (f32→u8, 4x) and Binary (sign-bit, 32x) vector quantization
-    fusion.rs               # MMR diversity reranking, Reciprocal Rank Fusion for hybrid search
-    persistence.rs          # Binary codec + gzip compression for entries/learning/graph state
-    cataloging.rs           # TopicIndex, MetadataIndex, MagnitudeCache
-    deduplication.rs        # Duplicate detection & clustering
-    recommendation.rs       # Scoring with recency/frequency
-    text_search.rs          # Exact/substring/fuzzy/regex/token search
-    inverted_index.rs       # BM25 text search indexing
-    topic_catalog.rs        # Hierarchical topic classification
-    learning.rs             # Adaptive learning engine
-    query_dsl.rs            # Query DSL parsing
-    context_format.rs       # Context formatting for LLM prompts (XML/natural)
-    graph.rs                # Graph index with explicit/similarity/correlation edges
-    text_cache.rs           # LRU text cache with entry-count + byte-budget limits
-    pcn/                    # Predictive coding network subsystem
-      config.rs             # PCN model configuration
-      encoder.rs            # Input encoding (embeddings → PCN input)
-      vocabulary.rs         # Token vocabulary management
-      network.rs            # Predictive coding network layers
-      layer.rs              # Layer implementation
-      predictor.rs          # Prediction engine (read-only, concurrent)
-      trainer.rs            # Model training (async background worker)
-      snapshot.rs           # Model snapshots (serializable weights)
-
-simse-code/engine/          # Pure Rust crate — unified engine (ACP + MCP + ML inference)
-  src/
-    acp/                    # ACP client/server (uses agent-client-protocol SDK)
-    mcp/                    # MCP client/server (stdio + HTTP transports)
-    inference/              # Local ML inference (embeddings + text generation)
-    models/                 # Model implementations (BERT, Llama, NomicBERT, TEI, sampling)
-
-simse-code/sandbox/         # Pure Rust crate — unified sandbox engine (VFS + VSH + VNet merged)
-  src/
-    lib.rs                  # Module declarations, re-exports
-    main.rs                 # Binary entry point (simse-sandbox-engine)
-    error.rs                # SandboxError enum (SANDBOX_ prefix, all VFS/VSH/VNet variants)
-    protocol.rs             # JSON-RPC param/result types
-    transport.rs            # NdjsonTransport (same pattern as other crates)
-    server.rs               # SandboxServer: JSON-RPC dispatcher (63 methods across 7 domains)
-    sandbox.rs              # Sandbox: unified orchestrator, backend switching
-    config.rs               # BackendConfig, SshConfig, SshAuth
-    vfs_store.rs            # VirtualFs: in-memory filesystem (vfs:// backend)
-    vfs_disk.rs             # DiskFs: real filesystem with shadow history (file:// backend)
-    vfs_diff.rs             # Myers diff algorithm
-    vfs_glob.rs             # Glob pattern matching
-    vfs_search.rs           # File search implementation
-    vfs_path.rs             # Path utilities, VfsLimits
-    vfs_types.rs            # Shared VFS types: DirEntry, HistoryEntry, ReadFileResult, etc.
-    vfs_backend.rs          # FsImpl enum { Local(DiskFs), Ssh(SshFs) }
-    vsh_shell.rs            # VirtualShell: session management, env, aliases, history
-    vsh_executor.rs         # Command execution via tokio::process with timeouts
-    vsh_sandbox.rs          # SandboxConfig: path validation, command filtering
-    vsh_backend.rs          # ShellImpl enum { Local(LocalShell), Ssh(SshShell) }
-    vnet_network.rs         # VirtualNetwork: core logic, mock HTTP, sandbox, metrics
-    vnet_sandbox.rs         # NetSandboxConfig: host/port/protocol allowlist validation
-    vnet_mock_store.rs      # MockStore: mock registry + glob pattern matching
-    vnet_session.rs         # SessionManager: persistent connection tracking (WS, TCP)
-    vnet_types.rs           # Shared VNet types: HttpResponseResult, MetricsResult, etc.
-    vnet_local.rs           # LocalNet: reqwest HTTP + DNS resolution
-    vnet_backend.rs         # NetImpl enum { Local(LocalNet), Ssh(SshNet) }
-    ssh/
-      mod.rs                # SSH module root
-      pool.rs               # SshPool: multiplexed russh connection manager
-      channel.rs            # ExecOutput, channel read with timeout
-      fs.rs                 # SshFs: SFTP-backed filesystem
-      shell.rs              # SshShell: exec channel command execution
-      net.rs                # SshNet: exec channel network operations (curl/getent)
-  tests/
-    integration.rs          # 10 integration tests (local backend)
-    ssh_integration.rs      # SSH integration tests (feature-gated)
-    vfs.rs                  # 60 VFS unit tests (VirtualFs + DiskFs)
-    vsh.rs                  # 24 VSH unit tests (VirtualShell)
-    vnet.rs                 # 42 VNet unit tests (VirtualNetwork)
-
-simse-code/remote/         # Pure Rust crate — remote access engine
-  src/
-    error.rs               # RemoteError enum with REMOTE_ code prefixes
-    protocol.rs            # JSON-RPC request/response types (7 methods)
-    transport.rs           # NdjsonTransport for JSON-RPC over stdio
-    auth.rs                # Auth client (login/logout, token validation via simse-api)
-    tunnel.rs              # WebSocket tunnel client (connect, reconnect, multiplex)
-    router.rs              # Local router (forward relayed requests to simse-core)
-    heartbeat.rs           # Backoff config, keepalive ping interval
-    server.rs              # RemoteServer: 7-method JSON-RPC dispatch
-  tests/
-    integration.rs         # 8 integration tests (JSON-RPC over stdio)
-```
+| Feature | Default | Deps | Description |
+|---------|---------|------|-------------|
+| `engine` | yes | candle-*, hf-hub, tokenizers, agent-client-protocol, reqwest | ACP + MCP + ML inference |
+| `adaptive` | yes | hnsw_rs, rayon, base64, flate2 | Vector store + PCN + library |
+| `sandbox` | yes | russh, russh-sftp, sha2, reqwest, base64 | VFS + VSH + VNet |
+| `remote` | yes | tokio-tungstenite, reqwest | Remote access tunneling |
+| `cuda`/`metal`/`mkl`/`accelerate` | no | (implies engine) | Hardware-accelerated inference |
 
 ### TUI Crates (CLI Application)
 
@@ -243,7 +157,7 @@ simse-tui/                  # Terminal UI (ratatui + crossterm + tokio)
     cli_args.rs             # CLI argument parsing
     onboarding.rs           # First-run setup detection
     dispatch.rs             # Command dispatch routing
-    markdown.rs             # Markdown→ratatui with syntax highlighting
+    markdown.rs             # Markdown->ratatui with syntax highlighting
     spinner.rs              # Animated thinking spinner
     autocomplete.rs         # /command autocomplete
     at_mention.rs           # @file path autocomplete
@@ -274,11 +188,11 @@ simse-cdn/                  # TypeScript — Cloudflare Worker at cdn.simse.dev
 |------|----------|
 | `GET /media/{file}` | Stream from R2, immutable cache |
 | `GET /download/{version}/{os}/{arch}` | Stream binary from R2, immutable cache, Content-Disposition |
-| `GET /download/latest/{os}/{arch}` | KV lookup → 301 redirect to versioned URL |
+| `GET /download/latest/{os}/{arch}` | KV lookup -> 301 redirect to versioned URL |
 | `GET /health` | 200 OK |
 
 **R2 key layout:** `media/{file}` and `releases/{os}/{arch}/{version}/{filename}`
-**KV keys:** `latest:{os}-{arch}` → version string
+**KV keys:** `latest:{os}-{arch}` -> version string
 
 ### TypeScript Services (Cloudflare Workers)
 
@@ -346,33 +260,33 @@ simse-cloud/                # SaaS web app + relay (React Router + Cloudflare Pa
 ### Key Patterns
 
 - **Rust-first architecture**: All core logic is in Rust. TS packages are application/service layers (simse-app (includes relay), simse-api, simse-auth, simse-payments, simse-cdn, simse-landing, simse-mailer).
-- **JSON-RPC 2.0 / NDJSON stdio**: All Rust crates expose their APIs via JSON-RPC over newline-delimited JSON on stdin/stdout. Tracing/logs go to stderr.
-- **Callback pattern**: Tools, hooks, chains, and loops registered from external callers use oneshot channels + JSON-RPC notifications for async callback execution.
-- **CoreContext wiring**: `CoreContext` ties together EventBus, Logger, AppConfig, TaskList, HookSystem, SessionManager, ToolRegistry, and optional Library.
+- **Single-crate Rust core**: `simse-core` is a pure library crate with four feature-gated modules (`engine`, `adaptive`, `sandbox`, `remote`). No standalone binaries or JSON-RPC transports — consumers link `simse-core` as a library dependency.
+- **Callback pattern**: Tools, hooks, chains, and loops registered from external callers use oneshot channels for async callback execution.
+- **CoreContext wiring**: `CoreContext` ties together EventBus, Logger, AppConfig, TaskList, HookSystem, SessionManager, ToolRegistry, and optional Library (requires `adaptive` feature).
 - **Error format**: `{ code: -32000, message: "...", data: { coreCode: "NOT_INITIALIZED" | "SESSION_NOT_FOUND" | ... } }`
 - **Doom loop detection**: The agentic loop tracks consecutive identical tool calls. After `maxIdenticalToolCalls` (default 3), it fires callbacks and injects a system warning.
 - **Tool output truncation**: `ToolRegistryOptions.maxOutputChars` (default 50,000) caps tool output. Per-tool override via `ToolDefinition.maxOutputChars`.
 - **Session forking**: `SessionManager.fork(id)` clones conversation state, creates fresh event bus and new ID.
 - **Structured compaction**: Auto-compaction requests 6 sections (Goal, Progress, Current State, Key Decisions, Relevant Files, Next Steps).
 - **Arc<AtomicBool> for health flags**: Connection health shared between spawned reader tasks and main struct.
-- **Backend enum dispatch**: simse-sandbox uses enum dispatch (`FsImpl`, `ShellImpl`, `NetImpl`) instead of trait objects. Each enum has `Local` and `Ssh` variants. Local wraps in-crate logic, Ssh uses russh multiplexed SSH connections.
+- **Backend enum dispatch**: The sandbox module uses enum dispatch (`FsImpl`, `ShellImpl`, `NetImpl`) instead of trait objects. Each enum has `Local` and `Ssh` variants. Local wraps in-crate logic, Ssh uses russh multiplexed SSH connections.
 - **Centralized Analytics**: All 8 services produce analytics/audit events to per-service `ANALYTICS_QUEUE` queues consumed by `simse-analytics`, which is the sole writer to the Analytics Engine dataset (`simse-analytics`) and D1 audit store. Data points include method, path, status, latency, userId, geo (country/city/continent), userAgent, and cfRay. Audit events are persisted in D1 `audit_events` table and also written to Analytics Engine with `indexes: ['audit']`.
 
 ### ACP Protocol
 
-The ACP engine (`simse-code/engine/src/acp/`) exposes the [Agent Client Protocol](https://agentclientprotocol.com) over JSON-RPC 2.0 / NDJSON stdio.
+The ACP engine (`simse-core/src/engine/acp/`) exposes the [Agent Client Protocol](https://agentclientprotocol.com).
 
 **Protocol details:**
 - **Protocol version**: 1
 - **Field naming**: camelCase throughout (`sessionId`, `stopReason`, `agentInfo`)
-- **Session lifecycle**: `session/new` → `session/prompt` → `session/update` notifications → response
+- **Session lifecycle**: `session/new` -> `session/prompt` -> `session/update` notifications -> response
 - **Permission flow**: Agent sends `session/request_permission`; client responds with `allow_once`/`allow_always`/`reject_once`/`reject_always`
-- **Tool call lifecycle**: `tool_call` → `tool_call_update` (in_progress) → `tool_call_update` (completed)
+- **Tool call lifecycle**: `tool_call` -> `tool_call_update` (in_progress) -> `tool_call_update` (completed)
 - **Timeout defaults**: `timeoutMs` = 60s, `initTimeoutMs` = 30s (both overridable)
 
 ### MCP Protocol
 
-The MCP engine (`simse-code/engine/src/mcp/`) implements the [Model Context Protocol](https://modelcontextprotocol.io) over JSON-RPC 2.0 / NDJSON stdio.
+The MCP engine (`simse-core/src/engine/mcp/`) implements the [Model Context Protocol](https://modelcontextprotocol.io).
 
 **Protocol details:**
 - **Client**: Connects to external MCP servers via stdio or HTTP transport
@@ -381,12 +295,12 @@ The MCP engine (`simse-code/engine/src/mcp/`) implements the [Model Context Prot
 
 ### Adaptive Store System
 
-The adaptive store has two layers: the storage engine in Rust (`simse-code/adaptive/`), with orchestration in `simse-core/src/library/`.
+The adaptive store is implemented entirely within `simse-core` (requires `adaptive` feature):
 
-**Rust engine** (`simse-code/adaptive/src/`) — all vector + PCN operations via JSON-RPC:
+**Storage layer** (`simse-core/src/adaptive/`) — all vector + PCN operations:
 - Store (entries, CRUD, search), distance metrics (SIMD-accelerated), SoA vector storage, index backends (Flat/HNSW), quantization (Scalar/Binary), fusion (MMR/RRF), persistence, cataloging, deduplication, recommendation, text search, BM25, topic classification, adaptive learning, context formatting, graph index, predictive coding network (`pcn/`)
 
-**simse-core orchestration layer** (`simse-core/src/library/`) — high-level operations:
+**Orchestration layer** (`simse-core/src/library/`) — high-level operations:
 - Library, Stacks, Shelf, Librarian, LibrarianRegistry, CirculationDesk
 
 ### Formatting

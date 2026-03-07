@@ -67,28 +67,53 @@ export async function verifyJwt(
 	token: string,
 	secret: string,
 ): Promise<JwtPayload | null> {
-	const parts = token.split('.');
-	if (parts.length !== 3) return null;
+	try {
+		const parts = token.split('.');
+		if (parts.length !== 3) return null;
 
-	const [header, body, sig] = parts;
-	const enc = new TextEncoder();
-	const signingInput = `${header}.${body}`;
+		const [header, body, sig] = parts;
 
-	const key = await importKey(secret);
-	const signatureBytes = base64UrlDecode(sig);
+		// Validate alg header — reject anything other than HS256
+		const headerObj = JSON.parse(
+			new TextDecoder().decode(base64UrlDecode(header)),
+		) as { alg?: string };
+		if (headerObj.alg !== 'HS256') return null;
 
-	const valid = await crypto.subtle.verify(
-		'HMAC',
-		key,
-		signatureBytes,
-		enc.encode(signingInput),
-	);
+		const enc = new TextEncoder();
+		const signingInput = `${header}.${body}`;
 
-	if (!valid) return null;
+		const key = await importKey(secret);
+		const signatureBytes = base64UrlDecode(sig);
 
-	const payload = JSON.parse(
-		new TextDecoder().decode(base64UrlDecode(body)),
-	) as JwtPayload;
+		const valid = await crypto.subtle.verify(
+			'HMAC',
+			key,
+			signatureBytes,
+			enc.encode(signingInput),
+		);
 
-	return payload;
+		if (!valid) return null;
+
+		const payload = JSON.parse(
+			new TextDecoder().decode(base64UrlDecode(body)),
+		) as Partial<JwtPayload>;
+
+		// Validate required fields exist
+		if (
+			typeof payload.sub !== 'string' ||
+			typeof payload.exp !== 'number' ||
+			typeof payload.iat !== 'number' ||
+			typeof payload.sid !== 'string'
+		) {
+			return null;
+		}
+
+		// Reject expired tokens
+		if (payload.exp <= Math.floor(Date.now() / 1000)) return null;
+
+		return payload as JwtPayload;
+	} catch {
+		// Malformed base64, invalid JSON, or other parsing errors
+		return null;
+	}
 }

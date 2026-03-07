@@ -4,7 +4,10 @@ export async function checkRateLimit(
 	windowSeconds: number,
 	maxAttempts: number,
 ): Promise<{ allowed: boolean; remaining: number }> {
-	const window = String(Math.floor(Date.now() / (windowSeconds * 1000)));
+	// Store window start as unix seconds so cleanup can compare against timestamps
+	const windowStart =
+		Math.floor(Date.now() / 1000 / windowSeconds) * windowSeconds;
+	const window = String(windowStart);
 
 	// Atomic upsert — increment and return count in one operation
 	const row = await db

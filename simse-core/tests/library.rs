@@ -317,14 +317,14 @@ async fn library_search_with_max_results() {
 
 	for i in 0..5 {
 		lib.add(
-			&format!("Volume number {}", i),
+			&format!("Entry number {}", i),
 			HashMap::new(),
 		)
 		.await
 		.unwrap();
 	}
 
-	let results = lib.search("Volume", Some(2), Some(0.0)).await.unwrap();
+	let results = lib.search("Entry", Some(2), Some(0.0)).await.unwrap();
 	assert!(results.len() <= 2);
 }
 
@@ -351,7 +351,7 @@ async fn library_text_search() {
 
 	let results = lib.text_search(&options).unwrap();
 	assert_eq!(results.len(), 1);
-	assert!(results[0].volume.text.contains("Rust"));
+	assert!(results[0].entry.text.contains("Rust"));
 }
 
 #[tokio::test]
@@ -485,7 +485,7 @@ async fn library_clear() {
 async fn library_find_duplicates() {
 	let lib = make_library();
 
-	// Add a few volumes (with default duplicate threshold = 0.95,
+	// Add a few entries (with default duplicate threshold = 0.95,
 	// our mock embeddings should not create duplicates)
 	lib.add("Unique text one", HashMap::new()).await.unwrap();
 	lib.add("Unique text two", HashMap::new()).await.unwrap();
@@ -541,8 +541,8 @@ async fn library_check_duplicate_no_match() {
 async fn library_compendium_no_generator_errors() {
 	let lib = make_library();
 
-	let id1 = lib.add("Volume one text", HashMap::new()).await.unwrap();
-	let id2 = lib.add("Volume two text", HashMap::new()).await.unwrap();
+	let id1 = lib.add("Entry one text", HashMap::new()).await.unwrap();
+	let id2 = lib.add("Entry two text", HashMap::new()).await.unwrap();
 
 	let err = lib
 		.compendium(CompendiumOptions {
@@ -563,7 +563,7 @@ async fn library_compendium_too_few_ids_errors() {
 	let lib = make_library();
 	lib.set_text_generator(Arc::new(MockTextGenerator));
 
-	let id1 = lib.add("Only one volume", HashMap::new()).await.unwrap();
+	let id1 = lib.add("Only one entry", HashMap::new()).await.unwrap();
 
 	let err = lib
 		.compendium(CompendiumOptions {
@@ -584,8 +584,8 @@ async fn library_compendium_success() {
 	let lib = make_library();
 	lib.set_text_generator(Arc::new(MockTextGenerator));
 
-	let id1 = lib.add("Volume one content", HashMap::new()).await.unwrap();
-	let id2 = lib.add("Volume two content", HashMap::new()).await.unwrap();
+	let id1 = lib.add("Entry one content", HashMap::new()).await.unwrap();
+	let id2 = lib.add("Entry two content", HashMap::new()).await.unwrap();
 
 	let result = lib
 		.compendium(CompendiumOptions {
@@ -602,7 +602,7 @@ async fn library_compendium_success() {
 	assert!(result.text.starts_with("Summary of"));
 	assert_eq!(result.source_ids, vec![id1, id2]);
 	assert!(!result.deleted_originals);
-	// Original volumes + compendium volume
+	// Original entries + compendium entry
 	assert_eq!(lib.size(), 3);
 }
 
@@ -611,8 +611,8 @@ async fn library_compendium_deletes_originals() {
 	let lib = make_library();
 	lib.set_text_generator(Arc::new(MockTextGenerator));
 
-	let id1 = lib.add("Volume one content", HashMap::new()).await.unwrap();
-	let id2 = lib.add("Volume two content", HashMap::new()).await.unwrap();
+	let id1 = lib.add("Entry one content", HashMap::new()).await.unwrap();
+	let id2 = lib.add("Entry two content", HashMap::new()).await.unwrap();
 
 	let result = lib
 		.compendium(CompendiumOptions {
@@ -626,7 +626,7 @@ async fn library_compendium_deletes_originals() {
 		.unwrap();
 
 	assert!(result.deleted_originals);
-	// Only the compendium volume should remain
+	// Only the compendium entry should remain
 	assert_eq!(lib.size(), 1);
 }
 
@@ -635,8 +635,8 @@ async fn library_compendium_failing_generator() {
 	let lib = make_library();
 	lib.set_text_generator(Arc::new(FailingTextGenerator));
 
-	let id1 = lib.add("Volume one content", HashMap::new()).await.unwrap();
-	let id2 = lib.add("Volume two content", HashMap::new()).await.unwrap();
+	let id1 = lib.add("Entry one content", HashMap::new()).await.unwrap();
+	let id2 = lib.add("Entry two content", HashMap::new()).await.unwrap();
 
 	let err = lib
 		.compendium(CompendiumOptions {
@@ -680,7 +680,7 @@ async fn library_compendium_with_custom_metadata() {
 }
 
 #[tokio::test]
-async fn library_compendium_volume_not_found_errors() {
+async fn library_compendium_entry_not_found_errors() {
 	let lib = make_library();
 	lib.set_text_generator(Arc::new(MockTextGenerator));
 
@@ -891,7 +891,7 @@ async fn shelf_search_filters_by_shelf() {
 	let results_a = shelf_a.search("Content", None, Some(0.0)).await.unwrap();
 	for r in &results_a {
 		assert_eq!(
-			r.volume.metadata.get("shelf").unwrap(),
+			r.entry.metadata.get("shelf").unwrap(),
 			"agent-a"
 		);
 	}
@@ -900,7 +900,7 @@ async fn shelf_search_filters_by_shelf() {
 	let results_b = shelf_b.search("Content", None, Some(0.0)).await.unwrap();
 	for r in &results_b {
 		assert_eq!(
-			r.volume.metadata.get("shelf").unwrap(),
+			r.entry.metadata.get("shelf").unwrap(),
 			"agent-b"
 		);
 	}
@@ -921,22 +921,22 @@ async fn shelf_search_global_returns_all() {
 		.search_global("Content", None, Some(0.0))
 		.await
 		.unwrap();
-	// Global search should return volumes from both the shelf and the global library
+	// Global search should return entries from both the shelf and the global library
 	assert!(!global_results.is_empty());
 }
 
 #[tokio::test]
-async fn shelf_volumes_returns_only_shelf_volumes() {
+async fn shelf_entries_returns_only_shelf_entries() {
 	let lib = make_library();
 	let shelf = lib.shelf("my-shelf");
 
 	shelf
-		.add("Shelf volume", HashMap::new())
+		.add("Shelf entry", HashMap::new())
 		.await
 		.unwrap();
-	lib.add("Library volume", HashMap::new()).await.unwrap();
+	lib.add("Library entry", HashMap::new()).await.unwrap();
 
-	let vols = shelf.volumes().unwrap();
+	let vols = shelf.entries().unwrap();
 	assert_eq!(vols.len(), 1);
 	assert_eq!(vols[0].metadata.get("shelf").unwrap(), "my-shelf");
 }
@@ -1058,14 +1058,14 @@ fn prompt_inject_format_age() {
 
 #[test]
 fn prompt_inject_structured_format() {
-	use simse_core::library::{format_memory_context, PromptInjectionOptions};
-	use simse_adaptive_engine::types::{Lookup, Volume};
+	use simse_core::library::{format_context, ContextFormatOptions};
+	use simse_adaptive_engine::types::{Entry, Lookup};
 
 	let mut metadata = HashMap::new();
 	metadata.insert("topic".to_string(), "rust".to_string());
 
 	let results = vec![Lookup {
-		volume: Volume {
+		entry: Entry {
 			id: "vol-1".to_string(),
 			text: "Hello world".to_string(),
 			embedding: vec![],
@@ -1075,8 +1075,8 @@ fn prompt_inject_structured_format() {
 		score: 0.92,
 	}];
 
-	let opts = PromptInjectionOptions::default();
-	let output = format_memory_context(&results, &opts, 2000);
+	let opts = ContextFormatOptions::default();
+	let output = format_context(&results, &opts, 2000);
 
 	assert!(output.contains("<memory-context>"));
 	assert!(output.contains("</memory-context>"));
@@ -1087,14 +1087,14 @@ fn prompt_inject_structured_format() {
 
 #[test]
 fn prompt_inject_natural_format() {
-	use simse_core::library::{format_memory_context, PromptInjectionOptions};
-	use simse_adaptive_engine::types::{Lookup, Volume};
+	use simse_core::library::{format_context, ContextFormatOptions};
+	use simse_adaptive_engine::types::{Entry, Lookup};
 
 	let mut metadata = HashMap::new();
 	metadata.insert("topic".to_string(), "go".to_string());
 
 	let results = vec![Lookup {
-		volume: Volume {
+		entry: Entry {
 			id: "vol-1".to_string(),
 			text: "Hello world".to_string(),
 			embedding: vec![],
@@ -1104,11 +1104,11 @@ fn prompt_inject_natural_format() {
 		score: 0.85,
 	}];
 
-	let opts = PromptInjectionOptions {
+	let opts = ContextFormatOptions {
 		format: Some("natural".to_string()),
 		..Default::default()
 	};
-	let output = format_memory_context(&results, &opts, 2000);
+	let output = format_context(&results, &opts, 2000);
 
 	assert!(output.starts_with("Relevant context from library:"));
 	assert!(output.contains("[go]"));
@@ -1117,20 +1117,20 @@ fn prompt_inject_natural_format() {
 
 #[test]
 fn prompt_inject_empty_results() {
-	use simse_core::library::{format_memory_context, PromptInjectionOptions};
+	use simse_core::library::{format_context, ContextFormatOptions};
 
-	let output = format_memory_context(&[], &PromptInjectionOptions::default(), 1000);
+	let output = format_context(&[], &ContextFormatOptions::default(), 1000);
 	assert_eq!(output, "");
 }
 
 #[test]
 fn prompt_inject_min_score_filters() {
-	use simse_core::library::{format_memory_context, PromptInjectionOptions};
-	use simse_adaptive_engine::types::{Lookup, Volume};
+	use simse_core::library::{format_context, ContextFormatOptions};
+	use simse_adaptive_engine::types::{Entry, Lookup};
 
 	let results = vec![
 		Lookup {
-			volume: Volume {
+			entry: Entry {
 				id: "v1".to_string(),
 				text: "high".to_string(),
 				embedding: vec![],
@@ -1140,7 +1140,7 @@ fn prompt_inject_min_score_filters() {
 			score: 0.9,
 		},
 		Lookup {
-			volume: Volume {
+			entry: Entry {
 				id: "v2".to_string(),
 				text: "low".to_string(),
 				embedding: vec![],
@@ -1151,11 +1151,11 @@ fn prompt_inject_min_score_filters() {
 		},
 	];
 
-	let opts = PromptInjectionOptions {
+	let opts = ContextFormatOptions {
 		min_score: Some(0.5),
 		..Default::default()
 	};
-	let output = format_memory_context(&results, &opts, 2000);
+	let output = format_context(&results, &opts, 2000);
 
 	assert!(output.contains("high"));
 	assert!(!output.contains("low"));
@@ -1163,11 +1163,11 @@ fn prompt_inject_min_score_filters() {
 
 #[test]
 fn prompt_inject_custom_tag() {
-	use simse_core::library::{format_memory_context, PromptInjectionOptions};
-	use simse_adaptive_engine::types::{Lookup, Volume};
+	use simse_core::library::{format_context, ContextFormatOptions};
+	use simse_adaptive_engine::types::{Entry, Lookup};
 
 	let results = vec![Lookup {
-		volume: Volume {
+		entry: Entry {
 			id: "v1".to_string(),
 			text: "text".to_string(),
 			embedding: vec![],
@@ -1177,11 +1177,11 @@ fn prompt_inject_custom_tag() {
 		score: 0.9,
 	}];
 
-	let opts = PromptInjectionOptions {
+	let opts = ContextFormatOptions {
 		tag: Some("context".to_string()),
 		..Default::default()
 	};
-	let output = format_memory_context(&results, &opts, 2000);
+	let output = format_context(&results, &opts, 2000);
 
 	assert!(output.contains("<context>"));
 	assert!(output.contains("</context>"));

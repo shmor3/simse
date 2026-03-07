@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use simse_adaptive_engine::prompt_injection::{format_memory_context, PromptInjectionOptions};
+use simse_adaptive_engine::context_format::{format_context, ContextFormatOptions};
 
 use crate::error::SimseError;
 use crate::library::Library;
@@ -142,7 +142,7 @@ impl LibraryServices {
 			return context.current_system_prompt.clone();
 		}
 
-		let format_opts = PromptInjectionOptions {
+		let format_opts = ContextFormatOptions {
 			max_results: Some(self.max_results),
 			min_score: self.min_score,
 			format: self.format.clone(),
@@ -155,7 +155,7 @@ impl LibraryServices {
 			.map(|d| d.as_millis() as u64)
 			.unwrap_or(0);
 
-		let memory_block = format_memory_context(&results, &format_opts, now);
+		let memory_block = format_context(&results, &format_opts, now);
 
 		if memory_block.is_empty() {
 			return context.current_system_prompt.clone();

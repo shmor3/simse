@@ -9,7 +9,7 @@ pub enum AdaptiveError {
 	EmptyText,
 	#[error("Empty embedding: cannot add volume with empty embedding")]
 	EmptyEmbedding,
-	#[error("Volume not found: {0}")]
+	#[error("Entry not found: {0}")]
 	NotFound(String),
 	#[error("Duplicate detected: similarity {0:.4}")]
 	Duplicate(f64),

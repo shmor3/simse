@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use simse_core::error::SimseError;
 use simse_core::library::librarian::{
 	EntryType, Librarian, LibrarianLibraryAccess, LibrarianOptions, OptimizationResult,
-	ReorganizationPlan, TextGenerationWithModel, TurnContext, Volume,
+	ReorganizationPlan, TextGenerationWithModel, TurnContext, Entry,
 };
 use simse_core::library::librarian_def::{
 	default_definition, load_all_definitions, load_definition, matches_topic, save_definition,
@@ -65,7 +65,7 @@ impl TextGenerationProvider for ReorgGenerator {
 		_system_prompt: Option<&str>,
 	) -> Result<String, SimseError> {
 		Ok(r#"{
-			"moves": [{"volumeId": "vol-1", "newTopic": "programming/go"}],
+			"moves": [{"entryId": "vol-1", "newTopic": "programming/go"}],
 			"newSubtopics": ["programming/rust/async"],
 			"merges": [{"source": "lang/rust", "target": "programming/rust"}]
 		}"#
@@ -153,7 +153,7 @@ impl TextGenerationProvider for SummarizeGenerator {
 		_prompt: &str,
 		_system_prompt: Option<&str>,
 	) -> Result<String, SimseError> {
-		Ok("Summary of the volumes".to_string())
+		Ok("Summary of the entries".to_string())
 	}
 }
 
@@ -166,13 +166,13 @@ impl LibrarianLibraryAccess for MockLibraryAccess {
 		&self,
 		_query: &str,
 		_max_results: Option<usize>,
-	) -> Result<Vec<Volume>, SimseError> {
+	) -> Result<Vec<Entry>, SimseError> {
 		Ok(Vec::new())
 	}
 	async fn get_topics(&self) -> Result<Vec<String>, SimseError> {
 		Ok(vec!["programming/rust".to_string()])
 	}
-	async fn filter_by_topic(&self, _topics: &[String]) -> Result<Vec<Volume>, SimseError> {
+	async fn filter_by_topic(&self, _topics: &[String]) -> Result<Vec<Entry>, SimseError> {
 		Ok(Vec::new())
 	}
 }
@@ -262,19 +262,19 @@ async fn summarize_returns_text_and_source_ids() {
 	let generator = Arc::new(SummarizeGenerator);
 	let librarian = Librarian::new(generator, None);
 
-	let volumes = vec![
-		Volume {
+	let entries = vec![
+		Entry {
 			id: "v1".to_string(),
-			text: "First volume".to_string(),
+			text: "First entry".to_string(),
 		},
-		Volume {
+		Entry {
 			id: "v2".to_string(),
-			text: "Second volume".to_string(),
+			text: "Second entry".to_string(),
 		},
 	];
 
-	let result = librarian.summarize(&volumes, "test-topic").await.unwrap();
-	assert_eq!(result.text, "Summary of the volumes");
+	let result = librarian.summarize(&entries, "test-topic").await.unwrap();
+	assert_eq!(result.text, "Summary of the entries");
 	assert_eq!(result.source_ids, vec!["v1", "v2"]);
 }
 
@@ -324,14 +324,14 @@ async fn reorganize_parses_valid_json() {
 	let generator = Arc::new(ReorgGenerator);
 	let librarian = Librarian::new(generator, None);
 
-	let volumes = vec![Volume {
+	let entries = vec![Entry {
 		id: "vol-1".to_string(),
 		text: "Some content".to_string(),
 	}];
 
-	let result = librarian.reorganize("programming/rust", &volumes).await;
+	let result = librarian.reorganize("programming/rust", &entries).await;
 	assert_eq!(result.moves.len(), 1);
-	assert_eq!(result.moves[0].volume_id, "vol-1");
+	assert_eq!(result.moves[0].entry_id, "vol-1");
 	assert_eq!(result.moves[0].new_topic, "programming/go");
 	assert_eq!(result.new_subtopics, vec!["programming/rust/async"]);
 	assert_eq!(result.merges.len(), 1);
@@ -355,18 +355,18 @@ async fn optimize_parses_valid_json() {
 	let generator = Arc::new(OptimizeGenerator);
 	let librarian = Librarian::new(generator, None);
 
-	let volumes = vec![
-		Volume {
+	let entries = vec![
+		Entry {
 			id: "vol-1".to_string(),
 			text: "content 1".to_string(),
 		},
-		Volume {
+		Entry {
 			id: "vol-old".to_string(),
 			text: "outdated content".to_string(),
 		},
 	];
 
-	let result = librarian.optimize(&volumes, "rust", "gpt-4").await;
+	let result = librarian.optimize(&entries, "rust", "gpt-4").await;
 	assert_eq!(result.pruned, vec!["vol-old"]);
 	assert_eq!(result.summary, "Rust is great for systems programming");
 	assert_eq!(result.model_used, "gpt-4");
@@ -390,12 +390,12 @@ async fn optimize_with_model_generator() {
 	let librarian =
 		Librarian::new(generator, None).with_model_generator(model_gen as Arc<dyn TextGenerationWithModel>);
 
-	let volumes = vec![Volume {
+	let entries = vec![Entry {
 		id: "v1".to_string(),
 		text: "content".to_string(),
 	}];
 
-	let result = librarian.optimize(&volumes, "rust", "claude-3").await;
+	let result = librarian.optimize(&entries, "rust", "claude-3").await;
 	assert_eq!(result.pruned, vec!["old-1"]);
 	assert!(result.summary.contains("claude-3"));
 	assert_eq!(result.model_used, "claude-3");
@@ -1060,7 +1060,7 @@ impl MockLibraryOps {
 
 #[async_trait]
 impl CirculationLibraryOps for MockLibraryOps {
-	async fn add_volume(
+	async fn add_entry(
 		&self,
 		text: &str,
 		metadata: HashMap<String, String>,
@@ -1074,15 +1074,15 @@ impl CirculationLibraryOps for MockLibraryOps {
 		Ok(DuplicateCheckResult { is_duplicate: false })
 	}
 
-	async fn get_volumes_for_topic(&self, _topic: &str) -> Result<Vec<Volume>, SimseError> {
+	async fn get_entries_for_topic(&self, _topic: &str) -> Result<Vec<Entry>, SimseError> {
 		Ok(Vec::new())
 	}
 
-	async fn delete_volume(&self, _id: &str) -> Result<(), SimseError> {
+	async fn delete_entry(&self, _id: &str) -> Result<(), SimseError> {
 		Ok(())
 	}
 
-	async fn get_total_volume_count(&self) -> Result<usize, SimseError> {
+	async fn get_total_entry_count(&self) -> Result<usize, SimseError> {
 		Ok(0)
 	}
 
@@ -1132,7 +1132,7 @@ async fn circulation_desk_enqueue_and_drain() {
 
 	assert_eq!(desk.pending(), 0);
 
-	// Check that volumes were added
+	// Check that entries were added
 	let added = ops.added.lock().await;
 	assert_eq!(added.len(), 2); // ExtractionGenerator returns 2 memories
 }

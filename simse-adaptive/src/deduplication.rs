@@ -2,12 +2,12 @@
 // Deduplication — detect and group near-duplicate vector entries
 // ---------------------------------------------------------------------------
 //
-// Pure functions that operate on Volume arrays. No side effects,
+// Pure functions that operate on Entry arrays. No side effects,
 // no external dependencies beyond cosine similarity.
 // ---------------------------------------------------------------------------
 
 use crate::cosine::cosine_similarity;
-use crate::types::{DuplicateCheckResult, DuplicateVolumes, Volume};
+use crate::types::{DuplicateCheckResult, DuplicateCluster, Entry};
 
 // ---------------------------------------------------------------------------
 // Single-entry duplicate check
@@ -19,10 +19,10 @@ use crate::types::{DuplicateCheckResult, DuplicateVolumes, Volume};
 /// if no match is found. Linear scan — O(N).
 pub fn check_duplicate(
 	new_embedding: &[f32],
-	volumes: &[Volume],
+	volumes: &[Entry],
 	threshold: f64,
 ) -> DuplicateCheckResult {
-	let mut best_entry: Option<&Volume> = None;
+	let mut best_entry: Option<&Entry> = None;
 	let mut best_similarity = f64::NEG_INFINITY;
 
 	for volume in volumes {
@@ -39,12 +39,12 @@ pub fn check_duplicate(
 	match best_entry {
 		Some(vol) => DuplicateCheckResult {
 			is_duplicate: true,
-			existing_volume: Some(vol.clone()),
+			existing_entry: Some(vol.clone()),
 			similarity: Some(best_similarity),
 		},
 		None => DuplicateCheckResult {
 			is_duplicate: false,
-			existing_volume: None,
+			existing_entry: None,
 			similarity: None,
 		},
 	}
@@ -63,9 +63,9 @@ pub fn check_duplicate(
 /// O(N^2) — intended for explicit user-triggered deduplication, not hot paths.
 /// Only returns groups that have at least one duplicate.
 pub fn find_duplicate_volumes(
-	volumes: &[Volume],
+	volumes: &[Entry],
 	threshold: f64,
-) -> Vec<DuplicateVolumes> {
+) -> Vec<DuplicateCluster> {
 	if volumes.len() < 2 {
 		return vec![];
 	}
@@ -75,8 +75,8 @@ pub fn find_duplicate_volumes(
 	sorted.sort_by_key(|v| v.timestamp);
 
 	struct Group {
-		representative: Volume,
-		duplicates: Vec<Volume>,
+		representative: Entry,
+		duplicates: Vec<Entry>,
 		total_similarity: f64,
 	}
 
@@ -115,7 +115,7 @@ pub fn find_duplicate_volumes(
 			} else {
 				g.total_similarity / g.duplicates.len() as f64
 			};
-			DuplicateVolumes {
+			DuplicateCluster {
 				representative: g.representative,
 				duplicates: g.duplicates,
 				average_similarity: avg,
@@ -133,8 +133,8 @@ mod tests {
 	use super::*;
 	use std::collections::HashMap;
 
-	fn make_volume(id: &str, embedding: Vec<f32>, timestamp: u64) -> Volume {
-		Volume {
+	fn make_volume(id: &str, embedding: Vec<f32>, timestamp: u64) -> Entry {
+		Entry {
 			id: id.to_string(),
 			text: format!("text for {}", id),
 			embedding,
@@ -151,7 +151,7 @@ mod tests {
 		let volumes = vec![make_volume("a", vec![1.0, 0.0, 0.0], 100)];
 		let result = check_duplicate(&emb, &volumes, 0.9);
 		assert!(result.is_duplicate);
-		assert_eq!(result.existing_volume.as_ref().unwrap().id, "a");
+		assert_eq!(result.existing_entry.as_ref().unwrap().id, "a");
 		assert!((result.similarity.unwrap() - 1.0).abs() < 1e-10);
 	}
 
@@ -161,7 +161,7 @@ mod tests {
 		let volumes = vec![make_volume("a", vec![0.0, 1.0, 0.0], 100)];
 		let result = check_duplicate(&emb, &volumes, 0.9);
 		assert!(!result.is_duplicate);
-		assert!(result.existing_volume.is_none());
+		assert!(result.existing_entry.is_none());
 		assert!(result.similarity.is_none());
 	}
 
@@ -174,7 +174,7 @@ mod tests {
 		];
 		let result = check_duplicate(&emb, &volumes, 0.5);
 		assert!(result.is_duplicate);
-		assert_eq!(result.existing_volume.as_ref().unwrap().id, "b");
+		assert_eq!(result.existing_entry.as_ref().unwrap().id, "b");
 	}
 
 	#[test]

@@ -5,7 +5,7 @@
 //! - Job types: extraction, compendium, reorganization, optimization
 //! - `enqueue_*` methods push jobs onto a `tokio::sync::mpsc` channel
 //! - `drain()` receives and processes jobs sequentially
-//! - Escalation checking (topic/global volume thresholds trigger optimization)
+//! - Escalation checking (topic/global entry thresholds trigger optimization)
 //! - Failed jobs are swallowed (fire-and-forget)
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -17,7 +17,7 @@ use tokio::sync::Mutex;
 
 use crate::error::SimseError;
 
-use super::librarian::{Librarian, TurnContext, Volume};
+use super::librarian::{Entry, Librarian, TurnContext};
 use super::librarian_reg::LibrarianRegistry;
 
 // ---------------------------------------------------------------------------
@@ -27,7 +27,7 @@ use super::librarian_reg::LibrarianRegistry;
 /// Trait for topic catalog operations used during circulation.
 pub trait TopicCatalog: Send + Sync {
 	fn resolve(&self, proposed_topic: &str) -> String;
-	fn relocate(&self, volume_id: &str, new_topic: &str);
+	fn relocate(&self, entry_id: &str, new_topic: &str);
 	fn merge(&self, source_topic: &str, target_topic: &str);
 }
 
@@ -40,11 +40,11 @@ pub trait TopicCatalog: Send + Sync {
 pub struct CirculationThresholds {
 	/// Minimum entries in a topic before compendium is triggered.
 	pub compendium_min_entries: usize,
-	/// Max volumes per topic before reorganization is triggered.
-	pub reorganization_max_volumes_per_topic: usize,
-	/// Topic volume threshold for optimization escalation.
+	/// Max entries per topic before reorganization is triggered.
+	pub reorganization_max_entries_per_topic: usize,
+	/// Topic entry threshold for optimization escalation.
 	pub optimization_topic_threshold: usize,
-	/// Global volume threshold for optimization escalation.
+	/// Global entry threshold for optimization escalation.
 	pub optimization_global_threshold: usize,
 	/// Model ID for optimization (required if optimization is enabled).
 	pub optimization_model_id: Option<String>,
@@ -56,7 +56,7 @@ impl Default for CirculationThresholds {
 	fn default() -> Self {
 		Self {
 			compendium_min_entries: 10,
-			reorganization_max_volumes_per_topic: 30,
+			reorganization_max_entries_per_topic: 30,
 			optimization_topic_threshold: 50,
 			optimization_global_threshold: 500,
 			optimization_model_id: None,
@@ -72,7 +72,7 @@ impl Default for CirculationThresholds {
 /// Operations the circulation desk needs from the library.
 #[async_trait]
 pub trait CirculationLibraryOps: Send + Sync {
-	async fn add_volume(
+	async fn add_entry(
 		&self,
 		text: &str,
 		metadata: std::collections::HashMap<String, String>,
@@ -80,11 +80,11 @@ pub trait CirculationLibraryOps: Send + Sync {
 
 	async fn check_duplicate(&self, text: &str) -> Result<DuplicateCheckResult, SimseError>;
 
-	async fn get_volumes_for_topic(&self, topic: &str) -> Result<Vec<Volume>, SimseError>;
+	async fn get_entries_for_topic(&self, topic: &str) -> Result<Vec<Entry>, SimseError>;
 
-	async fn delete_volume(&self, id: &str) -> Result<(), SimseError>;
+	async fn delete_entry(&self, id: &str) -> Result<(), SimseError>;
 
-	async fn get_total_volume_count(&self) -> Result<usize, SimseError>;
+	async fn get_total_entry_count(&self) -> Result<usize, SimseError>;
 
 	async fn get_all_topics(&self) -> Result<Vec<String>, SimseError>;
 }
@@ -314,15 +314,15 @@ impl CirculationDesk {
 			return new_jobs;
 		}
 
-		if let Ok(volumes) = self.library_ops.get_volumes_for_topic(topic).await
-			&& volumes.len() >= self.thresholds.optimization_topic_threshold {
+		if let Ok(entries) = self.library_ops.get_entries_for_topic(topic).await
+			&& entries.len() >= self.thresholds.optimization_topic_threshold {
 				new_jobs.push(Job::Optimization {
 					topic: topic.to_string(),
 				});
 				return new_jobs;
 			}
 
-		if let Ok(total) = self.library_ops.get_total_volume_count().await
+		if let Ok(total) = self.library_ops.get_total_entry_count().await
 			&& total >= self.thresholds.optimization_global_threshold
 				&& let Ok(topics) = self.library_ops.get_all_topics().await {
 					for t in topics {
@@ -340,9 +340,9 @@ impl CirculationDesk {
 	async fn check_spawning(&self, topic: &str) {
 		if let (Some(registry), Some(threshold)) =
 			(&self.registry, self.thresholds.spawning_complexity_threshold)
-			&& let Ok(volumes) = self.library_ops.get_volumes_for_topic(topic).await
-				&& volumes.len() >= threshold {
-					let _ = registry.spawn_specialist(topic, &volumes).await;
+			&& let Ok(entries) = self.library_ops.get_entries_for_topic(topic).await
+				&& entries.len() >= threshold {
+					let _ = registry.spawn_specialist(topic, &entries).await;
 				}
 	}
 
@@ -378,7 +378,7 @@ impl CirculationDesk {
 					metadata.insert("tags".to_string(), mem.tags.join(","));
 					metadata.insert("entryType".to_string(), mem.entry_type.to_string());
 
-					self.library_ops.add_volume(&mem.text, metadata).await?;
+					self.library_ops.add_entry(&mem.text, metadata).await?;
 					extracted_topics.insert(topic);
 				}
 
@@ -401,21 +401,21 @@ impl CirculationDesk {
 			Job::Compendium { topic } => {
 				let (librarian, _name) = self.resolve_librarian_for_job(&topic, "").await;
 
-				let volumes = self.library_ops.get_volumes_for_topic(&topic).await?;
-				if volumes.len() >= self.thresholds.compendium_min_entries {
-					let _ = librarian.summarize(&volumes, &topic).await;
+				let entries = self.library_ops.get_entries_for_topic(&topic).await?;
+				if entries.len() >= self.thresholds.compendium_min_entries {
+					let _ = librarian.summarize(&entries, &topic).await;
 				}
 			}
 
 			Job::Reorganization { topic } => {
 				let (librarian, _name) = self.resolve_librarian_for_job(&topic, "").await;
 
-				let volumes = self.library_ops.get_volumes_for_topic(&topic).await?;
-				if volumes.len() >= self.thresholds.reorganization_max_volumes_per_topic {
-					let plan = librarian.reorganize(&topic, &volumes).await;
+				let entries = self.library_ops.get_entries_for_topic(&topic).await?;
+				if entries.len() >= self.thresholds.reorganization_max_entries_per_topic {
+					let plan = librarian.reorganize(&topic, &entries).await;
 					if let Some(ref catalog) = self.catalog {
 						for mv in &plan.moves {
-							catalog.relocate(&mv.volume_id, &mv.new_topic);
+							catalog.relocate(&mv.entry_id, &mv.new_topic);
 						}
 						for merge in &plan.merges {
 							catalog.merge(&merge.source, &merge.target);
@@ -432,27 +432,27 @@ impl CirculationDesk {
 
 				let (librarian, _name) = self.resolve_librarian_for_job(&topic, "").await;
 
-				let volumes = self.library_ops.get_volumes_for_topic(&topic).await?;
-				if volumes.is_empty() {
+				let entries = self.library_ops.get_entries_for_topic(&topic).await?;
+				if entries.is_empty() {
 					return Ok(());
 				}
 
-				let result = librarian.optimize(&volumes, &topic, &model_id).await;
+				let result = librarian.optimize(&entries, &topic, &model_id).await;
 
 				for id in &result.pruned {
-					let _ = self.library_ops.delete_volume(id).await;
+					let _ = self.library_ops.delete_entry(id).await;
 				}
 
 				if !result.summary.is_empty() {
 					let mut metadata = std::collections::HashMap::new();
 					metadata.insert("topic".to_string(), topic.clone());
 					metadata.insert("entryType".to_string(), "compendium".to_string());
-					let _ = self.library_ops.add_volume(&result.summary, metadata).await;
+					let _ = self.library_ops.add_entry(&result.summary, metadata).await;
 				}
 
 				if let Some(ref catalog) = self.catalog {
 					for mv in &result.reorganization.moves {
-						catalog.relocate(&mv.volume_id, &mv.new_topic);
+						catalog.relocate(&mv.entry_id, &mv.new_topic);
 					}
 					for merge in &result.reorganization.merges {
 						catalog.merge(&merge.source, &merge.target);

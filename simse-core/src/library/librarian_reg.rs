@@ -475,10 +475,10 @@ Choose the best librarian. Return ONLY valid JSON:
 	pub async fn spawn_specialist(
 		&self,
 		topic: &str,
-		volumes: &[super::librarian::Volume],
+		entries: &[super::librarian::Entry],
 	) -> Result<Arc<ManagedLibrarian>, SimseError> {
 		// Step 1: Assess whether a specialist is needed
-		let volume_samples: String = volumes
+		let entry_samples: String = entries
 			.iter()
 			.take(5)
 			.map(|v| {
@@ -490,15 +490,15 @@ Choose the best librarian. Return ONLY valid JSON:
 
 		let assess_prompt = format!(
 			r#"Should a specialist librarian be created for the topic "{}"?
-There are currently {} volumes in this topic.
+There are currently {} entries in this topic.
 
-Volume samples:
+Entry samples:
 {}
 
 Return ONLY valid JSON: {{"shouldSpawn": true/false, "reason": "brief explanation"}}"#,
 			topic,
-			volumes.len(),
-			volume_samples
+			entries.len(),
+			entry_samples
 		);
 
 		let assess_response = self

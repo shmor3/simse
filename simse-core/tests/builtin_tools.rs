@@ -8,7 +8,7 @@ use simse_core::error::SimseError;
 use simse_core::tasks::{TaskList, TaskListOptions};
 use simse_core::tools::builtin::{
 	CompendiumResult, LibraryStore, SearchResult, TopicInfo,
-	VolumeInfo, register_library_tools, register_task_tools,
+	EntryInfo, register_library_tools, register_task_tools,
 };
 use simse_core::tools::{ToolCallRequest, ToolRegistry, ToolRegistryOptions};
 
@@ -21,7 +21,7 @@ struct MockLibraryStore {
 	add_id: String,
 	delete_found: bool,
 	topics: Vec<TopicInfo>,
-	volumes: Vec<VolumeInfo>,
+	entries: Vec<EntryInfo>,
 	compendium_result: CompendiumResult,
 }
 
@@ -60,14 +60,14 @@ impl Default for MockLibraryStore {
 					entry_count: 2,
 				},
 			],
-			volumes: vec![
-				VolumeInfo {
+			entries: vec![
+				EntryInfo {
 					id: "v1".to_string(),
 				},
-				VolumeInfo {
+				EntryInfo {
 					id: "v2".to_string(),
 				},
-				VolumeInfo {
+				EntryInfo {
 					id: "v3".to_string(),
 				},
 			],
@@ -97,8 +97,8 @@ impl LibraryStore for MockLibraryStore {
 		Ok(self.topics.clone())
 	}
 
-	async fn filter_by_topic(&self, _topics: &[String]) -> Result<Vec<VolumeInfo>, SimseError> {
-		Ok(self.volumes.clone())
+	async fn filter_by_topic(&self, _topics: &[String]) -> Result<Vec<EntryInfo>, SimseError> {
+		Ok(self.entries.clone())
 	}
 
 	async fn compendium(&self, _ids: &[String]) -> Result<CompendiumResult, SimseError> {
@@ -168,7 +168,7 @@ async fn test_library_search_no_results() {
 	let result = registry.execute(&call).await;
 
 	assert!(!result.is_error);
-	assert_eq!(result.output, "No matching volumes found.");
+	assert_eq!(result.output, "No matching entries found.");
 }
 
 // ---------------------------------------------------------------------------
@@ -188,7 +188,7 @@ async fn test_library_shelve_returns_id() {
 	let result = registry.execute(&call).await;
 
 	assert!(!result.is_error);
-	assert_eq!(result.output, "Shelved volume with ID: vol_42");
+	assert_eq!(result.output, "Shelved entry with ID: vol_42");
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +208,7 @@ async fn test_library_withdraw_found() {
 	let result = registry.execute(&call).await;
 
 	assert!(!result.is_error);
-	assert_eq!(result.output, "Withdrew volume: vol_1");
+	assert_eq!(result.output, "Withdrew entry: vol_1");
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +231,7 @@ async fn test_library_withdraw_not_found() {
 	let result = registry.execute(&call).await;
 
 	assert!(!result.is_error);
-	assert_eq!(result.output, "Volume not found: missing_vol");
+	assert_eq!(result.output, "Entry not found: missing_vol");
 }
 
 // ---------------------------------------------------------------------------
@@ -248,11 +248,11 @@ async fn test_library_catalog_all_topics() {
 	let result = registry.execute(&call).await;
 
 	assert!(!result.is_error);
-	assert!(result.output.contains("programming (10 volumes)"));
+	assert!(result.output.contains("programming (10 entries)"));
 	// Sub-topics should be indented
-	assert!(result.output.contains("  programming/rust (5 volumes)"));
-	assert!(result.output.contains("  programming/async (3 volumes)"));
-	assert!(result.output.contains("design (2 volumes)"));
+	assert!(result.output.contains("  programming/rust (5 entries)"));
+	assert!(result.output.contains("  programming/async (3 entries)"));
+	assert!(result.output.contains("design (2 entries)"));
 }
 
 // ---------------------------------------------------------------------------
@@ -272,8 +272,8 @@ async fn test_library_catalog_filtered() {
 	let result = registry.execute(&call).await;
 
 	assert!(!result.is_error);
-	assert!(result.output.contains("programming (10 volumes)"));
-	assert!(result.output.contains("programming/rust (5 volumes)"));
+	assert!(result.output.contains("programming (10 entries)"));
+	assert!(result.output.contains("programming/rust (5 entries)"));
 	// "design" should not appear
 	assert!(!result.output.contains("design"));
 }
@@ -299,11 +299,11 @@ async fn test_library_catalog_empty() {
 }
 
 // ---------------------------------------------------------------------------
-// 9. library_compact with sufficient volumes
+// 9. library_compact with sufficient entries
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_library_compact_sufficient_volumes() {
+async fn test_library_compact_sufficient_entries() {
 	let mut registry = make_registry();
 	let store: Arc<dyn LibraryStore> = Arc::new(MockLibraryStore::default());
 	register_library_tools(&mut registry, store);
@@ -317,19 +317,19 @@ async fn test_library_compact_sufficient_volumes() {
 	assert!(!result.is_error);
 	assert_eq!(
 		result.output,
-		"Created compendium comp_1 from 3 volumes."
+		"Created compendium comp_1 from 3 entries."
 	);
 }
 
 // ---------------------------------------------------------------------------
-// 10. library_compact with insufficient volumes
+// 10. library_compact with insufficient entries
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn test_library_compact_insufficient_volumes() {
+async fn test_library_compact_insufficient_entries() {
 	let mut registry = make_registry();
 	let store: Arc<dyn LibraryStore> = Arc::new(MockLibraryStore {
-		volumes: vec![VolumeInfo {
+		entries: vec![EntryInfo {
 			id: "v1".to_string(),
 		}],
 		..Default::default()
@@ -345,7 +345,7 @@ async fn test_library_compact_insufficient_volumes() {
 	assert!(!result.is_error);
 	assert!(result
 		.output
-		.contains("has fewer than 2 volumes"));
+		.contains("has fewer than 2 entries"));
 	assert!(result.output.contains("nothing to compact"));
 }
 

@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Volume {
+pub struct Entry {
 	pub id: String,
 	pub text: String,
 	pub embedding: Vec<f32>,
@@ -12,19 +12,19 @@ pub struct Volume {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Lookup {
-	pub volume: Volume,
+	pub entry: Entry,
 	pub score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextLookup {
-	pub volume: Volume,
+	pub entry: Entry,
 	pub score: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdvancedLookup {
-	pub volume: Volume,
+	pub entry: Entry,
 	pub score: f64,
 	pub scores: ScoreBreakdown,
 }
@@ -39,15 +39,15 @@ pub struct ScoreBreakdown {
 pub struct DuplicateCheckResult {
 	#[serde(rename = "isDuplicate")]
 	pub is_duplicate: bool,
-	#[serde(rename = "existingVolume")]
-	pub existing_volume: Option<Volume>,
+	#[serde(rename = "existingEntry")]
+	pub existing_entry: Option<Entry>,
 	pub similarity: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DuplicateVolumes {
-	pub representative: Volume,
-	pub duplicates: Vec<Volume>,
+pub struct DuplicateCluster {
+	pub representative: Entry,
+	pub duplicates: Vec<Entry>,
 	#[serde(rename = "averageSimilarity")]
 	pub average_similarity: f64,
 }
@@ -68,13 +68,13 @@ pub struct TopicCatalogSection {
 	pub topic: String,
 	pub parent: Option<String>,
 	pub children: Vec<String>,
-	#[serde(rename = "volumeCount")]
-	pub volume_count: usize,
+	#[serde(rename = "entryCount")]
+	pub entry_count: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Recommendation {
-	pub volume: Volume,
+	pub entry: Entry,
 	pub score: f64,
 	pub scores: RecommendationScores,
 }
@@ -109,7 +109,7 @@ pub struct DateRange {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PatronProfile {
+pub struct LearnerProfile {
 	#[serde(rename = "queryHistory")]
 	pub query_history: Vec<QueryRecord>,
 	#[serde(rename = "adaptedWeights")]

@@ -2,13 +2,13 @@
 //!
 //! A `Shelf` is a thin wrapper around a [`Library`] that:
 //! - Adds `metadata.shelf = name` to all `add` operations
-//! - Filters search and `volumes()` results to only include volumes on this shelf
+//! - Filters search and `entries()` results to only include entries on this shelf
 //! - Provides `search_global()` for unfiltered library-wide searches
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use simse_adaptive_engine::types::{Lookup, Volume};
+use simse_adaptive_engine::types::{Entry, Lookup};
 
 use crate::error::SimseError;
 
@@ -20,7 +20,7 @@ use super::library::Library;
 
 /// An agent-scoped partition within the library.
 ///
-/// All `add` calls automatically tag volumes with `metadata.shelf = name`.
+/// All `add` calls automatically tag entries with `metadata.shelf = name`.
 /// Search and listing operations filter results to this shelf by default.
 #[derive(Clone)]
 pub struct Shelf {
@@ -60,7 +60,7 @@ impl Shelf {
 		let results = self.library.search(query, max_results, threshold).await?;
 		Ok(results
 			.into_iter()
-			.filter(|r| r.volume.metadata.get("shelf").map(|s| s.as_str()) == Some(&self.name))
+			.filter(|r| r.entry.metadata.get("shelf").map(|s| s.as_str()) == Some(&self.name))
 			.collect())
 	}
 
@@ -74,8 +74,8 @@ impl Shelf {
 		self.library.search(query, max_results, threshold).await
 	}
 
-	/// Get all volumes on this shelf.
-	pub fn volumes(&self) -> Result<Vec<Volume>, SimseError> {
+	/// Get all entries on this shelf.
+	pub fn entries(&self) -> Result<Vec<Entry>, SimseError> {
 		let all = self.library.get_all()?;
 		Ok(all
 			.into_iter()

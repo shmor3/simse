@@ -27,7 +27,7 @@ use crate::tools::types::{
 /// A single search result from the library store.
 #[derive(Debug, Clone)]
 pub struct SearchResult {
-	/// The text content of the volume.
+	/// The text content of the entry.
 	pub text: String,
 	/// The topic classification, if any.
 	pub topic: Option<String>,
@@ -40,14 +40,14 @@ pub struct SearchResult {
 pub struct TopicInfo {
 	/// The topic path (e.g. "rust/async").
 	pub topic: String,
-	/// Number of entries (volumes) under this topic.
+	/// Number of entries under this topic.
 	pub entry_count: usize,
 }
 
-/// Minimal volume info used for filtering and compendium.
+/// Minimal entry info used for filtering and compendium.
 #[derive(Debug, Clone)]
-pub struct VolumeInfo {
-	/// The volume ID.
+pub struct EntryInfo {
+	/// The entry ID.
 	pub id: String,
 }
 
@@ -56,7 +56,7 @@ pub struct VolumeInfo {
 pub struct CompendiumResult {
 	/// ID of the created compendium.
 	pub compendium_id: String,
-	/// IDs of the source volumes that were compacted.
+	/// IDs of the source entries that were compacted.
 	pub source_ids: Vec<String>,
 }
 
@@ -67,29 +67,29 @@ pub struct CompendiumResult {
 /// Abstraction over the vector store for library tool handlers.
 #[async_trait]
 pub trait LibraryStore: Send + Sync {
-	/// Search the library for matching volumes.
+	/// Search the library for matching entries.
 	async fn search(
 		&self,
 		query: &str,
 		max_results: usize,
 	) -> Result<Vec<SearchResult>, SimseError>;
 
-	/// Add a volume to the library.
+	/// Add an entry to the library.
 	async fn add(&self, text: &str, topic: &str) -> Result<String, SimseError>;
 
-	/// Delete a volume by ID. Returns `true` if found and deleted.
+	/// Delete an entry by ID. Returns `true` if found and deleted.
 	async fn delete(&self, id: &str) -> Result<bool, SimseError>;
 
 	/// Get the topic catalog.
 	async fn get_topics(&self) -> Result<Vec<TopicInfo>, SimseError>;
 
-	/// Filter volumes by topic(s).
+	/// Filter entries by topic(s).
 	async fn filter_by_topic(
 		&self,
 		topics: &[String],
-	) -> Result<Vec<VolumeInfo>, SimseError>;
+	) -> Result<Vec<EntryInfo>, SimseError>;
 
-	/// Create a compendium from the given volume IDs.
+	/// Create a compendium from the given entry IDs.
 	async fn compendium(
 		&self,
 		ids: &[String],
@@ -135,7 +135,7 @@ pub fn register_library_tools(
 
 		let definition = ToolDefinition {
 			name: "library_search".to_string(),
-			description: "Search the library for relevant volumes and context. Returns matching volumes ranked by relevance.".to_string(),
+			description: "Search the library for relevant entries and context. Returns matching entries ranked by relevance.".to_string(),
 			parameters,
 			category: ToolCategory::Library,
 			annotations: Some(ToolAnnotations {
@@ -162,7 +162,7 @@ pub fn register_library_tools(
 				let results = store.search(query, max_results).await?;
 
 				if results.is_empty() {
-					return Ok("No matching volumes found.".to_string());
+					return Ok("No matching entries found.".to_string());
 				}
 
 				let formatted: Vec<String> = results
@@ -199,12 +199,12 @@ pub fn register_library_tools(
 		);
 		parameters.insert(
 			"topic".to_string(),
-			param("string", "Topic category for the volume", true),
+			param("string", "Topic category for the entry", true),
 		);
 
 		let definition = ToolDefinition {
 			name: "library_shelve".to_string(),
-			description: "Shelve a volume in the library for long-term storage."
+			description: "Shelve an entry in the library for long-term storage."
 				.to_string(),
 			parameters,
 			category: ToolCategory::Library,
@@ -227,7 +227,7 @@ pub fn register_library_tools(
 					.unwrap_or("general");
 
 				let id = store.add(text, topic).await?;
-				Ok(format!("Shelved volume with ID: {}", id))
+				Ok(format!("Shelved entry with ID: {}", id))
 			})
 		});
 
@@ -239,12 +239,12 @@ pub fn register_library_tools(
 		let mut parameters = HashMap::new();
 		parameters.insert(
 			"id".to_string(),
-			param("string", "The volume ID to withdraw", true),
+			param("string", "The entry ID to withdraw", true),
 		);
 
 		let definition = ToolDefinition {
 			name: "library_withdraw".to_string(),
-			description: "Withdraw a volume from the library by ID.".to_string(),
+			description: "Withdraw an entry from the library by ID.".to_string(),
 			parameters,
 			category: ToolCategory::Library,
 			annotations: Some(ToolAnnotations {
@@ -266,9 +266,9 @@ pub fn register_library_tools(
 
 				let deleted = store.delete(id).await?;
 				if deleted {
-					Ok(format!("Withdrew volume: {}", id))
+					Ok(format!("Withdrew entry: {}", id))
 				} else {
-					Ok(format!("Volume not found: {}", id))
+					Ok(format!("Entry not found: {}", id))
 				}
 			})
 		});
@@ -290,7 +290,7 @@ pub fn register_library_tools(
 
 		let definition = ToolDefinition {
 			name: "library_catalog".to_string(),
-			description: "Browse the topic catalog. Returns the hierarchical topic tree with volume counts.".to_string(),
+			description: "Browse the topic catalog. Returns the hierarchical topic tree with entry counts.".to_string(),
 			parameters,
 			category: ToolCategory::Library,
 			annotations: Some(ToolAnnotations {
@@ -333,7 +333,7 @@ pub fn register_library_tools(
 						let depth = t.topic.matches('/').count();
 						let indent = "  ".repeat(depth);
 						format!(
-							"{}{} ({} volumes)",
+							"{}{} ({} entries)",
 							indent, t.topic, t.entry_count
 						)
 					})
@@ -356,7 +356,7 @@ pub fn register_library_tools(
 
 		let definition = ToolDefinition {
 			name: "library_compact".to_string(),
-			description: "Trigger a compendium (summarization) for a specific topic. Condenses multiple volumes into a single summary.".to_string(),
+			description: "Trigger a compendium (summarization) for a specific topic. Condenses multiple entries into a single summary.".to_string(),
 			parameters,
 			category: ToolCategory::Library,
 			annotations: None,
@@ -373,23 +373,23 @@ pub fn register_library_tools(
 					.and_then(|v| v.as_str())
 					.unwrap_or("");
 
-				let volumes = store
+				let entries = store
 					.filter_by_topic(&[topic.to_string()])
 					.await?;
 
-				if volumes.len() < 2 {
+				if entries.len() < 2 {
 					return Ok(format!(
-						"Topic \"{}\" has fewer than 2 volumes — nothing to compact.",
+						"Topic \"{}\" has fewer than 2 entries — nothing to compact.",
 						topic
 					));
 				}
 
 				let ids: Vec<String> =
-					volumes.iter().map(|v| v.id.clone()).collect();
+					entries.iter().map(|v| v.id.clone()).collect();
 				let result = store.compendium(&ids).await?;
 
 				Ok(format!(
-					"Created compendium {} from {} volumes.",
+					"Created compendium {} from {} entries.",
 					result.compendium_id,
 					result.source_ids.len()
 				))

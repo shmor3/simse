@@ -14,9 +14,9 @@ bindings = [{ name = "TUNNEL_SESSION", class_name = "TunnelSession" }]
 tag = "v1"
 new_classes = ["TunnelSession"]
 
-[analytics_engine]
-dataset = "simse-analytics"
-binding = "ANALYTICS"
+[[queues.producers]]
+queue = "simse-cloud-analytics"
+binding = "ANALYTICS_QUEUE"
 
 # --- Environments ---
 
@@ -26,9 +26,17 @@ name = "simse-cloud-staging"
 [env.staging.vars]
 APP_URL = "https://simse-cloud-staging.pages.dev"
 
+[[env.staging.queues.producers]]
+queue = "simse-cloud-analytics-staging"
+binding = "ANALYTICS_QUEUE"
+
 [env.production]
 name = "simse-cloud"
 routes = [{ pattern = "app.simse.dev", custom_domain = true }]
+
+[[env.production.queues.producers]]
+queue = "simse-cloud-analytics"
+binding = "ANALYTICS_QUEUE"
 
 [env.production.vars]
 APP_URL = "https://app.simse.dev"

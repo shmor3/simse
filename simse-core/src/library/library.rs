@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 
-use simse_adaptive_engine::store::{StoreConfig, Store};
-use simse_adaptive_engine::types::{
+use crate::adaptive::store::{StoreConfig, Store};
+use crate::adaptive::types::{
 	AdvancedLookup, DateRange, DuplicateCheckResult, DuplicateCluster, Entry, Lookup, MetadataFilter,
 	LearnerProfile, Recommendation, RecommendOptions, SearchOptions, TextLookup, TextSearchOptions,
 	TopicInfo,
@@ -367,10 +367,10 @@ impl Library {
 		}
 
 		// Build batch entries for the store
-		let store_entries: Vec<simse_adaptive_engine::store::AddEntry> = entries
+		let store_entries: Vec<crate::adaptive::store::AddEntry> = entries
 			.iter()
 			.zip(embeddings.into_iter())
-			.map(|((text, meta), emb)| simse_adaptive_engine::store::AddEntry {
+			.map(|((text, meta), emb)| crate::adaptive::store::AddEntry {
 				text: text.to_string(),
 				embedding: emb,
 				metadata: meta.clone(),

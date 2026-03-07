@@ -73,7 +73,7 @@ async fn run_in_session(
 	timeout_ms: Option<u64>,
 	max_output_bytes: Option<usize>,
 	stdin: Option<&str>,
-) -> (VirtualShell, Result<simse_sandbox_engine::vsh_executor::ExecResult, SandboxError>) {
+) -> (VirtualShell, Result<simse_core::sandbox::vsh_executor::ExecResult, SandboxError>) {
 	let req = shell
 		.prepare_exec(session_id, command, timeout_ms, max_output_bytes, stdin)
 		.unwrap();
@@ -107,7 +107,7 @@ async fn run_raw(
 	timeout_ms: Option<u64>,
 	max_output_bytes: Option<usize>,
 	stdin: Option<&str>,
-) -> (VirtualShell, Result<simse_sandbox_engine::vsh_executor::ExecResult, SandboxError>) {
+) -> (VirtualShell, Result<simse_core::sandbox::vsh_executor::ExecResult, SandboxError>) {
 	let req = shell
 		.prepare_exec_raw(command, cwd, env, shell_override, timeout_ms, max_output_bytes, stdin)
 		.unwrap();

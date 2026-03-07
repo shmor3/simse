@@ -10,7 +10,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use simse_adaptive_engine::context_format::{format_context, ContextFormatOptions};
+use crate::adaptive::context_format::{format_context, ContextFormatOptions};
 
 use crate::error::SimseError;
 use crate::library::Library;

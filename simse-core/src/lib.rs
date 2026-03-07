@@ -1,6 +1,3 @@
-// simse-core: Pure Rust orchestration library for simse
-// Links simse-acp, simse-mcp, simse-adaptive as library dependencies
-
 pub mod agent;
 pub mod agentic_loop;
 pub mod chain;
@@ -10,19 +7,27 @@ pub mod conversation;
 pub mod error;
 pub mod events;
 pub mod hooks;
-pub mod library;
 pub mod logger;
 pub mod prompts;
-pub mod rpc_protocol;
-pub mod rpc_server;
-pub mod rpc_transport;
 pub mod server;
 pub mod tasks;
 pub mod tools;
 pub mod utils;
 
-// Re-export engine crate for consumers
-pub use simse_engine;
+#[cfg(feature = "engine")]
+pub mod engine;
+
+#[cfg(feature = "adaptive")]
+pub mod adaptive;
+
+#[cfg(feature = "sandbox")]
+pub mod sandbox;
+
+#[cfg(feature = "remote")]
+pub mod remote;
+
+#[cfg(feature = "adaptive")]
+pub mod library;
 
 // Re-export key types at the crate root for convenience
 pub use config::AppConfig;

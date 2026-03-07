@@ -14,7 +14,7 @@ use simse_core::events::EventBus;
 use simse_core::library::{
 	CompendiumOptions, EmbeddingProvider, Library, LibraryConfig, TextGenerationProvider,
 };
-use simse_adaptive_engine::store::StoreConfig;
+use simse_core::adaptive::store::StoreConfig;
 
 // ---------------------------------------------------------------------------
 // Mock embedding provider
@@ -343,7 +343,7 @@ async fn library_text_search() {
 		.await
 		.unwrap();
 
-	let options = simse_adaptive_engine::types::TextSearchOptions {
+	let options = simse_core::adaptive::types::TextSearchOptions {
 		query: "Rust".to_string(),
 		mode: Some("substring".to_string()),
 		threshold: None,
@@ -360,7 +360,7 @@ async fn library_text_search_empty_query_returns_empty() {
 
 	lib.add("Some text", HashMap::new()).await.unwrap();
 
-	let options = simse_adaptive_engine::types::TextSearchOptions {
+	let options = simse_core::adaptive::types::TextSearchOptions {
 		query: "".to_string(),
 		mode: Some("substring".to_string()),
 		threshold: None,
@@ -386,7 +386,7 @@ async fn library_filter_by_metadata() {
 	meta2.insert("lang".to_string(), "go".to_string());
 	lib.add("Go article", meta2).await.unwrap();
 
-	let filters = vec![simse_adaptive_engine::types::MetadataFilter {
+	let filters = vec![simse_core::adaptive::types::MetadataFilter {
 		key: "lang".to_string(),
 		value: Some(serde_json::Value::String("rust".to_string())),
 		mode: Some("eq".to_string()),
@@ -1059,7 +1059,7 @@ fn prompt_inject_format_age() {
 #[test]
 fn prompt_inject_structured_format() {
 	use simse_core::library::{format_context, ContextFormatOptions};
-	use simse_adaptive_engine::types::{Entry, Lookup};
+	use simse_core::adaptive::types::{Entry, Lookup};
 
 	let mut metadata = HashMap::new();
 	metadata.insert("topic".to_string(), "rust".to_string());
@@ -1088,7 +1088,7 @@ fn prompt_inject_structured_format() {
 #[test]
 fn prompt_inject_natural_format() {
 	use simse_core::library::{format_context, ContextFormatOptions};
-	use simse_adaptive_engine::types::{Entry, Lookup};
+	use simse_core::adaptive::types::{Entry, Lookup};
 
 	let mut metadata = HashMap::new();
 	metadata.insert("topic".to_string(), "go".to_string());
@@ -1126,7 +1126,7 @@ fn prompt_inject_empty_results() {
 #[test]
 fn prompt_inject_min_score_filters() {
 	use simse_core::library::{format_context, ContextFormatOptions};
-	use simse_adaptive_engine::types::{Entry, Lookup};
+	use simse_core::adaptive::types::{Entry, Lookup};
 
 	let results = vec![
 		Lookup {
@@ -1164,7 +1164,7 @@ fn prompt_inject_min_score_filters() {
 #[test]
 fn prompt_inject_custom_tag() {
 	use simse_core::library::{format_context, ContextFormatOptions};
-	use simse_adaptive_engine::types::{Entry, Lookup};
+	use simse_core::adaptive::types::{Entry, Lookup};
 
 	let results = vec![Lookup {
 		entry: Entry {
@@ -1197,10 +1197,10 @@ async fn library_advanced_search_auto_embeds() {
 
 	lib.add("Rust programming", HashMap::new()).await.unwrap();
 
-	let options = simse_adaptive_engine::types::SearchOptions {
+	let options = simse_core::adaptive::types::SearchOptions {
 		query_embedding: None,
 		similarity_threshold: None,
-		text: Some(simse_adaptive_engine::types::TextSearchOptions {
+		text: Some(simse_core::adaptive::types::TextSearchOptions {
 			query: "Rust".to_string(),
 			mode: Some("substring".to_string()),
 			threshold: None,

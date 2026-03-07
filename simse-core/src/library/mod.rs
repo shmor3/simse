@@ -1,4 +1,4 @@
-//! Library orchestration layer wrapping `simse_adaptive_engine::store::Store`.
+//! Library orchestration layer wrapping `crate::adaptive::store::Store`.
 //!
 //! Provides:
 //! - [`Library`] — high-level API with automatic embedding, event publishing, and shelf management

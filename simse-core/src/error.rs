@@ -353,14 +353,17 @@ pub enum SimseError {
 	},
 
 	// Passthrough from engine crates
+	#[cfg(feature = "engine")]
 	#[error(transparent)]
-	Acp(#[from] simse_engine::acp::error::AcpError),
+	Acp(#[from] crate::engine::acp::error::AcpError),
 
+	#[cfg(feature = "engine")]
 	#[error(transparent)]
-	McpEngine(#[from] simse_engine::mcp::error::McpError),
+	McpEngine(#[from] crate::engine::mcp::error::McpError),
 
+	#[cfg(feature = "adaptive")]
 	#[error(transparent)]
-	Adaptive(#[from] simse_adaptive_engine::error::AdaptiveError),
+	Adaptive(#[from] crate::adaptive::error::AdaptiveError),
 
 	#[error("IO error: {0}")]
 	Io(#[from] std::io::Error),
@@ -388,8 +391,11 @@ impl SimseError {
 			Self::Resilience { code, .. } => code.as_str(),
 			Self::Task { code, .. } => code.as_str(),
 			Self::Tool { code, .. } => code.as_str(),
+			#[cfg(feature = "engine")]
 			Self::Acp(_) => "ACP_ERROR",
+			#[cfg(feature = "engine")]
 			Self::McpEngine(_) => "MCP_ENGINE_ERROR",
+			#[cfg(feature = "adaptive")]
 			Self::Adaptive(_) => "ADAPTIVE_ERROR",
 			Self::Io(_) => "IO_ERROR",
 			Self::Other(_) => "OTHER_ERROR",

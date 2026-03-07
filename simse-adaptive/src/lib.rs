@@ -5,6 +5,7 @@ pub mod types;
 pub mod transport;
 pub mod protocol;
 pub mod distance;
+pub mod fusion;
 pub mod text_search;
 pub mod inverted_index;
 pub mod cataloging;

@@ -6,6 +6,10 @@
 // no external dependencies beyond cosine similarity.
 // ---------------------------------------------------------------------------
 
+use std::cmp::Ordering;
+
+use rayon::prelude::*;
+
 use crate::distance::cosine_similarity;
 use crate::types::{DuplicateCheckResult, DuplicateCluster, Entry};
 
@@ -83,21 +87,28 @@ pub fn find_duplicate_volumes(
 	let mut groups: Vec<Group> = Vec::new();
 
 	for volume in sorted {
-		let mut assigned = false;
-		for group in &mut groups {
-			if group.representative.embedding.len() != volume.embedding.len() {
-				continue;
-			}
-			let sim =
-				cosine_similarity(&group.representative.embedding, &volume.embedding);
-			if sim >= threshold {
-				group.duplicates.push(volume.clone());
-				group.total_similarity += sim;
-				assigned = true;
-				break;
-			}
-		}
-		if !assigned {
+		// Find the best matching group in parallel
+		let match_result = groups
+			.par_iter()
+			.enumerate()
+			.filter_map(|(idx, group)| {
+				if group.representative.embedding.len() != volume.embedding.len() {
+					return None;
+				}
+				let sim =
+					cosine_similarity(&group.representative.embedding, &volume.embedding);
+				if sim >= threshold {
+					Some((idx, sim))
+				} else {
+					None
+				}
+			})
+			.max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(Ordering::Equal));
+
+		if let Some((idx, sim)) = match_result {
+			groups[idx].duplicates.push(volume.clone());
+			groups[idx].total_similarity += sim;
+		} else {
 			groups.push(Group {
 				representative: volume,
 				duplicates: Vec::new(),

@@ -1,5 +1,7 @@
 use std::cmp::Ordering;
 
+use rayon::prelude::*;
+
 use crate::distance::DistanceMetric;
 use crate::vector_storage::VectorStorage;
 
@@ -48,18 +50,27 @@ impl IndexBackend for FlatIndex {
 	}
 
 	fn search(&self, query: &[f32], k: usize, metric: DistanceMetric) -> Vec<SearchResult> {
-		let mut results: Vec<SearchResult> = self
-			.storage
-			.iter()
-			.map(|(id, embedding)| {
+		let n = self.storage.len();
+		if n == 0 {
+			return vec![];
+		}
+
+		let dims = self.storage.dimensions();
+		let raw = self.storage.raw_embeddings();
+
+		// Collect IDs up front so we can index by position in the parallel loop
+		let ids: Vec<&str> = self.storage.iter().map(|(id, _)| id).collect();
+
+		let mut results: Vec<SearchResult> = (0..n)
+			.into_par_iter()
+			.map(|i| {
+				let embedding = &raw[i * dims..(i + 1) * dims];
 				let score = metric.similarity(query, embedding);
-				(id.to_string(), score)
+				(ids[i].to_string(), score)
 			})
 			.collect();
 
-		results.sort_by(|a, b| {
-			b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal)
-		});
+		results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(Ordering::Equal));
 
 		results.truncate(k);
 		results

@@ -30,6 +30,8 @@ tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 uuid = { version = "1", features = ["v4"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
 rand = "0.10"
+hnsw_rs = "0.3"
+rayon = "1"
 
 [dev-dependencies]
 tempfile = "3"

@@ -33,21 +33,27 @@ pub type DistanceFn = fn(&[f32], &[f32]) -> f64;
 impl DistanceMetric {
 	/// Returns a function pointer for the raw distance function of this metric.
 	///
-	/// - Cosine: `cosine_distance` (1 - cosine_similarity)
-	/// - Euclidean: `euclidean_distance`
-	/// - DotProduct: `dot_product_distance` (negated dot product)
-	/// - Manhattan: `manhattan_distance`
+	/// Uses SIMD-accelerated paths when available (AVX2+FMA on x86_64,
+	/// NEON on aarch64), with scalar fallback.
+	///
+	/// - Cosine: `1.0 - simd_cosine_similarity`
+	/// - Euclidean: `simd_euclidean_distance`
+	/// - DotProduct: negated `simd_dot_product`
+	/// - Manhattan: `simd_manhattan_distance`
 	#[inline]
 	pub fn distance_fn(self) -> DistanceFn {
 		match self {
-			Self::Cosine => cosine_distance,
-			Self::Euclidean => euclidean_distance,
-			Self::DotProduct => dot_product_distance,
-			Self::Manhattan => manhattan_distance,
+			Self::Cosine => simd_cosine_distance,
+			Self::Euclidean => simd_euclidean_distance,
+			Self::DotProduct => simd_dot_product_distance,
+			Self::Manhattan => simd_manhattan_distance,
 		}
 	}
 
 	/// Compute the similarity score between two vectors using this metric.
+	///
+	/// Uses SIMD-accelerated paths when available (AVX2+FMA on x86_64,
+	/// NEON on aarch64), with scalar fallback.
 	///
 	/// Higher values always mean more similar:
 	/// - Cosine: clamped cosine similarity in [-1, 1]
@@ -57,14 +63,14 @@ impl DistanceMetric {
 	#[inline]
 	pub fn similarity(self, a: &[f32], b: &[f32]) -> f64 {
 		match self {
-			Self::Cosine => cosine_similarity_score(a, b),
+			Self::Cosine => simd_cosine_similarity(a, b),
 			Self::Euclidean => {
-				let d = euclidean_distance(a, b);
+				let d = simd_euclidean_distance(a, b);
 				1.0 / (1.0 + d)
 			}
-			Self::DotProduct => dot_product_similarity(a, b),
+			Self::DotProduct => simd_dot_product(a, b),
 			Self::Manhattan => {
-				let d = manhattan_distance(a, b);
+				let d = simd_manhattan_distance(a, b);
 				1.0 / (1.0 + d)
 			}
 		}
@@ -229,6 +235,396 @@ pub fn manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
 		sum += ((a[i] as f64) - (b[i] as f64)).abs();
 	}
 	sum
+}
+
+// ---------------------------------------------------------------------------
+// SIMD — AVX2 internals (x86_64)
+// ---------------------------------------------------------------------------
+
+/// Horizontally sum 8 f32 lanes in a __m256 register to a single f32.
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[allow(clippy::undocumented_unsafe_blocks)]
+unsafe fn avx2_hsum_ps(v: std::arch::x86_64::__m256) -> f32 {
+	use std::arch::x86_64::*;
+	let hi = _mm256_extractf128_ps(v, 1);
+	let lo = _mm256_castps256_ps128(v);
+	let sum128 = _mm_add_ps(lo, hi);
+	let sum64 = _mm_add_ps(sum128, _mm_movehl_ps(sum128, sum128));
+	let sum32 = _mm_add_ss(sum64, _mm_shuffle_ps(sum64, sum64, 1));
+	_mm_cvtss_f32(sum32)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[allow(clippy::undocumented_unsafe_blocks)]
+unsafe fn avx2_dot_product(a: &[f32], b: &[f32]) -> f64 {
+	use std::arch::x86_64::*;
+	let n = a.len();
+	let chunks = n / 8;
+	let mut sum = _mm256_setzero_ps();
+
+	for i in 0..chunks {
+		let va = _mm256_loadu_ps(a.as_ptr().add(i * 8));
+		let vb = _mm256_loadu_ps(b.as_ptr().add(i * 8));
+		sum = _mm256_fmadd_ps(va, vb, sum);
+	}
+
+	let mut result = avx2_hsum_ps(sum) as f64;
+
+	// Scalar tail for remaining elements
+	for i in (chunks * 8)..n {
+		result += (*a.get_unchecked(i) as f64) * (*b.get_unchecked(i) as f64);
+	}
+
+	result
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[allow(clippy::undocumented_unsafe_blocks)]
+unsafe fn avx2_cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
+	use std::arch::x86_64::*;
+	let n = a.len();
+	let chunks = n / 8;
+	let mut dot_acc = _mm256_setzero_ps();
+	let mut norm_a_acc = _mm256_setzero_ps();
+	let mut norm_b_acc = _mm256_setzero_ps();
+
+	for i in 0..chunks {
+		let va = _mm256_loadu_ps(a.as_ptr().add(i * 8));
+		let vb = _mm256_loadu_ps(b.as_ptr().add(i * 8));
+		dot_acc = _mm256_fmadd_ps(va, vb, dot_acc);
+		norm_a_acc = _mm256_fmadd_ps(va, va, norm_a_acc);
+		norm_b_acc = _mm256_fmadd_ps(vb, vb, norm_b_acc);
+	}
+
+	let mut dot = avx2_hsum_ps(dot_acc) as f64;
+	let mut norm_a = avx2_hsum_ps(norm_a_acc) as f64;
+	let mut norm_b = avx2_hsum_ps(norm_b_acc) as f64;
+
+	// Scalar tail
+	for i in (chunks * 8)..n {
+		let ai = *a.get_unchecked(i) as f64;
+		let bi = *b.get_unchecked(i) as f64;
+		dot += ai * bi;
+		norm_a += ai * ai;
+		norm_b += bi * bi;
+	}
+
+	let denom = norm_a.sqrt() * norm_b.sqrt();
+	if denom == 0.0 {
+		return 0.0;
+	}
+	let result = dot / denom;
+	if !result.is_finite() {
+		return 0.0;
+	}
+	result.clamp(-1.0, 1.0)
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[allow(clippy::undocumented_unsafe_blocks)]
+unsafe fn avx2_euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
+	use std::arch::x86_64::*;
+	let n = a.len();
+	let chunks = n / 8;
+	let mut sum = _mm256_setzero_ps();
+
+	for i in 0..chunks {
+		let va = _mm256_loadu_ps(a.as_ptr().add(i * 8));
+		let vb = _mm256_loadu_ps(b.as_ptr().add(i * 8));
+		let diff = _mm256_sub_ps(va, vb);
+		sum = _mm256_fmadd_ps(diff, diff, sum);
+	}
+
+	let mut result = avx2_hsum_ps(sum) as f64;
+
+	// Scalar tail
+	for i in (chunks * 8)..n {
+		let diff = (*a.get_unchecked(i) as f64) - (*b.get_unchecked(i) as f64);
+		result += diff * diff;
+	}
+
+	result.sqrt()
+}
+
+#[cfg(target_arch = "x86_64")]
+#[target_feature(enable = "avx2,fma")]
+#[allow(clippy::undocumented_unsafe_blocks)]
+unsafe fn avx2_manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
+	use std::arch::x86_64::*;
+	let n = a.len();
+	let chunks = n / 8;
+	// Sign mask: clear the sign bit to compute absolute value
+	let sign_mask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFF_FFFFu32 as i32));
+	let mut sum = _mm256_setzero_ps();
+
+	for i in 0..chunks {
+		let va = _mm256_loadu_ps(a.as_ptr().add(i * 8));
+		let vb = _mm256_loadu_ps(b.as_ptr().add(i * 8));
+		let diff = _mm256_sub_ps(va, vb);
+		let abs_diff = _mm256_and_ps(diff, sign_mask);
+		sum = _mm256_add_ps(sum, abs_diff);
+	}
+
+	let mut result = avx2_hsum_ps(sum) as f64;
+
+	// Scalar tail
+	for i in (chunks * 8)..n {
+		result += ((*a.get_unchecked(i) as f64) - (*b.get_unchecked(i) as f64)).abs();
+	}
+
+	result
+}
+
+// ---------------------------------------------------------------------------
+// SIMD — NEON internals (aarch64)
+// ---------------------------------------------------------------------------
+
+#[cfg(target_arch = "aarch64")]
+#[allow(clippy::undocumented_unsafe_blocks)]
+unsafe fn neon_dot_product(a: &[f32], b: &[f32]) -> f64 {
+	use std::arch::aarch64::*;
+	let n = a.len();
+	let chunks = n / 4;
+	let mut sum = vdupq_n_f32(0.0);
+
+	for i in 0..chunks {
+		let va = vld1q_f32(a.as_ptr().add(i * 4));
+		let vb = vld1q_f32(b.as_ptr().add(i * 4));
+		sum = vfmaq_f32(sum, va, vb);
+	}
+
+	let mut result = vaddvq_f32(sum) as f64;
+
+	for i in (chunks * 4)..n {
+		result += (*a.get_unchecked(i) as f64) * (*b.get_unchecked(i) as f64);
+	}
+
+	result
+}
+
+#[cfg(target_arch = "aarch64")]
+#[allow(clippy::undocumented_unsafe_blocks)]
+unsafe fn neon_cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
+	use std::arch::aarch64::*;
+	let n = a.len();
+	let chunks = n / 4;
+	let mut dot_acc = vdupq_n_f32(0.0);
+	let mut norm_a_acc = vdupq_n_f32(0.0);
+	let mut norm_b_acc = vdupq_n_f32(0.0);
+
+	for i in 0..chunks {
+		let va = vld1q_f32(a.as_ptr().add(i * 4));
+		let vb = vld1q_f32(b.as_ptr().add(i * 4));
+		dot_acc = vfmaq_f32(dot_acc, va, vb);
+		norm_a_acc = vfmaq_f32(norm_a_acc, va, va);
+		norm_b_acc = vfmaq_f32(norm_b_acc, vb, vb);
+	}
+
+	let mut dot = vaddvq_f32(dot_acc) as f64;
+	let mut norm_a = vaddvq_f32(norm_a_acc) as f64;
+	let mut norm_b = vaddvq_f32(norm_b_acc) as f64;
+
+	for i in (chunks * 4)..n {
+		let ai = *a.get_unchecked(i) as f64;
+		let bi = *b.get_unchecked(i) as f64;
+		dot += ai * bi;
+		norm_a += ai * ai;
+		norm_b += bi * bi;
+	}
+
+	let denom = norm_a.sqrt() * norm_b.sqrt();
+	if denom == 0.0 {
+		return 0.0;
+	}
+	let result = dot / denom;
+	if !result.is_finite() {
+		return 0.0;
+	}
+	result.clamp(-1.0, 1.0)
+}
+
+#[cfg(target_arch = "aarch64")]
+#[allow(clippy::undocumented_unsafe_blocks)]
+unsafe fn neon_euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
+	use std::arch::aarch64::*;
+	let n = a.len();
+	let chunks = n / 4;
+	let mut sum = vdupq_n_f32(0.0);
+
+	for i in 0..chunks {
+		let va = vld1q_f32(a.as_ptr().add(i * 4));
+		let vb = vld1q_f32(b.as_ptr().add(i * 4));
+		let diff = vsubq_f32(va, vb);
+		sum = vfmaq_f32(sum, diff, diff);
+	}
+
+	let mut result = vaddvq_f32(sum) as f64;
+
+	for i in (chunks * 4)..n {
+		let diff = (*a.get_unchecked(i) as f64) - (*b.get_unchecked(i) as f64);
+		result += diff * diff;
+	}
+
+	result.sqrt()
+}
+
+#[cfg(target_arch = "aarch64")]
+#[allow(clippy::undocumented_unsafe_blocks)]
+unsafe fn neon_manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
+	use std::arch::aarch64::*;
+	let n = a.len();
+	let chunks = n / 4;
+	let mut sum = vdupq_n_f32(0.0);
+
+	for i in 0..chunks {
+		let va = vld1q_f32(a.as_ptr().add(i * 4));
+		let vb = vld1q_f32(b.as_ptr().add(i * 4));
+		let diff = vsubq_f32(va, vb);
+		let abs_diff = vabsq_f32(diff);
+		sum = vaddq_f32(sum, abs_diff);
+	}
+
+	let mut result = vaddvq_f32(sum) as f64;
+
+	for i in (chunks * 4)..n {
+		result += ((*a.get_unchecked(i) as f64) - (*b.get_unchecked(i) as f64)).abs();
+	}
+
+	result
+}
+
+// ---------------------------------------------------------------------------
+// SIMD — public dispatch functions
+// ---------------------------------------------------------------------------
+
+/// SIMD-accelerated dot product with runtime feature detection.
+///
+/// Dispatches to AVX2+FMA on x86_64, NEON on aarch64, or falls back to scalar.
+pub fn simd_dot_product(a: &[f32], b: &[f32]) -> f64 {
+	if a.len() != b.len() || a.is_empty() {
+		return 0.0;
+	}
+
+	#[cfg(target_arch = "x86_64")]
+	{
+		if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+			// SAFETY: Feature detection guarantees AVX2+FMA availability.
+			// Inputs are valid slices of equal length (checked above).
+			return unsafe { avx2_dot_product(a, b) };
+		}
+	}
+
+	#[cfg(target_arch = "aarch64")]
+	{
+		// SAFETY: NEON is mandatory on aarch64. Inputs are valid slices.
+		return unsafe { neon_dot_product(a, b) };
+	}
+
+	// Scalar fallback for other architectures or missing features
+	#[allow(unreachable_code)]
+	dot_product_similarity(a, b)
+}
+
+/// SIMD-accelerated cosine similarity with runtime feature detection.
+///
+/// Returns a value in [-1.0, 1.0]. Dispatches to AVX2+FMA on x86_64,
+/// NEON on aarch64, or falls back to scalar.
+pub fn simd_cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
+	if a.len() != b.len() || a.is_empty() {
+		return 0.0;
+	}
+
+	#[cfg(target_arch = "x86_64")]
+	{
+		if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+			// SAFETY: Feature detection guarantees AVX2+FMA availability.
+			// Inputs are valid slices of equal length (checked above).
+			return unsafe { avx2_cosine_similarity(a, b) };
+		}
+	}
+
+	#[cfg(target_arch = "aarch64")]
+	{
+		// SAFETY: NEON is mandatory on aarch64. Inputs are valid slices.
+		return unsafe { neon_cosine_similarity(a, b) };
+	}
+
+	#[allow(unreachable_code)]
+	cosine_similarity_score(a, b)
+}
+
+/// SIMD-accelerated Euclidean distance with runtime feature detection.
+///
+/// Dispatches to AVX2+FMA on x86_64, NEON on aarch64, or falls back to scalar.
+pub fn simd_euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
+	if a.len() != b.len() || a.is_empty() {
+		return 0.0;
+	}
+
+	#[cfg(target_arch = "x86_64")]
+	{
+		if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+			// SAFETY: Feature detection guarantees AVX2+FMA availability.
+			// Inputs are valid slices of equal length (checked above).
+			return unsafe { avx2_euclidean_distance(a, b) };
+		}
+	}
+
+	#[cfg(target_arch = "aarch64")]
+	{
+		// SAFETY: NEON is mandatory on aarch64. Inputs are valid slices.
+		return unsafe { neon_euclidean_distance(a, b) };
+	}
+
+	#[allow(unreachable_code)]
+	euclidean_distance(a, b)
+}
+
+/// SIMD-accelerated Manhattan distance with runtime feature detection.
+///
+/// Dispatches to AVX2+FMA on x86_64, NEON on aarch64, or falls back to scalar.
+pub fn simd_manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
+	if a.len() != b.len() || a.is_empty() {
+		return 0.0;
+	}
+
+	#[cfg(target_arch = "x86_64")]
+	{
+		if is_x86_feature_detected!("avx2") && is_x86_feature_detected!("fma") {
+			// SAFETY: Feature detection guarantees AVX2+FMA availability.
+			// Inputs are valid slices of equal length (checked above).
+			return unsafe { avx2_manhattan_distance(a, b) };
+		}
+	}
+
+	#[cfg(target_arch = "aarch64")]
+	{
+		// SAFETY: NEON is mandatory on aarch64. Inputs are valid slices.
+		return unsafe { neon_manhattan_distance(a, b) };
+	}
+
+	#[allow(unreachable_code)]
+	manhattan_distance(a, b)
+}
+
+/// SIMD-accelerated cosine distance: `1.0 - simd_cosine_similarity`.
+///
+/// Returns a value in [0.0, 2.0].
+#[inline]
+pub fn simd_cosine_distance(a: &[f32], b: &[f32]) -> f64 {
+	1.0 - simd_cosine_similarity(a, b)
+}
+
+/// SIMD-accelerated dot product distance (negated dot product).
+///
+/// Negation makes it usable as a distance metric where lower = closer.
+#[inline]
+pub fn simd_dot_product_distance(a: &[f32], b: &[f32]) -> f64 {
+	-simd_dot_product(a, b)
 }
 
 // ---------------------------------------------------------------------------
@@ -600,5 +996,134 @@ mod tests {
 		assert!((manhattan_distance(&v, &v)).abs() < 1e-10);
 		// DotProduct distance is negative for same-direction vectors
 		assert!(dot_product_distance(&v, &v) < 0.0);
+	}
+
+	// -- SIMD vs scalar agreement -------------------------------------------
+
+	#[test]
+	fn simd_dot_matches_scalar() {
+		let a: Vec<f32> = (0..384).map(|i| (i as f32) * 0.01).collect();
+		let b: Vec<f32> = (0..384).map(|i| ((384 - i) as f32) * 0.01).collect();
+		let scalar = dot_product_similarity(&a, &b);
+		let simd = simd_dot_product(&a, &b);
+		assert!((scalar - simd).abs() < 1e-3, "scalar={scalar} simd={simd}");
+	}
+
+	#[test]
+	fn simd_cosine_matches_scalar() {
+		let a: Vec<f32> = (0..384).map(|i| (i as f32) * 0.01).collect();
+		let b: Vec<f32> = (0..384).map(|i| ((384 - i) as f32) * 0.01).collect();
+		let scalar = cosine_similarity_score(&a, &b);
+		let simd = simd_cosine_similarity(&a, &b);
+		assert!((scalar - simd).abs() < 1e-5, "scalar={scalar} simd={simd}");
+	}
+
+	#[test]
+	fn simd_euclidean_matches_scalar() {
+		let a: Vec<f32> = (0..384).map(|i| (i as f32) * 0.01).collect();
+		let b: Vec<f32> = (0..384).map(|i| ((384 - i) as f32) * 0.01).collect();
+		let scalar = euclidean_distance(&a, &b);
+		let simd = simd_euclidean_distance(&a, &b);
+		assert!((scalar - simd).abs() < 1e-3, "scalar={scalar} simd={simd}");
+	}
+
+	#[test]
+	fn simd_manhattan_matches_scalar() {
+		let a: Vec<f32> = (0..384).map(|i| (i as f32) * 0.01).collect();
+		let b: Vec<f32> = (0..384).map(|i| ((384 - i) as f32) * 0.01).collect();
+		let scalar = manhattan_distance(&a, &b);
+		let simd = simd_manhattan_distance(&a, &b);
+		assert!((scalar - simd).abs() < 1e-3, "scalar={scalar} simd={simd}");
+	}
+
+	#[test]
+	fn simd_short_vector() {
+		let a = vec![1.0f32, 2.0];
+		let b = vec![3.0f32, 4.0];
+		let scalar = cosine_similarity_score(&a, &b);
+		let simd = simd_cosine_similarity(&a, &b);
+		assert!((scalar - simd).abs() < 1e-6);
+	}
+
+	#[test]
+	fn simd_large_vector() {
+		let a: Vec<f32> = (0..1536).map(|i| (i as f32) * 0.001).collect();
+		let b: Vec<f32> = (0..1536).map(|i| ((1536 - i) as f32) * 0.001).collect();
+		let scalar = cosine_similarity_score(&a, &b);
+		let simd = simd_cosine_similarity(&a, &b);
+		assert!((scalar - simd).abs() < 1e-4, "scalar={scalar} simd={simd}");
+	}
+
+	#[test]
+	fn simd_empty_vectors() {
+		assert_eq!(simd_dot_product(&[], &[]), 0.0);
+		assert_eq!(simd_cosine_similarity(&[], &[]), 0.0);
+		assert_eq!(simd_euclidean_distance(&[], &[]), 0.0);
+		assert_eq!(simd_manhattan_distance(&[], &[]), 0.0);
+	}
+
+	#[test]
+	fn simd_mismatched_lengths() {
+		assert_eq!(simd_dot_product(&[1.0], &[1.0, 2.0]), 0.0);
+		assert_eq!(simd_cosine_similarity(&[1.0], &[1.0, 2.0]), 0.0);
+		assert_eq!(simd_euclidean_distance(&[1.0], &[1.0, 2.0]), 0.0);
+		assert_eq!(simd_manhattan_distance(&[1.0], &[1.0, 2.0]), 0.0);
+	}
+
+	#[test]
+	fn simd_cosine_distance_wrapper() {
+		let a: Vec<f32> = (0..384).map(|i| (i as f32) * 0.01).collect();
+		let b: Vec<f32> = (0..384).map(|i| ((384 - i) as f32) * 0.01).collect();
+		let sim = simd_cosine_similarity(&a, &b);
+		let dist = simd_cosine_distance(&a, &b);
+		assert!((dist - (1.0 - sim)).abs() < 1e-10);
+	}
+
+	#[test]
+	fn simd_dot_product_distance_wrapper() {
+		let a: Vec<f32> = (0..384).map(|i| (i as f32) * 0.01).collect();
+		let b: Vec<f32> = (0..384).map(|i| ((384 - i) as f32) * 0.01).collect();
+		let sim = simd_dot_product(&a, &b);
+		let dist = simd_dot_product_distance(&a, &b);
+		assert!((dist + sim).abs() < 1e-10);
+	}
+
+	#[test]
+	fn simd_identical_vectors() {
+		let v: Vec<f32> = (0..256).map(|i| (i as f32) * 0.1).collect();
+		// Cosine similarity of identical vectors should be ~1.0
+		let sim = simd_cosine_similarity(&v, &v);
+		assert!((sim - 1.0).abs() < 1e-5, "cosine sim of identical={sim}");
+		// Euclidean distance of identical vectors should be ~0.0
+		let dist = simd_euclidean_distance(&v, &v);
+		assert!(dist.abs() < 1e-3, "euclidean dist of identical={dist}");
+		// Manhattan distance of identical vectors should be ~0.0
+		let dist = simd_manhattan_distance(&v, &v);
+		assert!(dist.abs() < 1e-3, "manhattan dist of identical={dist}");
+	}
+
+	// -- DistanceMetric dispatches to SIMD ----------------------------------
+
+	#[test]
+	fn distance_metric_uses_simd_paths() {
+		let a: Vec<f32> = (0..384).map(|i| (i as f32) * 0.01).collect();
+		let b: Vec<f32> = (0..384).map(|i| ((384 - i) as f32) * 0.01).collect();
+
+		// Verify DistanceMetric methods agree with direct SIMD calls
+		let sim = DistanceMetric::Cosine.similarity(&a, &b);
+		let simd = simd_cosine_similarity(&a, &b);
+		assert!((sim - simd).abs() < 1e-10);
+
+		let f = DistanceMetric::Euclidean.distance_fn();
+		let simd = simd_euclidean_distance(&a, &b);
+		assert!((f(&a, &b) - simd).abs() < 1e-10);
+
+		let sim = DistanceMetric::DotProduct.similarity(&a, &b);
+		let simd = simd_dot_product(&a, &b);
+		assert!((sim - simd).abs() < 1e-10);
+
+		let f = DistanceMetric::Manhattan.distance_fn();
+		let simd = simd_manhattan_distance(&a, &b);
+		assert!((f(&a, &b) - simd).abs() < 1e-10);
 	}
 }

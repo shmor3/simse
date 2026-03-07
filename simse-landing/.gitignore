@@ -1,7 +1,0 @@
-node_modules/
-dist/
-build/
-.wrangler/
-.react-router/
-worker-configuration.d.ts
-*.tsbuildinfo

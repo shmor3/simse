@@ -5,7 +5,7 @@ export async function hashPassword(password: string): Promise<string> {
 	const salt = crypto.getRandomValues(new Uint8Array(16));
 	const key = await deriveKey(password, salt, CURRENT_ITERATIONS);
 	const hash = await crypto.subtle.exportKey('raw', key);
-	const hashArray = new Uint8Array(hash);
+	const hashArray = new Uint8Array(hash as ArrayBuffer);
 
 	const saltB64 = btoa(String.fromCharCode(...salt));
 	const hashB64 = btoa(String.fromCharCode(...hashArray));
@@ -35,7 +35,7 @@ export async function verifyPassword(
 
 	const key = await deriveKey(password, salt, iterations);
 	const hash = await crypto.subtle.exportKey('raw', key);
-	const hashArray = new Uint8Array(hash);
+	const hashArray = new Uint8Array(hash as ArrayBuffer);
 
 	if (hashArray.length !== storedHash.length) return false;
 	let diff = 0;

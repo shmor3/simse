@@ -41,6 +41,7 @@ function getClientIp(
 
 export const rateLimitMiddleware = createMiddleware<{
 	Bindings: Env;
+	Variables: AppVariables;
 }>(async (c, next) => {
 	const now = Date.now();
 	if (now - lastPrune > 60_000) {

@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { renderTemplate } from './render';
 import notificationsRoute from './routes/notifications';
 import { sendEmail } from './send';
+import type { SecretsStoreNamespace } from './types';
 
 type CommsMessage =
 	| {

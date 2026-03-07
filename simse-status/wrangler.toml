@@ -9,9 +9,9 @@ binding = "DB"
 database_name = "simse-status-db"
 database_id = "placeholder-create-via-wrangler"
 
-[analytics_engine]
-dataset = "simse-analytics"
-binding = "ANALYTICS"
+[[queues.producers]]
+queue = "simse-status-analytics"
+binding = "ANALYTICS_QUEUE"
 
 [triggers]
 crons = ["* * * * *"]

@@ -249,8 +249,8 @@ export default function NavPanel({
 				))}
 			</nav>
 
-			{/* Settings */}
-			<div className="border-t border-zinc-800 p-3">
+			{/* Bottom section */}
+			<div className="border-t border-zinc-800 p-3 space-y-0.5">
 				<NavLink
 					to={settingsTo}
 					onClick={() => onClose?.()}
@@ -290,6 +290,11 @@ export default function NavPanel({
 						</>
 					)}
 				</NavLink>
+
+				{/* Version */}
+				<div className="px-3 pt-2">
+					<p className="font-mono text-[10px] text-zinc-800">v0.1.0-alpha</p>
+				</div>
 			</div>
 		</aside>
 	);

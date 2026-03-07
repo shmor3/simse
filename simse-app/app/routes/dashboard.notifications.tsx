@@ -5,6 +5,21 @@ import Button from '~/components/ui/Button';
 import Card from '~/components/ui/Card';
 import EmptyState from '~/components/ui/EmptyState';
 import { type ApiResponse, authenticatedApi } from '~/lib/api.server';
+
+function relativeTime(dateStr: string): string {
+	const now = Date.now();
+	const then = new Date(dateStr).getTime();
+	const diff = Math.max(0, now - then);
+	const mins = Math.floor(diff / 60000);
+	if (mins < 1) return 'just now';
+	if (mins < 60) return `${mins}m ago`;
+	const hrs = Math.floor(mins / 60);
+	if (hrs < 24) return `${hrs}h ago`;
+	const days = Math.floor(hrs / 24);
+	if (days < 7) return `${days}d ago`;
+	return new Date(dateStr).toLocaleDateString();
+}
+
 import type { Route } from './+types/dashboard.notifications';
 
 export async function loader({ request }: Route.LoaderArgs) {
@@ -176,7 +191,7 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
 									</div>
 									<p className="mt-0.5 text-[13px] text-zinc-500">{n.body}</p>
 									<p className="mt-1 font-mono text-[11px] text-zinc-700">
-										{new Date(n.created_at).toLocaleString()}
+										{relativeTime(n.created_at)}
 									</p>
 								</div>
 								{!n.read && (

@@ -189,7 +189,7 @@ export default function Team({ loaderData }: Route.ComponentProps) {
 						{invites.map((inv) => (
 							<div
 								key={inv.id}
-								className="flex items-center justify-between px-6 py-4"
+								className="flex items-center justify-between px-6 py-4 transition-colors hover:bg-zinc-800/20"
 							>
 								<div>
 									<p className="text-sm text-zinc-300">{inv.email}</p>

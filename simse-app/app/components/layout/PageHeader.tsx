@@ -18,6 +18,8 @@ export default function PageHeader({
 				{description && (
 					<p className="mt-1 text-sm text-zinc-500">{description}</p>
 				)}
+				{/* Subtle gradient underline */}
+				<div className="mt-4 h-px w-16 bg-gradient-to-r from-emerald-400/40 to-transparent" />
 			</div>
 			{action && <div>{action}</div>}
 		</div>

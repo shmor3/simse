@@ -2,7 +2,7 @@
 
 A modular pipeline framework for orchestrating multi-step AI workflows. Connects to AI backends via [ACP](https://agentclientprotocol.com), exposes tools via [MCP](https://modelcontextprotocol.io), runs local inference with [Candle](https://github.com/huggingface/candle), and provides file-backed adaptive memory with vector search, a predictive coding network, and graph indexing.
 
-The entire core is implemented in **Rust**. Each crate is a standalone binary communicating over **JSON-RPC 2.0 / NDJSON stdio**. The cloud platform runs on **Cloudflare Workers** in TypeScript.
+The entire core is implemented in **Rust** in a single `simse-core` crate with feature-gated modules. The cloud platform runs on **Cloudflare Workers** in TypeScript.
 
 ## Features
 
@@ -16,21 +16,28 @@ The entire core is implemented in **Rust**. Each crate is a standalone binary co
 
 ## Repository Layout
 
-### Rust Crates
+This is a monorepo using git submodules:
 
-| Crate | Path | Description |
-|-------|------|-------------|
-| `simse-engine` | `simse-code/engine` | Unified engine — ACP, MCP, and ML inference over JSON-RPC 2.0 / NDJSON stdio |
-| `simse-core` | `simse-core` | Orchestration library — agentic loop, chains, tools, hooks, sessions, library |
-| `simse-adaptive` | `simse-code/adaptive` | Adaptive engine — vector store (SIMD, HNSW, quantization), PCN, MMR/RRF fusion, cataloging, deduplication, graph index |
-| `simse-sandbox` | `simse-code/sandbox` | Sandbox engine — VFS + VSH + VNet, local and SSH backends |
-| `simse-remote` | `simse-code/remote` | Remote access engine — auth, WebSocket tunnel, request routing |
-| `simse-ui-core` | `simse-ui-core` | Platform-agnostic UI logic — state, input, commands, config (no I/O) |
-| `simse-tui` | `simse-tui` | Terminal UI — ratatui + crossterm, Elm Architecture |
+| Submodule | Description |
+|-----------|-------------|
+| `simse-core` | Rust — orchestration library with feature-gated modules (engine, adaptive, sandbox, remote) |
+| `simse-cli` | Rust — terminal UI + UI core (ratatui, Elm Architecture) |
+| `simse-cloud` | TypeScript — all Cloudflare Workers (nested submodules: app, api, auth, payments, bi, cdn, landing, mailer, status) |
+| `simse-brand` | Brand assets — logos, screenshots, design system, guidelines, copy |
 
-### TypeScript Services (Cloudflare Workers)
+### simse-core Features
 
-| Package | Description |
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `engine` | yes | ACP + MCP + ML inference (Candle) |
+| `adaptive` | yes | Vector store + PCN (SIMD, HNSW, quantization, MMR/RRF) |
+| `sandbox` | yes | VFS + VSH + VNet (local + SSH backends) |
+| `remote` | yes | Remote access tunneling (WebSocket) |
+| `cuda`/`metal`/`mkl`/`accelerate` | no | Hardware-accelerated inference |
+
+### simse-cloud Services
+
+| Service | Description |
 |---------|-------------|
 | `simse-app` | SaaS web app + relay (React Router + Cloudflare Pages + Durable Objects) |
 | `simse-api` | API gateway — route proxying, auth validation, secrets middleware |
@@ -42,44 +49,31 @@ The entire core is implemented in **Rust**. Each crate is a standalone binary co
 | `simse-mailer` | Email templates + notifications |
 | `simse-status` | Status page (React Router + D1 + Cron) |
 
-### Other
-
-| Directory | Description |
-|-----------|-------------|
-| `simse-brand` | Brand assets — logos, screenshots, design system, guidelines, copy |
-
 ## Architecture
 
 ```
                           ┌─────────────┐
-                          │  simse-tui  │
+                          │  simse-cli  │
                           │  (ratatui)  │
                           └──────┬──────┘
                                  │
                           ┌──────┴──────┐
-                          │ simse-ui-core│
+                          │ simse-core  │
+                          │             │
+                          ├─────────────┤
+                          │ orchestration│
+                          │ engine (ACP │
+                          │  MCP, ML)   │
+                          │ adaptive    │
+                          │ sandbox     │
+                          │ remote      │
                           └──────┬──────┘
                                  │
                           ┌──────┴──────┐
-                          │ simse-core  │
-                          │(orchestration)│
-                          └──┬───┬───┬──┘
-                 ┌───────────┤   │   ├───────────┐
-                 │           │   │   │           │
-          ┌──────┴──────┐   │   │   │   ┌───────┴───────┐
-          │simse-engine │   │   │   │   │simse-adaptive │
-          │ ACP+MCP+ML  │   │   │   │   │ vector+PCN    │
-          └─────────────┘   │   │   │   └───────────────┘
-                            │   │   │
-                 ┌──────────┘   │   └──────────┐
-                 │              │              │
-          ┌──────┴──────┐ ┌────┴─────┐ ┌──────┴──────┐
-          │simse-sandbox│ │simse-    │ │  (cloud     │
-          │ VFS+VSH+VNet│ │ remote   │ │  services)  │
-          └─────────────┘ └──────────┘ └─────────────┘
+                          │ simse-cloud │
+                          │  (TS/CF)    │
+                          └─────────────┘
 ```
-
-All Rust crates communicate over JSON-RPC 2.0 / NDJSON stdio. Tracing and logs go to stderr.
 
 ## Requirements
 
@@ -89,40 +83,28 @@ All Rust crates communicate over JSON-RPC 2.0 / NDJSON stdio. Tracing and logs g
 
 ## Building
 
-### Rust Crates
+### Rust
 
 ```bash
-# Via bun scripts
-bun run build:core             # simse-core
-bun run build:adaptive-engine  # simse-adaptive
-bun run build:acp-engine       # simse-engine (ACP binary)
-bun run build:mcp-engine       # simse-engine (MCP binary)
-bun run build:sandbox-engine   # simse-sandbox
-bun run build:remote-engine    # simse-remote
-bun run build:tui              # simse-tui
-
-# Or directly with cargo
-cd simse-code/engine && cargo build --release
-cd simse-core && cargo build --release
-
-# Hardware-accelerated inference
-cd simse-code/engine && cargo build --release --features cuda    # NVIDIA GPU
-cd simse-code/engine && cargo build --release --features metal   # Apple GPU
-cd simse-code/engine && cargo build --release --features mkl     # Intel CPU
+cd simse-core && cargo build --release                    # All features
+cd simse-core && cargo build --release --features cuda    # NVIDIA GPU
+cd simse-core && cargo build --release --features metal   # Apple GPU
+cd simse-core && cargo build --release --features mkl     # Intel CPU
+cd simse-cli && cargo build --release                     # CLI
 ```
 
 ### TypeScript Services
 
 ```bash
-cd simse-app && npm install && npm run build
-cd simse-api && npm install && npm run build
-cd simse-auth && npm install && npm run build
-cd simse-payments && npm install && npm run build
-cd simse-cdn && npm install && npm run build
-cd simse-bi && npm install && npm run build
-cd simse-landing && npm install && npm run build
-cd simse-mailer && npm install && npm run build
-cd simse-status && npm install && npm run build
+cd simse-cloud/simse-app && npm install && npm run build
+cd simse-cloud/simse-api && npm install && npm run build
+cd simse-cloud/simse-auth && npm install && npm run build
+cd simse-cloud/simse-payments && npm install && npm run build
+cd simse-cloud/simse-bi && npm install && npm run build
+cd simse-cloud/simse-cdn && npm install && npm run build
+cd simse-cloud/simse-landing && npm install && npm run build
+cd simse-cloud/simse-mailer && npm install && npm run build
+cd simse-cloud/simse-status && npm install && npm run build
 ```
 
 ## Testing
@@ -130,20 +112,19 @@ cd simse-status && npm install && npm run build
 ### Rust
 
 ```bash
-cd simse-core && cargo test
-cd simse-code/engine && cargo test
-cd simse-code/adaptive && cargo test
-cd simse-code/sandbox && cargo test
-cd simse-code/remote && cargo test
-cd simse-ui-core && cargo test
-cd simse-tui && cargo test
+cd simse-core && cargo test                          # All tests
+cd simse-core && cargo test --features engine        # Engine module only
+cd simse-core && cargo test --features adaptive      # Adaptive module only
+cd simse-core && cargo test --features sandbox       # Sandbox module only
+cd simse-core && cargo test --features remote        # Remote module only
+cd simse-cli && cargo test                           # CLI tests
 ```
 
 ### TypeScript
 
 ```bash
-cd simse-cdn && npm run test
-cd simse-mailer && npm run test
+cd simse-cloud/simse-cdn && npm run test
+cd simse-cloud/simse-mailer && npm run test
 ```
 
 ### Linting
@@ -151,10 +132,10 @@ cd simse-mailer && npm run test
 All TypeScript services use [Biome](https://biomejs.dev) (tabs, single quotes, semicolons):
 
 ```bash
-cd simse-api && npm run lint
-cd simse-auth && npm run lint
-cd simse-payments && npm run lint
-cd simse-cdn && npm run lint
+cd simse-cloud/simse-api && npm run lint
+cd simse-cloud/simse-auth && npm run lint
+cd simse-cloud/simse-payments && npm run lint
+cd simse-cloud/simse-cdn && npm run lint
 ```
 
 Rust crates use standard `rustfmt` and `clippy -D warnings`.
@@ -162,9 +143,9 @@ Rust crates use standard `rustfmt` and `clippy -D warnings`.
 ## Key Patterns
 
 - **Rust-first** — All core logic is in Rust. TypeScript is only used for application/service layers on Cloudflare Workers.
-- **JSON-RPC 2.0 / NDJSON stdio** — Every Rust crate exposes its API as JSON-RPC methods over newline-delimited JSON on stdin/stdout.
-- **Backend enum dispatch** — simse-sandbox uses enum dispatch (`FsImpl`, `ShellImpl`, `NetImpl`) with `Local` and `Ssh` variants instead of trait objects.
-- **Callback pattern** — Tools, hooks, chains, and loops use oneshot channels + JSON-RPC notifications for async callback execution.
+- **Single-crate core** — `simse-core` uses feature flags (`engine`, `adaptive`, `sandbox`, `remote`) instead of separate crates.
+- **Backend enum dispatch** — Sandbox uses enum dispatch (`FsImpl`, `ShellImpl`, `NetImpl`) with `Local` and `Ssh` variants instead of trait objects.
+- **Callback pattern** — Tools, hooks, chains, and loops use oneshot channels for async callback execution.
 - **Centralized analytics** — All services produce events to per-service queues consumed by simse-bi, the sole writer to Analytics Engine and D1 audit store.
 
 ## License

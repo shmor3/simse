@@ -135,18 +135,7 @@ simse-core/
 
 `simse-cli/` is a submodule containing the merged TUI + UI core (formerly `simse-tui` + `simse-ui-core`). Elm Architecture with ratatui + crossterm + tokio. Includes platform-agnostic UI logic, state management, keybindings, command registry, markdown rendering, tool call display, permission dialogs, and settings overlays.
 
-### CDN Worker
-
-```tree
-simse-cdn/                  # TypeScript — Cloudflare Worker at cdn.simse.dev
-  src/
-    index.ts                # Worker fetch handler (media, versioned downloads, latest redirect)
-    types.ts                # Env interface (R2Bucket, KVNamespace)
-    index.test.ts           # Integration tests (8 tests, @cloudflare/vitest-pool-workers)
-    test-setup.ts           # R2/KV mock seeding for tests
-  wrangler.toml             # R2 bucket (CDN_BUCKET) + KV namespace (VERSION_STORE) bindings
-  vitest.config.ts          # Vitest workers pool config
-```
+### CDN Worker (`simse-cloud/simse-cdn`)
 
 **Routes:**
 | Path | Behavior |

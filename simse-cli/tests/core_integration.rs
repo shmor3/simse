@@ -115,8 +115,8 @@ fn tool_call_result_diff_none_by_default() {
 #[test]
 fn config_loading_with_defaults() {
 	// Test that config loading works with default options.
-	let options = simse_tui::config::ConfigOptions::default();
-	let config = simse_tui::config::load_config(&options);
+	let options = simse_cli::config::ConfigOptions::default();
+	let config = simse_cli::config::load_config(&options);
 	// Should at least have a data_dir.
 	assert!(!config.data_dir.as_os_str().is_empty());
 }
@@ -128,7 +128,7 @@ fn config_loading_with_defaults() {
 #[test]
 fn session_store_create_and_list() {
 	let dir = tempfile::tempdir().unwrap();
-	let store = simse_tui::session_store::SessionStore::new(dir.path());
+	let store = simse_cli::session_store::SessionStore::new(dir.path());
 	let id = store.create("/tmp/test").unwrap();
 	let sessions = store.list();
 	assert_eq!(sessions.len(), 1);
@@ -138,10 +138,10 @@ fn session_store_create_and_list() {
 #[test]
 fn session_store_round_trip() {
 	let dir = tempfile::tempdir().unwrap();
-	let store = simse_tui::session_store::SessionStore::new(dir.path());
+	let store = simse_cli::session_store::SessionStore::new(dir.path());
 	let id = store.create("/tmp/project").unwrap();
 
-	let msg = simse_tui::session_store::SessionMessage {
+	let msg = simse_cli::session_store::SessionMessage {
 		role: "user".into(),
 		content: "Hello, world!".into(),
 		tool_call_id: None,

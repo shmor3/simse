@@ -4,7 +4,7 @@
 //! These commands are largely UI-only (no bridge calls needed).  The handlers
 //! return `CommandOutput` items that the TUI dispatch layer can act on directly.
 
-use simse_ui_core::commands::registry::{parse_bool_arg, CommandCategory, CommandDefinition};
+use crate::ui_core::commands::registry::{parse_bool_arg, CommandCategory, CommandDefinition};
 use std::collections::BTreeMap;
 
 use super::{BridgeAction, CommandOutput, OverlayAction};
@@ -156,7 +156,7 @@ fn format_help_text(commands: &[CommandDefinition]) -> String {
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use simse_ui_core::commands::registry::all_commands;
+	use crate::ui_core::commands::registry::all_commands;
 
 	fn test_commands() -> Vec<CommandDefinition> {
 		all_commands()

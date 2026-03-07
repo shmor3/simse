@@ -34,7 +34,7 @@ use ratatui::{
 	Frame,
 };
 
-use simse_ui_core::config::settings_state::{SettingsFormState, SettingsLevel, CONFIG_FILES};
+use crate::ui_core::config::settings_state::{SettingsFormState, SettingsLevel, CONFIG_FILES};
 
 // ── Constants ───────────────────────────────────────────
 
@@ -241,7 +241,7 @@ fn render_editing(
 		.current_file_schema()
 		.and_then(|schema| {
 			let field = schema.fields.get(state.selected_field)?.clone();
-			if let simse_ui_core::config::settings_schema::FieldType::Select { options } = field.field_type {
+			if let crate::ui_core::config::settings_schema::FieldType::Select { options } = field.field_type {
 				Some(options)
 			} else {
 				None

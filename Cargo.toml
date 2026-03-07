@@ -1,8 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
-    "simse-ui-core",
-    "simse-tui",
+    "simse-cli",
     "simse-core",
 ]
 

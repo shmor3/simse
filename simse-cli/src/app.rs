@@ -7,11 +7,11 @@ use ratatui::{
 	widgets::{Block, Borders, Clear, Paragraph, Wrap},
 	Frame,
 };
-use simse_ui_core::app::{
+use crate::ui_core::app::{
 	OutputItem, PermissionRequest, ToolCallState, ToolCallStatus,
 };
-use simse_ui_core::commands::registry::{all_commands, CommandDefinition};
-use simse_ui_core::input::state as input;
+use crate::ui_core::commands::registry::{all_commands, CommandDefinition};
+use crate::ui_core::input::state as input;
 
 use crate::autocomplete::{render_inline_completions, CommandAutocompleteState};
 use crate::onboarding::OnboardingState;
@@ -29,7 +29,7 @@ use crate::dispatch::{parse_command_line, DispatchContext};
 use crate::output;
 use crate::overlays::librarian::{render_librarian_explorer, LibrarianExplorerState};
 use crate::overlays::settings::render_settings_form;
-use simse_ui_core::config::settings_state::{SettingsFormState, SettingsAction};
+use crate::ui_core::config::settings_state::{SettingsFormState, SettingsAction};
 use crate::overlays::setup::{render_setup_selector, SetupSelectorState};
 
 // ── Screen ──────────────────────────────────────────────
@@ -941,7 +941,7 @@ fn render_chat_area(app: &App, frame: &mut Frame, area: Rect) {
 
 	// Show active tool calls.
 	for tc in &app.active_tool_calls {
-		let tc_lines = output::render_output_item(&simse_ui_core::app::OutputItem::ToolCall(
+		let tc_lines = output::render_output_item(&crate::ui_core::app::OutputItem::ToolCall(
 			tc.clone(),
 		));
 		lines.extend(tc_lines);
@@ -1188,7 +1188,7 @@ fn handle_setup_action(app: &mut App, action: crate::overlays::setup::SetupActio
 #[cfg(test)]
 mod tests {
 	use super::*;
-	use simse_ui_core::config::settings_state::SettingsLevel;
+	use crate::ui_core::config::settings_state::SettingsLevel;
 
 	#[test]
 	fn new_app_defaults() {

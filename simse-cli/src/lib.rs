@@ -1,8 +1,9 @@
-//! SimSE TUI — Terminal interface for SimSE.
+//! simse-cli — SimSE terminal interface.
 //!
-//! This library re-exports the TUI modules so that integration tests can
-//! exercise them without duplicating the module tree.
+//! This crate merges the platform-agnostic UI logic (ui_core) with the
+//! ratatui-based terminal frontend into a single CLI binary.
 
+pub mod ui_core;
 pub mod app;
 pub mod at_mention;
 pub mod autocomplete;

@@ -32,6 +32,9 @@ use crate::engine::mcp::protocol::{
 	ToolInfo, TransportType,
 };
 use crate::engine::mcp::stdio_transport::{NotificationHandler, StdioTransport, StdioTransportConfig, SubscriptionHandle, Transport};
+use crate::engine::acp::resilience::{
+	CircuitBreaker, HealthMonitor, HealthSnapshot, HealthStatus,
+};
 
 // ===========================================================================
 // Resilience — MCP-specific retry configuration and helpers

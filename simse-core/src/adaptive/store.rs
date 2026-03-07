@@ -973,7 +973,7 @@ impl Store {
 
 			// Compute vector score
 			let vector_score =
-				if let (Some(ref emb), Some(qm)) = (&options.query_embedding, query_mag) {
+				if let (Some(emb), Some(qm)) = (&options.query_embedding, query_mag) {
 					if qm > 0.0 {
 						self.fast_cosine(emb, qm, vol)
 					} else {

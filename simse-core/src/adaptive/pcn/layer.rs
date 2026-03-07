@@ -1,5 +1,5 @@
 use rand::rngs::StdRng;
-use rand::{Rng, RngExt, SeedableRng};
+use rand::{Rng, SeedableRng};
 
 use crate::adaptive::pcn::config::Activation;
 

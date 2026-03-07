@@ -1,4 +1,4 @@
-use rand::RngExt;
+use rand::Rng;
 
 use crate::adaptive::pcn::config::PcnConfig;
 use crate::adaptive::pcn::layer::PcnLayer;

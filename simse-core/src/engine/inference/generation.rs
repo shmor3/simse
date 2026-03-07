@@ -4,7 +4,7 @@ use anyhow::Result;
 
 use crate::engine::models::{ModelRegistry, SamplingParams};
 use crate::engine::protocol::*;
-use crate::engine::transport::NdjsonTransport;
+use crate::engine::mcp::rpc_transport::NdjsonTransport;
 
 /// Run text generation with streaming notifications.
 ///

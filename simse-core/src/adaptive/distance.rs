@@ -260,24 +260,26 @@ unsafe fn avx2_hsum_ps(v: std::arch::x86_64::__m256) -> f32 {
 #[allow(clippy::undocumented_unsafe_blocks)]
 unsafe fn avx2_dot_product(a: &[f32], b: &[f32]) -> f64 {
 	use std::arch::x86_64::*;
-	let n = a.len();
-	let chunks = n / 8;
-	let mut sum = _mm256_setzero_ps();
+	unsafe {
+		let n = a.len();
+		let chunks = n / 8;
+		let mut sum = _mm256_setzero_ps();
 
-	for i in 0..chunks {
-		let va = _mm256_loadu_ps(a.as_ptr().add(i * 8));
-		let vb = _mm256_loadu_ps(b.as_ptr().add(i * 8));
-		sum = _mm256_fmadd_ps(va, vb, sum);
+		for i in 0..chunks {
+			let va = _mm256_loadu_ps(a.as_ptr().add(i * 8));
+			let vb = _mm256_loadu_ps(b.as_ptr().add(i * 8));
+			sum = _mm256_fmadd_ps(va, vb, sum);
+		}
+
+		let mut result = avx2_hsum_ps(sum) as f64;
+
+		// Scalar tail for remaining elements
+		for i in (chunks * 8)..n {
+			result += (*a.get_unchecked(i) as f64) * (*b.get_unchecked(i) as f64);
+		}
+
+		result
 	}
-
-	let mut result = avx2_hsum_ps(sum) as f64;
-
-	// Scalar tail for remaining elements
-	for i in (chunks * 8)..n {
-		result += (*a.get_unchecked(i) as f64) * (*b.get_unchecked(i) as f64);
-	}
-
-	result
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -285,42 +287,44 @@ unsafe fn avx2_dot_product(a: &[f32], b: &[f32]) -> f64 {
 #[allow(clippy::undocumented_unsafe_blocks)]
 unsafe fn avx2_cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
 	use std::arch::x86_64::*;
-	let n = a.len();
-	let chunks = n / 8;
-	let mut dot_acc = _mm256_setzero_ps();
-	let mut norm_a_acc = _mm256_setzero_ps();
-	let mut norm_b_acc = _mm256_setzero_ps();
+	unsafe {
+		let n = a.len();
+		let chunks = n / 8;
+		let mut dot_acc = _mm256_setzero_ps();
+		let mut norm_a_acc = _mm256_setzero_ps();
+		let mut norm_b_acc = _mm256_setzero_ps();
 
-	for i in 0..chunks {
-		let va = _mm256_loadu_ps(a.as_ptr().add(i * 8));
-		let vb = _mm256_loadu_ps(b.as_ptr().add(i * 8));
-		dot_acc = _mm256_fmadd_ps(va, vb, dot_acc);
-		norm_a_acc = _mm256_fmadd_ps(va, va, norm_a_acc);
-		norm_b_acc = _mm256_fmadd_ps(vb, vb, norm_b_acc);
-	}
+		for i in 0..chunks {
+			let va = _mm256_loadu_ps(a.as_ptr().add(i * 8));
+			let vb = _mm256_loadu_ps(b.as_ptr().add(i * 8));
+			dot_acc = _mm256_fmadd_ps(va, vb, dot_acc);
+			norm_a_acc = _mm256_fmadd_ps(va, va, norm_a_acc);
+			norm_b_acc = _mm256_fmadd_ps(vb, vb, norm_b_acc);
+		}
 
-	let mut dot = avx2_hsum_ps(dot_acc) as f64;
-	let mut norm_a = avx2_hsum_ps(norm_a_acc) as f64;
-	let mut norm_b = avx2_hsum_ps(norm_b_acc) as f64;
+		let mut dot = avx2_hsum_ps(dot_acc) as f64;
+		let mut norm_a = avx2_hsum_ps(norm_a_acc) as f64;
+		let mut norm_b = avx2_hsum_ps(norm_b_acc) as f64;
 
-	// Scalar tail
-	for i in (chunks * 8)..n {
-		let ai = *a.get_unchecked(i) as f64;
-		let bi = *b.get_unchecked(i) as f64;
-		dot += ai * bi;
-		norm_a += ai * ai;
-		norm_b += bi * bi;
-	}
+		// Scalar tail
+		for i in (chunks * 8)..n {
+			let ai = *a.get_unchecked(i) as f64;
+			let bi = *b.get_unchecked(i) as f64;
+			dot += ai * bi;
+			norm_a += ai * ai;
+			norm_b += bi * bi;
+		}
 
-	let denom = norm_a.sqrt() * norm_b.sqrt();
-	if denom == 0.0 {
-		return 0.0;
+		let denom = norm_a.sqrt() * norm_b.sqrt();
+		if denom == 0.0 {
+			return 0.0;
+		}
+		let result = dot / denom;
+		if !result.is_finite() {
+			return 0.0;
+		}
+		result.clamp(-1.0, 1.0)
 	}
-	let result = dot / denom;
-	if !result.is_finite() {
-		return 0.0;
-	}
-	result.clamp(-1.0, 1.0)
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -328,26 +332,28 @@ unsafe fn avx2_cosine_similarity(a: &[f32], b: &[f32]) -> f64 {
 #[allow(clippy::undocumented_unsafe_blocks)]
 unsafe fn avx2_euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
 	use std::arch::x86_64::*;
-	let n = a.len();
-	let chunks = n / 8;
-	let mut sum = _mm256_setzero_ps();
+	unsafe {
+		let n = a.len();
+		let chunks = n / 8;
+		let mut sum = _mm256_setzero_ps();
 
-	for i in 0..chunks {
-		let va = _mm256_loadu_ps(a.as_ptr().add(i * 8));
-		let vb = _mm256_loadu_ps(b.as_ptr().add(i * 8));
-		let diff = _mm256_sub_ps(va, vb);
-		sum = _mm256_fmadd_ps(diff, diff, sum);
+		for i in 0..chunks {
+			let va = _mm256_loadu_ps(a.as_ptr().add(i * 8));
+			let vb = _mm256_loadu_ps(b.as_ptr().add(i * 8));
+			let diff = _mm256_sub_ps(va, vb);
+			sum = _mm256_fmadd_ps(diff, diff, sum);
+		}
+
+		let mut result = avx2_hsum_ps(sum) as f64;
+
+		// Scalar tail
+		for i in (chunks * 8)..n {
+			let diff = (*a.get_unchecked(i) as f64) - (*b.get_unchecked(i) as f64);
+			result += diff * diff;
+		}
+
+		result.sqrt()
 	}
-
-	let mut result = avx2_hsum_ps(sum) as f64;
-
-	// Scalar tail
-	for i in (chunks * 8)..n {
-		let diff = (*a.get_unchecked(i) as f64) - (*b.get_unchecked(i) as f64);
-		result += diff * diff;
-	}
-
-	result.sqrt()
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -355,28 +361,30 @@ unsafe fn avx2_euclidean_distance(a: &[f32], b: &[f32]) -> f64 {
 #[allow(clippy::undocumented_unsafe_blocks)]
 unsafe fn avx2_manhattan_distance(a: &[f32], b: &[f32]) -> f64 {
 	use std::arch::x86_64::*;
-	let n = a.len();
-	let chunks = n / 8;
-	// Sign mask: clear the sign bit to compute absolute value
-	let sign_mask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFF_FFFFu32 as i32));
-	let mut sum = _mm256_setzero_ps();
+	unsafe {
+		let n = a.len();
+		let chunks = n / 8;
+		// Sign mask: clear the sign bit to compute absolute value
+		let sign_mask = _mm256_castsi256_ps(_mm256_set1_epi32(0x7FFF_FFFFu32 as i32));
+		let mut sum = _mm256_setzero_ps();
 
-	for i in 0..chunks {
-		let va = _mm256_loadu_ps(a.as_ptr().add(i * 8));
-		let vb = _mm256_loadu_ps(b.as_ptr().add(i * 8));
-		let diff = _mm256_sub_ps(va, vb);
-		let abs_diff = _mm256_and_ps(diff, sign_mask);
-		sum = _mm256_add_ps(sum, abs_diff);
+		for i in 0..chunks {
+			let va = _mm256_loadu_ps(a.as_ptr().add(i * 8));
+			let vb = _mm256_loadu_ps(b.as_ptr().add(i * 8));
+			let diff = _mm256_sub_ps(va, vb);
+			let abs_diff = _mm256_and_ps(diff, sign_mask);
+			sum = _mm256_add_ps(sum, abs_diff);
+		}
+
+		let mut result = avx2_hsum_ps(sum) as f64;
+
+		// Scalar tail
+		for i in (chunks * 8)..n {
+			result += ((*a.get_unchecked(i) as f64) - (*b.get_unchecked(i) as f64)).abs();
+		}
+
+		result
 	}
-
-	let mut result = avx2_hsum_ps(sum) as f64;
-
-	// Scalar tail
-	for i in (chunks * 8)..n {
-		result += ((*a.get_unchecked(i) as f64) - (*b.get_unchecked(i) as f64)).abs();
-	}
-
-	result
 }
 
 // ---------------------------------------------------------------------------

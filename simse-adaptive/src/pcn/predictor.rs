@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use crate::snapshot::{ModelSnapshot, PredictionResult};
+use crate::pcn::snapshot::{ModelSnapshot, PredictionResult};
 
 /// Summary statistics about the current model state.
 pub struct ModelStats {
@@ -127,9 +127,9 @@ impl Predictor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pcn_config::{Activation, LayerConfig, PcnConfig};
-    use crate::network::PredictiveCodingNetwork;
-    use crate::vocabulary::VocabularyManager;
+    use crate::pcn::config::{Activation, LayerConfig, PcnConfig};
+    use crate::pcn::network::PredictiveCodingNetwork;
+    use crate::pcn::vocabulary::VocabularyManager;
 
     fn test_config() -> PcnConfig {
         PcnConfig {

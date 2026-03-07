@@ -20,12 +20,4 @@ pub mod graph;
 pub mod store;
 pub mod server;
 
-// PCN modules
-pub mod pcn_config;
-pub mod encoder;
-pub mod vocabulary;
-pub mod network;
-pub mod layer;
-pub mod predictor;
-pub mod trainer;
-pub mod snapshot;
+pub mod pcn;

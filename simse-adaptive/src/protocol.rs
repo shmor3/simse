@@ -1,7 +1,7 @@
 use serde::Deserialize;
 
-use crate::encoder::LibraryEvent;
-use crate::pcn_config::PcnConfig;
+use crate::pcn::encoder::InputEvent;
+use crate::pcn::config::PcnConfig;
 
 // JSON-RPC 2.0 error codes
 pub const INTERNAL_ERROR: i32 = -32603;
@@ -30,7 +30,7 @@ pub struct PcnInitializeParams {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FeedEventParams {
-	pub event: LibraryEvent,
+	pub event: InputEvent,
 }
 
 #[derive(Debug, Deserialize)]

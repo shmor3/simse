@@ -17,17 +17,17 @@ use serde::Deserialize;
 use tokio::sync::mpsc;
 use tracing::info;
 
-use crate::encoder::LibraryEvent;
+use crate::pcn::encoder::InputEvent;
 use crate::error::AdaptiveError;
-use crate::pcn_config::PcnConfig;
+use crate::pcn::config::PcnConfig;
 use crate::persistence::{load_snapshot, save_snapshot};
-use crate::predictor::Predictor;
+use crate::pcn::predictor::Predictor;
 use crate::context_format::{format_context, ContextFormatOptions};
 use crate::protocol::*;
 use crate::query_dsl::parse_query;
-use crate::snapshot::ModelSnapshot;
+use crate::pcn::snapshot::ModelSnapshot;
 use crate::store::{AddEntry, DuplicateBehavior, StoreConfig, Store};
-use crate::trainer::TrainingWorker;
+use crate::pcn::trainer::TrainingWorker;
 use crate::transport::NdjsonTransport;
 use crate::types::Lookup;
 
@@ -43,7 +43,7 @@ pub struct AdaptiveServer {
 	// PCN fields
 	snapshot: Arc<RwLock<ModelSnapshot>>,
 	predictor: Option<Predictor>,
-	event_tx: Option<mpsc::Sender<LibraryEvent>>,
+	event_tx: Option<mpsc::Sender<InputEvent>>,
 	pcn_initialized: bool,
 	pcn_config: Option<PcnConfig>,
 	embedding_dim: usize,
@@ -308,7 +308,7 @@ impl AdaptiveServer {
 		let embedding_dim = p.embedding_dim;
 
 		let snapshot = Arc::new(RwLock::new(ModelSnapshot::empty()));
-		let (tx, rx) = mpsc::channel::<LibraryEvent>(config.channel_capacity);
+		let (tx, rx) = mpsc::channel::<InputEvent>(config.channel_capacity);
 
 		let worker_snapshot = snapshot.clone();
 		let worker_config = config.clone();

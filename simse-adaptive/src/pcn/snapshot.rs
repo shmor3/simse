@@ -2,9 +2,9 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 
-use crate::pcn_config::{LayerConfig, PcnConfig};
-use crate::network::PredictiveCodingNetwork;
-use crate::vocabulary::{VocabularyManager, VocabularyState};
+use crate::pcn::config::{LayerConfig, PcnConfig};
+use crate::pcn::network::PredictiveCodingNetwork;
+use crate::pcn::vocabulary::{VocabularyManager, VocabularyState};
 
 fn default_inference_rate() -> f64 {
     0.1
@@ -34,7 +34,7 @@ pub struct ModelSnapshot {
     /// Bias for the input predictor layer.
     pub input_predictor_bias: Vec<f64>,
     /// Input predictor activation (matches first latent layer's activation).
-    pub input_predictor_activation: crate::pcn_config::Activation,
+    pub input_predictor_activation: crate::pcn::config::Activation,
     /// Serialized vocabulary state for persistence and reconstruction.
     pub vocabulary: VocabularyState,
     /// Training epoch at the time of snapshot.
@@ -205,7 +205,7 @@ impl ModelSnapshot {
             layer_biases: Vec::new(),
             input_predictor_weights: Vec::new(),
             input_predictor_bias: Vec::new(),
-            input_predictor_activation: crate::pcn_config::Activation::Relu,
+            input_predictor_activation: crate::pcn::config::Activation::Relu,
             vocabulary: VocabularyState {
                 topics: Vec::new(),
                 tags: Vec::new(),
@@ -223,7 +223,7 @@ impl ModelSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pcn_config::{Activation, LayerConfig, PcnConfig};
+    use crate::pcn::config::{Activation, LayerConfig, PcnConfig};
 
     fn test_config() -> PcnConfig {
         PcnConfig {

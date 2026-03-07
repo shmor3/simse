@@ -992,7 +992,7 @@ mod tests {
 // PCN model snapshot persistence
 // ---------------------------------------------------------------------------
 
-use crate::snapshot::ModelSnapshot;
+use crate::pcn::snapshot::ModelSnapshot;
 
 /// Save a [`ModelSnapshot`] to a file as JSON, optionally gzip-compressed.
 pub fn save_snapshot(snapshot: &ModelSnapshot, path: &str, compress: bool) -> Result<(), crate::error::AdaptiveError> {

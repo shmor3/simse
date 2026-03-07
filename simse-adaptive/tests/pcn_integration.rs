@@ -1,18 +1,18 @@
-use simse_adaptive_engine::pcn_config::{Activation, LayerConfig, PcnConfig};
-use simse_adaptive_engine::encoder::{InputEncoder, LibraryEvent};
-use simse_adaptive_engine::network::PredictiveCodingNetwork;
-use simse_adaptive_engine::predictor::Predictor;
-use simse_adaptive_engine::snapshot::ModelSnapshot;
-use simse_adaptive_engine::trainer::TrainingWorker;
-use simse_adaptive_engine::vocabulary::VocabularyManager;
+use simse_adaptive_engine::pcn::config::{Activation, LayerConfig, PcnConfig};
+use simse_adaptive_engine::pcn::encoder::{InputEncoder, InputEvent};
+use simse_adaptive_engine::pcn::network::PredictiveCodingNetwork;
+use simse_adaptive_engine::pcn::predictor::Predictor;
+use simse_adaptive_engine::pcn::snapshot::ModelSnapshot;
+use simse_adaptive_engine::pcn::trainer::TrainingWorker;
+use simse_adaptive_engine::pcn::vocabulary::VocabularyManager;
 use std::sync::{Arc, RwLock};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn make_event(embedding: Vec<f32>, topic: &str, tags: Vec<&str>) -> LibraryEvent {
-    LibraryEvent {
+fn make_event(embedding: Vec<f32>, topic: &str, tags: Vec<&str>) -> InputEvent {
+    InputEvent {
         embedding,
         topic: topic.to_string(),
         tags: tags.into_iter().map(String::from).collect(),
@@ -164,7 +164,7 @@ async fn trainer_and_predictor_work_together() {
 
     let embedding_dim = 4;
     let snapshot = Arc::new(RwLock::new(ModelSnapshot::empty()));
-    let (tx, rx) = tokio::sync::mpsc::channel::<LibraryEvent>(config.channel_capacity);
+    let (tx, rx) = tokio::sync::mpsc::channel::<InputEvent>(config.channel_capacity);
 
     // Spawn the training worker as a tokio task.
     let snap_clone = snapshot.clone();

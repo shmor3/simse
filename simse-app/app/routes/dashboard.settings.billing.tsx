@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { Form, redirect, useNavigation } from 'react-router';
 import PageHeader from '~/components/layout/PageHeader';
 import Badge from '~/components/ui/Badge';
@@ -100,11 +101,18 @@ export default function Billing({ loaderData }: Route.ComponentProps) {
 			/>
 
 			{/* Plan cards */}
-			<div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-3">
+			<div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-3 animate-fade-in-up">
 				{plans.map((plan) => {
 					const isCurrent = loaderData.plan === plan.current;
 					return (
-						<Card key={plan.name} accent={isCurrent} className="p-6">
+						<Card
+							key={plan.name}
+							accent={isCurrent ? 'gradient' : undefined}
+							className={clsx(
+								'card-hover p-6',
+								isCurrent && 'ring-1 ring-emerald-400/20',
+							)}
+						>
 							<div className="flex items-center justify-between">
 								<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
 									{plan.name}
@@ -117,30 +125,51 @@ export default function Billing({ loaderData }: Route.ComponentProps) {
 								</span>
 								<span className="text-sm text-zinc-500">{plan.period}</span>
 							</p>
-							<ul className="mt-6 space-y-2">
+							<ul className="mt-6 space-y-2.5">
 								{plan.features.map((f) => (
 									<li
 										key={f}
-										className="flex items-center gap-2 text-sm text-zinc-400"
+										className="flex items-center gap-2.5 text-sm text-zinc-400"
 									>
-										<span className="text-emerald-400">&#10003;</span>
+										<svg
+											className="h-3.5 w-3.5 shrink-0 text-emerald-400"
+											fill="none"
+											viewBox="0 0 24 24"
+											stroke="currentColor"
+											strokeWidth={2.5}
+										>
+											<path
+												strokeLinecap="round"
+												strokeLinejoin="round"
+												d="M5 13l4 4L19 7"
+											/>
+										</svg>
 										{f}
 									</li>
 								))}
 							</ul>
+							{!isCurrent && (
+								<Button
+									variant="secondary"
+									className="mt-6 w-full"
+									onClick={() => {}}
+								>
+									Upgrade
+								</Button>
+							)}
 						</Card>
 					);
 				})}
 			</div>
 
 			{/* Credit balance */}
-			<Card className="mt-8 p-6">
+			<Card className="mt-8 card-hover p-6 animate-stagger-3">
 				<div className="flex items-center justify-between">
 					<div>
 						<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
 							Credit balance
 						</p>
-						<p className="mt-2 text-2xl font-bold text-white">
+						<p className="mt-2 text-2xl font-bold text-emerald-400">
 							${loaderData.creditBalance.toFixed(2)}
 						</p>
 					</div>

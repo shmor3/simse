@@ -131,7 +131,7 @@ export default function Team({ loaderData }: Route.ComponentProps) {
 			/>
 
 			{/* Members */}
-			<Card className="mt-8 overflow-hidden">
+			<Card className="mt-8 overflow-hidden animate-fade-in-up">
 				<div className="border-b border-zinc-800 px-6 py-4">
 					<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
 						Members ({members.length})
@@ -141,7 +141,7 @@ export default function Team({ loaderData }: Route.ComponentProps) {
 					{members.map((m) => (
 						<div
 							key={m.id}
-							className="flex items-center justify-between px-6 py-4"
+							className="flex items-center justify-between px-6 py-4 transition-colors hover:bg-zinc-800/20"
 						>
 							<div className="flex items-center gap-3">
 								<Avatar name={m.name} />
@@ -179,7 +179,7 @@ export default function Team({ loaderData }: Route.ComponentProps) {
 
 			{/* Pending invites */}
 			{invites.length > 0 && (
-				<Card className="mt-6 overflow-hidden">
+				<Card className="mt-6 overflow-hidden animate-stagger-3">
 					<div className="border-b border-zinc-800 px-6 py-4">
 						<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
 							Pending invites ({invites.length})

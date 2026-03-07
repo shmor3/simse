@@ -151,7 +151,7 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
 			/>
 
 			{notifications.length === 0 ? (
-				<div className="mt-8">
+				<div className="mt-8 animate-fade-in-up">
 					<EmptyState
 						type="notifications"
 						title="All caught up"
@@ -159,12 +159,12 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
 					/>
 				</div>
 			) : (
-				<Card className="mt-8 overflow-hidden">
+				<Card className="mt-8 overflow-hidden animate-fade-in-up">
 					<div className="divide-y divide-zinc-800/50">
 						{notifications.map((n) => (
 							<div
 								key={n.id}
-								className={`flex items-start gap-4 px-6 py-4 ${!n.read ? 'bg-zinc-800/20' : ''}`}
+								className={`flex items-start gap-4 px-6 py-4 transition-colors hover:bg-zinc-800/20 ${!n.read ? 'bg-zinc-800/15' : ''}`}
 							>
 								{typeIcon(n.type)}
 								<div className="min-w-0 flex-1">
@@ -175,7 +175,7 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
 										)}
 									</div>
 									<p className="mt-0.5 text-[13px] text-zinc-500">{n.body}</p>
-									<p className="mt-1 text-[12px] text-zinc-700">
+									<p className="mt-1 font-mono text-[11px] text-zinc-700">
 										{new Date(n.created_at).toLocaleString()}
 									</p>
 								</div>
@@ -185,7 +185,7 @@ export default function Notifications({ loaderData }: Route.ComponentProps) {
 										<input type="hidden" name="id" value={n.id} />
 										<button
 											type="submit"
-											className="text-[12px] text-zinc-600 transition-colors hover:text-zinc-400"
+											className="shrink-0 rounded-md border border-zinc-800 bg-zinc-900/50 px-2.5 py-1 font-mono text-[10px] uppercase tracking-wider text-zinc-500 transition-colors hover:border-zinc-700 hover:text-zinc-300"
 										>
 											Mark read
 										</button>

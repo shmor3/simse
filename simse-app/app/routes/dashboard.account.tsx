@@ -127,7 +127,7 @@ export default function Account({
 			/>
 
 			{/* Profile */}
-			<Card className="mt-8 p-6">
+			<Card className="mt-8 card-hover p-6 animate-fade-in-up">
 				<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
 					Profile
 				</p>
@@ -167,7 +167,7 @@ export default function Account({
 			</Card>
 
 			{/* Security */}
-			<Card className="mt-6 p-6">
+			<Card className="mt-6 card-hover p-6 animate-stagger-3">
 				<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-zinc-500">
 					Security
 				</p>
@@ -196,7 +196,7 @@ export default function Account({
 			</Card>
 
 			{/* Danger zone */}
-			<Card className="mt-6 border-red-500/20 p-6">
+			<Card className="mt-6 border-red-500/20 p-6 animate-stagger-5">
 				<p className="font-mono text-[10px] font-bold uppercase tracking-[0.25em] text-red-400">
 					Danger zone
 				</p>

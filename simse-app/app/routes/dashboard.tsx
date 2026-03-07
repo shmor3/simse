@@ -44,9 +44,7 @@ export async function loader({ request }: Route.LoaderArgs) {
 	try {
 		const remotesRes = await authenticatedApi(request, '/remotes');
 		if (remotesRes.ok) {
-			const remotesJson = (await remotesRes.json()) as ApiResponse<
-				Remote[]
-			>;
+			const remotesJson = (await remotesRes.json()) as ApiResponse<Remote[]>;
 			remotes = remotesJson.data ?? [];
 		}
 	} catch {

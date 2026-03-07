@@ -103,7 +103,7 @@ export default function DashboardLayout({
 			</div>
 
 			{/* Main content */}
-			<div className="flex min-w-0 flex-1 flex-col">
+			<div className="flex min-w-0 flex-1 flex-col overflow-hidden">
 				{/* Header */}
 				<header className="flex h-14 items-center justify-between border-b border-zinc-800/50 px-4">
 					<div className="flex items-center gap-3">

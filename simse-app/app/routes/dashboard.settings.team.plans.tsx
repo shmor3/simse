@@ -1,3 +1,4 @@
+import clsx from 'clsx';
 import { Link } from 'react-router';
 import PageHeader from '~/components/layout/PageHeader';
 import Badge from '~/components/ui/Badge';
@@ -76,14 +77,17 @@ export default function TeamPlans({ loaderData }: Route.ComponentProps) {
 				}
 			/>
 
-			<div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-3">
+			<div className="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-3 animate-fade-in-up">
 				{plans.map((plan) => {
 					const isCurrent = loaderData.currentPlan === plan.id;
 					return (
 						<Card
 							key={plan.id}
-							accent={isCurrent}
-							className="flex flex-col p-6"
+							accent={isCurrent ? 'gradient' : undefined}
+							className={clsx(
+								'card-hover flex flex-col p-6',
+								isCurrent && 'ring-1 ring-emerald-400/20',
+							)}
 						>
 							<div className="flex items-center justify-between">
 								<p className="text-lg font-bold text-white">{plan.name}</p>

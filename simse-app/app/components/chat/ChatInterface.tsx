@@ -53,7 +53,6 @@ export default function ChatInterface({
 		if (!trimmed || isStreaming) return;
 		onSend(trimmed);
 		setInput('');
-		// Reset textarea height
 		if (textareaRef.current) {
 			textareaRef.current.style.height = 'auto';
 		}
@@ -77,13 +76,43 @@ export default function ChatInterface({
 			<div className="flex-1 overflow-y-auto">
 				{isEmpty ? (
 					/* Empty state */
-					<div className="flex h-full flex-col items-center justify-center gap-4">
-						<SimseLogo size={48} className="text-zinc-700" />
-						<p className="text-sm text-zinc-500">What would you like to do?</p>
+					<div className="flex h-full flex-col items-center justify-center gap-5 animate-fade-in">
+						<div className="relative">
+							<div className="absolute inset-0 rounded-full bg-emerald-400/5 blur-2xl" />
+							<SimseLogo size={56} className="relative text-zinc-700" />
+						</div>
+						<div className="text-center">
+							<p className="text-sm font-medium text-zinc-400">
+								What would you like to do?
+							</p>
+							<p className="mt-1 text-[13px] text-zinc-600">
+								Type a message to get started.
+							</p>
+						</div>
+						{/* Suggestions */}
+						<div className="mt-2 flex flex-wrap justify-center gap-2">
+							{[
+								'Explain this codebase',
+								'Find and fix bugs',
+								'Write tests',
+							].map((suggestion) => (
+								<button
+									key={suggestion}
+									type="button"
+									onClick={() => {
+										setInput(suggestion);
+										textareaRef.current?.focus();
+									}}
+									className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-1.5 text-[13px] text-zinc-500 transition-colors hover:border-zinc-700 hover:text-zinc-300"
+								>
+									{suggestion}
+								</button>
+							))}
+						</div>
 					</div>
 				) : (
 					/* Messages + tool calls */
-					<div className="py-4 space-y-1">
+					<div className="space-y-1 py-4">
 						{messages.map((msg) => (
 							<MessageBubble
 								key={msg.id}
@@ -106,7 +135,20 @@ export default function ChatInterface({
 						{/* Streaming indicator */}
 						{isStreaming && (
 							<div className="mx-auto max-w-3xl px-4 py-2">
-								<span className="inline-block h-4 w-1.5 animate-pulse rounded-full bg-emerald-400" />
+								<div className="flex items-center gap-1.5">
+									<span
+										className="h-1.5 w-1.5 rounded-full bg-emerald-400"
+										style={{ animation: 'blink 1.4s infinite 0s' }}
+									/>
+									<span
+										className="h-1.5 w-1.5 rounded-full bg-emerald-400"
+										style={{ animation: 'blink 1.4s infinite 0.2s' }}
+									/>
+									<span
+										className="h-1.5 w-1.5 rounded-full bg-emerald-400"
+										style={{ animation: 'blink 1.4s infinite 0.4s' }}
+									/>
+								</div>
 							</div>
 						)}
 
@@ -118,20 +160,25 @@ export default function ChatInterface({
 			{/* Input area */}
 			<div className="shrink-0 border-t border-zinc-800/50 bg-zinc-950 p-4">
 				<div className="mx-auto flex max-w-3xl items-end gap-3">
-					<textarea
-						ref={textareaRef}
-						value={input}
-						onChange={handleInput}
-						onKeyDown={handleKeyDown}
-						placeholder="Send a message..."
-						rows={1}
-						className="flex-1 resize-none rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 placeholder-zinc-600 outline-none transition-colors focus:border-zinc-700 focus:ring-2 focus:ring-emerald-400/50"
-					/>
+					<div className="relative flex-1">
+						<textarea
+							ref={textareaRef}
+							value={input}
+							onChange={handleInput}
+							onKeyDown={handleKeyDown}
+							placeholder="Send a message..."
+							rows={1}
+							className="w-full resize-none rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 pr-10 text-sm text-zinc-100 placeholder-zinc-600 outline-none transition-colors focus:border-zinc-700 focus:ring-2 focus:ring-emerald-400/20"
+						/>
+						<div className="pointer-events-none absolute bottom-3 right-3 font-mono text-[10px] text-zinc-700">
+							<kbd>Enter</kbd>
+						</div>
+					</div>
 					<button
 						type="button"
 						onClick={handleSend}
 						disabled={!input.trim() || isStreaming}
-						className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-400 text-zinc-950 transition-colors hover:bg-emerald-300 active:bg-emerald-500 disabled:pointer-events-none disabled:opacity-50"
+						className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-emerald-400 text-zinc-950 transition-all hover:bg-emerald-300 hover:shadow-lg hover:shadow-emerald-400/10 active:bg-emerald-500 disabled:pointer-events-none disabled:opacity-50"
 					>
 						<svg
 							className="h-5 w-5"

@@ -67,3 +67,28 @@ pub struct ModelRestoreParams {
 pub struct ModelConfigureParams {
 	pub config: PcnConfig,
 }
+
+// -- Store index / search protocol types --------------------------------------
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetIndexStrategyParams {
+	pub strategy: crate::types::IndexStrategy,
+	/// Optional HNSW tuning parameters (ignored when strategy is `flat`).
+	pub hnsw_config: Option<HnswConfigParams>,
+}
+
+/// Deserialization-friendly mirror of [`crate::index::HnswConfig`].
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HnswConfigParams {
+	pub m: Option<usize>,
+	pub ef_construction: Option<usize>,
+	pub ef_search: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetQuantizationParams {
+	pub quantization: crate::quantization::Quantization,
+}

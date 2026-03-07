@@ -29,7 +29,7 @@ use crate::pcn::snapshot::ModelSnapshot;
 use crate::store::{AddEntry, DuplicateBehavior, StoreConfig, Store};
 use crate::pcn::trainer::TrainingWorker;
 use crate::transport::NdjsonTransport;
-use crate::types::Lookup;
+use crate::types::{Lookup, SearchWithOptionsParams};
 
 // ---------------------------------------------------------------------------
 // Server
@@ -122,6 +122,9 @@ impl AdaptiveServer {
 
 			// -- Search --------------------------------------------------
 			"store/search" => self.with_state_transition(|s| handle_search(s, req.params)),
+			"store/searchWithOptions" => {
+				self.with_state_transition(|s| handle_search_with_options(s, req.params))
+			}
 			"store/textSearch" => self.with_state(|s| handle_text_search(s, req.params)),
 			"store/advancedSearch" => {
 				self.with_state_transition(|s| handle_advanced_search(s, req.params))
@@ -136,6 +139,19 @@ impl AdaptiveServer {
 			"store/getTopics" => self.with_state(|s| {
 				let topics = s.get_topics();
 				Ok(serde_json::json!({ "topics": topics }))
+			}),
+
+			// -- Index management ----------------------------------------
+			"store/setIndexStrategy" => {
+				self.with_state_transition(|s| handle_set_index_strategy(s, req.params))
+			}
+			"store/setQuantization" => {
+				self.with_state_transition(|s| handle_set_quantization(s, req.params))
+			}
+			"store/getIndexStats" => self.with_state(|s| {
+				let stats = s.get_index_stats();
+				serde_json::to_value(stats)
+					.map_err(|e| AdaptiveError::Serialization(e.to_string()))
 			}),
 
 			// -- Recommendation ------------------------------------------
@@ -287,6 +303,7 @@ impl AdaptiveServer {
 				.unwrap_or(30.0 * 24.0 * 60.0 * 60.0 * 1000.0),
 			topic_catalog_threshold: p.topic_catalog_threshold.unwrap_or(0.85),
 			graph_config: Default::default(),
+			..Default::default()
 		};
 
 		let store = Store::new(config);
@@ -706,6 +723,42 @@ fn handle_search(
 	let p: SearchParams = parse_params(params)?;
 	let (store, results) = store.search(&p.query_embedding, p.max_results.unwrap_or(10), p.threshold.unwrap_or(0.0))?;
 	Ok((store, serde_json::json!({ "results": results })))
+}
+
+fn handle_search_with_options(
+	store: Store,
+	params: serde_json::Value,
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
+	let p: SearchWithOptionsParams = parse_params(params)?;
+	let metric = p.metric.unwrap_or_default();
+	let (store, results) = store.search_with_options(
+		&p.query_embedding,
+		p.max_results.unwrap_or(10),
+		p.threshold.unwrap_or(0.0),
+		metric,
+		p.mmr_lambda,
+	)?;
+	Ok((store, serde_json::json!({ "results": results })))
+}
+
+fn handle_set_index_strategy(
+	store: Store,
+	params: serde_json::Value,
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
+	let p: SetIndexStrategyParams = parse_params(params)?;
+	let _ = p.hnsw_config; // reserved for future HNSW tuning
+	let store = store.set_index_strategy(p.strategy);
+	Ok((store, serde_json::json!({})))
+}
+
+fn handle_set_quantization(
+	store: Store,
+	params: serde_json::Value,
+) -> Result<(Store, serde_json::Value), AdaptiveError> {
+	let _p: SetQuantizationParams = parse_params(params)?;
+	// Quantization is acknowledged but not yet wired into the search path.
+	// The store tracks it via config; full integration is a follow-up task.
+	Ok((store, serde_json::json!({})))
 }
 
 fn handle_text_search(

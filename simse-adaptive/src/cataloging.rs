@@ -8,7 +8,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::cosine::compute_magnitude;
+use crate::distance::compute_magnitude;
 use crate::types::TopicInfo;
 
 // ---------------------------------------------------------------------------

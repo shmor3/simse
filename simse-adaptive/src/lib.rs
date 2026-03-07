@@ -15,8 +15,10 @@ pub mod topic_catalog;
 pub mod query_dsl;
 pub mod text_cache;
 pub mod persistence;
+pub mod quantization;
 pub mod context_format;
 pub mod graph;
+pub mod vector_storage;
 pub mod store;
 pub mod server;
 

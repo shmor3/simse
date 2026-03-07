@@ -98,7 +98,7 @@ impl SessionManager {
     pub fn close(self, id: &str) -> (Self, bool) {
         let had = self.sessions.contains_key(id);
         let sessions = self.sessions.without(id);
-        (Self { sessions, ..self }, had)
+        (Self { sessions }, had)
     }
 
     /// Record bytes sent/received on an existing session.

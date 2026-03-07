@@ -168,7 +168,7 @@ impl SessionManager {
 		F: FnOnce(&Session) -> R,
 	{
 		let inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-		inner.sessions.get(id).map(|session| f(session))
+		inner.sessions.get(id).map(f)
 	}
 
 	/// Execute a state transition on a session's conversation using owned-return.

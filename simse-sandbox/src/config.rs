@@ -10,20 +10,15 @@ pub enum BackendConfig {
 }
 
 /// Policy for verifying SSH server host keys.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum HostKeyPolicy {
     /// Accept all host keys without verification (INSECURE).
     /// Suitable only for trusted/internal networks.
+    #[default]
     AcceptAll,
     /// Accept only a server whose public key matches this SHA256 fingerprint.
     /// Format: `"SHA256:<base64>"` (same as `ssh-keygen -lf`).
     Fingerprint(String),
-}
-
-impl Default for HostKeyPolicy {
-    fn default() -> Self {
-        Self::AcceptAll
-    }
 }
 
 #[derive(Debug, Clone)]

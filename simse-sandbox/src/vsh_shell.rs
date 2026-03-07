@@ -264,6 +264,7 @@ impl VirtualShell {
 	/// [`RawExecRequest`] with all data needed for execution.
 	/// The caller must run the command via a backend and then call
 	/// [`record_exec_raw`] with the result.
+	#[allow(clippy::too_many_arguments)]
 	pub fn prepare_exec_raw(
 		&self,
 		command: &str,

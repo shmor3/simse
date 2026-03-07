@@ -1,6 +1,5 @@
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::AtomicU64;
 
 use crate::error::RemoteError;
 
@@ -12,8 +11,6 @@ use crate::error::RemoteError;
 pub struct LocalRouter {
     child: Option<Child>,
     reader: Option<BufReader<std::process::ChildStdout>>,
-    #[allow(dead_code)]
-    next_id: AtomicU64,
 }
 
 impl Default for LocalRouter {
@@ -27,7 +24,6 @@ impl LocalRouter {
         Self {
             child: None,
             reader: None,
-            next_id: AtomicU64::new(1),
         }
     }
 

@@ -16,14 +16,33 @@ use simse_sandbox_engine::vsh_backend::{LocalShell, ShellImpl};
 use simse_sandbox_engine::vsh_sandbox::SandboxConfig;
 use simse_sandbox_engine::vsh_shell::VirtualShell;
 
-/// Detect a working shell path (cross-platform: Linux, macOS, MINGW64/Git Bash).
+/// Detect a working shell path (cross-platform: Linux, macOS, Windows/MINGW64).
 fn shell_path() -> String {
+	// Unix paths
 	for candidate in &["/bin/sh", "/usr/bin/sh", "/usr/bin/bash"] {
 		if std::path::Path::new(candidate).exists() {
 			return candidate.to_string();
 		}
 	}
-	// Fallback — tests that execute commands will fail with a clear error.
+	// Windows: Git Bash / MSYS2 shell
+	for candidate in &[
+		r"C:\Program Files\Git\usr\bin\sh.exe",
+		r"C:\Program Files\Git\usr\bin\bash.exe",
+		r"C:\Program Files\Git\bin\sh.exe",
+	] {
+		if std::path::Path::new(candidate).exists() {
+			return candidate.to_string();
+		}
+	}
+	// Last resort — check PATH via `which`
+	if let Ok(output) = std::process::Command::new("which").arg("sh").output() {
+		if output.status.success() {
+			let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+			if !path.is_empty() {
+				return path;
+			}
+		}
+	}
 	"/bin/sh".to_string()
 }
 

@@ -36,11 +36,8 @@ use crate::protocol::{
 pub type NotificationHandler = Box<dyn Fn(serde_json::Value) + Send + Sync>;
 
 /// A pending JSON-RPC request awaiting a response.
-#[allow(dead_code)]
 struct PendingRequest {
 	sender: Option<oneshot::Sender<Result<serde_json::Value, AcpError>>>,
-	deadline: tokio::time::Instant,
-	method: String,
 }
 
 /// A handle that, when dropped, unregisters the associated notification handler.
@@ -384,8 +381,6 @@ impl AcpConnection {
 				id,
 				PendingRequest {
 					sender: Some(tx),
-					deadline,
-					method: method.to_string(),
 				},
 			);
 		}
@@ -903,9 +898,6 @@ mod tests {
 				1,
 				PendingRequest {
 					sender: Some(tx),
-					deadline: tokio::time::Instant::now()
-						+ std::time::Duration::from_secs(10),
-					method: "test".into(),
 				},
 			);
 		}
@@ -934,9 +926,6 @@ mod tests {
 				2,
 				PendingRequest {
 					sender: Some(tx),
-					deadline: tokio::time::Instant::now()
-						+ std::time::Duration::from_secs(10),
-					method: "test".into(),
 				},
 			);
 		}
@@ -1180,18 +1169,12 @@ mod tests {
 				1,
 				PendingRequest {
 					sender: Some(tx1),
-					deadline: tokio::time::Instant::now()
-						+ std::time::Duration::from_secs(10),
-					method: "test1".into(),
 				},
 			);
 			p.insert(
 				2,
 				PendingRequest {
 					sender: Some(tx2),
-					deadline: tokio::time::Instant::now()
-						+ std::time::Duration::from_secs(10),
-					method: "test2".into(),
 				},
 			);
 		}
@@ -1237,9 +1220,6 @@ mod tests {
 				1,
 				PendingRequest {
 					sender: Some(tx),
-					deadline: tokio::time::Instant::now()
-						+ std::time::Duration::from_secs(10),
-					method: "partial".into(),
 				},
 			);
 		}
@@ -1286,9 +1266,6 @@ mod tests {
 				1,
 				PendingRequest {
 					sender: Some(tx),
-					deadline: tokio::time::Instant::now()
-						+ std::time::Duration::from_secs(10),
-					method: "empty".into(),
 				},
 			);
 		}
@@ -1323,9 +1300,6 @@ mod tests {
 				1,
 				PendingRequest {
 					sender: Some(tx),
-					deadline: tokio::time::Instant::now()
-						+ std::time::Duration::from_secs(10),
-					method: "invalid".into(),
 				},
 			);
 		}
@@ -1411,9 +1385,6 @@ mod tests {
 				id,
 				PendingRequest {
 					sender: Some(tx),
-					deadline: tokio::time::Instant::now()
-						+ std::time::Duration::from_secs(10),
-					method: "test/echo".into(),
 				},
 			);
 		}

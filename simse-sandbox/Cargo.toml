@@ -24,7 +24,6 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 russh = { version = "0.57", default-features = false, features = ["ring", "rsa", "async-trait"] }
 russh-sftp = "2.1"
-russh-keys = "0.49"
 base64 = "0.22"
 regex = "1"
 sha2 = "0.10"
@@ -33,7 +32,6 @@ reqwest = { version = "0.13", features = ["json"] }
 
 [dev-dependencies]
 tempfile = "3"
-base64 = "0.22"
 
 [features]
 ssh-test = []

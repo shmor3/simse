@@ -1618,6 +1618,7 @@ impl VirtualFs {
 
 	// -- Transaction ------------------------------------------------------
 
+	#[allow(clippy::result_large_err)]
 	pub fn transaction(self, ops: Vec<TransactionOp>) -> Result<Self, (Self, SandboxError)> {
 		let snap = self.snapshot();
 		let limits = self.limits.clone();

@@ -539,10 +539,8 @@ struct FilterByTopicParams {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 struct CheckDuplicateParams {
 	embedding: Vec<f32>,
-	threshold: Option<f64>,
 }
 
 #[derive(Deserialize)]

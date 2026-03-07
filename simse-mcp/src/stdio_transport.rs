@@ -111,11 +111,8 @@ pub trait Transport: Send + Sync {
 // ---------------------------------------------------------------------------
 
 /// A pending JSON-RPC request awaiting a response.
-#[allow(dead_code)]
 struct PendingRequest {
 	sender: Option<oneshot::Sender<Result<serde_json::Value, McpError>>>,
-	deadline: tokio::time::Instant,
-	method: String,
 }
 
 /// Configuration for spawning an MCP server as a child process.
@@ -380,8 +377,6 @@ impl StdioTransport {
 				id,
 				PendingRequest {
 					sender: Some(tx),
-					deadline,
-					method: method.to_string(),
 				},
 			);
 		}
@@ -767,9 +762,6 @@ mod tests {
 				1,
 				PendingRequest {
 					sender: Some(tx),
-					deadline: tokio::time::Instant::now()
-						+ std::time::Duration::from_secs(10),
-					method: "test".into(),
 				},
 			);
 		}
@@ -798,9 +790,6 @@ mod tests {
 				2,
 				PendingRequest {
 					sender: Some(tx),
-					deadline: tokio::time::Instant::now()
-						+ std::time::Duration::from_secs(10),
-					method: "test".into(),
 				},
 			);
 		}

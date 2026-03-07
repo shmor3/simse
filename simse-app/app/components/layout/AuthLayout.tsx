@@ -6,7 +6,7 @@ export default function AuthLayout() {
 	return (
 		<div className="relative flex min-h-screen items-center justify-center px-4">
 			<DotGrid />
-			<div className="relative z-10 w-full max-w-md">
+			<div className="relative z-10 w-full max-w-md animate-fade-in-up">
 				{/* SIMSE header */}
 				<div className="mb-10 flex items-center justify-center gap-2.5">
 					<SimseLogo size={20} className="text-zinc-600" />
@@ -16,8 +16,9 @@ export default function AuthLayout() {
 				</div>
 
 				{/* Card */}
-				<div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/80 backdrop-blur-sm">
-					<div className="h-1 bg-emerald-400" />
+				<div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900/80 shadow-2xl shadow-black/40 backdrop-blur-sm">
+					{/* Animated gradient top bar */}
+					<div className="h-1 gradient-border" />
 					<div className="p-8">
 						<Outlet />
 					</div>

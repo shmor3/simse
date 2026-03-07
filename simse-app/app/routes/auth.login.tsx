@@ -53,7 +53,7 @@ export default function Login({ actionData }: Route.ComponentProps) {
 	const values = actionData?.values as Record<string, string> | undefined;
 
 	return (
-		<>
+		<div className="animate-fade-in">
 			<h1 className="text-2xl font-bold tracking-tight text-white">
 				Sign <span className="text-emerald-400">in</span>.
 			</h1>
@@ -101,6 +101,6 @@ export default function Login({ actionData }: Route.ComponentProps) {
 					Create one
 				</Link>
 			</p>
-		</>
+		</div>
 	);
 }

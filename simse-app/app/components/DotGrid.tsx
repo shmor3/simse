@@ -118,10 +118,21 @@ export default function DotGrid() {
 	}, []);
 
 	return (
-		<canvas
-			ref={canvasRef}
-			className={clsx('pointer-events-none fixed inset-0 z-0')}
-			aria-hidden="true"
-		/>
+		<>
+			<canvas
+				ref={canvasRef}
+				className={clsx('pointer-events-none fixed inset-0 z-0')}
+				aria-hidden="true"
+			/>
+			{/* Subtle emerald radial glow */}
+			<div
+				className="pointer-events-none fixed inset-0 z-0"
+				aria-hidden="true"
+				style={{
+					background:
+						'radial-gradient(ellipse 60% 40% at 50% 45%, rgba(52, 211, 153, 0.03) 0%, transparent 70%)',
+				}}
+			/>
+		</>
 	);
 }

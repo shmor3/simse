@@ -32,6 +32,17 @@ pub struct ContextFormatOptions {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// Escape a string for safe use in XML attributes.
+///
+/// Replaces `&`, `<`, `>`, `"`, and `'` with their XML entity equivalents.
+fn escape_xml_attr(s: &str) -> String {
+	s.replace('&', "&amp;")
+		.replace('<', "&lt;")
+		.replace('>', "&gt;")
+		.replace('"', "&quot;")
+		.replace('\'', "&apos;")
+}
+
 /// Format a duration in milliseconds as a human-readable age string.
 ///
 /// Returns seconds, minutes, hours, or days depending on magnitude.
@@ -133,7 +144,7 @@ pub fn format_context(
 		};
 		let entry = format!(
 			"<entry topic=\"{}\" relevance=\"{:.2}\" age=\"{}\">\n{}\n</entry>",
-			topic, r.score, age, r.entry.text
+			escape_xml_attr(topic), r.score, age, r.entry.text
 		);
 		if chars + entry.len() > max_chars {
 			break;

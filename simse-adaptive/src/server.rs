@@ -307,6 +307,11 @@ impl AdaptiveServer {
 		let config = p.config;
 		let embedding_dim = p.embedding_dim;
 
+		// Drop old event sender first to signal the existing training worker
+		// to shut down. Without this, re-initializing the PCN would leak the
+		// old worker task (it would block forever on the now-orphaned channel).
+		self.event_tx = None;
+
 		let snapshot = Arc::new(RwLock::new(ModelSnapshot::empty()));
 		let (tx, rx) = mpsc::channel::<InputEvent>(config.channel_capacity);
 
@@ -474,7 +479,7 @@ fn parse_params<T: serde::de::DeserializeOwned>(
 	params: serde_json::Value,
 ) -> Result<T, AdaptiveError> {
 	serde_json::from_value(params)
-		.map_err(|e| AdaptiveError::Serialization(format!("Invalid params: {}", e)))
+		.map_err(|e| AdaptiveError::InvalidParams(e.to_string()))
 }
 
 #[derive(Deserialize)]

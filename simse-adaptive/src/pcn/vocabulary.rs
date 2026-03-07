@@ -211,8 +211,12 @@ impl VocabularyManager {
 }
 
 impl Default for VocabularyManager {
+    /// Default vocabulary with reasonable capacity limits.
+    ///
+    /// Uses 100 topics and 200 tags, which matches typical usage. Prefer
+    /// `VocabularyManager::new(max_topics, max_tags)` for explicit control.
     fn default() -> Self {
-        Self::new(0, 0)
+        Self::new(100, 200)
     }
 }
 

@@ -89,12 +89,18 @@ impl InputEncoder {
         let tags_before = self.vocab.tag_count();
 
         // 2. Register topic and tags (may grow vocabulary or return overflow error).
-        let (vocab, _) = std::mem::take(&mut self.vocab).register_topic(&event.topic)?;
-        self.vocab = vocab;
+        //    Clone the vocab first so that on error the encoder stays intact.
+        //    im:: persistent data structures make this clone cheap (structural sharing).
+        let mut vocab = self.vocab.clone();
+        let (v, _) = vocab.register_topic(&event.topic)?;
+        vocab = v;
         for tag in &event.tags {
-            let (v, _) = std::mem::take(&mut self.vocab).register_tag(tag)?;
-            self.vocab = v;
+            let (v, _) = vocab.register_tag(tag)?;
+            vocab = v;
         }
+
+        // All registrations succeeded — commit the new vocab.
+        self.vocab = vocab;
 
         // 3. Check if vocabulary grew.
         let grew =
@@ -369,5 +375,15 @@ mod tests {
         let result = encoder.encode(&event2);
         assert!(result.is_err());
         assert_eq!(result.unwrap_err().code(), "PCN_VOCABULARY_OVERFLOW");
+
+        // After an overflow error, the encoder should still be usable
+        // with the previously registered vocabulary.
+        assert_eq!(encoder.vocab().topic_count(), 1);
+        assert_eq!(encoder.vocab().tag_count(), 1);
+
+        // Encoding the original event should still work.
+        let (vec, grew) = encoder.encode(&event1).unwrap();
+        assert!(!grew);
+        assert_eq!(vec.len(), encoder.current_input_dim());
     }
 }

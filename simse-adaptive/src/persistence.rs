@@ -468,9 +468,12 @@ pub fn save_to_directory(
 	// Gzip the JSON
 	let compressed = compress(json.as_bytes())?;
 
-	// Write to index.gz
-	let path = std::path::Path::new(dir).join("index.gz");
-	std::fs::write(&path, &compressed).map_err(PersistenceError::Io)?;
+	// Atomic write: write to a temp file then rename, so a crash during
+	// write doesn't corrupt the existing index.gz.
+	let final_path = std::path::Path::new(dir).join("index.gz");
+	let tmp_path = std::path::Path::new(dir).join("index.gz.tmp");
+	std::fs::write(&tmp_path, &compressed).map_err(PersistenceError::Io)?;
+	std::fs::rename(&tmp_path, &final_path).map_err(PersistenceError::Io)?;
 
 	Ok(())
 }

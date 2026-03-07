@@ -57,7 +57,7 @@ impl AdaptiveError {
 			Self::ModelCorrupt(_) => "PCN_MODEL_CORRUPT",
 			Self::VocabularyOverflow(_) => "PCN_VOCABULARY_OVERFLOW",
 			Self::InvalidParams(_) => "PCN_INVALID_PARAMS",
-			Self::Json(_) => "PCN_JSON_ERROR",
+			Self::Json(_) => "ADAPTIVE_JSON_ERROR",
 		}
 	}
 

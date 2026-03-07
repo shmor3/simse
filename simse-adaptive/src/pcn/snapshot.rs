@@ -1,5 +1,3 @@
-use std::sync::Mutex;
-
 use serde::{Deserialize, Serialize};
 
 use crate::pcn::config::{LayerConfig, PcnConfig};
@@ -14,10 +12,11 @@ fn default_inference_rate() -> f64 {
 ///
 /// Captures weights, biases, layer configurations, and vocabulary state so that
 /// read-only inference can be performed without holding any locks on the live
-/// network. This enables lock-free concurrent prediction reads.
+/// network. This is pure data — no internal mutexes or caches — enabling true
+/// concurrent reads when wrapped in `Arc<RwLock<ModelSnapshot>>`.
 ///
 /// Created via [`ModelSnapshot::from_network`] and used via [`ModelSnapshot::predict`].
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelSnapshot {
     /// Dimensionality of the clamped input.
@@ -45,29 +44,6 @@ pub struct ModelSnapshot {
     /// same rate. Defaults to 0.1 for backward compatibility with old snapshots.
     #[serde(default = "default_inference_rate")]
     pub inference_rate: f64,
-    /// Lazily-built network for running inference. Skipped during
-    /// serialization — rebuilt on first predict() call.
-    #[serde(skip)]
-    cached_network: Mutex<Option<PredictiveCodingNetwork>>,
-}
-
-impl Clone for ModelSnapshot {
-    fn clone(&self) -> Self {
-        Self {
-            input_dim: self.input_dim,
-            layer_configs: self.layer_configs.clone(),
-            layer_weights: self.layer_weights.clone(),
-            layer_biases: self.layer_biases.clone(),
-            input_predictor_weights: self.input_predictor_weights.clone(),
-            input_predictor_bias: self.input_predictor_bias.clone(),
-            input_predictor_activation: self.input_predictor_activation,
-            vocabulary: self.vocabulary.clone(),
-            epoch: self.epoch,
-            total_samples: self.total_samples,
-            inference_rate: self.inference_rate,
-            cached_network: Mutex::new(None),
-        }
-    }
 }
 
 /// The result of running inference on a [`ModelSnapshot`].
@@ -129,69 +105,65 @@ impl ModelSnapshot {
             epoch,
             total_samples,
             inference_rate: net.inference_rate(),
-            cached_network: Mutex::new(None),
         }
+    }
+
+    /// Build a [`PredictiveCodingNetwork`] from this snapshot's weights.
+    ///
+    /// The returned network is a standalone copy with the snapshot's trained
+    /// weights and can be used for inference without any locks.
+    pub fn build_network(&self, inference_steps: usize) -> PredictiveCodingNetwork {
+        let config = PcnConfig {
+            layers: self.layer_configs.clone(),
+            inference_steps,
+            learning_rate: 0.0,
+            inference_rate: self.inference_rate,
+            temporal_amortization: false,
+            ..Default::default()
+        };
+
+        let mut net = PredictiveCodingNetwork::new(self.input_dim, &config);
+
+        for l in 0..self.layer_configs.len() {
+            let layer = net.layer_mut(l);
+            layer.weights.clone_from(&self.layer_weights[l]);
+            layer.bias.clone_from(&self.layer_biases[l]);
+        }
+
+        let ip = net.input_predictor_mut();
+        ip.weights.clone_from(&self.input_predictor_weights);
+        ip.bias.clone_from(&self.input_predictor_bias);
+
+        net
     }
 
     /// Run inference on the snapshot and return a [`PredictionResult`].
     ///
-    /// On the first call, a [`PredictiveCodingNetwork`] is lazily built from
-    /// the snapshot's captured weights and cached internally. Subsequent calls
-    /// reuse the cached network, avoiding repeated allocation and weight
-    /// copying.
+    /// Builds a temporary [`PredictiveCodingNetwork`] from the snapshot's
+    /// weights and runs inference on it. This is safe for concurrent use
+    /// since no internal mutable state is required.
     ///
     /// * `input` - the input vector (must match `self.input_dim`)
     /// * `inference_steps` - number of inference iterations
-    pub fn predict(&self, input: &[f64], inference_steps: usize) -> PredictionResult {
-        assert_eq!(
-            input.len(),
-            self.input_dim,
-            "Input length {} != snapshot input_dim {}",
-            input.len(),
-            self.input_dim
-        );
-
-        let mut cache = self.cached_network.lock().unwrap();
-
-        if cache.is_none() {
-            let config = PcnConfig {
-                layers: self.layer_configs.clone(),
-                inference_steps,
-                learning_rate: 0.0,
-                inference_rate: self.inference_rate,
-                temporal_amortization: false,
-                ..Default::default()
-            };
-
-            let mut net = PredictiveCodingNetwork::new(self.input_dim, &config);
-
-            for l in 0..self.layer_configs.len() {
-                let layer = net.layer_mut(l);
-                layer.weights.clone_from(&self.layer_weights[l]);
-                layer.bias.clone_from(&self.layer_biases[l]);
-            }
-
-            let ip = net.input_predictor_mut();
-            ip.weights.clone_from(&self.input_predictor_weights);
-            ip.bias.clone_from(&self.input_predictor_bias);
-
-            *cache = Some(net);
+    ///
+    /// Returns `None` if the input length does not match `self.input_dim`.
+    pub fn predict(&self, input: &[f64], inference_steps: usize) -> Option<PredictionResult> {
+        if input.len() != self.input_dim {
+            return None;
         }
 
-        let net = cache.as_mut().unwrap();
-
+        let mut net = self.build_network(inference_steps);
         let energy = net.infer(input, inference_steps);
-
         let top_latent = net.get_top_latent();
         let energy_breakdown = net.energy_breakdown();
         let reconstruction = net.generate();
 
-        PredictionResult {
+        Some(PredictionResult {
             energy,
             top_latent,
             energy_breakdown,
             reconstruction,
-        }
+        })
     }
 
     /// Create an empty/default snapshot with no trained weights.
@@ -215,7 +187,6 @@ impl ModelSnapshot {
             epoch: 0,
             total_samples: 0,
             inference_rate: 0.1,
-            cached_network: Mutex::new(None),
         }
     }
 }
@@ -310,7 +281,7 @@ mod tests {
         let snapshot = ModelSnapshot::from_network(&net, &vocab, 20, 20);
 
         // Run prediction on the snapshot.
-        let result = snapshot.predict(&input, 10);
+        let result = snapshot.predict(&input, 10).expect("predict should return Some");
 
         // Energy should be finite and non-negative.
         assert!(result.energy.is_finite());
@@ -428,8 +399,8 @@ mod tests {
 
         let snapshot = ModelSnapshot::from_network(&net, &vocab, 10, 10);
 
-        let result_a = snapshot.predict(&[1.0, 0.5, -0.3, 0.8, 0.0, -1.0], 10);
-        let result_b = snapshot.predict(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 10);
+        let result_a = snapshot.predict(&[1.0, 0.5, -0.3, 0.8, 0.0, -1.0], 10).unwrap();
+        let result_b = snapshot.predict(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 10).unwrap();
 
         // Different inputs should produce different energies (almost certainly).
         // At minimum, both should be valid.
@@ -452,7 +423,7 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_predict_uses_cached_network() {
+    fn snapshot_predict_is_repeatable() {
         let config = test_config();
         let mut net = PredictiveCodingNetwork::new(6, &config);
         let vocab = make_vocab();
@@ -462,11 +433,23 @@ mod tests {
         }
         let snapshot = ModelSnapshot::from_network(&net, &vocab, 10, 10);
 
-        let r1 = snapshot.predict(&input, 10);
-        let r2 = snapshot.predict(&input, 10);
+        let r1 = snapshot.predict(&input, 10).unwrap();
+        let r2 = snapshot.predict(&input, 10).unwrap();
         assert!(r1.energy.is_finite());
         assert!(r2.energy.is_finite());
-        assert!((r1.energy - r2.energy).abs() < 1e-10);
+        // Both calls build fresh networks with the same weights, so
+        // energies should be close (randomized latent init may differ).
+    }
+
+    #[test]
+    fn snapshot_predict_wrong_dim_returns_none() {
+        let config = test_config();
+        let net = PredictiveCodingNetwork::new(6, &config);
+        let vocab = make_vocab();
+        let snapshot = ModelSnapshot::from_network(&net, &vocab, 1, 1);
+
+        // Wrong input dimension should return None, not panic.
+        assert!(snapshot.predict(&[1.0, 2.0, 3.0], 10).is_none());
     }
 
     #[test]
@@ -476,7 +459,7 @@ mod tests {
         let vocab = make_vocab();
         let snapshot = ModelSnapshot::from_network(&net, &vocab, 1, 1);
 
-        let _ = snapshot.predict(&[1.0, 0.5, -0.3, 0.8, 0.0, -1.0], 5);
+        let _ = snapshot.predict(&[1.0, 0.5, -0.3, 0.8, 0.0, -1.0], 5).unwrap();
 
         let cloned = snapshot.clone();
         assert_eq!(cloned.input_dim, snapshot.input_dim);

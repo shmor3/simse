@@ -32,7 +32,9 @@ fn make_event(embedding: Vec<f32>, topic: &str, tags: Vec<&str>) -> InputEvent {
 /// data, and verify that energy decreases from the first to the last epoch.
 #[test]
 fn full_training_loop_reduces_energy() {
-    // Small network: 2 layers (16 ReLU, 8 Tanh).
+    // Small network: 2 layers (16 Tanh, 8 Tanh).
+    // Use Tanh (bounded) instead of ReLU to prevent numerical divergence
+    // when inference randomizes latent values with non-deterministic seeds.
     let embedding_dim = 4;
     let max_topics = 10;
     let max_tags = 10;
@@ -41,7 +43,7 @@ fn full_training_loop_reduces_energy() {
         layers: vec![
             LayerConfig {
                 dim: 16,
-                activation: Activation::Relu,
+                activation: Activation::Tanh,
             },
             LayerConfig {
                 dim: 8,

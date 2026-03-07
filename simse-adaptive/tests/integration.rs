@@ -1240,3 +1240,188 @@ fn delete_entry_cascades_graph_edges() {
 		"A's neighbors should be empty after deleting B, got: {neighbors:?}"
 	);
 }
+
+// ---------------------------------------------------------------------------
+// Index management and extended search integration tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn search_with_metric() {
+	let mut proc = VectorProcess::spawn();
+	proc.initialize();
+
+	proc.call(
+		"store/add",
+		json!({
+			"text": "close",
+			"embedding": [1.0, 0.0, 0.0],
+			"metadata": {}
+		}),
+	);
+	proc.call(
+		"store/add",
+		json!({
+			"text": "far",
+			"embedding": [0.0, 1.0, 0.0],
+			"metadata": {}
+		}),
+	);
+
+	// Cosine search
+	let result = proc.call(
+		"store/searchWithOptions",
+		json!({
+			"queryEmbedding": [1.0, 0.0, 0.0],
+			"maxResults": 2,
+			"metric": "cosine"
+		}),
+	);
+	let results = result["results"].as_array().unwrap();
+	assert_eq!(results.len(), 2);
+	assert!(
+		results[0]["score"].as_f64().unwrap() > 0.9,
+		"cosine score for exact match should be > 0.9, got {}",
+		results[0]["score"].as_f64().unwrap()
+	);
+
+	// Euclidean search
+	let result = proc.call(
+		"store/searchWithOptions",
+		json!({
+			"queryEmbedding": [1.0, 0.0, 0.0],
+			"maxResults": 2,
+			"metric": "euclidean"
+		}),
+	);
+	let results = result["results"].as_array().unwrap();
+	assert_eq!(results.len(), 2);
+}
+
+#[test]
+fn mmr_diversity() {
+	let mut proc = VectorProcess::spawn();
+
+	// Use a very high duplicate threshold so "c" is not skipped as a near-duplicate of "a"
+	proc.call(
+		"store/initialize",
+		json!({ "duplicateThreshold": 1.0 }),
+	);
+
+	proc.call(
+		"store/add",
+		json!({ "text": "a", "embedding": [1.0, 0.0, 0.0], "metadata": {} }),
+	);
+	proc.call(
+		"store/add",
+		json!({ "text": "b", "embedding": [0.0, 1.0, 0.0], "metadata": {} }),
+	);
+	proc.call(
+		"store/add",
+		json!({ "text": "c", "embedding": [0.95, 0.05, 0.0], "metadata": {} }),
+	);
+
+	// Verify all 3 entries are stored
+	let size = proc.call("store/size", json!({}));
+	assert_eq!(size["count"].as_u64().unwrap(), 3, "should have 3 entries");
+
+	// With MMR lambda=0.3, diverse result "b" should be promoted over "c"
+	// which is very similar to "a"
+	let result = proc.call(
+		"store/searchWithOptions",
+		json!({
+			"queryEmbedding": [1.0, 0.0, 0.0],
+			"maxResults": 3,
+			"mmrLambda": 0.3
+		}),
+	);
+	let results = result["results"].as_array().unwrap();
+	assert_eq!(
+		results.len(),
+		3,
+		"MMR should return 3 results"
+	);
+
+	// First result should be "a" (most relevant)
+	assert_eq!(
+		results[0]["entry"]["text"].as_str().unwrap(),
+		"a",
+		"first result should be 'a' (most relevant)"
+	);
+	// "b" should be second (diversity boost), "c" third
+	assert_eq!(
+		results[1]["entry"]["text"].as_str().unwrap(),
+		"b",
+		"second result should be 'b' (diversity-promoted)"
+	);
+}
+
+#[test]
+fn get_index_stats() {
+	let mut proc = VectorProcess::spawn();
+	proc.initialize();
+
+	proc.call(
+		"store/add",
+		json!({ "text": "x", "embedding": [1.0, 2.0, 3.0], "metadata": {} }),
+	);
+
+	let stats = proc.call("store/getIndexStats", json!({}));
+	assert_eq!(
+		stats["vectorCount"].as_u64().unwrap(),
+		1,
+		"vectorCount should be 1"
+	);
+	assert_eq!(
+		stats["dimensions"].as_u64().unwrap(),
+		3,
+		"dimensions should be 3"
+	);
+	assert!(
+		stats["indexType"].as_str().is_some(),
+		"indexType should be a string"
+	);
+}
+
+#[test]
+fn set_index_strategy() {
+	let mut proc = VectorProcess::spawn();
+	proc.initialize();
+
+	for i in 0..5 {
+		proc.call(
+			"store/add",
+			json!({
+				"text": format!("entry {i}"),
+				"embedding": [i as f64 * 0.1, 0.5, 0.3],
+				"metadata": {}
+			}),
+		);
+	}
+
+	// Switch to HNSW
+	proc.call(
+		"store/setIndexStrategy",
+		json!({ "strategy": "hnsw" }),
+	);
+
+	// Stats should reflect the change
+	let stats = proc.call("store/getIndexStats", json!({}));
+	assert_eq!(
+		stats["indexType"].as_str().unwrap(),
+		"hnsw",
+		"indexType should be 'hnsw' after setIndexStrategy"
+	);
+
+	// Search should still work
+	let result = proc.call(
+		"store/search",
+		json!({
+			"queryEmbedding": [0.1, 0.5, 0.3],
+			"maxResults": 3
+		}),
+	);
+	assert!(
+		!result["results"].as_array().unwrap().is_empty(),
+		"search should return results after switching to HNSW"
+	);
+}

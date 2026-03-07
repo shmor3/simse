@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::distance::DistanceMetric;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
 	pub id: String,
@@ -202,4 +204,50 @@ pub struct RecommendOptions {
 	pub topics: Option<Vec<String>>,
 	#[serde(rename = "dateRange")]
 	pub date_range: Option<DateRange>,
+}
+
+/// Strategy for vector index backing the store's search operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum IndexStrategy {
+	/// Automatically choose: flat for small stores, HNSW above the threshold.
+	#[default]
+	Auto,
+	/// Always use brute-force flat scan.
+	Flat,
+	/// Always use HNSW approximate nearest-neighbor index.
+	Hnsw,
+}
+
+/// Statistics about the current index configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexStats {
+	/// The index type currently in effect (`"flat"` or `"hnsw"`).
+	pub index_type: String,
+	/// Number of vectors in the store.
+	pub vector_count: usize,
+	/// Dimensionality of stored vectors (0 if store is empty).
+	pub dimensions: usize,
+	/// The distance metric configured for searches.
+	pub metric: DistanceMetric,
+}
+
+/// Options for the extended `search_with_options` method.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchWithOptionsParams {
+	/// Query embedding vector.
+	#[serde(rename = "queryEmbedding")]
+	pub query_embedding: Vec<f32>,
+	/// Maximum number of results.
+	#[serde(rename = "maxResults")]
+	pub max_results: Option<usize>,
+	/// Minimum similarity threshold.
+	pub threshold: Option<f64>,
+	/// Distance metric to use (defaults to store config's `default_metric`).
+	pub metric: Option<DistanceMetric>,
+	/// If set, apply MMR reranking with this lambda value (0.0..=1.0).
+	#[serde(rename = "mmrLambda")]
+	pub mmr_lambda: Option<f64>,
 }

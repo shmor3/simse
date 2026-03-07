@@ -97,6 +97,7 @@ impl IndexBackend for FlatIndex {
 // ---------------------------------------------------------------------------
 
 /// Configuration for the HNSW index.
+#[derive(Clone)]
 pub struct HnswConfig {
 	/// Maximum number of bi-directional connections per node (default 16).
 	pub m: usize,

@@ -14,10 +14,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 use crate::cataloging::{MagnitudeCache, MetadataIndex, TopicIndex};
-use crate::distance::compute_magnitude;
+use crate::distance::{compute_magnitude, DistanceMetric};
 use crate::deduplication;
 use crate::error::AdaptiveError;
+use crate::fusion;
 use crate::graph::{GraphConfig, GraphIndex};
+use crate::index::HnswConfig;
 use crate::inverted_index::InvertedIndex;
 use crate::learning::{LearningEngine, LearningOptions};
 use crate::persistence::{self, AccessStats};
@@ -29,9 +31,10 @@ use crate::text_cache::TextCache;
 use crate::text_search::{self, matches_all_metadata_filters};
 use crate::topic_catalog::TopicCatalog;
 use crate::types::{
-	AdvancedLookup, DateRange, DuplicateCheckResult, DuplicateCluster, Lookup,
-	MetadataFilter, Recommendation, RecommendOptions, RecommendationScores, ScoreBreakdown,
-	SearchOptions, TextLookup, TextSearchOptions, TopicCatalogSection, TopicInfo, Entry,
+	AdvancedLookup, DateRange, DuplicateCheckResult, DuplicateCluster, IndexStats, IndexStrategy,
+	Lookup, MetadataFilter, Recommendation, RecommendOptions, RecommendationScores,
+	ScoreBreakdown, SearchOptions, TextLookup, TextSearchOptions, TopicCatalogSection, TopicInfo,
+	Entry,
 };
 
 // ---------------------------------------------------------------------------
@@ -64,6 +67,14 @@ pub struct StoreConfig {
 	pub recency_half_life_ms: f64,
 	pub topic_catalog_threshold: f64,
 	pub graph_config: GraphConfig,
+	/// Which index strategy to use for vector search.
+	pub index_strategy: IndexStrategy,
+	/// Configuration for the HNSW index (used when strategy is `Hnsw` or `Auto` above threshold).
+	pub hnsw_config: HnswConfig,
+	/// Default distance metric for search operations.
+	pub default_metric: DistanceMetric,
+	/// Volume count at which `Auto` strategy switches from flat to HNSW.
+	pub auto_index_threshold: usize,
 }
 
 impl Default for StoreConfig {
@@ -78,6 +89,10 @@ impl Default for StoreConfig {
 			recency_half_life_ms: 30.0 * 24.0 * 60.0 * 60.0 * 1000.0,
 			topic_catalog_threshold: 0.85,
 			graph_config: GraphConfig::default(),
+			index_strategy: IndexStrategy::default(),
+			hnsw_config: HnswConfig::default(),
+			default_metric: DistanceMetric::default(),
+			auto_index_threshold: 1000,
 		}
 	}
 }
@@ -565,23 +580,76 @@ impl Store {
 	// -- Search --------------------------------------------------------------
 
 	/// Vector similarity search using cosine similarity with magnitude cache.
+	///
+	/// This is the backward-compatible entry point. It delegates to
+	/// [`search_with_options`] using the default metric (Cosine) and no MMR.
 	pub fn search(
-		mut self,
+		self,
 		query_embedding: &[f32],
 		max_results: usize,
 		threshold: f64,
 	) -> Result<(Self, Vec<Lookup>), AdaptiveError> {
+		self.search_with_options(
+			query_embedding,
+			max_results,
+			threshold,
+			DistanceMetric::Cosine,
+			None,
+		)
+	}
+
+	/// Extended vector similarity search with configurable metric and optional
+	/// MMR diversity reranking.
+	///
+	/// # Arguments
+	///
+	/// * `query_embedding` — The query vector.
+	/// * `max_results` — Maximum number of results to return.
+	/// * `threshold` — Minimum similarity score to include in results.
+	/// * `metric` — Distance metric used to compute similarity.
+	/// * `mmr_lambda` — If `Some(lambda)`, apply Maximal Marginal Relevance
+	///   reranking with the given lambda (0.0 = pure diversity, 1.0 = pure
+	///   relevance). If `None`, return results ranked by raw similarity.
+	pub fn search_with_options(
+		mut self,
+		query_embedding: &[f32],
+		max_results: usize,
+		threshold: f64,
+		metric: DistanceMetric,
+		mmr_lambda: Option<f64>,
+	) -> Result<(Self, Vec<Lookup>), AdaptiveError> {
 		ensure_initialized!(self);
 
-		let query_mag = compute_magnitude(query_embedding);
-		if query_mag == 0.0 {
+		if query_embedding.is_empty() {
 			return Ok((self, Vec::new()));
 		}
+
+		// For Cosine, we can use the fast path with pre-computed magnitudes.
+		// For other metrics, we use metric.similarity() directly.
+		let use_fast_cosine = metric == DistanceMetric::Cosine;
+
+		let query_mag = if use_fast_cosine {
+			let mag = compute_magnitude(query_embedding);
+			if mag == 0.0 {
+				return Ok((self, Vec::new()));
+			}
+			mag
+		} else {
+			0.0 // unused for non-cosine
+		};
 
 		let mut results: Vec<Lookup> = Vec::new();
 
 		for vol in &self.volumes {
-			if let Some(score) = self.fast_cosine(query_embedding, query_mag, vol) {
+			let score = if use_fast_cosine {
+				self.fast_cosine(query_embedding, query_mag, vol)
+			} else if vol.embedding.len() != query_embedding.len() {
+				None
+			} else {
+				Some(metric.similarity(query_embedding, &vol.embedding))
+			};
+
+			if let Some(score) = score {
 				if score >= threshold {
 					results.push(Lookup {
 						entry: vol.clone(),
@@ -596,7 +664,39 @@ impl Store {
 				.partial_cmp(&a.score)
 				.unwrap_or(std::cmp::Ordering::Equal)
 		});
-		results.truncate(max_results);
+
+		// Apply MMR reranking if requested
+		let results: Vec<Lookup> = if let Some(lambda) = mmr_lambda {
+			// Build candidate tuples: (id, embedding, relevance_score)
+			let candidates: Vec<(String, Vec<f32>, f64)> = results
+				.iter()
+				.map(|r| (r.entry.id.clone(), r.entry.embedding.clone(), r.score))
+				.collect();
+
+			let mmr_results = fusion::mmr_rerank(
+				&candidates,
+				query_embedding,
+				max_results,
+				lambda,
+				metric,
+			);
+
+			// Map MMR results back to Lookup structs, preserving MMR order and scores
+			mmr_results
+				.into_iter()
+				.filter_map(|(id, mmr_score)| {
+					results
+						.iter()
+						.find(|r| r.entry.id == id)
+						.map(|r| Lookup {
+							entry: r.entry.clone(),
+							score: mmr_score,
+						})
+				})
+				.collect()
+		} else {
+			results.into_iter().take(max_results).collect()
+		};
 
 		// Track access and record query for learning
 		let selected_ids: Vec<String> =
@@ -958,6 +1058,9 @@ impl Store {
 	// -- Recommendation ------------------------------------------------------
 
 	/// Compute recommendations using weighted scoring with optional pre-filtering.
+	///
+	/// Vector scoring uses the store's configured `default_metric`. When the
+	/// metric is Cosine, the fast path with pre-computed magnitudes is used.
 	pub fn recommend(
 		&self,
 		options: &RecommendOptions,
@@ -968,6 +1071,7 @@ impl Store {
 
 		let max_results = options.max_results.unwrap_or(10);
 		let min_score = options.min_score.unwrap_or(0.0);
+		let metric = self.config.default_metric;
 
 		// Get weights from learning engine or normalize user-provided
 		let weights = if let Some(engine) = &self.learning_engine {
@@ -1042,11 +1146,13 @@ impl Store {
 		let now = current_timestamp_ms();
 		let half_life = self.config.recency_half_life_ms;
 
-		// Compute query magnitude if embedding provided
-		let query_mag = options
-			.query_embedding
-			.as_ref()
-			.map(|e| compute_magnitude(e));
+		// Compute query magnitude if embedding provided (fast path for Cosine)
+		let use_fast_cosine = metric == DistanceMetric::Cosine;
+		let query_mag = if use_fast_cosine {
+			options.query_embedding.as_ref().map(|e| compute_magnitude(e))
+		} else {
+			None
+		};
 
 		// Graph weight: opt-in only, default 0 (no change to existing behavior)
 		let graph_weight = options
@@ -1069,17 +1175,23 @@ impl Store {
 		let mut results: Vec<Recommendation> = Vec::new();
 
 		for vol in &candidates {
-			// Compute vector score
-			let vector_score =
-				if let (Some(ref emb), Some(qm)) = (&options.query_embedding, query_mag) {
+			// Compute vector score using the configured metric
+			let vector_score = if let Some(ref emb) = options.query_embedding {
+				if use_fast_cosine {
+					let qm = query_mag.unwrap_or(0.0);
 					if qm > 0.0 {
 						self.fast_cosine(emb, qm, vol)
 					} else {
 						None
 					}
+				} else if vol.embedding.len() == emb.len() {
+					Some(metric.similarity(emb, &vol.embedding))
 				} else {
 					None
-				};
+				}
+			} else {
+				None
+			};
 
 			// Compute recency score
 			let rec_score = recency_score(vol.timestamp, half_life, now);
@@ -1333,6 +1445,54 @@ impl Store {
 	/// Direct access to the underlying graph index.
 	pub fn graph_index(&self) -> &GraphIndex {
 		&self.graph_index
+	}
+
+	// -- Index management ----------------------------------------------------
+
+	/// Set the index strategy. This marks the store as dirty so the new
+	/// strategy takes effect on the next search.
+	pub fn set_index_strategy(mut self, strategy: IndexStrategy) -> Self {
+		self.config.index_strategy = strategy;
+		self.dirty = true;
+		self
+	}
+
+	/// Set the default distance metric used by `search()` and `recommend()`.
+	pub fn set_default_metric(mut self, metric: DistanceMetric) -> Self {
+		self.config.default_metric = metric;
+		self.dirty = true;
+		self
+	}
+
+	/// Return statistics about the current index configuration.
+	pub fn get_index_stats(&self) -> IndexStats {
+		let effective_type = match self.config.index_strategy {
+			IndexStrategy::Auto => {
+				if self.volumes.len() > self.config.auto_index_threshold {
+					"hnsw"
+				} else {
+					"flat"
+				}
+			}
+			IndexStrategy::Flat => "flat",
+			IndexStrategy::Hnsw => "hnsw",
+		};
+
+		IndexStats {
+			index_type: effective_type.to_string(),
+			vector_count: self.volumes.len(),
+			dimensions: self
+				.volumes
+				.first()
+				.map(|v| v.embedding.len())
+				.unwrap_or(0),
+			metric: self.config.default_metric,
+		}
+	}
+
+	/// Access the store's current configuration.
+	pub fn config(&self) -> &StoreConfig {
+		&self.config
 	}
 }
 

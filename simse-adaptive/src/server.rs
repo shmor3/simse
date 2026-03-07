@@ -287,6 +287,7 @@ impl AdaptiveServer {
 				.unwrap_or(30.0 * 24.0 * 60.0 * 60.0 * 1000.0),
 			topic_catalog_threshold: p.topic_catalog_threshold.unwrap_or(0.85),
 			graph_config: Default::default(),
+			..Default::default()
 		};
 
 		let store = Store::new(config);
